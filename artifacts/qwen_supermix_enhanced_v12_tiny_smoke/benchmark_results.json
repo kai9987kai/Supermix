@@ -1,0 +1,43 @@
+{
+  "config": {
+    "base_model": "C:\\Users\\kai99\\.cache\\huggingface\\hub\\models--Qwen--Qwen2.5-0.5B-Instruct\\snapshots\\7ae557604adf67be50417f59c2c2f167def9a775",
+    "max_records": 24,
+    "eval_size": 4,
+    "max_steps": 1,
+    "max_length": 160,
+    "supermix_distill_ratio": 0.0,
+    "teacher_generated": 0,
+    "use_dora": true,
+    "use_rslora": true,
+    "lora_init": "true",
+    "neftune_noise_alpha": 0.0,
+    "preference_objective": "repo",
+    "preference_steps": 1,
+    "preference_pairs": 4,
+    "preference_candidate_count": 2,
+    "preference_no_greedy_negative": false,
+    "preference_short_reject_boost": 0.65,
+    "preference_long_reject_boost": 0.2,
+    "preference_min_chosen_quality": 0.9,
+    "preference_min_chosen_words": 6,
+    "preference_min_quality_gap": 0.05,
+    "preference_allow_template_prompts": false,
+    "init_adapter_dir": "artifacts\\qwen_supermix_enhanced_v8_repair\\adapter",
+    "skip_benchmark": true
+  },
+  "train_stats": {
+    "sft_steps": 1.0,
+    "sft_loss_mean": 3.653703451156616,
+    "preference_steps": 1.0,
+    "preference_loss_mean": 0.06699639558792114,
+    "preference_pairs": 4.0,
+    "preference_weight_mean": 1.6611505417100236,
+    "preference_objective": "repo",
+    "train_tokens_per_sec": 0.10217263179488115,
+    "train_seconds": 949.3736071586609,
+    "lora_use_dora": true,
+    "lora_use_rslora": true
+  },
+  "base": {},
+  "tuned": {}
+}

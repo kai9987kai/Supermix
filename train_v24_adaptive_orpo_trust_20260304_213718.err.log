@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\qwen_supermix_pipeline.py", line 3375, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\qwen_supermix_pipeline.py", line 3125, in main
+    teacher = SupermixTeacher(
+        weights_path=args.supermix_weights,
+        meta_path=args.supermix_meta,
+        device=args.device,
+    )
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\qwen_supermix_pipeline.py", line 633, in __init__
+    self.device = torch.device(device)
+                  ~~~~~~~~~~~~^^^^^^^^
+RuntimeError: Expected one of cpu, cuda, ipu, xpu, mkldnn, opengl, opencl, ideep, hip, ve, fpga, maia, xla, lazy, vulkan, mps, meta, hpu, mtia, privateuseone device type at start of device string: auto

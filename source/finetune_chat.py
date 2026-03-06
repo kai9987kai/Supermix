@@ -1,3 +1,21 @@
+"""Fine-tuning script for ChampionNet retrieval-style chat models.
+
+This module implements the complete fine-tuning pipeline for Supermix_27,
+including data loading, model construction, training with preference
+optimization (SimPO/RePO), EMA weight averaging, cosine LR scheduling,
+and checkpoint management.
+
+Usage:
+    python finetune_chat.py --data conversation_data.jsonl \
+        --weights champion_model.pth --model_size smarter_expert \
+        --epochs 8 --batch_size 32
+
+Supported model sizes:
+    base, large, xlarge, xxlarge, xxxlarge, ultralarge, megalarge,
+    ultra_expert, hierarchical_expert, deep_expert, expert_choice,
+    smarter_expert
+"""
+
 import argparse
 import json
 import math
@@ -38,6 +56,11 @@ from run import safe_load_state_dict
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for reproducibility across all backends.
+
+    Args:
+        seed: Integer seed value for random, torch, and CUDA RNGs.
+    """
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -45,6 +68,22 @@ def set_seed(seed: int) -> None:
 
 
 def _split_indices(n: int, val_split: float, seed: int, labels: torch.Tensor, split_mode: str):
+    """Split dataset indices into train and validation sets.
+
+    Supports stratified splitting (preserving class distribution) and
+    random splitting. Falls back to random if stratification is not
+    possible (e.g., single-element classes).
+
+    Args:
+        n: Total number of samples.
+        val_split: Fraction of data to use for validation (0.0–1.0).
+        seed: Random seed for reproducible splits.
+        labels: Tensor of class labels for stratification.
+        split_mode: Either 'stratified' or 'random'.
+
+    Returns:
+        Tuple of (train_indices, val_indices) as lists of ints.
+    """
     if split_mode == "stratified" and labels.numel() == n and n > 1:
         rng = random.Random(seed)
         grouped: Dict[int, List[int]] = defaultdict(list)
@@ -82,6 +121,16 @@ def _split_indices(n: int, val_split: float, seed: int, labels: torch.Tensor, sp
 
 
 def _evaluate(model: nn.Module, loader: DataLoader, device: Any):
+    """Evaluate model on a DataLoader, returning loss and accuracy.
+
+    Args:
+        model: The neural network model to evaluate.
+        loader: DataLoader yielding (input, label) batches.
+        device: Torch device to run evaluation on.
+
+    Returns:
+        Dict with 'loss' and 'acc' keys, or None if the loader is empty.
+    """
     if len(loader) == 0:
         return None
 
@@ -110,6 +159,20 @@ def _evaluate(model: nn.Module, loader: DataLoader, device: Any):
 
 
 def _make_train_loader(train_x: torch.Tensor, train_y: torch.Tensor, batch_size: int, balanced_sampler: bool):
+    """Create a training DataLoader with optional class-balanced sampling.
+
+    When balanced_sampler is True, uses inverse-frequency weighted sampling
+    to mitigate class imbalance in the training set.
+
+    Args:
+        train_x: Input feature tensor of shape (N, 1, D).
+        train_y: Label tensor of shape (N,).
+        batch_size: Number of samples per batch.
+        balanced_sampler: If True, use WeightedRandomSampler.
+
+    Returns:
+        A PyTorch DataLoader ready for training iteration.
+    """
     dataset = TensorDataset(train_x, train_y)
     if not balanced_sampler:
         return DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -131,6 +194,21 @@ def _sample_negative_labels(
     hard_negative_ratio: float = 0.5,
     num_negatives: int = 1,
 ) -> torch.Tensor:
+    """Sample negative class labels for preference loss computation.
+
+    Generates a mix of hard negatives (highest-scoring wrong classes) and
+    random negatives, controlled by hard_negative_ratio.
+
+    Args:
+        logits: Model output logits of shape (B, C).
+        labels: Ground-truth labels of shape (B,).
+        hard_negative_ratio: Fraction of negatives that should be hard
+            (0.0 = all random, 1.0 = all hard).
+        num_negatives: Number of negative classes to sample per example.
+
+    Returns:
+        Tensor of shape (B, num_negatives) with sampled negative class indices.
+    """
     # Uniformly sample labels different from the ground-truth class.
     num_negatives = max(1, int(num_negatives))
     num_classes = logits.shape[-1]
@@ -178,9 +256,25 @@ def _preference_loss(
     group_estimator: str = "pairwise_mean",
     margin: float = 0.2,
 ) -> torch.Tensor:
-    """
-    Pairwise preference objective in the spirit of recent preference-optimization methods.
-    It pushes the gold class logit above sampled negative class logits.
+    """Compute pairwise preference loss to push gold class above negatives.
+
+    Implements SimPO-style sigmoid or RePO-style ReLU margin objectives.
+    Supports group preference estimation (EPO) and confidence-weighted
+    adaptive preference terms for robustness to noisy labels.
+
+    Args:
+        logits: Model output logits of shape (B, C).
+        labels: Ground-truth labels of shape (B,).
+        beta: Temperature scale for sigmoid objective.
+        hard_negative_ratio: Fraction of hard negatives (0–1).
+        adaptive_weighting: If True, weight terms by model confidence.
+        objective: 'sigmoid' (SimPO) or 'repo_relu' (RePO margin).
+        group_size: Number of negative classes per example.
+        group_estimator: 'pairwise_mean' or 'epo' for group reduction.
+        margin: Margin for RePO-style objective.
+
+    Returns:
+        Scalar loss tensor (mean over batch).
     """
     pos = logits.gather(1, labels.unsqueeze(1))
     neg_labels = _sample_negative_labels(
@@ -215,6 +309,15 @@ def _preference_loss(
 
 
 def _set_trainable_params(model: nn.Module, train_all: bool):
+    """Configure which model parameters are trainable.
+
+    By default, only the classifier head (layers 10–11) is trained.
+    When train_all is True, all parameters are unfrozen.
+
+    Args:
+        model: The model whose parameters will be configured.
+        train_all: If True, train all parameters; otherwise head-only.
+    """
     if train_all:
         for p in model.parameters():
             p.requires_grad = True
@@ -229,6 +332,14 @@ def _set_trainable_params(model: nn.Module, train_all: bool):
 
 
 def _count_trainable(model: nn.Module):
+    """Count trainable and total parameters in a model.
+
+    Args:
+        model: The model to count parameters for.
+
+    Returns:
+        Tuple of (trainable_params, total_params).
+    """
     trainable = 0
     total = 0
     for p in model.parameters():
@@ -240,6 +351,19 @@ def _count_trainable(model: nn.Module):
 
 
 def _make_cosine_warmup_scheduler(optimizer, total_steps: int, warmup_steps: int):
+    """Create a cosine annealing LR scheduler with linear warmup.
+
+    The learning rate linearly increases from 0 to base_lr over warmup_steps,
+    then decays following a cosine curve to 0 over the remaining steps.
+
+    Args:
+        optimizer: The optimizer to schedule.
+        total_steps: Total number of training steps.
+        warmup_steps: Number of linear warmup steps.
+
+    Returns:
+        A PyTorch LambdaLR scheduler.
+    """
     total_steps = max(1, int(total_steps))
     warmup_steps = max(0, min(int(warmup_steps), total_steps - 1))
 
@@ -254,6 +378,20 @@ def _make_cosine_warmup_scheduler(optimizer, total_steps: int, warmup_steps: int
 
 
 def _pref_warmup_scale(epoch_idx: int, batch_idx: int, batches_per_epoch: int, warmup_epochs: float) -> float:
+    """Compute the preference loss warmup scale factor.
+
+    Linearly ramps from 0.0 to 1.0 over warmup_epochs, allowing the
+    model to stabilize on cross-entropy before preference terms kick in.
+
+    Args:
+        epoch_idx: Current epoch index (0-based).
+        batch_idx: Current batch index within the epoch.
+        batches_per_epoch: Total batches per epoch.
+        warmup_epochs: Number of epochs over which to ramp.
+
+    Returns:
+        Scale factor in [0.0, 1.0].
+    """
     if warmup_epochs <= 0:
         return 1.0
     progress_epochs = float(epoch_idx) + float(batch_idx + 1) / float(max(1, batches_per_epoch))
@@ -261,14 +399,17 @@ def _pref_warmup_scale(epoch_idx: int, batch_idx: int, batches_per_epoch: int, w
 
 
 def _clone_state_dict_tensors(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Deep-clone all tensors in a state dict (for EMA snapshots)."""
     return {k: v.detach().clone() for k, v in state_dict.items()}
 
 
 def _init_ema_state(model: nn.Module) -> Dict[str, torch.Tensor]:
+    """Initialize EMA shadow weights from the current model state."""
     return _clone_state_dict_tensors(model.state_dict())
 
 
 def _format_seconds(seconds: float) -> str:
+    """Format a duration in seconds to a human-readable string (e.g., '3m42s')."""
     s = int(max(0.0, float(seconds)))
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
@@ -281,6 +422,16 @@ def _format_seconds(seconds: float) -> str:
 
 @torch.no_grad()
 def _update_ema_state(ema_state: Dict[str, torch.Tensor], model: nn.Module, decay: float) -> None:
+    """Update EMA shadow weights with the current model's parameters.
+
+    Applies exponential moving average: ema = decay * ema + (1-decay) * current.
+    Integer buffers are copied directly.
+
+    Args:
+        ema_state: Dictionary of EMA shadow tensors.
+        model: Current model whose weights to blend in.
+        decay: EMA decay factor (typically 0.999).
+    """
     current = model.state_dict()
     d = float(max(0.0, min(0.99999, decay)))
     for name, value in current.items():
@@ -292,6 +443,21 @@ def _update_ema_state(ema_state: Dict[str, torch.Tensor], model: nn.Module, deca
 
 
 def _load_examples_from_manifest(manifest_path: str) -> Tuple[List, List[str]]:
+    """Load training examples from a multi-shard manifest JSON.
+
+    The manifest can be a dict with a 'shards' key or a list of shard
+    entries. Each shard entry is either a string path or a dict with
+    a 'path' key.
+
+    Args:
+        manifest_path: Path to the manifest JSON file.
+
+    Returns:
+        Tuple of (all_examples, shard_paths).
+
+    Raises:
+        ValueError: If the manifest contains no valid shard paths.
+    """
     with open(manifest_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
     shard_paths: List[str] = []
@@ -340,7 +506,7 @@ def main():
     ap.add_argument("--meta", default="chat_model_meta.json", help="Output metadata JSON.")
     ap.add_argument(
         "--model_size",
-        choices=["base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"],
+        choices=["base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge", "ultra_expert", "hierarchical_expert", "deep_expert", "expert_choice", "smarter_expert", "thought_expert", "recursive_expert"],
         default="base",
         help="Model variant to train.",
     )
@@ -548,6 +714,12 @@ def main():
         "--epoch_checkpoint_dir",
         default="",
         help="Optional directory to save per-epoch checkpoints (useful for long runs).",
+    )
+    ap.add_argument(
+        "--aux_loss_weight",
+        type=float,
+        default=0.01,
+        help="Weight of the auxiliary load-balancing loss for MoE models.",
     )
     args = ap.parse_args()
 
@@ -928,7 +1100,14 @@ def main():
                     warmup_epochs=args.pref_warmup_epochs,
                 )
                 effective_pref_weight = args.pref_weight * pref_scale
-                loss = ce_loss + effective_pref_weight * pref_loss
+                
+                # Auxiliary load-balancing loss for Hierarchical MoE
+                aux_loss = torch.tensor(0.0, device=device)
+                head = model.layers[10]
+                if hasattr(head, "_aux_loss"):
+                    aux_loss = head._aux_loss
+                
+                loss = ce_loss + (effective_pref_weight * pref_loss) + (args.aux_loss_weight * aux_loss)
                 scaled_loss = loss / float(grad_accum_steps)
                 
             scaler.scale(scaled_loss).backward()
@@ -973,6 +1152,7 @@ def main():
                     f"(global {global_optimizer_step}/{total_steps}) "
                     f"batch {batch_idx + 1}/{batches_per_epoch} "
                     f"loss={avg_loss_so_far:.4f} ce={avg_ce_so_far:.4f} pref={avg_pref_so_far:.4f} "
+                    f"aux={float(aux_loss.item()):.4f} "
                     f"pref_w={avg_pref_w_so_far:.4f} acc={avg_acc_so_far:.4f} "
                     f"lr={float(optim.param_groups[0]['lr']):.6g} "
                     f"elapsed={_format_seconds(elapsed)} eta={_format_seconds(eta)}"

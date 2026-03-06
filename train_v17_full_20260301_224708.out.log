@@ -1,0 +1,10 @@
+[data] loading Supermix pairs...
+[data] quality filter: raw=509699 kept=442128 empty=64 placeholder=936 filtered=58464 deduped=8107 source_cap=440087 synthetic_cap=69 prompt_cap=62 cap_relax=1
+[data] cap_state: source=0.70->0.75 synthetic=0.05->0.07 prompt_sig=3->4
+[data] synthetic_kept=94/1910
+[data] source_mix: conversation_data.coding_knowledge_2026_02_19.jsonl:380, conversation_data.quality_anchor_v2.jsonl:127, conversation_data.supermix_plus_v27_500k.jsonl:1337, conversation_data.world_events_2026_02_19.jsonl:66
+[data] loaded=1910
+[data] train=1790 eval=120
+[distill] loading Supermix teacher...
+[distill] teacher_generated=120 train_after_mix=1910
+[train] fine-tuning Qwen with LoRA...

@@ -1,0 +1,23 @@
+{
+  "config": {
+    "max_new_tokens": 20,
+    "max_length": 256,
+    "eval_samples": 40
+  },
+  "base": {
+    "eval_samples": 40.0,
+    "eval_loss": 3.0873885110020636,
+    "perplexity": 21.91975995369008,
+    "token_f1": 0.10264236089012686,
+    "char_similarity": 0.2006321023638201,
+    "avg_gen_seconds": 4.771026247739792
+  },
+  "tuned": {
+    "eval_samples": 40.0,
+    "eval_loss": 0.528970620315522,
+    "perplexity": 1.6971843620194618,
+    "token_f1": 0.4094467067759532,
+    "char_similarity": 0.5640475449825912,
+    "avg_gen_seconds": 41.576215875148776
+  }
+}

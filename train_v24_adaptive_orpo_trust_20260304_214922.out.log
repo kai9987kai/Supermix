@@ -1,0 +1,49 @@
+[runtime] device=cpu model_dtype=torch.float32 gradient_checkpointing=False
+[data] loading Supermix pairs...
+[data] sources=6 -> conversation_data.quality_anchor_v2.jsonl, conversation_data.coding_knowledge_2026_02_19.jsonl, conversation_data.world_events_2026_02_19.jsonl, conversation_data.supermix_plus_v27_500k.jsonl, conversation_data.mega_reasoning_creative_v25_75582.jsonl, conversation_data.mega_creative_250k_v2.jsonl
+[data] progress: pairs=2000/42000 raw=2716 kept=2018 rate=953.34/s
+[data] progress: pairs=4000/42000 raw=5938 kept=4136 rate=836.66/s
+[data] progress: pairs=6000/42000 raw=9223 kept=6273 rate=747.86/s
+[data] progress: pairs=8000/42000 raw=12459 kept=8376 rate=735.02/s
+[data] progress: pairs=10000/42000 raw=15750 kept=10511 rate=697.49/s
+[data] progress: pairs=12000/42000 raw=19049 kept=12656 rate=677.39/s
+[data] progress: pairs=14000/42000 raw=22464 kept=14833 rate=660.83/s
+[data] progress: pairs=16000/42000 raw=25911 kept=17046 rate=644.04/s
+[data] progress: pairs=18000/42000 raw=29514 kept=19322 rate=627.28/s
+[data] progress: pairs=20000/42000 raw=33209 kept=21634 rate=624.99/s
+[data] progress: pairs=22000/42000 raw=36848 kept=23970 rate=627.07/s
+[data] progress: pairs=24000/42000 raw=40527 kept=26333 rate=618.08/s
+[data] progress: pairs=26000/42000 raw=44261 kept=28718 rate=613.36/s
+[data] progress: pairs=28000/42000 raw=48107 kept=31123 rate=604.48/s
+[data] progress: pairs=30000/42000 raw=51930 kept=33523 rate=608.03/s
+[data] progress: pairs=32000/42000 raw=55702 kept=35898 rate=609.06/s
+[data] progress: pairs=34000/42000 raw=59609 kept=38325 rate=609.02/s
+[data] progress: pairs=36000/42000 raw=63427 kept=40740 rate=613.32/s
+[data] progress: pairs=38000/42000 raw=67320 kept=43203 rate=610.89/s
+[data] progress: pairs=40000/42000 raw=71203 kept=45644 rate=611.46/s
+[data] progress: pairs=42000/42000 raw=75145 kept=48082 rate=609.54/s
+[data] quality filter: raw=75145 kept=48082 empty=338 placeholder=5183 filtered=15531 deduped=6011 source_cap=0 synthetic_cap=0 prompt_cap=6082 cap_relax=0
+[data] cap_state: source=0.52->0.52 synthetic=0.10->0.10 prompt_sig=5->5
+[data] synthetic_kept=3084/42000
+[data] source_mix: conversation_data.coding_knowledge_2026_02_19.jsonl:380, conversation_data.mega_creative_250k_v2.jsonl:13809, conversation_data.mega_reasoning_creative_v25_75582.jsonl:13809, conversation_data.quality_anchor_v2.jsonl:127, conversation_data.supermix_plus_v27_500k.jsonl:13809, conversation_data.world_events_2026_02_19.jsonl:66
+[data] loaded=42000
+[data] train=41500 eval=500
+[distill] loading Supermix teacher...
+[distill] config: target=600 ratio=0.120 max_seconds=1800.0
+[distill] progress: visited=40/600 generated=34 rate=7.11/s
+[distill] progress: visited=80/600 generated=58 rate=6.54/s
+[distill] progress: visited=120/600 generated=91 rate=6.59/s
+[distill] progress: visited=160/600 generated=121 rate=6.53/s
+[distill] progress: visited=200/600 generated=145 rate=6.45/s
+[distill] progress: visited=280/600 generated=203 rate=6.39/s
+[distill] progress: visited=320/600 generated=232 rate=6.36/s
+[distill] progress: visited=360/600 generated=258 rate=6.35/s
+[distill] progress: visited=400/600 generated=281 rate=6.31/s
+[distill] progress: visited=440/600 generated=306 rate=6.30/s
+[distill] progress: visited=480/600 generated=328 rate=6.29/s
+[distill] progress: visited=520/600 generated=354 rate=6.30/s
+[distill] progress: visited=560/600 generated=381 rate=6.32/s
+[distill] progress: visited=600/600 generated=410 rate=6.34/s
+[distill] complete: generated=410 visited=600/600 elapsed=94.8s
+[distill] teacher_generated=410 train_after_mix=41910
+[train] fine-tuning Qwen with LoRA...

@@ -1,0 +1,947 @@
+﻿2026-03-06 10:23:18.696   Log opened. (Time zone: UTC+00:00)
+2026-03-06 10:23:18.696   Setup version: Inno Setup version 6.7.1
+2026-03-06 10:23:18.696   Original Setup EXE: C:\Users\kai99\Desktop\New folder (9)\Supermix_27\dist\installer\SupermixQwenDesktop-Setup-2026.03.06.exe
+2026-03-06 10:23:18.697   Setup command line: /SL5="$2E053E,79009672,898560,C:\Users\kai99\Desktop\New folder (9)\Supermix_27\dist\installer\SupermixQwenDesktop-Setup-2026.03.06.exe" /SPAWNWND=$6C05D2 /FIRSTWND=$4C05C0 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=desktopicon /LOG="C:\Users\kai99\Desktop\New folder (9)\Supermix_27\dist\installer\SupermixQwenDesktop-install-run.log" 
+2026-03-06 10:23:18.697   Compatibility mode: Yes (Installer)
+2026-03-06 10:23:18.697   Windows version: 10.0.26200
+2026-03-06 10:23:18.697   Windows architecture: Arm64 (64-bit)
+2026-03-06 10:23:18.697   Machine types supported by system: x86 x64 Arm64
+2026-03-06 10:23:18.698   User privileges: Administrative
+2026-03-06 10:23:18.704   Administrative install mode: Yes
+2026-03-06 10:23:18.704   Install mode root key: HKEY_LOCAL_MACHINE
+2026-03-06 10:23:18.704   64-bit install mode: Yes
+2026-03-06 10:23:18.704   RedirectionGuard status for current process: Enabled in enforcing mode
+2026-03-06 10:23:18.711   Created protected temporary directory: C:\Users\kai99\AppData\Local\Temp\is-H8N3RD2CUP.tmp
+2026-03-06 10:23:19.044   Found 18 files to register with RestartManager.
+2026-03-06 10:23:19.044   Calling RestartManager's RmGetList.
+2026-03-06 10:23:19.052   RmGetList finished successfully.
+2026-03-06 10:23:19.052   RestartManager found no applications using one of our files.
+2026-03-06 10:23:19.059   Starting the installation process.
+2026-03-06 10:23:19.061   Creating directory: C:\Program Files\Supermix Qwen Desktop
+2026-03-06 10:23:19.062   Directory for uninstall files: C:\Program Files\Supermix Qwen Desktop
+2026-03-06 10:23:19.062   Creating new uninstall log: C:\Program Files\Supermix Qwen Desktop\unins000.dat
+2026-03-06 10:23:19.065   -- File entry --
+2026-03-06 10:23:19.066   Dest filename: C:\Program Files\Supermix Qwen Desktop\unins000.exe
+2026-03-06 10:23:19.066   Non-default bitness: 32-bit
+2026-03-06 10:23:19.071   Time stamp of our file: 2026-03-06 10:23:18.262
+2026-03-06 10:23:19.071   Installing the file.
+2026-03-06 10:23:19.081   Successfully installed the file.
+2026-03-06 10:23:19.082   -- File entry --
+2026-03-06 10:23:19.082   Dest filename: C:\Program Files\Supermix Qwen Desktop\SupermixQwenDesktop.exe
+2026-03-06 10:23:19.083   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.083   Installing the file.
+2026-03-06 10:23:19.189   Successfully installed the file.
+2026-03-06 10:23:19.190   -- File entry --
+2026-03-06 10:23:19.190   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\base_library.zip
+2026-03-06 10:23:19.190   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.190   Installing the file.
+2026-03-06 10:23:19.190   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal
+2026-03-06 10:23:19.227   Successfully installed the file.
+2026-03-06 10:23:19.227   -- File entry --
+2026-03-06 10:23:19.227   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\libcrypto-3.dll
+2026-03-06 10:23:19.228   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.228   Installing the file.
+2026-03-06 10:23:19.382   Successfully installed the file.
+2026-03-06 10:23:19.382   -- File entry --
+2026-03-06 10:23:19.382   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\libffi-8.dll
+2026-03-06 10:23:19.383   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.383   Installing the file.
+2026-03-06 10:23:19.388   Successfully installed the file.
+2026-03-06 10:23:19.388   -- File entry --
+2026-03-06 10:23:19.388   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\libssl-3.dll
+2026-03-06 10:23:19.389   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.389   Installing the file.
+2026-03-06 10:23:19.419   Successfully installed the file.
+2026-03-06 10:23:19.419   -- File entry --
+2026-03-06 10:23:19.419   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyexpat.pyd
+2026-03-06 10:23:19.419   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.419   Installing the file.
+2026-03-06 10:23:19.430   Successfully installed the file.
+2026-03-06 10:23:19.430   -- File entry --
+2026-03-06 10:23:19.430   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\python313.dll
+2026-03-06 10:23:19.431   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.431   Installing the file.
+2026-03-06 10:23:19.635   Successfully installed the file.
+2026-03-06 10:23:19.635   -- File entry --
+2026-03-06 10:23:19.635   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\select.pyd
+2026-03-06 10:23:19.635   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.635   Installing the file.
+2026-03-06 10:23:19.637   Successfully installed the file.
+2026-03-06 10:23:19.637   -- File entry --
+2026-03-06 10:23:19.637   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\unicodedata.pyd
+2026-03-06 10:23:19.637   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.637   Installing the file.
+2026-03-06 10:23:19.663   Successfully installed the file.
+2026-03-06 10:23:19.663   -- File entry --
+2026-03-06 10:23:19.663   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\VCRUNTIME140.dll
+2026-03-06 10:23:19.663   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.663   Installing the file.
+2026-03-06 10:23:19.669   Successfully installed the file.
+2026-03-06 10:23:19.669   -- File entry --
+2026-03-06 10:23:19.669   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\VCRUNTIME140_1.dll
+2026-03-06 10:23:19.670   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.670   Installing the file.
+2026-03-06 10:23:19.671   Successfully installed the file.
+2026-03-06 10:23:19.671   -- File entry --
+2026-03-06 10:23:19.671   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_asyncio.pyd
+2026-03-06 10:23:19.671   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.671   Installing the file.
+2026-03-06 10:23:19.676   Successfully installed the file.
+2026-03-06 10:23:19.676   -- File entry --
+2026-03-06 10:23:19.676   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_bz2.pyd
+2026-03-06 10:23:19.676   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.676   Installing the file.
+2026-03-06 10:23:19.680   Successfully installed the file.
+2026-03-06 10:23:19.680   -- File entry --
+2026-03-06 10:23:19.681   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_cffi_backend.cp313-win_amd64.pyd
+2026-03-06 10:23:19.681   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.681   Installing the file.
+2026-03-06 10:23:19.687   Successfully installed the file.
+2026-03-06 10:23:19.687   -- File entry --
+2026-03-06 10:23:19.687   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_ctypes.pyd
+2026-03-06 10:23:19.687   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.687   Installing the file.
+2026-03-06 10:23:19.694   Successfully installed the file.
+2026-03-06 10:23:19.695   -- File entry --
+2026-03-06 10:23:19.695   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_decimal.pyd
+2026-03-06 10:23:19.695   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.695   Installing the file.
+2026-03-06 10:23:19.704   Successfully installed the file.
+2026-03-06 10:23:19.705   -- File entry --
+2026-03-06 10:23:19.705   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_elementtree.pyd
+2026-03-06 10:23:19.705   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.705   Installing the file.
+2026-03-06 10:23:19.710   Successfully installed the file.
+2026-03-06 10:23:19.710   -- File entry --
+2026-03-06 10:23:19.710   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_hashlib.pyd
+2026-03-06 10:23:19.710   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.710   Installing the file.
+2026-03-06 10:23:19.713   Successfully installed the file.
+2026-03-06 10:23:19.713   -- File entry --
+2026-03-06 10:23:19.713   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_lzma.pyd
+2026-03-06 10:23:19.713   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.713   Installing the file.
+2026-03-06 10:23:19.719   Successfully installed the file.
+2026-03-06 10:23:19.719   -- File entry --
+2026-03-06 10:23:19.719   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_multiprocessing.pyd
+2026-03-06 10:23:19.719   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.719   Installing the file.
+2026-03-06 10:23:19.721   Successfully installed the file.
+2026-03-06 10:23:19.721   -- File entry --
+2026-03-06 10:23:19.721   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_overlapped.pyd
+2026-03-06 10:23:19.722   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.722   Installing the file.
+2026-03-06 10:23:19.725   Successfully installed the file.
+2026-03-06 10:23:19.726   -- File entry --
+2026-03-06 10:23:19.726   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_queue.pyd
+2026-03-06 10:23:19.726   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.726   Installing the file.
+2026-03-06 10:23:19.726   Successfully installed the file.
+2026-03-06 10:23:19.726   -- File entry --
+2026-03-06 10:23:19.726   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_socket.pyd
+2026-03-06 10:23:19.726   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.726   Installing the file.
+2026-03-06 10:23:19.728   Successfully installed the file.
+2026-03-06 10:23:19.728   -- File entry --
+2026-03-06 10:23:19.730   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_ssl.pyd
+2026-03-06 10:23:19.730   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.730   Installing the file.
+2026-03-06 10:23:19.733   Successfully installed the file.
+2026-03-06 10:23:19.733   -- File entry --
+2026-03-06 10:23:19.733   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_uuid.pyd
+2026-03-06 10:23:19.733   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.733   Installing the file.
+2026-03-06 10:23:19.733   Successfully installed the file.
+2026-03-06 10:23:19.733   -- File entry --
+2026-03-06 10:23:19.733   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\_wmi.pyd
+2026-03-06 10:23:19.733   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.733   Installing the file.
+2026-03-06 10:23:19.736   Successfully installed the file.
+2026-03-06 10:23:19.736   -- File entry --
+2026-03-06 10:23:19.736   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\assets\supermix_qwen_icon.ico
+2026-03-06 10:23:19.736   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.736   Installing the file.
+2026-03-06 10:23:19.736   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\assets
+2026-03-06 10:23:19.741   Successfully installed the file.
+2026-03-06 10:23:19.741   -- File entry --
+2026-03-06 10:23:19.741   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\assets\supermix_qwen_icon.png
+2026-03-06 10:23:19.742   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.742   Installing the file.
+2026-03-06 10:23:19.744   Successfully installed the file.
+2026-03-06 10:23:19.744   -- File entry --
+2026-03-06 10:23:19.744   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\assets\supermix_qwen_installer_small.bmp
+2026-03-06 10:23:19.744   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.744   Installing the file.
+2026-03-06 10:23:19.744   Successfully installed the file.
+2026-03-06 10:23:19.744   -- File entry --
+2026-03-06 10:23:19.744   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\assets\supermix_qwen_installer_wizard.bmp
+2026-03-06 10:23:19.744   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.744   Installing the file.
+2026-03-06 10:23:19.749   Successfully installed the file.
+2026-03-06 10:23:19.749   -- File entry --
+2026-03-06 10:23:19.749   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\assets\supermix_qwen_splash.png
+2026-03-06 10:23:19.751   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.751   Installing the file.
+2026-03-06 10:23:19.756   Successfully installed the file.
+2026-03-06 10:23:19.756   -- File entry --
+2026-03-06 10:23:19.757   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\entry_points.txt
+2026-03-06 10:23:19.757   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.757   Installing the file.
+2026-03-06 10:23:19.757   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info
+2026-03-06 10:23:19.757   Successfully installed the file.
+2026-03-06 10:23:19.757   -- File entry --
+2026-03-06 10:23:19.757   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\INSTALLER
+2026-03-06 10:23:19.757   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.757   Installing the file.
+2026-03-06 10:23:19.759   Successfully installed the file.
+2026-03-06 10:23:19.759   -- File entry --
+2026-03-06 10:23:19.759   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\METADATA
+2026-03-06 10:23:19.759   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.759   Installing the file.
+2026-03-06 10:23:19.759   Successfully installed the file.
+2026-03-06 10:23:19.759   -- File entry --
+2026-03-06 10:23:19.759   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\RECORD
+2026-03-06 10:23:19.759   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.759   Installing the file.
+2026-03-06 10:23:19.760   Successfully installed the file.
+2026-03-06 10:23:19.760   -- File entry --
+2026-03-06 10:23:19.760   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\top_level.txt
+2026-03-06 10:23:19.760   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.760   Installing the file.
+2026-03-06 10:23:19.760   Successfully installed the file.
+2026-03-06 10:23:19.760   -- File entry --
+2026-03-06 10:23:19.760   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\WHEEL
+2026-03-06 10:23:19.761   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.761   Installing the file.
+2026-03-06 10:23:19.761   Successfully installed the file.
+2026-03-06 10:23:19.761   -- File entry --
+2026-03-06 10:23:19.762   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\licenses\LICENSE
+2026-03-06 10:23:19.762   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.762   Installing the file.
+2026-03-06 10:23:19.762   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\bottle-0.13.4.dist-info\licenses
+2026-03-06 10:23:19.762   Successfully installed the file.
+2026-03-06 10:23:19.762   -- File entry --
+2026-03-06 10:23:19.762   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter\adapter_config.json
+2026-03-06 10:23:19.762   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.762   Installing the file.
+2026-03-06 10:23:19.762   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter
+2026-03-06 10:23:19.762   Successfully installed the file.
+2026-03-06 10:23:19.762   -- File entry --
+2026-03-06 10:23:19.762   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter\adapter_model.safetensors
+2026-03-06 10:23:19.763   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:19.763   Installing the file.
+2026-03-06 10:23:24.312   Successfully installed the file.
+2026-03-06 10:23:24.312   -- File entry --
+2026-03-06 10:23:24.312   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter\chat_template.jinja
+2026-03-06 10:23:24.312   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.312   Installing the file.
+2026-03-06 10:23:24.316   Successfully installed the file.
+2026-03-06 10:23:24.316   -- File entry --
+2026-03-06 10:23:24.316   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter\README.md
+2026-03-06 10:23:24.317   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.317   Installing the file.
+2026-03-06 10:23:24.317   Successfully installed the file.
+2026-03-06 10:23:24.317   -- File entry --
+2026-03-06 10:23:24.318   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter\tokenizer.json
+2026-03-06 10:23:24.318   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.318   Installing the file.
+2026-03-06 10:23:24.532   Successfully installed the file.
+2026-03-06 10:23:24.533   -- File entry --
+2026-03-06 10:23:24.533   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\bundled_latest_adapter\tokenizer_config.json
+2026-03-06 10:23:24.533   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.533   Installing the file.
+2026-03-06 10:23:24.535   Successfully installed the file.
+2026-03-06 10:23:24.535   -- File entry --
+2026-03-06 10:23:24.535   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\hostfxr.py
+2026-03-06 10:23:24.535   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.535   Installing the file.
+2026-03-06 10:23:24.535   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader
+2026-03-06 10:23:24.535   Successfully installed the file.
+2026-03-06 10:23:24.535   -- File entry --
+2026-03-06 10:23:24.535   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\mono.py
+2026-03-06 10:23:24.535   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.535   Installing the file.
+2026-03-06 10:23:24.535   Successfully installed the file.
+2026-03-06 10:23:24.535   -- File entry --
+2026-03-06 10:23:24.535   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\netfx.py
+2026-03-06 10:23:24.535   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.535   Installing the file.
+2026-03-06 10:23:24.538   Successfully installed the file.
+2026-03-06 10:23:24.538   -- File entry --
+2026-03-06 10:23:24.538   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\py.typed
+2026-03-06 10:23:24.538   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.540   Installing the file.
+2026-03-06 10:23:24.541   Successfully installed the file.
+2026-03-06 10:23:24.541   -- File entry --
+2026-03-06 10:23:24.541   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\types.py
+2026-03-06 10:23:24.541   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.541   Installing the file.
+2026-03-06 10:23:24.544   Successfully installed the file.
+2026-03-06 10:23:24.544   -- File entry --
+2026-03-06 10:23:24.544   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\__init__.py
+2026-03-06 10:23:24.544   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.544   Installing the file.
+2026-03-06 10:23:24.544   Successfully installed the file.
+2026-03-06 10:23:24.544   -- File entry --
+2026-03-06 10:23:24.544   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\hostfxr.py
+2026-03-06 10:23:24.544   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.544   Installing the file.
+2026-03-06 10:23:24.546   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi
+2026-03-06 10:23:24.546   Successfully installed the file.
+2026-03-06 10:23:24.546   -- File entry --
+2026-03-06 10:23:24.546   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\mono.py
+2026-03-06 10:23:24.546   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.546   Installing the file.
+2026-03-06 10:23:24.546   Successfully installed the file.
+2026-03-06 10:23:24.546   -- File entry --
+2026-03-06 10:23:24.546   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\netfx.py
+2026-03-06 10:23:24.549   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.549   Installing the file.
+2026-03-06 10:23:24.549   Successfully installed the file.
+2026-03-06 10:23:24.549   -- File entry --
+2026-03-06 10:23:24.549   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\__init__.py
+2026-03-06 10:23:24.549   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.549   Installing the file.
+2026-03-06 10:23:24.550   Successfully installed the file.
+2026-03-06 10:23:24.550   -- File entry --
+2026-03-06 10:23:24.550   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls\amd64\ClrLoader.dll
+2026-03-06 10:23:24.550   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.550   Installing the file.
+2026-03-06 10:23:24.550   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls
+2026-03-06 10:23:24.551   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls\amd64
+2026-03-06 10:23:24.552   Successfully installed the file.
+2026-03-06 10:23:24.552   -- File entry --
+2026-03-06 10:23:24.552   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls\amd64\ClrLoader.pdb
+2026-03-06 10:23:24.552   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.552   Installing the file.
+2026-03-06 10:23:24.554   Successfully installed the file.
+2026-03-06 10:23:24.554   -- File entry --
+2026-03-06 10:23:24.554   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls\x86\ClrLoader.dll
+2026-03-06 10:23:24.554   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.554   Installing the file.
+2026-03-06 10:23:24.554   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls\x86
+2026-03-06 10:23:24.555   Successfully installed the file.
+2026-03-06 10:23:24.555   -- File entry --
+2026-03-06 10:23:24.555   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\ffi\dlls\x86\ClrLoader.pdb
+2026-03-06 10:23:24.555   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.555   Installing the file.
+2026-03-06 10:23:24.556   Successfully installed the file.
+2026-03-06 10:23:24.557   -- File entry --
+2026-03-06 10:23:24.557   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util\clr_error.py
+2026-03-06 10:23:24.557   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.557   Installing the file.
+2026-03-06 10:23:24.557   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util
+2026-03-06 10:23:24.558   Successfully installed the file.
+2026-03-06 10:23:24.558   -- File entry --
+2026-03-06 10:23:24.558   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util\coreclr_errors.py
+2026-03-06 10:23:24.558   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.558   Installing the file.
+2026-03-06 10:23:24.560   Successfully installed the file.
+2026-03-06 10:23:24.560   -- File entry --
+2026-03-06 10:23:24.561   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util\find.py
+2026-03-06 10:23:24.561   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.561   Installing the file.
+2026-03-06 10:23:24.562   Successfully installed the file.
+2026-03-06 10:23:24.562   -- File entry --
+2026-03-06 10:23:24.562   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util\hostfxr_errors.py
+2026-03-06 10:23:24.562   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.562   Installing the file.
+2026-03-06 10:23:24.563   Successfully installed the file.
+2026-03-06 10:23:24.563   -- File entry --
+2026-03-06 10:23:24.563   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util\runtime_spec.py
+2026-03-06 10:23:24.563   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.563   Installing the file.
+2026-03-06 10:23:24.565   Successfully installed the file.
+2026-03-06 10:23:24.565   -- File entry --
+2026-03-06 10:23:24.565   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader\util\__init__.py
+2026-03-06 10:23:24.565   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.565   Installing the file.
+2026-03-06 10:23:24.566   Successfully installed the file.
+2026-03-06 10:23:24.566   -- File entry --
+2026-03-06 10:23:24.566   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader-0.2.10.dist-info\INSTALLER
+2026-03-06 10:23:24.567   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.567   Installing the file.
+2026-03-06 10:23:24.567   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader-0.2.10.dist-info
+2026-03-06 10:23:24.567   Successfully installed the file.
+2026-03-06 10:23:24.567   -- File entry --
+2026-03-06 10:23:24.567   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader-0.2.10.dist-info\METADATA
+2026-03-06 10:23:24.567   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.567   Installing the file.
+2026-03-06 10:23:24.568   Successfully installed the file.
+2026-03-06 10:23:24.568   -- File entry --
+2026-03-06 10:23:24.568   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader-0.2.10.dist-info\RECORD
+2026-03-06 10:23:24.568   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.568   Installing the file.
+2026-03-06 10:23:24.569   Successfully installed the file.
+2026-03-06 10:23:24.569   -- File entry --
+2026-03-06 10:23:24.569   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader-0.2.10.dist-info\top_level.txt
+2026-03-06 10:23:24.569   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.569   Installing the file.
+2026-03-06 10:23:24.571   Successfully installed the file.
+2026-03-06 10:23:24.571   -- File entry --
+2026-03-06 10:23:24.571   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\clr_loader-0.2.10.dist-info\WHEEL
+2026-03-06 10:23:24.571   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.571   Installing the file.
+2026-03-06 10:23:24.571   Successfully installed the file.
+2026-03-06 10:23:24.571   -- File entry --
+2026-03-06 10:23:24.571   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe\_speedups.cp313-win_amd64.pyd
+2026-03-06 10:23:24.571   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.571   Installing the file.
+2026-03-06 10:23:24.571   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe
+2026-03-06 10:23:24.575   Successfully installed the file.
+2026-03-06 10:23:24.575   -- File entry --
+2026-03-06 10:23:24.575   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\INSTALLER
+2026-03-06 10:23:24.575   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.575   Installing the file.
+2026-03-06 10:23:24.576   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info
+2026-03-06 10:23:24.576   Successfully installed the file.
+2026-03-06 10:23:24.576   -- File entry --
+2026-03-06 10:23:24.576   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\METADATA
+2026-03-06 10:23:24.576   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.576   Installing the file.
+2026-03-06 10:23:24.577   Successfully installed the file.
+2026-03-06 10:23:24.577   -- File entry --
+2026-03-06 10:23:24.577   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\RECORD
+2026-03-06 10:23:24.578   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.578   Installing the file.
+2026-03-06 10:23:24.579   Successfully installed the file.
+2026-03-06 10:23:24.579   -- File entry --
+2026-03-06 10:23:24.579   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\top_level.txt
+2026-03-06 10:23:24.579   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.579   Installing the file.
+2026-03-06 10:23:24.580   Successfully installed the file.
+2026-03-06 10:23:24.580   -- File entry --
+2026-03-06 10:23:24.580   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\WHEEL
+2026-03-06 10:23:24.580   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.580   Installing the file.
+2026-03-06 10:23:24.580   Successfully installed the file.
+2026-03-06 10:23:24.580   -- File entry --
+2026-03-06 10:23:24.581   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\licenses\LICENSE.txt
+2026-03-06 10:23:24.581   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.581   Installing the file.
+2026-03-06 10:23:24.581   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\markupsafe-3.0.3.dist-info\licenses
+2026-03-06 10:23:24.582   Successfully installed the file.
+2026-03-06 10:23:24.582   -- File entry --
+2026-03-06 10:23:24.582   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info\INSTALLER
+2026-03-06 10:23:24.582   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.582   Installing the file.
+2026-03-06 10:23:24.582   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info
+2026-03-06 10:23:24.583   Successfully installed the file.
+2026-03-06 10:23:24.583   -- File entry --
+2026-03-06 10:23:24.583   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info\LICENSE.md
+2026-03-06 10:23:24.584   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.584   Installing the file.
+2026-03-06 10:23:24.584   Successfully installed the file.
+2026-03-06 10:23:24.584   -- File entry --
+2026-03-06 10:23:24.584   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info\METADATA
+2026-03-06 10:23:24.584   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.584   Installing the file.
+2026-03-06 10:23:24.585   Successfully installed the file.
+2026-03-06 10:23:24.585   -- File entry --
+2026-03-06 10:23:24.585   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info\RECORD
+2026-03-06 10:23:24.585   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.585   Installing the file.
+2026-03-06 10:23:24.587   Successfully installed the file.
+2026-03-06 10:23:24.587   -- File entry --
+2026-03-06 10:23:24.587   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info\top_level.txt
+2026-03-06 10:23:24.587   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.587   Installing the file.
+2026-03-06 10:23:24.588   Successfully installed the file.
+2026-03-06 10:23:24.588   -- File entry --
+2026-03-06 10:23:24.588   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pyreadline3-3.5.4.dist-info\WHEEL
+2026-03-06 10:23:24.588   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.588   Installing the file.
+2026-03-06 10:23:24.589   Successfully installed the file.
+2026-03-06 10:23:24.589   -- File entry --
+2026-03-06 10:23:24.589   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet\__init__.py
+2026-03-06 10:23:24.589   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.589   Installing the file.
+2026-03-06 10:23:24.589   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet
+2026-03-06 10:23:24.590   Successfully installed the file.
+2026-03-06 10:23:24.591   -- File entry --
+2026-03-06 10:23:24.591   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet\runtime\Python.Runtime.deps.json
+2026-03-06 10:23:24.591   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.591   Installing the file.
+2026-03-06 10:23:24.591   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet\runtime
+2026-03-06 10:23:24.592   Successfully installed the file.
+2026-03-06 10:23:24.592   -- File entry --
+2026-03-06 10:23:24.592   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet\runtime\Python.Runtime.dll
+2026-03-06 10:23:24.592   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.592   Installing the file.
+2026-03-06 10:23:24.607   Successfully installed the file.
+2026-03-06 10:23:24.607   -- File entry --
+2026-03-06 10:23:24.607   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet\runtime\Python.Runtime.pdb
+2026-03-06 10:23:24.607   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.607   Installing the file.
+2026-03-06 10:23:24.615   Successfully installed the file.
+2026-03-06 10:23:24.615   -- File entry --
+2026-03-06 10:23:24.615   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet\runtime\Python.Runtime.xml
+2026-03-06 10:23:24.615   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.615   Installing the file.
+2026-03-06 10:23:24.618   Successfully installed the file.
+2026-03-06 10:23:24.618   -- File entry --
+2026-03-06 10:23:24.618   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet-3.0.5.dist-info\INSTALLER
+2026-03-06 10:23:24.618   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.618   Installing the file.
+2026-03-06 10:23:24.618   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet-3.0.5.dist-info
+2026-03-06 10:23:24.618   Successfully installed the file.
+2026-03-06 10:23:24.618   -- File entry --
+2026-03-06 10:23:24.618   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet-3.0.5.dist-info\METADATA
+2026-03-06 10:23:24.618   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.618   Installing the file.
+2026-03-06 10:23:24.621   Successfully installed the file.
+2026-03-06 10:23:24.621   -- File entry --
+2026-03-06 10:23:24.621   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet-3.0.5.dist-info\RECORD
+2026-03-06 10:23:24.621   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.621   Installing the file.
+2026-03-06 10:23:24.622   Successfully installed the file.
+2026-03-06 10:23:24.622   -- File entry --
+2026-03-06 10:23:24.623   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet-3.0.5.dist-info\top_level.txt
+2026-03-06 10:23:24.623   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.623   Installing the file.
+2026-03-06 10:23:24.624   Successfully installed the file.
+2026-03-06 10:23:24.624   -- File entry --
+2026-03-06 10:23:24.624   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pythonnet-3.0.5.dist-info\WHEEL
+2026-03-06 10:23:24.624   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.624   Installing the file.
+2026-03-06 10:23:24.624   Successfully installed the file.
+2026-03-06 10:23:24.624   -- File entry --
+2026-03-06 10:23:24.625   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\entry_points.txt
+2026-03-06 10:23:24.625   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.625   Installing the file.
+2026-03-06 10:23:24.625   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info
+2026-03-06 10:23:24.626   Successfully installed the file.
+2026-03-06 10:23:24.626   -- File entry --
+2026-03-06 10:23:24.626   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\INSTALLER
+2026-03-06 10:23:24.626   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.626   Installing the file.
+2026-03-06 10:23:24.628   Successfully installed the file.
+2026-03-06 10:23:24.628   -- File entry --
+2026-03-06 10:23:24.628   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\METADATA
+2026-03-06 10:23:24.628   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.628   Installing the file.
+2026-03-06 10:23:24.630   Successfully installed the file.
+2026-03-06 10:23:24.630   -- File entry --
+2026-03-06 10:23:24.630   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\RECORD
+2026-03-06 10:23:24.630   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.630   Installing the file.
+2026-03-06 10:23:24.630   Successfully installed the file.
+2026-03-06 10:23:24.630   -- File entry --
+2026-03-06 10:23:24.630   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\REQUESTED
+2026-03-06 10:23:24.630   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.630   Installing the file.
+2026-03-06 10:23:24.632   Successfully installed the file.
+2026-03-06 10:23:24.632   -- File entry --
+2026-03-06 10:23:24.632   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\top_level.txt
+2026-03-06 10:23:24.632   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.632   Installing the file.
+2026-03-06 10:23:24.633   Successfully installed the file.
+2026-03-06 10:23:24.633   -- File entry --
+2026-03-06 10:23:24.633   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\WHEEL
+2026-03-06 10:23:24.633   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.633   Installing the file.
+2026-03-06 10:23:24.633   Successfully installed the file.
+2026-03-06 10:23:24.633   -- File entry --
+2026-03-06 10:23:24.633   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\licenses\LICENSE
+2026-03-06 10:23:24.634   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.634   Installing the file.
+2026-03-06 10:23:24.634   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pywebview-6.1.dist-info\licenses
+2026-03-06 10:23:24.634   Successfully installed the file.
+2026-03-06 10:23:24.635   -- File entry --
+2026-03-06 10:23:24.635   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\pywin32_system32\pywintypes313.dll
+2026-03-06 10:23:24.635   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.635   Installing the file.
+2026-03-06 10:23:24.635   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\pywin32_system32
+2026-03-06 10:23:24.640   Successfully installed the file.
+2026-03-06 10:23:24.640   -- File entry --
+2026-03-06 10:23:24.640   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\INSTALLER
+2026-03-06 10:23:24.641   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.641   Installing the file.
+2026-03-06 10:23:24.641   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools
+2026-03-06 10:23:24.641   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor
+2026-03-06 10:23:24.641   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info
+2026-03-06 10:23:24.642   Successfully installed the file.
+2026-03-06 10:23:24.642   -- File entry --
+2026-03-06 10:23:24.642   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\METADATA
+2026-03-06 10:23:24.642   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.642   Installing the file.
+2026-03-06 10:23:24.643   Successfully installed the file.
+2026-03-06 10:23:24.643   -- File entry --
+2026-03-06 10:23:24.643   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\RECORD
+2026-03-06 10:23:24.643   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.643   Installing the file.
+2026-03-06 10:23:24.643   Successfully installed the file.
+2026-03-06 10:23:24.643   -- File entry --
+2026-03-06 10:23:24.643   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\REQUESTED
+2026-03-06 10:23:24.643   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.643   Installing the file.
+2026-03-06 10:23:24.643   Successfully installed the file.
+2026-03-06 10:23:24.643   -- File entry --
+2026-03-06 10:23:24.643   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\top_level.txt
+2026-03-06 10:23:24.643   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.643   Installing the file.
+2026-03-06 10:23:24.647   Successfully installed the file.
+2026-03-06 10:23:24.647   -- File entry --
+2026-03-06 10:23:24.648   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\WHEEL
+2026-03-06 10:23:24.648   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.648   Installing the file.
+2026-03-06 10:23:24.648   Successfully installed the file.
+2026-03-06 10:23:24.648   -- File entry --
+2026-03-06 10:23:24.649   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\licenses\LICENSE
+2026-03-06 10:23:24.649   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.649   Installing the file.
+2026-03-06 10:23:24.649   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\importlib_metadata-8.7.1.dist-info\licenses
+2026-03-06 10:23:24.649   Successfully installed the file.
+2026-03-06 10:23:24.649   -- File entry --
+2026-03-06 10:23:24.649   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\jaraco\text\Lorem ipsum.txt
+2026-03-06 10:23:24.649   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.649   Installing the file.
+2026-03-06 10:23:24.649   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\jaraco
+2026-03-06 10:23:24.651   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\setuptools\_vendor\jaraco\text
+2026-03-06 10:23:24.651   Successfully installed the file.
+2026-03-06 10:23:24.651   -- File entry --
+2026-03-06 10:23:24.651   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\source\qwen_chat_web_app.py
+2026-03-06 10:23:24.652   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.652   Installing the file.
+2026-03-06 10:23:24.652   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\source
+2026-03-06 10:23:24.652   Successfully installed the file.
+2026-03-06 10:23:24.652   -- File entry --
+2026-03-06 10:23:24.654   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\errors.py
+2026-03-06 10:23:24.654   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.654   Installing the file.
+2026-03-06 10:23:24.654   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview
+2026-03-06 10:23:24.655   Successfully installed the file.
+2026-03-06 10:23:24.655   -- File entry --
+2026-03-06 10:23:24.655   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\event.py
+2026-03-06 10:23:24.655   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.655   Installing the file.
+2026-03-06 10:23:24.655   Successfully installed the file.
+2026-03-06 10:23:24.655   -- File entry --
+2026-03-06 10:23:24.655   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\guilib.py
+2026-03-06 10:23:24.655   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.655   Installing the file.
+2026-03-06 10:23:24.657   Successfully installed the file.
+2026-03-06 10:23:24.657   -- File entry --
+2026-03-06 10:23:24.657   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\http.py
+2026-03-06 10:23:24.657   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.657   Installing the file.
+2026-03-06 10:23:24.658   Successfully installed the file.
+2026-03-06 10:23:24.658   -- File entry --
+2026-03-06 10:23:24.658   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\localization.py
+2026-03-06 10:23:24.658   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.658   Installing the file.
+2026-03-06 10:23:24.659   Successfully installed the file.
+2026-03-06 10:23:24.659   -- File entry --
+2026-03-06 10:23:24.660   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\menu.py
+2026-03-06 10:23:24.660   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.660   Installing the file.
+2026-03-06 10:23:24.660   Successfully installed the file.
+2026-03-06 10:23:24.660   -- File entry --
+2026-03-06 10:23:24.660   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\models.py
+2026-03-06 10:23:24.660   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.660   Installing the file.
+2026-03-06 10:23:24.661   Successfully installed the file.
+2026-03-06 10:23:24.661   -- File entry --
+2026-03-06 10:23:24.662   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\py.typed
+2026-03-06 10:23:24.662   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.662   Installing the file.
+2026-03-06 10:23:24.662   Successfully installed the file.
+2026-03-06 10:23:24.662   -- File entry --
+2026-03-06 10:23:24.662   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\screen.py
+2026-03-06 10:23:24.662   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.662   Installing the file.
+2026-03-06 10:23:24.663   Successfully installed the file.
+2026-03-06 10:23:24.663   -- File entry --
+2026-03-06 10:23:24.663   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\state.py
+2026-03-06 10:23:24.663   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.663   Installing the file.
+2026-03-06 10:23:24.664   Successfully installed the file.
+2026-03-06 10:23:24.664   -- File entry --
+2026-03-06 10:23:24.664   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\util.py
+2026-03-06 10:23:24.664   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.664   Installing the file.
+2026-03-06 10:23:24.666   Successfully installed the file.
+2026-03-06 10:23:24.666   -- File entry --
+2026-03-06 10:23:24.666   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\window.py
+2026-03-06 10:23:24.666   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.666   Installing the file.
+2026-03-06 10:23:24.667   Successfully installed the file.
+2026-03-06 10:23:24.667   -- File entry --
+2026-03-06 10:23:24.667   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\_version.py
+2026-03-06 10:23:24.667   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.667   Installing the file.
+2026-03-06 10:23:24.669   Successfully installed the file.
+2026-03-06 10:23:24.669   -- File entry --
+2026-03-06 10:23:24.669   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\__init__.py
+2026-03-06 10:23:24.669   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.669   Installing the file.
+2026-03-06 10:23:24.670   Successfully installed the file.
+2026-03-06 10:23:24.671   -- File entry --
+2026-03-06 10:23:24.671   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom\classlist.py
+2026-03-06 10:23:24.671   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.671   Installing the file.
+2026-03-06 10:23:24.671   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom
+2026-03-06 10:23:24.671   Successfully installed the file.
+2026-03-06 10:23:24.671   -- File entry --
+2026-03-06 10:23:24.671   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom\dom.py
+2026-03-06 10:23:24.671   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.671   Installing the file.
+2026-03-06 10:23:24.672   Successfully installed the file.
+2026-03-06 10:23:24.672   -- File entry --
+2026-03-06 10:23:24.672   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom\element.py
+2026-03-06 10:23:24.672   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.672   Installing the file.
+2026-03-06 10:23:24.673   Successfully installed the file.
+2026-03-06 10:23:24.675   -- File entry --
+2026-03-06 10:23:24.675   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom\event.py
+2026-03-06 10:23:24.675   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.675   Installing the file.
+2026-03-06 10:23:24.675   Successfully installed the file.
+2026-03-06 10:23:24.675   -- File entry --
+2026-03-06 10:23:24.675   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom\propsdict.py
+2026-03-06 10:23:24.675   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.675   Installing the file.
+2026-03-06 10:23:24.677   Successfully installed the file.
+2026-03-06 10:23:24.677   -- File entry --
+2026-03-06 10:23:24.677   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\dom\__init__.py
+2026-03-06 10:23:24.677   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.677   Installing the file.
+2026-03-06 10:23:24.678   Successfully installed the file.
+2026-03-06 10:23:24.678   -- File entry --
+2026-03-06 10:23:24.678   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\api.js
+2026-03-06 10:23:24.678   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.678   Installing the file.
+2026-03-06 10:23:24.678   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js
+2026-03-06 10:23:24.679   Successfully installed the file.
+2026-03-06 10:23:24.679   -- File entry --
+2026-03-06 10:23:24.679   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\customize.js
+2026-03-06 10:23:24.679   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.679   Installing the file.
+2026-03-06 10:23:24.681   Successfully installed the file.
+2026-03-06 10:23:24.681   -- File entry --
+2026-03-06 10:23:24.681   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\finish.js
+2026-03-06 10:23:24.681   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.681   Installing the file.
+2026-03-06 10:23:24.681   Successfully installed the file.
+2026-03-06 10:23:24.681   -- File entry --
+2026-03-06 10:23:24.681   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\state.js
+2026-03-06 10:23:24.681   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.681   Installing the file.
+2026-03-06 10:23:24.682   Successfully installed the file.
+2026-03-06 10:23:24.682   -- File entry --
+2026-03-06 10:23:24.682   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\lib\dom_json.js
+2026-03-06 10:23:24.682   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.682   Installing the file.
+2026-03-06 10:23:24.682   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\lib
+2026-03-06 10:23:24.683   Successfully installed the file.
+2026-03-06 10:23:24.683   -- File entry --
+2026-03-06 10:23:24.683   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\js\lib\polyfill.js
+2026-03-06 10:23:24.683   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.683   Installing the file.
+2026-03-06 10:23:24.685   Successfully installed the file.
+2026-03-06 10:23:24.685   -- File entry --
+2026-03-06 10:23:24.685   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\Microsoft.Web.WebView2.Core.dll
+2026-03-06 10:23:24.685   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.685   Installing the file.
+2026-03-06 10:23:24.685   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib
+2026-03-06 10:23:24.699   Successfully installed the file.
+2026-03-06 10:23:24.699   -- File entry --
+2026-03-06 10:23:24.699   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\Microsoft.Web.WebView2.WinForms.dll
+2026-03-06 10:23:24.699   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.699   Installing the file.
+2026-03-06 10:23:24.700   Successfully installed the file.
+2026-03-06 10:23:24.700   -- File entry --
+2026-03-06 10:23:24.700   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\pywebview-android.jar
+2026-03-06 10:23:24.702   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.702   Installing the file.
+2026-03-06 10:23:24.704   Successfully installed the file.
+2026-03-06 10:23:24.704   -- File entry --
+2026-03-06 10:23:24.704   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\WebBrowserInterop.x64.dll
+2026-03-06 10:23:24.704   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.704   Installing the file.
+2026-03-06 10:23:24.704   Successfully installed the file.
+2026-03-06 10:23:24.704   -- File entry --
+2026-03-06 10:23:24.704   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\WebBrowserInterop.x86.dll
+2026-03-06 10:23:24.706   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.706   Installing the file.
+2026-03-06 10:23:24.707   Successfully installed the file.
+2026-03-06 10:23:24.707   -- File entry --
+2026-03-06 10:23:24.707   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-arm64\native\WebView2Loader.dll
+2026-03-06 10:23:24.708   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.708   Installing the file.
+2026-03-06 10:23:24.708   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes
+2026-03-06 10:23:24.708   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-arm64
+2026-03-06 10:23:24.708   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-arm64\native
+2026-03-06 10:23:24.712   Successfully installed the file.
+2026-03-06 10:23:24.712   -- File entry --
+2026-03-06 10:23:24.712   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-x64\native\WebView2Loader.dll
+2026-03-06 10:23:24.712   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.712   Installing the file.
+2026-03-06 10:23:24.712   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-x64
+2026-03-06 10:23:24.712   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-x64\native
+2026-03-06 10:23:24.718   Successfully installed the file.
+2026-03-06 10:23:24.718   -- File entry --
+2026-03-06 10:23:24.718   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-x86\native\WebView2Loader.dll
+2026-03-06 10:23:24.720   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.720   Installing the file.
+2026-03-06 10:23:24.720   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-x86
+2026-03-06 10:23:24.721   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\lib\runtimes\win-x86\native
+2026-03-06 10:23:24.727   Successfully installed the file.
+2026-03-06 10:23:24.727   -- File entry --
+2026-03-06 10:23:24.727   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\cef.py
+2026-03-06 10:23:24.727   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.727   Installing the file.
+2026-03-06 10:23:24.727   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms
+2026-03-06 10:23:24.728   Successfully installed the file.
+2026-03-06 10:23:24.728   -- File entry --
+2026-03-06 10:23:24.728   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\cocoa.py
+2026-03-06 10:23:24.728   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.728   Installing the file.
+2026-03-06 10:23:24.730   Successfully installed the file.
+2026-03-06 10:23:24.730   -- File entry --
+2026-03-06 10:23:24.730   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\edgechromium.py
+2026-03-06 10:23:24.730   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.730   Installing the file.
+2026-03-06 10:23:24.731   Successfully installed the file.
+2026-03-06 10:23:24.731   -- File entry --
+2026-03-06 10:23:24.732   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\gtk.py
+2026-03-06 10:23:24.732   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.732   Installing the file.
+2026-03-06 10:23:24.733   Successfully installed the file.
+2026-03-06 10:23:24.733   -- File entry --
+2026-03-06 10:23:24.733   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\mshtml.py
+2026-03-06 10:23:24.733   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.733   Installing the file.
+2026-03-06 10:23:24.734   Successfully installed the file.
+2026-03-06 10:23:24.734   -- File entry --
+2026-03-06 10:23:24.734   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\qt.py
+2026-03-06 10:23:24.734   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.734   Installing the file.
+2026-03-06 10:23:24.736   Successfully installed the file.
+2026-03-06 10:23:24.736   -- File entry --
+2026-03-06 10:23:24.736   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\winforms.py
+2026-03-06 10:23:24.736   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.736   Installing the file.
+2026-03-06 10:23:24.737   Successfully installed the file.
+2026-03-06 10:23:24.737   -- File entry --
+2026-03-06 10:23:24.737   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\__init__.py
+2026-03-06 10:23:24.737   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.737   Installing the file.
+2026-03-06 10:23:24.737   Successfully installed the file.
+2026-03-06 10:23:24.737   -- File entry --
+2026-03-06 10:23:24.737   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\app.py
+2026-03-06 10:23:24.738   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.738   Installing the file.
+2026-03-06 10:23:24.738   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android
+2026-03-06 10:23:24.738   Successfully installed the file.
+2026-03-06 10:23:24.738   -- File entry --
+2026-03-06 10:23:24.739   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\base.py
+2026-03-06 10:23:24.739   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.739   Installing the file.
+2026-03-06 10:23:24.740   Successfully installed the file.
+2026-03-06 10:23:24.740   -- File entry --
+2026-03-06 10:23:24.740   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\event.py
+2026-03-06 10:23:24.740   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.740   Installing the file.
+2026-03-06 10:23:24.740   Successfully installed the file.
+2026-03-06 10:23:24.740   -- File entry --
+2026-03-06 10:23:24.740   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\__init__.py
+2026-03-06 10:23:24.740   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.740   Installing the file.
+2026-03-06 10:23:24.740   Successfully installed the file.
+2026-03-06 10:23:24.742   -- File entry --
+2026-03-06 10:23:24.742   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\app.py
+2026-03-06 10:23:24.742   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.742   Installing the file.
+2026-03-06 10:23:24.742   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass
+2026-03-06 10:23:24.742   Successfully installed the file.
+2026-03-06 10:23:24.742   -- File entry --
+2026-03-06 10:23:24.743   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\content.py
+2026-03-06 10:23:24.743   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.743   Installing the file.
+2026-03-06 10:23:24.743   Successfully installed the file.
+2026-03-06 10:23:24.743   -- File entry --
+2026-03-06 10:23:24.743   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\net.py
+2026-03-06 10:23:24.743   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.743   Installing the file.
+2026-03-06 10:23:24.744   Successfully installed the file.
+2026-03-06 10:23:24.744   -- File entry --
+2026-03-06 10:23:24.744   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\os.py
+2026-03-06 10:23:24.744   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.744   Installing the file.
+2026-03-06 10:23:24.745   Successfully installed the file.
+2026-03-06 10:23:24.745   -- File entry --
+2026-03-06 10:23:24.745   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\view.py
+2026-03-06 10:23:24.745   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.745   Installing the file.
+2026-03-06 10:23:24.746   Successfully installed the file.
+2026-03-06 10:23:24.746   -- File entry --
+2026-03-06 10:23:24.746   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\webkit.py
+2026-03-06 10:23:24.746   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.746   Installing the file.
+2026-03-06 10:23:24.747   Successfully installed the file.
+2026-03-06 10:23:24.747   -- File entry --
+2026-03-06 10:23:24.747   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jclass\__init__.py
+2026-03-06 10:23:24.747   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.747   Installing the file.
+2026-03-06 10:23:24.747   Successfully installed the file.
+2026-03-06 10:23:24.748   -- File entry --
+2026-03-06 10:23:24.748   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jinterface\pywebview.py
+2026-03-06 10:23:24.748   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.748   Installing the file.
+2026-03-06 10:23:24.748   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jinterface
+2026-03-06 10:23:24.748   Successfully installed the file.
+2026-03-06 10:23:24.748   -- File entry --
+2026-03-06 10:23:24.748   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jinterface\view.py
+2026-03-06 10:23:24.748   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.748   Installing the file.
+2026-03-06 10:23:24.748   Successfully installed the file.
+2026-03-06 10:23:24.748   -- File entry --
+2026-03-06 10:23:24.748   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jinterface\webkit.py
+2026-03-06 10:23:24.749   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.749   Installing the file.
+2026-03-06 10:23:24.749   Successfully installed the file.
+2026-03-06 10:23:24.749   -- File entry --
+2026-03-06 10:23:24.749   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\platforms\android\jinterface\__init__.py
+2026-03-06 10:23:24.749   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.749   Installing the file.
+2026-03-06 10:23:24.750   Successfully installed the file.
+2026-03-06 10:23:24.750   -- File entry --
+2026-03-06 10:23:24.750   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\__pyinstaller\hook-webview.py
+2026-03-06 10:23:24.750   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.750   Installing the file.
+2026-03-06 10:23:24.750   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\webview\__pyinstaller
+2026-03-06 10:23:24.751   Successfully installed the file.
+2026-03-06 10:23:24.751   -- File entry --
+2026-03-06 10:23:24.751   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\webview\__pyinstaller\__init__.py
+2026-03-06 10:23:24.751   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.751   Installing the file.
+2026-03-06 10:23:24.751   Successfully installed the file.
+2026-03-06 10:23:24.751   -- File entry --
+2026-03-06 10:23:24.752   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\win32\win32api.pyd
+2026-03-06 10:23:24.752   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.752   Installing the file.
+2026-03-06 10:23:24.752   Creating directory: C:\Program Files\Supermix Qwen Desktop\_internal\win32
+2026-03-06 10:23:24.756   Successfully installed the file.
+2026-03-06 10:23:24.756   -- File entry --
+2026-03-06 10:23:24.756   Dest filename: C:\Program Files\Supermix Qwen Desktop\_internal\win32\win32evtlog.pyd
+2026-03-06 10:23:24.756   Time stamp of our file: 2026-03-06 10:17:16.000
+2026-03-06 10:23:24.756   Installing the file.
+2026-03-06 10:23:24.759   Successfully installed the file.
+2026-03-06 10:23:24.759   -- Icon entry --
+2026-03-06 10:23:24.759   Dest filename: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Supermix Qwen Desktop.lnk
+2026-03-06 10:23:24.760   Creating the icon.
+2026-03-06 10:23:25.114   Successfully created the icon.
+2026-03-06 10:23:25.121   -- Icon entry --
+2026-03-06 10:23:25.121   Dest filename: C:\Users\Public\Desktop\Supermix Qwen Desktop.lnk
+2026-03-06 10:23:25.123   Creating the icon.
+2026-03-06 10:23:25.129   Successfully created the icon.
+2026-03-06 10:23:25.134   Saving uninstall information.
+2026-03-06 10:23:25.134   Creating new uninstall key: HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\{BCF0A53D-392D-49D8-A167-6B2F33005808}_is1
+2026-03-06 10:23:25.134   Writing uninstall key values.
+2026-03-06 10:23:25.136   Detected previous non administrative install? No
+2026-03-06 10:23:25.136   Detected previous administrative 32-bit install? No
+2026-03-06 10:23:25.141   Installation process succeeded.
+2026-03-06 10:23:25.141   Need to restart Windows? No
+2026-03-06 10:23:25.144   Deinitializing Setup.
+2026-03-06 10:23:25.152   Log closed.

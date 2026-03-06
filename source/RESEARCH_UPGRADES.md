@@ -70,3 +70,100 @@ python finetune_chat.py --data conversation_data.hybrid_v5_clean.jsonl --weights
 ```bash
 python chat_app.py --weights champion_model_chat_large_ft_v6.pth --meta chat_model_large_meta_v6.json --device cpu --pool_mode all --top_labels 4 --response_temperature 0.08 --llm_db llm_chat_v5.db --db_top_k 160
 ```
+
+---
+
+## March 2026: Qwen Supermix Pipeline Upgrades
+
+Applied in `source/qwen_supermix_pipeline.py` and launcher scripts.
+
+### Recent papers reviewed (primary sources)
+
+1. SimPO (NeurIPS 2024):  
+   https://arxiv.org/abs/2405.14734
+2. Reward-aware Preference Optimization (RPO, 2025):  
+   https://arxiv.org/abs/2502.00203
+3. Focused-DPO for code error-prone points (ACL Findings 2025):  
+   https://arxiv.org/abs/2502.11475
+4. IterPref / Target-DPO for iterative code debugging (2025):  
+   https://arxiv.org/abs/2503.02783
+5. AP2O-Coder adaptive progressive coding preferences (2025):  
+   https://arxiv.org/abs/2510.02393
+6. TRPA trust-region preference optimization for reasoning stability (2025):  
+   https://arxiv.org/abs/2504.04524
+7. QLoRA memory-efficient large-model finetuning (NeurIPS 2023):  
+   https://arxiv.org/abs/2305.14314
+8. DoRA PEFT stability/capacity improvements (ICML 2024):  
+   https://arxiv.org/abs/2402.09353
+
+### What changed in this repo
+
+1. Preference mining stability fixes (hang prevention):
+- Added mining modes: `auto`, `hybrid`, `dataset`, `generation`.
+- `auto` now disables on-the-fly generation on CPU and mines from dataset negatives.
+- Added mining progress logs, wall-clock limits, and attempt limits.
+- Added generation failure guards so runs continue instead of silently stalling.
+
+2. Coding/problem-solving focus in training:
+- Added prompt-aware SFT weighting (`--sft_prompt_skill_boost`).
+- Added reasoning source weighting (`--sft_reasoning_boost`).
+- Added preference pair weighting boosts for coding/reasoning prompts:
+  `--preference_coding_focus_boost`, `--preference_reasoning_focus_boost`.
+- Added counterfactual hard negatives for coding/reasoning preference mining:
+  `--preference_counterfactual_rejects_per_prompt`.
+  This is a practical adaptation inspired by code-focused preference/error-point training papers.
+
+3. Larger-model practicality:
+- Added `--device auto|cpu|cuda|mps`.
+- Added `--model_dtype auto|float32|float16|bfloat16`.
+- Added `--gradient_checkpointing` for memory-constrained larger-model runs.
+- Added automatic CPU safety: gradient checkpointing is disabled on CPU to avoid pre-step stalls.
+- Added launch profile: `run_train_qwen_supermix_v23_larger_reasoner.ps1`.
+
+4. Training observability:
+- Added GUI monitor: `source/training_monitor_gui.py`
+  (stage/step/loss/LR/PID/stall detection for `train_*.out.log`).
+
+5. Advanced preference objectives and stability (new):
+- Added ORPO-style objective option in Qwen preference stage:
+  `--preference_objective orpo`.
+- Added progressive preference schedules inspired by adaptive/progressive alignment:
+  `--preference_beta_end`, `--preference_margin_end`.
+- Added hard-example emphasis during preference training:
+  `--preference_hardness_gamma`.
+- Added trust-region style anchoring to the pre-preference policy:
+  `--preference_reference_anchor_weight`, `--preference_reference_anchor_batch_size`.
+  Implementation caches reference chosen/rejected log-probs before preference updates and penalizes large margin drift.
+
+6. New launch profile for smarter alignment:
+- Added `source/run_train_qwen_supermix_v24_adaptive_orpo_trust.ps1`.
+- Uses ORPO + progressive schedules + trust-region anchoring for stronger reasoning/coding stability.
+
+7. Preference-data selection curation (new, v25):
+- Added post-mining pair selection in `source/qwen_supermix_pipeline.py`:
+  `_select_preference_pairs(...)` with paper-inspired curation controls.
+- Added strategies:
+  - `--preference_selection_strategy margin_topk`
+  - `--preference_selection_strategy capacity_aware`
+- Added controls:
+  - `--preference_selection_keep_ratio`
+  - `--preference_selection_min_keep`
+  - `--preference_selection_max_keep`
+  - `--preference_selection_hardness_target`
+  - `--preference_selection_hardness_bandwidth`
+- Added training telemetry for selection outcomes (kept/mined ratio + difficulty/quality deltas).
+- Added launch profile `source/run_train_qwen_supermix_v25_selective_pref.ps1`.
+
+### Additional papers reviewed for v25 selection
+
+1. Less is More: Improving LLM Alignment via Preference Data Selection (2025):  
+   https://arxiv.org/abs/2502.14560
+2. Principled Data Selection for Alignment: Hidden Risks of Difficult Examples (2025):  
+   https://arxiv.org/abs/2502.09650
+3. Towards Understanding Valuable Preference Data for LLM Post-Training (2025):  
+   https://arxiv.org/abs/2510.13212
+
+### Notes
+
+- These changes are inspired by the above papers and focused on practical reliability and coding/reasoning gains for this codebase.
+- They are not full re-implementations of those methods.

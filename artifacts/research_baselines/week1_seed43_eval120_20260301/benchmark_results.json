@@ -1,0 +1,58 @@
+{
+  "config": {
+    "benchmark_type": "week1_eval120_mixed",
+    "generated_at_utc": "2026-03-01T02:01:45.257330+00:00",
+    "base_model": "C:\\Users\\kai99\\.cache\\huggingface\\hub\\models--Qwen--Qwen2.5-0.5B-Instruct\\snapshots\\7ae557604adf67be50417f59c2c2f167def9a775",
+    "adapter_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\qwen_supermix_enhanced_v8_repair\\adapter",
+    "eval_source": "split_from_data",
+    "eval_samples": 120,
+    "seed": 43,
+    "max_length": 256,
+    "max_new_tokens": 32,
+    "max_records": 2400,
+    "eval_size": 120,
+    "max_eval_samples": 120
+  },
+  "base": {
+    "eval_samples": 120.0,
+    "eval_loss": 3.5785207440455755,
+    "perplexity": 35.82051392802077,
+    "token_f1": 0.1390485581199414,
+    "char_similarity": 0.23430104915148922,
+    "avg_gen_seconds": 8.1653004805247,
+    "avg_prompt_tokens": 53.24166666666667,
+    "avg_generated_tokens": 31.133333333333333,
+    "total_prompt_tokens": 6389.0,
+    "total_generated_tokens": 3736.0,
+    "eval_seconds": 1232.2966587543488,
+    "generated_tokens_per_sec": 3.0317375069218215
+  },
+  "tuned": {
+    "eval_samples": 120.0,
+    "eval_loss": 1.2764868438554307,
+    "perplexity": 3.5840263379907795,
+    "token_f1": 0.4657498802684194,
+    "char_similarity": 0.5251869977021182,
+    "avg_gen_seconds": 7.4966817120711005,
+    "avg_prompt_tokens": 53.24166666666667,
+    "avg_generated_tokens": 27.991666666666667,
+    "total_prompt_tokens": 6389.0,
+    "total_generated_tokens": 3359.0,
+    "eval_seconds": 1141.5718953609467,
+    "generated_tokens_per_sec": 2.942434036480846
+  },
+  "delta_tuned_minus_base": {
+    "avg_gen_seconds": -0.6686187684535989,
+    "avg_generated_tokens": -3.1416666666666657,
+    "avg_prompt_tokens": 0.0,
+    "char_similarity": 0.290885948550629,
+    "eval_loss": -2.302033900190145,
+    "eval_samples": 0.0,
+    "eval_seconds": -90.7247633934021,
+    "generated_tokens_per_sec": -0.08930347044097564,
+    "perplexity": -32.236487590029995,
+    "token_f1": 0.326701322148478,
+    "total_generated_tokens": -377.0,
+    "total_prompt_tokens": 0.0
+  }
+}

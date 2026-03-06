@@ -56,12 +56,16 @@ CODE_HINT_RE = re.compile(
 MEDIA_IMAGE_PATH_RE = re.compile(r"(?:^|\|)\s*path=([^|\n]+)")
 MEDIA_VIDEO_PATH_RE = re.compile(r"(?:^|\|)\s*video=([^|\n]+)")
 MEDIA_3D_PATH_RE = re.compile(r"(?:^|\|)\s*model3d=([^|\n]+)")
-ROLE_LINE_RE = re.compile(r"^(user|assistant|system|tool|memory \d+ user|memory \d+ assistant)\s*:\s*(.*)$", re.I)
 PROGRAMMING_HINT_RE = re.compile(
     r"```|`[^`]+`|\b(def|class|import|from|return|async|await|SELECT|INSERT|UPDATE|DELETE|function|const|let|var|public|private|try|except|catch|lambda|pip|npm|pytest|traceback|stack trace|segfault|nullpointer|keyerror|indexerror)\b",
     re.I,
 )
 IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+# Optimized for reuse
+SPLIT_ROLE_RE = re.compile(r"^(user|assistant|system|tool|memory \d+ user|memory \d+ assistant)\s*:\s*(.*)$", re.I)
+ACTION_REQUEST_RE = re.compile(r"\b(please|can you|could you|help|build|fix|make|optimi[sz]e)\b", re.I)
+COREF_RE = re.compile(r"\b(it|that|this|they|them|he|she|those|these|same|previous|above)\b", re.I)
+CONTINUE_RE = re.compile(r"\b(continue|go on|more|deeper|expand|another|next)\b", re.I)
 CAMEL_OR_WORD_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+")
 CODE_LINE_SHAPE_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 CREATIVE_WORDS = {
@@ -613,7 +617,7 @@ def featurize_text(text: str, dim: int = FEAT_DIM) -> torch.Tensor:
 
 
 def _split_role_line(line: str) -> Tuple[str, str]:
-    m = ROLE_LINE_RE.match(line.strip())
+    m = SPLIT_ROLE_RE.match(line.strip())
     if not m:
         return "text", line.strip()
     role = str(m.group(1)).strip().lower()
@@ -672,7 +676,7 @@ def featurize_context_v2(context_text: str, dim: int = FEAT_DIM, max_lines: int 
         lower = content.lower()
         if "?" in content:
             acc += 0.035 * question_boost
-        if re.search(r"\b(please|can you|could you|help|build|fix|make|optimi[sz]e)\b", lower):
+        if ACTION_REQUEST_RE.search(lower):
             acc += 0.030 * action_boost
 
     norm = torch.norm(acc, p=2)
@@ -741,7 +745,7 @@ def featurize_context_v3(context_text: str, dim: int = FEAT_DIM, max_lines: int 
             latest_user = content
             if "?" in content:
                 question_count += 1
-            if re.search(r"\b(please|can you|could you|help|make|add|improve|continue|explain|rewrite|optimi[sz]e)\b", lower):
+            if ACTION_REQUEST_RE.search(lower):
                 imperative_count += 1
         elif role_key in {"assistant", "memory_assistant"}:
             assistant_turns += 1
@@ -754,11 +758,11 @@ def featurize_context_v3(context_text: str, dim: int = FEAT_DIM, max_lines: int 
 
     if latest_user:
         user_lower = latest_user.lower()
-        if re.search(r"\b(it|that|this|they|them|he|she|those|these|same|previous|above)\b", user_lower):
+        if COREF_RE.search(user_lower):
             _hash_add(acc, "ctxv3|followup|coref", 0.28, dim=dim, sign_bit=19)
             if latest_assistant:
                 acc += 0.12 * featurize_text("[recent_assistant] " + latest_assistant, dim=dim)
-        if re.search(r"\b(continue|go on|more|deeper|expand|another|next)\b", user_lower):
+        if CONTINUE_RE.search(user_lower):
             _hash_add(acc, "ctxv3|followup|continue", 0.24, dim=dim, sign_bit=20)
         if LITERARY_HINT_RE.search(latest_user):
             _hash_add(acc, "ctxv3|latest_user|literary", 0.22, dim=dim, sign_bit=21)

@@ -1,0 +1,11 @@
+[runtime] device=cpu model_dtype=torch.float32 gradient_checkpointing=False
+[data] loading Supermix pairs...
+[data] sources=6 -> conversation_data.quality_anchor_v2.jsonl, conversation_data.coding_knowledge_2026_02_19.jsonl, conversation_data.world_events_2026_02_19.jsonl, conversation_data.supermix_plus_v27_500k.jsonl, conversation_data.mega_reasoning_creative_v25_75582.jsonl, conversation_data.mega_creative_250k_v2.jsonl
+[data] progress: pairs=2000/42000 raw=2716 kept=2018 rate=574.03/s
+[data] progress: pairs=4000/42000 raw=5938 kept=4136 rate=554.59/s
+[data] progress: pairs=6000/42000 raw=9223 kept=6273 rate=554.27/s
+[data] progress: pairs=8000/42000 raw=12459 kept=8376 rate=546.90/s
+[data] progress: pairs=10000/42000 raw=15750 kept=10511 rate=535.71/s
+[data] progress: pairs=12000/42000 raw=19049 kept=12656 rate=531.34/s
+[data] progress: pairs=14000/42000 raw=22464 kept=14833 rate=514.83/s
+[data] progress: pairs=16000/42000 raw=25911 kept=17046 rate=513.04/s

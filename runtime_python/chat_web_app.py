@@ -14,56 +14,295 @@ from device_utils import configure_torch_runtime, resolve_device
 
 
 HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>Champion Chat Web</title>
+<title>Supermix v27 Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-body{margin:0;background:#0b1220;color:#e5edf7;font-family:Segoe UI,Arial,sans-serif}
-.wrap{max-width:1100px;margin:20px auto;padding:14px;display:grid;grid-template-columns:340px 1fr;gap:14px}
-.card{background:#121c30;border:1px solid #24324e;border-radius:14px;box-shadow:0 10px 24px rgba(0,0,0,.25)}
-.side{padding:14px}.chat{display:grid;grid-template-rows:auto 1fr auto;min-height:78vh}
-.row{margin-bottom:10px}.row label{display:block;font-size:.75rem;color:#9fb1d1;margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em}
-input,select,textarea{width:100%;background:#0b1220;color:#e5edf7;border:1px solid #2a3a58;border-radius:10px;padding:10px}
-button{background:#1d4ed8;color:white;border:0;border-radius:10px;padding:10px 12px;font-weight:600;cursor:pointer}
-button.alt{background:#263449}.btns{display:flex;gap:8px;flex-wrap:wrap}
-.status{white-space:pre-wrap;background:#0b1220;border:1px solid #2a3a58;border-radius:10px;padding:10px;min-height:100px;color:#b7c6df;font-size:.85rem}
-.head{padding:12px 14px;border-bottom:1px solid #24324e;display:flex;justify-content:space-between;gap:8px;align-items:center}
-.head small{color:#9fb1d1}
-.msgs{padding:12px;overflow:auto;display:flex;flex-direction:column;gap:10px}
-.msg{border:1px solid #24324e;border-radius:12px;padding:10px;background:#0b1220;max-width:85%;white-space:pre-wrap;line-height:1.35}
-.msg.user{align-self:flex-end;background:#10203d;border-color:#244d90}.msg.bot{align-self:flex-start}
-.msg .who{font-size:.72rem;color:#9fb1d1;margin-bottom:4px;text-transform:uppercase}.tim{margin-top:6px;color:#9fb1d1;font-size:.75rem}
-.comp{padding:12px;border-top:1px solid #24324e;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
-textarea{min-height:68px;max-height:180px;resize:vertical}
-@media (max-width: 900px){.wrap{grid-template-columns:1fr}.chat{min-height:70vh}}
+:root {
+  --bg: #05080e;
+  --card-bg: rgba(18, 28, 48, 0.7);
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.4);
+  --text: #e5edf7;
+  --text-dim: #9fb1d1;
+  --border: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.05);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(29, 78, 216, 0.15) 0px, transparent 50%);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+.wrap {
+  width: 100%;
+  max-width: 1400px;
+  margin: auto;
+  height: 95vh;
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 20px;
+  padding: 20px;
+}
+.card {
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.side { padding: 24px; overflow-y: auto; }
+.side::-webkit-scrollbar { width: 6px; }
+.side::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+.chat { position: relative; }
+.header {
+  padding: 20px 24px;
+  background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid var(--glass-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.header h2 { margin: 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
+.header small { color: var(--text-dim); font-size: 0.8rem; }
+
+.msgs { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+.msgs::-webkit-scrollbar { width: 6px; }
+.msgs::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+.msg {
+  max-width: 80%;
+  padding: 14px 18px;
+  border-radius: 18px;
+  line-height: 1.5;
+  font-size: 0.95rem;
+  position: relative;
+  animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: white;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 4px 15px var(--accent-glow);
+}
+.msg.bot {
+  align-self: flex-start;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--glass-border);
+  border-bottom-left-radius: 4px;
+  color: var(--text);
+}
+.msg .who { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; opacity: 0.7; font-weight: 700; }
+.msg .tim { font-size: 0.7rem; margin-top: 10px; opacity: 0.5; font-style: italic; }
+
+.comp {
+  padding: 20px 24px;
+  background: rgba(0,0,0,0.2);
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+textarea {
+  flex: 1;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  color: var(--text);
+  padding: 12px 16px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: none;
+  min-height: 48px;
+  max-height: 200px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s, filter 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+button:hover { filter: brightness(1.1); }
+button:active { transform: scale(0.96); }
+button.alt { background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); }
+
+.row { margin-bottom: 18px; }
+.row label { display: block; font-size: 0.7rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; }
+select, input {
+  width: 100%;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+.status {
+  margin-top: 20px;
+  padding: 14px;
+  background: rgba(0,0,0,0.15);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.btn-full { grid-column: span 2; }
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: 1fr; height: auto; overflow: visible; }
+  body { overflow: visible; }
+  .msgs { min-height: 400px; }
+}
 </style></head><body>
 <div class='wrap'>
   <div class='card side'>
-    <h3 style='margin:0 0 6px'>Champion Chat Web</h3>
-    <div style='color:#9fb1d1;font-size:.9rem;margin-bottom:12px'>Load model/meta files, then chat in the browser.</div>
-    <div class='row'><label>Weights (.pth)</label><input id='weights'></div>
-    <div class='row'><label>Metadata (.json)</label><input id='meta'></div>
-    <div class='row'><label>Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div>
-    <div class='row'><label>Response Temp</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
-    <div class='row'><label>Show Top Candidates</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div>
-    <div class='btns'><button id='loadBtn'>Load Model</button><button class='alt' id='statusBtn'>Refresh</button><button class='alt' id='clearBtn'>Clear Session</button></div>
-    <div class='status' id='statusBox'>Loading status...</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+        <div style="width:12px; height:12px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent);"></div>
+        <h3 style='margin:0'>Supermix v27</h3>
+    </div>
+    <div style='color:var(--text-dim);font-size:0.85rem;margin-bottom:24px'>Neural Intelligence Framework</div>
+    
+    <div class='row'><label>Weights</label><input id='weights'></div>
+    <div class='row'><label>Metadata</label><input id='meta'></div>
+    
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class='row'><label>Creative Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div>
+        <div class='row'><label>Temperature</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
+    </div>
+    
+    <div class='row'><label>Inference Width</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div>
+    
+    <div class='btns'>
+        <button id='loadBtn' class="btn-full">INITIALIZE ENGINE</button>
+        <button class='alt' id='statusBtn'>REFRESH</button>
+        <button class='alt' id='clearBtn'>PURGE</button>
+    </div>
+    
+    <div class='status' id='statusBox'>System idle.</div>
   </div>
+  
   <div class='card chat'>
-    <div class='head'><div><div style='font-weight:700'>Web Chat</div><small id='metaLine'>No model loaded</small></div><small id='session'></small></div>
+    <div class='header'>
+      <div><h2 id="metaLine">Waiting for Initialization</h2></div>
+      <small id='session'></small>
+    </div>
     <div class='msgs' id='msgs'></div>
-    <div class='comp'><textarea id='prompt' placeholder='Type message, Enter to send (Shift+Enter newline)'></textarea><button id='sendBtn'>Send</button></div>
+    <div class='comp'>
+      <textarea id='prompt' placeholder='Quantum prompt input...' rows="1"></textarea>
+      <button id='sendBtn'>SEND</button>
+    </div>
   </div>
 </div>
 <script>
-const el=(id)=>document.getElementById(id), msgs=el('msgs');
-let sid=localStorage.getItem('champion-web-sid'); if(!sid){{sid=(crypto.randomUUID?crypto.randomUUID():String(Date.now())); localStorage.setItem('champion-web-sid',sid);}} el('session').textContent='session '+sid.slice(0,8);
-function add(kind,text,timing,top){{const d=document.createElement('div'); d.className='msg '+kind; d.innerHTML=`<div class='who'>${{kind==='user'?'You':'Bot'}}</div>`; const b=document.createElement('div'); b.textContent=text; d.appendChild(b); if(timing){{const t=document.createElement('div'); t.className='tim'; t.textContent=`Timing: infer=${{timing.infer}} ms, rank=${{timing.rank_pick}} ms, total=${{timing.total}} ms`; d.appendChild(t);}} if(top&&top.length){{const x=document.createElement('div'); x.className='tim'; x.innerHTML='Top candidates:<br>'+top.map((c,i)=>`${{i+1}}. (${{c.score.toFixed(3)}}) ${{c.text.slice(0,160)}}`).join('<br>'); d.appendChild(x);}} msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight; }}
-async function jget(path){{const r=await fetch(path); const d=await r.json(); if(!r.ok||d.ok===false) throw new Error(d.error||`HTTP ${{r.status}}`); return d;}}
-async function jpost(path,p){{const r=await fetch(path,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(p||{{}})}}); const d=await r.json(); if(!r.ok||d.ok===false) throw new Error(d.error||`HTTP ${{r.status}}`); return d;}}
-async function refresh(){{try{{const d=await jget('/api/status'); el('statusBox').textContent=JSON.stringify(d.status,null,2); el('metaLine').textContent=d.status.loaded?`${{d.status.model_size}} | ${{d.status.feature_mode}} | labels=${{d.status.available_labels}}`:'No model loaded'; if(!el('weights').value&&d.status.weights) el('weights').value=d.status.weights; if(!el('meta').value&&d.status.meta) el('meta').value=d.status.meta; }}catch(e){{el('statusBox').textContent='Status error: '+e.message;}}}}
-async function loadModel(){{el('statusBox').textContent='Loading model...'; try{{const d=await jpost('/api/load',{{weights:el('weights').value.trim(),meta:el('meta').value.trim()}}); el('statusBox').textContent='Loaded.\n'+JSON.stringify(d,null,2); refresh();}}catch(e){{el('statusBox').textContent='Load error: '+e.message;}}}}
-async function send(){{const text=el('prompt').value.trim(); if(!text) return; add('user',text); el('prompt').value=''; try{{const d=await jpost('/api/chat',{{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value)}}); add('bot',d.response,d.timing_ms,d.top_candidates);}}catch(e){{add('bot','Error: '+e.message);}}}}
-async function clearSess(){{try{{await jpost('/api/clear',{{session_id:sid}}); msgs.innerHTML=''; add('bot','Session cleared.');}}catch(e){{add('bot','Clear error: '+e.message);}}}}
-el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; el('prompt').addEventListener('keydown',e=>{{if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();send();}}}}); refresh();
+const el=(id)=>document.getElementById(id), msgs=el('msgs'), promptEl=el('prompt');
+let sid=localStorage.getItem('champion-web-sid'); 
+if(!sid){ sid=String(Date.now())+'-'+Math.random().toString(16).slice(2,10); localStorage.setItem('champion-web-sid',sid); } 
+el('session').textContent='SESSION '+sid.slice(0,8).toUpperCase();
+
+promptEl.addEventListener('input', () => {
+    promptEl.style.height = 'auto';
+    promptEl.style.height = (promptEl.scrollHeight) + 'px';
+});
+
+function add(kind,text,timing,top){
+    const d=document.createElement('div'); 
+    d.className='msg '+kind; 
+    let html = `<div class='who'>${kind==='user'?'Human':'Supermix'}</div><div style="white-space:pre-wrap;">${text}</div>`;
+    
+    if(timing){
+        html += `<div class='tim'>Engine Latency: ${timing.total}ms | Infer: ${timing.infer}ms</div>`;
+    }
+    if(top&&top.length){
+        html += `<div class='tim' style="border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; margin-top:8px;">
+            <b>Neural Probabilities:</b><br>${top.map((c,i)=>`${i+1}. ${c.text.slice(0,100)}... (${(c.score*100).toFixed(1)}%)`).join('<br>')}
+        </div>`;
+    }
+    d.innerHTML = html;
+    msgs.appendChild(d); 
+    msgs.scrollTop=msgs.scrollHeight; 
+}
+
+async function jget(path){
+    const r=await fetch(path); 
+    const d=await r.json(); 
+    if(!r.ok||d.ok===false) throw new Error(d.error||`HTTP ${r.status}`); 
+    return d;
+}
+async function jpost(path,p){
+    const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p||{})}); 
+    const d=await r.json(); 
+    if(!r.ok||d.ok===false) throw new Error(d.error||`HTTP ${r.status}`); 
+    return d;
+}
+async function refresh(){
+    try{
+        const d=await jget('/api/status'); 
+        el('statusBox').textContent = 'SYSTEM STATUS:\\n' + JSON.stringify(d.status,null,2); 
+        el('metaLine').textContent = d.status.loaded ? `${d.status.model_size.toUpperCase()} CORE | ${d.status.device.toUpperCase()}` : 'ENGINE OFFLINE'; 
+        if(!el('weights').value&&d.status.weights) el('weights').value=d.status.weights; 
+        if(!el('meta').value&&d.status.meta) el('meta').value=d.status.meta; 
+    }catch(e){ el('statusBox').textContent='TELEMETRY ERROR: '+e.message; }
+}
+async function loadModel(){
+    el('statusBox').textContent='SYNCING NEURAL WEIGHTS...'; 
+    try{
+        const d=await jpost('/api/load',{weights:el('weights').value.trim(),meta:el('meta').value.trim()}); 
+        el('statusBox').textContent='SYNC COMPLETE.\\n'+JSON.stringify(d,null,2); 
+        refresh();
+    }catch(e){ el('statusBox').textContent='INITIALIZATION FAILED: '+e.message; }
+}
+async function send(){
+    const text=promptEl.value.trim(); if(!text) return; 
+    add('user',text); 
+    promptEl.value=''; 
+    promptEl.style.height = 'auto';
+    try{
+        const d=await jpost('/api/chat',{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value)}); 
+        add('bot',d.response,d.timing_ms,d.top_candidates);
+    }catch(e){ add('bot','CORE ERROR: '+e.message); }
+}
+async function clearSess(){
+    try{
+        await jpost('/api/clear',{session_id:sid}); 
+        msgs.innerHTML=''; 
+        add('bot','Neural cache purged. Ready for fresh session.');
+    }catch(e){ add('bot','PURGE ERROR: '+e.message); }
+}
+el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; 
+promptEl.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault();send(); } }); 
+refresh();
 </script></body></html>"""
 
 

@@ -1,0 +1,7 @@
+{
+  "stage": "preference",
+  "sft_steps": 470,
+  "preference_steps": 100,
+  "preference_loss_mean": 0.3858555694716051,
+  "checkpoint_adapter_dir": "artifacts\\qwen_supermix_enhanced_v25_selective_pref\\checkpoints\\pref_step_00100\\adapter"
+}
