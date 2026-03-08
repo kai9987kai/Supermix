@@ -17,6 +17,7 @@ from chat_pipeline import (
     infer_style_mode,
     pick_response,
     rank_response_candidates,
+    resolve_feature_mode,
     text_to_model_input,
 )
 from llm_database import LLMDatabase
@@ -29,7 +30,14 @@ from model_variants import (
     detect_xxxlarge_fourth_expansion_dim,
     detect_ultralarge_fifth_expansion_dim,
     detect_megalarge_sixth_expansion_dim,
+    EXPANSION_DIM_MODEL_SIZES,
+    EXTRA_EXPANSION_DIM_MODEL_SIZES,
+    FIFTH_EXPANSION_DIM_MODEL_SIZES,
+    FOURTH_EXPANSION_DIM_MODEL_SIZES,
     load_weights_for_model,
+    SIXTH_EXPANSION_DIM_MODEL_SIZES,
+    SUPPORTED_MODEL_SIZES,
+    THIRD_EXPANSION_DIM_MODEL_SIZES,
 )
 from chat_memory import ChatMemoryDB, render_memory_block
 from run import safe_load_state_dict
@@ -62,6 +70,7 @@ def _int_or_default(value, default: int) -> int:
 
 
 _FOLLOWUP_QUERY_RE = re.compile(r"\b(it|that|this|they|them|same|previous|above|more|continue|deeper|expand)\b", re.I)
+VALID_RUNTIME_MODEL_SIZES = SUPPORTED_MODEL_SIZES
 
 
 def _build_db_query(user: str, history: List[Tuple[str, str]], memory_rows: List[Dict], max_turns: int = 2) -> str:
@@ -120,6 +129,35 @@ def _resolve_expansion_dim(arg_val: Optional[int], meta: Dict, meta_key: str, de
     return val
 
 
+def resolve_runtime_model_size(requested_model_size: str, meta_model_size: str, inferred_from_weights: str) -> Tuple[str, str]:
+    resolved_model_size = str(requested_model_size or "auto").strip().lower() or "auto"
+    warning = ""
+    if resolved_model_size == "auto":
+        meta_model_size = str(meta_model_size or "").strip().lower()
+        if meta_model_size in VALID_RUNTIME_MODEL_SIZES and meta_model_size != inferred_from_weights:
+            warning = (
+                f"{TerminalColors.SYSTEM}Warning: metadata model_size="
+                f"{meta_model_size} but weights look like {inferred_from_weights}; using weights.{TerminalColors.RESET}"
+            )
+        resolved_model_size = inferred_from_weights
+    if resolved_model_size not in VALID_RUNTIME_MODEL_SIZES:
+        raise RuntimeError(f"Invalid model_size={resolved_model_size!r} (from args/meta).")
+    return resolved_model_size, warning
+
+
+def _default_expansion_dim_for_model_size(model_size: str) -> int:
+    if model_size in THIRD_EXPANSION_DIM_MODEL_SIZES:
+        return 1024
+    if model_size == "xlarge":
+        return 768
+    return 512
+
+
+def _default_extra_expansion_dim_for_model_size(model_size: str, expansion_dim: int) -> int:
+    base = 2048 if model_size in THIRD_EXPANSION_DIM_MODEL_SIZES else 1024
+    return max(base, expansion_dim * 2)
+
+
 def _format_ms(seconds: float) -> str:
     return f"{max(0.0, float(seconds)) * 1000.0:.1f} ms"
 
@@ -156,7 +194,7 @@ def main():
     ap.add_argument("--meta", default="chat_model_meta.json")
     ap.add_argument(
         "--model_size",
-        choices=["auto", "base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"],
+        choices=["auto", *VALID_RUNTIME_MODEL_SIZES],
         default="auto",
     )
     ap.add_argument("--expansion_dim", type=int, default=None)
@@ -265,65 +303,62 @@ def main():
     device, device_info = resolve_device(args.device, preference=args.device_preference)
     meta = load_metadata(args.meta)
     
-    feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
-    if feature_mode not in {"legacy", "context_v2", "context_v3", "context_v4", "context_mix_v1", "context_mix_v2_mm"}:
-        feature_mode = "legacy"
+    raw_feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
+    feature_mode = resolve_feature_mode(raw_feature_mode, smarter_auto=True)
+    feature_mode_note = ""
+    if feature_mode != raw_feature_mode:
+        feature_mode_note = f" (auto-upgraded from {raw_feature_mode or 'legacy'})"
         
     sd = safe_load_state_dict(args.weights)
     inferred_from_weights = detect_model_size_from_state_dict(sd)
-
-    resolved_model_size = args.model_size
-    if resolved_model_size == "auto":
-        meta_model_size = str(meta.get("model_size", "")).strip().lower()
-        if meta_model_size in {"base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"} and meta_model_size != inferred_from_weights:
-            print(
-                f"{TerminalColors.SYSTEM}Warning: metadata model_size="
-                f"{meta_model_size} but weights look like {inferred_from_weights}; using weights.{TerminalColors.RESET}"
-            )
-        resolved_model_size = inferred_from_weights
-    if resolved_model_size not in {"base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"}:
-        raise RuntimeError(f"Invalid model_size={resolved_model_size!r} (from args/meta).")
+    resolved_model_size, model_size_warning = resolve_runtime_model_size(
+        args.model_size,
+        str(meta.get("model_size", "")),
+        inferred_from_weights,
+    )
+    if model_size_warning:
+        print(model_size_warning)
 
     # Resolve architectural dimensions via unified helper function
     expansion_dim = _resolve_expansion_dim(
         args.expansion_dim, meta, "expansion_dim",
-        1024 if resolved_model_size in {"xxlarge", "xxxlarge", "ultralarge", "megalarge"} else (768 if resolved_model_size == "xlarge" else 512),
-        inferred_from_weights, {"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"},
+        _default_expansion_dim_for_model_size(resolved_model_size),
+        inferred_from_weights, EXPANSION_DIM_MODEL_SIZES,
         detect_large_head_expansion_dim, sd
     )
 
     extra_expansion_dim = _resolve_expansion_dim(
         args.extra_expansion_dim, meta, "extra_expansion_dim",
-        max(2048 if resolved_model_size in {"xxlarge", "xxxlarge", "ultralarge", "megalarge"} else 1024, expansion_dim * 2),
-        inferred_from_weights, {"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"},
+        _default_extra_expansion_dim_for_model_size(resolved_model_size, expansion_dim),
+        inferred_from_weights, EXTRA_EXPANSION_DIM_MODEL_SIZES,
         detect_xlarge_aux_expansion_dim, sd
     )
 
     third_expansion_dim = _resolve_expansion_dim(
         args.third_expansion_dim, meta, "third_expansion_dim",
         max(3072, extra_expansion_dim + expansion_dim),
-        inferred_from_weights, {"xxlarge", "xxxlarge", "ultralarge", "megalarge"},
+        inferred_from_weights, THIRD_EXPANSION_DIM_MODEL_SIZES,
         detect_xxlarge_third_expansion_dim, sd
     )
 
     fourth_expansion_dim = _resolve_expansion_dim(
         args.fourth_expansion_dim, meta, "fourth_expansion_dim",
         max(4096, third_expansion_dim + expansion_dim),
-        inferred_from_weights, {"xxxlarge", "ultralarge", "megalarge"},
+        inferred_from_weights, FOURTH_EXPANSION_DIM_MODEL_SIZES,
         detect_xxxlarge_fourth_expansion_dim, sd
     )
 
     fifth_expansion_dim = _resolve_expansion_dim(
         args.fifth_expansion_dim, meta, "fifth_expansion_dim",
         max(6144, fourth_expansion_dim + expansion_dim),
-        inferred_from_weights, {"ultralarge", "megalarge"},
+        inferred_from_weights, FIFTH_EXPANSION_DIM_MODEL_SIZES,
         detect_ultralarge_fifth_expansion_dim, sd
     )
 
     sixth_expansion_dim = _resolve_expansion_dim(
         args.sixth_expansion_dim, meta, "sixth_expansion_dim",
         max(8192, fifth_expansion_dim + expansion_dim),
-        inferred_from_weights, {"megalarge"},
+        inferred_from_weights, SIXTH_EXPANSION_DIM_MODEL_SIZES,
         detect_megalarge_sixth_expansion_dim, sd
     )
 
@@ -381,7 +416,7 @@ def main():
     print(f"\n{TerminalColors.SYSTEM}--- Session Info ---")
     print(f"Loaded: {Path(args.weights).name} [{resolved_model_size}] | Available labels: {len(available_labels)}")
     print(f"Device: {device_info.get('resolved', args.device)} | Threads intra={torch.get_num_threads()} interop={torch.get_num_interop_threads()}")
-    print(f"Feature mode: {feature_mode} | Style mode: {args.style_mode} (creativity={max(0.0, min(1.0, float(args.creativity))):.2f})")
+    print(f"Feature mode: {feature_mode}{feature_mode_note} | Style mode: {args.style_mode} (creativity={max(0.0, min(1.0, float(args.creativity))):.2f})")
     
     if llm_db:
         print(f"LLM DB: {args.llm_db} (top_k={args.db_top_k})")

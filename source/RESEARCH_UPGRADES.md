@@ -167,3 +167,24 @@ Applied in `source/qwen_supermix_pipeline.py` and launcher scripts.
 
 - These changes are inspired by the above papers and focused on practical reliability and coding/reasoning gains for this codebase.
 - They are not full re-implementations of those methods.
+
+## March 2026: Dialogue-Adherence + Creativity Upgrades
+
+Recent papers additionally used as design input:
+
+1. LongPO: Improving Multi-turn Alignment in LLMs via Preference Optimization for Long Dialogue  
+   https://arxiv.org/abs/2509.05179
+2. ConsistentChat: Benchmarking and Enhancing Consistency for Multi-turn Conversations in LLMs  
+   https://arxiv.org/abs/2506.11034
+3. CrPO: Creative Writing Improves Reasoning and Coding in Small Language Models  
+   https://arxiv.org/abs/2505.15778
+4. Temporal Consistency for LLM Reasoning Process Error Identification  
+   https://arxiv.org/abs/2501.13210
+
+Repo changes inspired by those papers:
+
+- Preserved recent multi-turn history when JSONL `messages` are converted into SFT pairs, instead of flattening every assistant response into an isolated single-turn prompt.
+- Added conversation-adherence scoring to SFT weighting, teacher distillation filtering, and preference mining so follow-up edits and context-dependent turns get rewarded more consistently.
+- Added a new preference-pair curation strategy, `innovation_mix`, that favors a balance of difficulty, reasoning structure, creativity, and dialogue continuity.
+- Added runtime follow-up-aware reranking plus a light refine pass for requests like “make it shorter,” “go deeper,” and “make it more creative.”
+- Added `context_mix_v3`, a smarter runtime context encoder that reads explicit conversation control tags, topic anchors, and prior-answer focus, and auto-upgrades old `context_v2` metadata paths at inference time.

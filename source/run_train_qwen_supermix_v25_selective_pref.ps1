@@ -50,6 +50,8 @@ python -u source\qwen_supermix_pipeline.py `
   --sft_events_boost 1.08 `
   --sft_reasoning_boost 1.22 `
   --sft_prompt_skill_boost 1.14 `
+  --sft_conversation_boost 1.18 `
+  --sft_creativity_boost 1.12 `
   --sft_min_quality_score 0.90 `
   --sft_quality_filter_exempt_sources "conversation_data.quality_anchor_v2.jsonl,conversation_data.world_events_2026_02_19.jsonl,conversation_data.mega_reasoning_creative_v25_75582.jsonl" `
   --sft_auto_balance_sources `
@@ -84,7 +86,7 @@ python -u source\qwen_supermix_pipeline.py `
   --preference_coding_focus_boost 1.26 `
   --preference_reasoning_focus_boost 1.24 `
   --preference_counterfactual_rejects_per_prompt 3 `
-  --preference_selection_strategy capacity_aware `
+  --preference_selection_strategy innovation_mix `
   --preference_selection_keep_ratio 0.62 `
   --preference_selection_min_keep 1500 `
   --preference_selection_max_keep 2200 `

@@ -86,6 +86,35 @@ Integrates `RecursiveThoughtExpertHead`. The most advanced and efficient variant
 - **Recursive Reasoning**: An iterative loop with cross-expert attention and residual adapters.
 - **Signal-Stable Initialization**: Small-signal normal initialization for experts to ensure differentiability from step 1.
 
+### `reflexive_expert` — Reflexive Thought (v15)
+Integrates `ReflexiveThoughtExpertHead`. The smartest self-correction variant:
+- **Two-Pass Reasoning**: Computes initial predictions, then passes original features *and* initial predictions into a secondary "Critique Pass".
+- **Self-Reflection MoE**: The critique pass uses an independent dynamically routed Mixture-of-Experts ensemble to identify uncertainties and directly correct errors in the initial prediction.
+- **Stable Initialization**: Small normal variance initialization for downstream experts inside both initial and critique modules to ensure unobstructed gradient flow.
+
+### `metacognitive_expert` — MetaCognitive Iterative Reflection (v16)
+Integrates `MetaCognitiveExpertHead`. The most advanced variant, unifying iterative reasoning, self-reflection, and adaptive halting:
+- **Shared Expert**: Always-on 2048-dim global expert for stable baseline signal.
+- **ReasoningCells**: Per-step residual MLPs that iteratively refine feature representations.
+- **Proposal MoE**: 6 routed experts with Sigma Gating generate predictions at each reasoning step.
+- **Critique MoE**: 4 specialized experts inspect `[features ∥ proposal_logits]` and output corrections, enabling explicit self-reflection.
+- **PonderNet Halting**: Learned per-step halt probability so the model spends more compute on hard inputs and exits early on easy ones.
+- **Dynamic Bias Load Balancing**: Non-gradient buffer biases keep expert utilization even during training.
+
+### `tree_of_thought_expert` — Latent Beam Search (v17)
+Integrates `TreeOfThoughtExpertHead`. Represents a fundamental paradigm shift by embedding test-time compute scaling directly into the latent forward pass:
+- **Action MoE Proposer**: At each reasoning step, 6 independent experts propose diverse modifications to the current hypothetical states.
+- **Value Network Scorer**: A dedicated network evaluates the "goodness" or confidence of every newly generated candidate state.
+- **Test-Time Beam Search**: A dynamically branching beam of hypothetical trajectories (`beam_size=4`) is maintained. At each step, branches are scored and heavily pruned, keeping only the most promising states.
+- **Differentiable Aggregation**: The final surviving states are fused based on their Value scores, permitting unobstructed, end-to-end gradient flow back through the search process itself.
+
+### `consensus_expert` — Architectural Diversity + Learned Arbitration (v18)
+Integrates `ConsensusExpertHead`. The first head to leverage **architectural diversity** — three fundamentally different computational paradigms independently reason about the input, then a learned arbiter resolves disagreements:
+- **MLP Pathway**: 6 feed-forward experts with Sigma Gating for fast pattern matching.
+- **Attention Pathway**: Self-attention over 8 learned expert embeddings for relational reasoning.
+- **Convolutional Pathway**: 1D convolution over the feature vector for local pattern detection.
+- **Consensus Network**: A 3-layer MLP arbiter evaluates inter-pathway agreement/disagreement and produces confidence-weighted fusion.
+
 ---
 
 ## Training & Fine-Tuning

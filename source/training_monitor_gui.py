@@ -63,6 +63,15 @@ RUN_CORE_RE = re.compile(r"^train_(.+?)_(\d{8}_\d{6})$")
 
 PROCESS_CMD_CACHE: Dict[int, Tuple[float, Optional[str]]] = {}
 PS1_TARGET_CACHE: Dict[str, Tuple[float, Optional[int], Optional[int], Optional[int], bool, bool]] = {}
+PROCESS_LIST_CACHE: Tuple[float, List["ProcessEntry"]] = (0.0, [])
+
+
+@dataclass(frozen=True)
+class ProcessEntry:
+    pid: int
+    parent_pid: Optional[int]
+    name: str
+    command_line: str
 
 
 @dataclass
@@ -72,6 +81,7 @@ class RunSnapshot:
     err_log: Optional[Path]
     pid_file: Optional[Path]
     pid: Optional[int]
+    pid_source: str
     pid_alive: bool
     status: str
     stage: str
@@ -209,7 +219,7 @@ def _read_tail_lines(path: Path, max_bytes: int = 2_000_000, max_lines: int = 24
             if size > max_bytes:
                 f.seek(size - max_bytes)
             data = f.read()
-        text = data.decode("utf-8", errors="replace")
+        text = _decode_log_bytes(data)
     except Exception:
         return []
 
@@ -219,7 +229,208 @@ def _read_tail_lines(path: Path, max_bytes: int = 2_000_000, max_lines: int = 24
     return lines
 
 
+def _decode_log_bytes(data: bytes) -> str:
+    if not data:
+        return ""
+
+    # Handle PowerShell/file redirection logs that sometimes end up UTF-16 encoded.
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")) or data.count(b"\x00") > max(8, len(data) // 10):
+        for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                return data.decode(encoding, errors="replace").replace("\x00", "")
+            except Exception:
+                continue
+
+    try:
+        return data.decode("utf-8-sig", errors="replace").replace("\x00", "")
+    except Exception:
+        return data.decode("latin-1", errors="replace").replace("\x00", "")
+
+
+def _list_process_entries() -> List[ProcessEntry]:
+    global PROCESS_LIST_CACHE
+
+    now = time.time()
+    cached_ts, cached_entries = PROCESS_LIST_CACHE
+    if cached_entries and (now - cached_ts) <= 5.0:
+        return cached_entries
+
+    entries: List[ProcessEntry] = []
+    try:
+        if os.name == "nt":
+            query = (
+                "Get-CimInstance Win32_Process | "
+                "Select-Object ProcessId,ParentProcessId,Name,CommandLine | "
+                "ConvertTo-Json -Compress"
+            )
+            cp = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", query],
+                capture_output=True,
+                text=True,
+                timeout=6,
+            )
+            raw = cp.stdout.strip()
+            if raw:
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    payload = [payload]
+                if isinstance(payload, list):
+                    for item in payload:
+                        if not isinstance(item, dict):
+                            continue
+                        try:
+                            pid = int(item.get("ProcessId"))
+                        except Exception:
+                            continue
+                        parent_pid_raw = item.get("ParentProcessId")
+                        try:
+                            parent_pid = int(parent_pid_raw) if parent_pid_raw is not None else None
+                        except Exception:
+                            parent_pid = None
+                        entries.append(
+                            ProcessEntry(
+                                pid=pid,
+                                parent_pid=parent_pid,
+                                name=str(item.get("Name") or ""),
+                                command_line=str(item.get("CommandLine") or ""),
+                            )
+                        )
+        else:
+            cp = subprocess.run(
+                ["ps", "-eo", "pid=,ppid=,comm=,args=", "-ww"],
+                capture_output=True,
+                text=True,
+                timeout=6,
+            )
+            for raw_line in cp.stdout.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 3)
+                if len(parts) < 4:
+                    continue
+                try:
+                    pid = int(parts[0])
+                    parent_pid = int(parts[1])
+                except Exception:
+                    continue
+                entries.append(
+                    ProcessEntry(
+                        pid=pid,
+                        parent_pid=parent_pid,
+                        name=str(parts[2]),
+                        command_line=str(parts[3]),
+                    )
+                )
+    except Exception:
+        entries = []
+
+    PROCESS_LIST_CACHE = (now, entries)
+    return entries
+
+
+def _signature_tokens(*parts: str) -> List[str]:
+    tokens = set()
+    for part in parts:
+        for token in re.split(r"[^a-z0-9]+", str(part or "").lower()):
+            if len(token) < 3:
+                continue
+            if token in {"train", "run", "source", "artifacts", "python", "powershell", "cmd", "exe"}:
+                continue
+            tokens.add(token)
+    return sorted(tokens)
+
+
+def _score_process_match(
+    proc: ProcessEntry,
+    run_name: str,
+    out_log: Path,
+    launch_hint: str,
+) -> int:
+    cmd_low = str(proc.command_line or "").lower()
+    name_low = str(proc.name or "").lower()
+    run_low = str(run_name or "").lower()
+    out_name = out_log.name.lower()
+    out_stem = out_log.stem.lower()
+    hint_low = str(launch_hint or "").lower()
+    hint_stem = Path(hint_low).stem.lower() if hint_low else ""
+    core = _run_core(run_name)
+
+    if not cmd_low:
+        return -1
+    if "training_monitor_gui.py" in cmd_low:
+        return -1
+    if "import training_monitor_gui" in cmd_low:
+        return -1
+
+    shell_wrapper = name_low.startswith("powershell") or name_low.startswith("cmd")
+
+    score = 0
+    if out_name and out_name in cmd_low:
+        score += 80 if shell_wrapper else 220
+    if out_stem and out_stem in cmd_low:
+        score += 70 if shell_wrapper else 180
+    if run_low and run_low in cmd_low:
+        score += 60 if shell_wrapper else 150
+    if core and len(core) >= 8 and core in cmd_low:
+        score += 55 if shell_wrapper else 130
+    if hint_stem and len(hint_stem) >= 8 and hint_stem in cmd_low:
+        score += 45 if shell_wrapper else 110
+
+    token_hits = 0
+    for token in _signature_tokens(run_low, out_stem, core, hint_stem):
+        if token in cmd_low:
+            token_hits += 1
+    score += token_hits * 12
+    if token_hits >= 2:
+        score += 25
+    if token_hits >= 3:
+        score += 40
+
+    if name_low.startswith("python"):
+        score += 35
+    elif name_low.startswith("powershell"):
+        score += 12
+    elif name_low.startswith("cmd"):
+        score += 4
+
+    if "qwen_supermix_pipeline.py" in cmd_low or "finetune_chat.py" in cmd_low:
+        score += 260
+
+    if shell_wrapper:
+        score = int(score * 0.7)
+
+    return score
+
+
+def _find_live_process_for_run(
+    run_name: str,
+    out_log: Path,
+    launch_hint: str,
+    processes: Optional[Sequence[ProcessEntry]] = None,
+) -> Tuple[Optional[int], str, str]:
+    proc_entries = list(processes) if processes is not None else _list_process_entries()
+    best: Optional[ProcessEntry] = None
+    best_score = -1
+
+    for proc in proc_entries:
+        score = _score_process_match(proc, run_name=run_name, out_log=out_log, launch_hint=launch_hint)
+        if score > best_score:
+            best = proc
+            best_score = score
+
+    if best is None or best_score < 60:
+        return None, "", ""
+    return int(best.pid), str(best.command_line or ""), "process_scan"
+
+
 def _query_process_cmdline(pid: int) -> Optional[str]:
+    for entry in _list_process_entries():
+        if int(entry.pid) == int(pid):
+            result = str(entry.command_line or "").strip()
+            PROCESS_CMD_CACHE[pid] = (time.time(), result or None)
+            return result or None
+
     now = time.time()
     cached = PROCESS_CMD_CACHE.get(pid)
     if cached is not None and (now - cached[0]) <= 20.0:
@@ -754,6 +965,7 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
     now = time.time()
     out_logs = sorted(root_dir.glob("train_*.out.log"))
     snapshots: List[RunSnapshot] = []
+    process_entries = _list_process_entries()
 
     for out_log in out_logs:
         stem = out_log.name.replace(".out.log", "")
@@ -765,14 +977,32 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
             pid_file = None
         pid = _read_pid(pid_file) if pid_file is not None else None
         pid_alive = _is_pid_alive(pid) if pid is not None else False
+        pid_source = "pid_file" if pid_alive and pid is not None else ""
 
         command_line = _query_process_cmdline(pid) if (pid_alive and pid is not None) else None
         command_line = command_line or ""
+        process_launch_hint = ""
+        if not command_line:
+            guessed_ps1 = _guess_ps1_from_run_name(stem, root_dir)
+            process_launch_hint = str(guessed_ps1) if guessed_ps1 is not None else ""
+            inferred_pid, inferred_cmd, inferred_source = _find_live_process_for_run(
+                run_name=stem,
+                out_log=out_log,
+                launch_hint=process_launch_hint,
+                processes=process_entries,
+            )
+            if inferred_pid is not None:
+                pid = inferred_pid
+                pid_alive = True
+                pid_source = inferred_source or "process_scan"
+                command_line = inferred_cmd or ""
         sft_target_steps, pref_target_steps, save_every_steps, launch_hint, has_distill_stage, has_pref_mining_stage = _infer_targets(
             stem,
             root_dir,
             command_line,
         )
+        if not launch_hint and process_launch_hint:
+            launch_hint = process_launch_hint
 
         parsed = _parse_log(out_log)
 
@@ -823,6 +1053,7 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
             status=status,
             stage=parsed.stage,
             pid_file=pid_file,
+            pid_source=pid_source,
             pid_alive=pid_alive,
             err_signal=err_signal,
             err_summary=err_summary,
@@ -836,6 +1067,7 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
                 err_log=err_log,
                 pid_file=pid_file,
                 pid=pid,
+                pid_source=pid_source,
                 pid_alive=pid_alive,
                 status=status,
                 stage=parsed.stage,
@@ -933,6 +1165,7 @@ def _build_health_summary(
     status: str,
     stage: str,
     pid_file: Optional[Path],
+    pid_source: str,
     pid_alive: bool,
     err_signal: str,
     err_summary: str,
@@ -951,6 +1184,8 @@ def _build_health_summary(
 
     if pid_file is not None and not pid_alive and status_low in {"stopped", "unknown"}:
         notes.append("pid file is stale")
+    elif pid_source == "process_scan" and pid_alive:
+        notes.append("live pid inferred from process scan")
 
     if err_signal == "error":
         notes.append(err_summary if err_summary and err_summary != "-" else "error detected in err log")
@@ -1504,6 +1739,7 @@ class TrainingMonitorApp:
             "status": snap.status,
             "stage": snap.stage,
             "pid": snap.pid,
+            "pid_source": snap.pid_source,
             "sft_step": snap.sft_step,
             "sft_target_steps": snap.sft_target_steps,
             "pref_step": snap.pref_step,
@@ -2075,7 +2311,7 @@ class TrainingMonitorApp:
             f"status: {snap.status}",
             f"health: {snap.health_summary}",
             f"stage: {snap.stage}",
-            f"pid: {snap.pid if snap.pid is not None else '-'} (alive={snap.pid_alive})",
+            f"pid: {snap.pid if snap.pid is not None else '-'} (alive={snap.pid_alive}, source={snap.pid_source or '-'})",
             f"sft_step: {snap.sft_step} / {snap.sft_target_steps if snap.sft_target_steps is not None else '-'}",
             f"pref_step: {snap.pref_step} / {snap.pref_target_steps if snap.pref_target_steps is not None else '-'}",
             f"pref_pairs: {snap.pref_pairs}",

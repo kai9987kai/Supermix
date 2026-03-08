@@ -23,6 +23,7 @@ from chat_pipeline import (
     build_context,
     choose_bucket_from_logits,
     pick_response,
+    resolve_feature_mode,
     text_to_model_input,
 )
 from model_variants import (
@@ -61,6 +62,18 @@ class PreferencePair:
     rejected_similarity: float = 0.0
     prompt_complexity: float = 0.0
     selection_score: float = 0.0
+    conversation_score: float = 0.0
+    reasoning_score: float = 0.0
+    creativity_score: float = 0.0
+    is_followup: bool = False
+
+
+@dataclass
+class PairAlignmentMetrics:
+    conversation: float = 0.0
+    reasoning: float = 0.0
+    creativity: float = 0.0
+    is_followup: bool = False
 
 
 def _coerce_text(value: object) -> str:
@@ -73,6 +86,7 @@ def _coerce_text(value: object) -> str:
 
 def _pairs_from_messages(messages: Sequence[Dict[str, object]]) -> List[ChatPair]:
     out: List[ChatPair] = []
+    history: List[Tuple[str, str]] = []
     pending_user: Optional[str] = None
     for msg in messages:
         role = _coerce_text(msg.get("role", "")).lower()
@@ -83,7 +97,15 @@ def _pairs_from_messages(messages: Sequence[Dict[str, object]]) -> List[ChatPair
             pending_user = text
             continue
         if role == "assistant" and pending_user:
-            out.append(ChatPair(user=pending_user, assistant=text))
+            user_text = pending_user
+            if history:
+                user_text = build_context(
+                    history=history[-3:],
+                    user_text=pending_user,
+                    max_turns=3,
+                )
+            out.append(ChatPair(user=user_text, assistant=text))
+            history.append((pending_user, text))
             pending_user = None
     return out
 
@@ -198,6 +220,80 @@ CODE_BUG_OP_FLIPS = (
 LEGACY_NESTED_ADAPTER_PREFIX = "base_model.model.base_model.model.model."
 NORMAL_ADAPTER_PREFIX = "base_model.model.model."
 NESTED_PREFIX_FRAGMENT = "base_model.model.base_model.model."
+CONTEXT_ROLE_LINE_RE = re.compile(r"^(user|assistant)\s*:\s*(.*)$", flags=re.IGNORECASE)
+FOLLOWUP_HINT_RE = re.compile(
+    r"\b(it|that|this|they|them|same|again|continue|deeper|expand|shorter|longer|rewrite|rephrase|refine|improve|make it|more like)\b",
+    flags=re.IGNORECASE,
+)
+SHORTEN_HINT_RE = re.compile(
+    r"\b(shorter|short version|brief|concise|trim|compress|tldr|one sentence|summarize)\b",
+    flags=re.IGNORECASE,
+)
+EXPAND_HINT_RE = re.compile(
+    r"\b(expand|elaborate|deeper|more detail|step by step|walk through|longer|explain more|unpack)\b",
+    flags=re.IGNORECASE,
+)
+REWRITE_HINT_RE = re.compile(
+    r"\b(rewrite|rephrase|say it better|clearer|fix the wording|make it clearer|polish)\b",
+    flags=re.IGNORECASE,
+)
+CREATIVE_REQUEST_RE = re.compile(
+    r"\b(creative|story|brainstorm|metaphor|analogy|invent|novel|poem|vivid|imaginative)\b",
+    flags=re.IGNORECASE,
+)
+REASONING_REQUEST_RE = re.compile(
+    r"\b(explain|why|how|analy[sz]e|reason|derive|prove|tradeoff|step by step|debug)\b",
+    flags=re.IGNORECASE,
+)
+SIGNIFICANT_TOKEN_RE = re.compile(r"[a-z0-9_+\-']+")
+NUMBER_RE = re.compile(r"\b-?\d+(?:\.\d+)?\b")
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "but",
+    "by",
+    "for",
+    "from",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "our",
+    "that",
+    "the",
+    "their",
+    "them",
+    "there",
+    "these",
+    "they",
+    "this",
+    "to",
+    "us",
+    "we",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+    "you",
+    "your",
+}
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -251,8 +347,20 @@ def _looks_like_placeholder_assistant(text: str) -> bool:
     return False
 
 
+def _latest_user_text(text: str) -> str:
+    raw = _normalize_whitespace(_coerce_text(text))
+    if not raw:
+        return ""
+    latest = ""
+    for line in raw.splitlines():
+        match = CONTEXT_ROLE_LINE_RE.match(line.strip())
+        if match and str(match.group(1)).strip().lower() == "user":
+            latest = str(match.group(2)).strip()
+    return latest or raw
+
+
 def _is_short_answer_prompt(user_text: str) -> bool:
-    low = _coerce_text(user_text).lower()
+    low = _latest_user_text(user_text).lower()
     return (
         "just the answer" in low
         or "one word" in low
@@ -262,7 +370,7 @@ def _is_short_answer_prompt(user_text: str) -> bool:
 
 
 def _is_synthetic_template_prompt(user_text: str) -> bool:
-    text = _normalize_whitespace(_coerce_text(user_text))
+    text = _normalize_whitespace(_latest_user_text(user_text))
     if not text:
         return False
     low = text.lower()
@@ -282,7 +390,7 @@ def _word_token_count(text: str) -> int:
 
 
 def _prompt_signature(text: str) -> str:
-    low = _normalize_whitespace(_coerce_text(text).lower())
+    low = _normalize_whitespace(_latest_user_text(text).lower())
     low = re.sub(
         r"\bin a [a-z0-9 \-]{2,48}\b(?= (?:worksheet|scenario|simulation|drill|exercise|study set|training|lab))",
         "in a <domain>",
@@ -350,7 +458,7 @@ def _is_quality_pair(user_text: str, assistant_text: str, min_chars: int) -> boo
 
 
 def _prompt_complexity_score(user_text: str) -> float:
-    text = _coerce_text(user_text)
+    text = _latest_user_text(user_text)
     if not text:
         return 0.0
     low = text.lower()
@@ -375,7 +483,7 @@ def _prompt_complexity_score(user_text: str) -> float:
 
 
 def _looks_like_coding_prompt(text: str) -> bool:
-    low = _coerce_text(text).lower()
+    low = _latest_user_text(text).lower()
     if not low:
         return False
     if "```" in low:
@@ -384,7 +492,7 @@ def _looks_like_coding_prompt(text: str) -> bool:
 
 
 def _looks_like_reasoning_prompt(text: str) -> bool:
-    low = _coerce_text(text).lower()
+    low = _latest_user_text(text).lower()
     if not low:
         return False
     hits = sum(1 for k in REASONING_PROMPT_KEYWORDS if k in low)
@@ -637,7 +745,7 @@ class SupermixTeacher:
         self.device = torch.device(device)
         with Path(meta_path).open("r", encoding="utf-8") as f:
             meta = json.load(f)
-        self.feature_mode = str(meta.get("feature_mode", "legacy"))
+        self.feature_mode = resolve_feature_mode(str(meta.get("feature_mode", "legacy")), smarter_auto=True)
         self.buckets: Dict[int, List[Dict[str, object]]] = {}
         for k, v in meta.get("buckets", {}).items():
             try:
@@ -805,7 +913,8 @@ def apply_supermix_distillation(
             continue
         if not _is_quality_pair(pair.user, teacher_resp, min_chars=4):
             continue
-        if _response_quality_score(teacher_resp) < float(min_quality_score):
+        teacher_score, _alignment = _paired_response_score(pair.user, teacher_resp)
+        if teacher_score < float(min_quality_score):
             continue
         key = (pair.user, teacher_resp)
         if key in seen_keys:
@@ -1278,6 +1387,8 @@ def _pair_sft_weight(
     events_boost: float,
     reasoning_boost: float,
     prompt_skill_boost: float,
+    conversation_boost: float,
+    creativity_boost: float,
 ) -> float:
     if str(mode).strip().lower() == "none":
         return 1.0
@@ -1285,10 +1396,10 @@ def _pair_sft_weight(
     source = str(pair.source or "").lower()
     user = _coerce_text(pair.user)
     assistant = _fast_cleanup_response_text(str(pair.assistant or ""))
-    quality = _response_quality_score(assistant)
+    paired_score, alignment = _paired_response_score(user, assistant)
 
     # Map quality to a mild multiplier around 1.0.
-    quality_factor = 1.0 + 0.22 * max(-1.0, min(1.5, (quality - 1.2) / 1.2))
+    quality_factor = 1.0 + 0.22 * max(-1.0, min(1.5, (paired_score - 1.2) / 1.2))
     w = float(quality_factor)
 
     if _is_synthetic_template_prompt(user):
@@ -1309,6 +1420,14 @@ def _pair_sft_weight(
         w *= float(max(1.0, prompt_skill_boost))
     if _looks_like_reasoning_prompt(user):
         w *= float(max(1.0, prompt_skill_boost))
+    if float(alignment.conversation) > 0.10:
+        conv_gain = (max(1.0, float(conversation_boost)) - 1.0) * min(1.0, float(alignment.conversation) / 1.15)
+        w *= 1.0 + conv_gain
+    if float(alignment.creativity) > 0.05:
+        creative_gain = (max(1.0, float(creativity_boost)) - 1.0) * min(1.0, float(alignment.creativity))
+        w *= 1.0 + creative_gain
+    if bool(alignment.is_followup):
+        w *= 1.0 + 0.05 * min(1.0, max(0.0, float(alignment.conversation)))
 
     return float(max(float(min_weight), min(float(max_weight), w)))
 
@@ -1338,8 +1457,8 @@ def filter_sft_training_pairs(
             continue
         if (not keep_short_answer_prompts) and _is_short_answer_prompt(pair.user):
             dropped_short += 1
-        quality = _response_quality_score(pair.assistant)
-        if quality < threshold:
+        paired_score, _alignment = _paired_response_score(pair.user, pair.assistant)
+        if paired_score < threshold:
             dropped_quality += 1
             continue
         kept.append(pair)
@@ -1380,6 +1499,89 @@ def _compute_source_balance_factors(
         raw = (target / max(1.0, float(count))) ** strength
         factors[src] = float(max(1.0 / max_s, min(max_s, raw)))
     return factors
+
+
+def _conversation_prompt_state(user_text: str) -> Tuple[List[Tuple[str, str]], str, str]:
+    raw = _normalize_whitespace(_coerce_text(user_text))
+    if not raw:
+        return [], "", ""
+
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    history: List[Tuple[str, str]] = []
+    latest_user = raw
+    last_assistant = ""
+    pending_user: Optional[str] = None
+    parsed_role_lines = False
+    for line in lines:
+        match = CONTEXT_ROLE_LINE_RE.match(line)
+        if not match:
+            continue
+        parsed_role_lines = True
+        role = str(match.group(1)).strip().lower()
+        content = str(match.group(2)).strip()
+        if not content:
+            continue
+        if role == "user":
+            latest_user = content
+            pending_user = content
+            continue
+        if role == "assistant":
+            last_assistant = content
+            if pending_user:
+                history.append((pending_user, content))
+                pending_user = None
+    if not parsed_role_lines:
+        return [], raw, ""
+    return history, latest_user, last_assistant
+
+
+def _significant_token_set(text: str, max_tokens: int = 96) -> set:
+    out = set()
+    for tok in SIGNIFICANT_TOKEN_RE.findall(_coerce_text(text).lower())[:max_tokens]:
+        if tok in STOPWORDS:
+            continue
+        if any(ch.isdigit() for ch in tok):
+            out.add(tok)
+            continue
+        if len(tok) >= 3:
+            out.add(tok)
+    return out
+
+
+def _response_reasoning_signal(text: str) -> float:
+    low = _fast_cleanup_response_text(text).lower()
+    if not low:
+        return 0.0
+    score = 0.0
+    if re.search(r"(^|\s)(1\)|1\.|first\b|step\s*1)", low):
+        score += 0.35
+    if re.search(r"\b(then|next|finally|therefore|thus|because|since|so)\b", low):
+        score += 0.30
+    if re.search(r"\b(let me|let's|consider|assume|suppose|verify)\b", low):
+        score += 0.20
+    if re.search(r"\b(tradeoff|edge case|counterexample|check)\b", low):
+        score += 0.15
+    return float(min(1.0, score))
+
+
+def _response_creativity_signal(text: str) -> float:
+    low = _fast_cleanup_response_text(text).lower()
+    if not low:
+        return 0.0
+    score = 0.0
+    if re.search(r"\b(imagine|picture|creative|story|invent|novel|poem|vivid)\b", low):
+        score += 0.35
+    if re.search(r"\b(analogy|metaphor|like\b|as if)\b", low):
+        score += 0.30
+    if re.search(r"\b(brainstorm|possibility|perspective|angle)\b", low):
+        score += 0.20
+    if "?" in low:
+        score += 0.10
+    token_words = re.findall(r"[a-z0-9']+", low)
+    if token_words:
+        uniq_ratio = len(set(token_words)) / float(len(token_words))
+        score += max(0.0, min(0.15, uniq_ratio - 0.55))
+    return float(min(1.0, score))
 
 
 def _response_quality_score(text: str) -> float:
@@ -1424,6 +1626,88 @@ def _response_quality_score(text: str) -> float:
     return float(score)
 
 
+def _response_alignment_metrics(user_text: str, assistant_text: str) -> PairAlignmentMetrics:
+    history, latest_user, last_assistant = _conversation_prompt_state(user_text)
+    response = _fast_cleanup_response_text(assistant_text)
+    if not response:
+        return PairAlignmentMetrics()
+
+    latest_tokens = _significant_token_set(latest_user)
+    response_tokens = _significant_token_set(response)
+    coverage = 0.0
+    if latest_tokens:
+        coverage = float(len(latest_tokens & response_tokens)) / float(max(1, len(latest_tokens)))
+
+    prompt_numbers = set(NUMBER_RE.findall(latest_user))
+    response_numbers = set(NUMBER_RE.findall(response))
+    number_coverage = 0.0
+    if prompt_numbers:
+        number_coverage = float(len(prompt_numbers & response_numbers)) / float(max(1, len(prompt_numbers)))
+
+    latest_low = latest_user.lower()
+    followup = bool(history) and bool(FOLLOWUP_HINT_RE.search(latest_low))
+    shorten = bool(SHORTEN_HINT_RE.search(latest_low))
+    expand = bool(EXPAND_HINT_RE.search(latest_low))
+    rewrite = bool(REWRITE_HINT_RE.search(latest_low))
+    wants_creative = bool(CREATIVE_REQUEST_RE.search(latest_low))
+    wants_reasoning = bool(REASONING_REQUEST_RE.search(latest_low) or _looks_like_reasoning_prompt(latest_user))
+
+    conversation = 0.55 * coverage + 0.18 * number_coverage
+    reasoning = _response_reasoning_signal(response) if wants_reasoning else 0.0
+    creativity = _response_creativity_signal(response) if wants_creative else 0.0
+
+    if followup and last_assistant:
+        prev_tokens = _significant_token_set(last_assistant)
+        prev_overlap = 0.0
+        if prev_tokens:
+            prev_overlap = float(len(prev_tokens & response_tokens)) / float(max(1, len(prev_tokens)))
+        prev_word_count = max(1, _word_token_count(last_assistant))
+        resp_word_count = max(1, _word_token_count(response))
+        len_ratio = float(resp_word_count) / float(prev_word_count)
+        conversation += 0.18 * min(1.0, prev_overlap / 0.45)
+        if shorten:
+            if len_ratio < 0.90:
+                conversation += 0.28 * min(1.0, (0.90 - len_ratio) / 0.55)
+            else:
+                conversation -= 0.10 * min(1.0, (len_ratio - 0.90) / 0.80)
+        elif expand:
+            if len_ratio > 1.05:
+                conversation += 0.24 * min(1.0, (len_ratio - 1.05) / 1.10)
+            conversation += 0.18 * reasoning
+        elif rewrite:
+            sim = float(SequenceMatcher(None, last_assistant.lower(), response.lower()).ratio())
+            if 0.18 <= sim <= 0.94:
+                conversation += 0.18
+            elif sim > 0.98:
+                conversation -= 0.10
+        elif wants_creative:
+            conversation += 0.16 * creativity
+
+    if wants_reasoning:
+        conversation += 0.12 * reasoning
+    if wants_creative:
+        conversation += 0.10 * creativity
+
+    conversation = float(max(-0.30, min(1.60, conversation)))
+    return PairAlignmentMetrics(
+        conversation=conversation,
+        reasoning=float(max(0.0, min(1.0, reasoning))),
+        creativity=float(max(0.0, min(1.0, creativity))),
+        is_followup=bool(followup),
+    )
+
+
+def _paired_response_score(user_text: str, assistant_text: str) -> Tuple[float, PairAlignmentMetrics]:
+    alignment = _response_alignment_metrics(user_text, assistant_text)
+    score = _response_quality_score(assistant_text)
+    score += 0.32 * float(alignment.conversation)
+    score += 0.18 * float(alignment.reasoning)
+    score += 0.16 * float(alignment.creativity)
+    if alignment.is_followup:
+        score += 0.06 * max(0.0, float(alignment.conversation))
+    return float(score), alignment
+
+
 def _preference_pair_weight(
     chosen_quality: float,
     rejected_quality: float,
@@ -1466,6 +1750,10 @@ def _preference_selection_score(
     rejected_similarity = max(0.0, min(1.0, float(pair.rejected_similarity)))
     prompt_complexity = max(0.0, float(pair.prompt_complexity))
     base_weight = max(0.25, float(pair.weight))
+    conversation_score = max(0.0, float(pair.conversation_score))
+    reasoning_score = max(0.0, float(pair.reasoning_score))
+    creativity_score = max(0.0, float(pair.creativity_score))
+    followup_bonus = 0.10 if bool(pair.is_followup) else 0.0
 
     if mode == "margin_topk":
         return float(base_weight * (quality_gap + 0.35 * rejected_similarity + 0.08 * prompt_complexity))
@@ -1476,6 +1764,23 @@ def _preference_selection_score(
         z = (rejected_similarity - target) / bw
         hardness_window = math.exp(-0.5 * z * z)
         return float(base_weight * hardness_window * (quality_gap + 0.12 * prompt_complexity + 0.05))
+
+    if mode == "innovation_mix":
+        target = max(0.0, min(1.0, float(hardness_target)))
+        bw = max(0.05, float(hardness_bandwidth))
+        z = (rejected_similarity - target) / bw
+        hardness_window = math.exp(-0.5 * z * z)
+        novelty_bonus = (
+            0.12 * conversation_score
+            + 0.10 * reasoning_score
+            + 0.10 * creativity_score
+            + followup_bonus
+        )
+        return float(
+            base_weight
+            * (0.35 + 0.65 * hardness_window)
+            * (quality_gap + 0.12 * prompt_complexity + novelty_bonus + 0.05)
+        )
 
     return float(max(0.25, pair.weight))
 
@@ -1493,7 +1798,7 @@ def _select_preference_pairs(
         return []
 
     mode = str(strategy or "none").strip().lower()
-    if mode not in {"none", "margin_topk", "capacity_aware"}:
+    if mode not in {"none", "margin_topk", "capacity_aware", "innovation_mix"}:
         mode = "none"
 
     keep_ratio = max(0.0, min(1.0, float(keep_ratio)))
@@ -1539,16 +1844,26 @@ def _select_preference_pairs(
     sel_gap = _mean([max(0.0, float(p.quality_gap)) for p in selected])
     sel_sim = _mean([max(0.0, min(1.0, float(p.rejected_similarity))) for p in selected])
     sel_score = _mean([float(p.selection_score) for p in selected])
+    full_conv = _mean([max(0.0, float(p.conversation_score)) for p in pairs])
+    sel_conv = _mean([max(0.0, float(p.conversation_score)) for p in selected])
+    full_reason = _mean([max(0.0, float(p.reasoning_score)) for p in pairs])
+    sel_reason = _mean([max(0.0, float(p.reasoning_score)) for p in selected])
+    full_creative = _mean([max(0.0, float(p.creativity_score)) for p in pairs])
+    sel_creative = _mean([max(0.0, float(p.creativity_score)) for p in selected])
     print(
         "[pref] pair selection: "
         f"strategy={mode} keep={len(selected)}/{total} keep_ratio={len(selected)/max(1,total):.3f} "
         f"gap={full_gap:.3f}->{sel_gap:.3f} sim={full_sim:.3f}->{sel_sim:.3f} "
+        f"conv={full_conv:.3f}->{sel_conv:.3f} "
+        f"reason={full_reason:.3f}->{sel_reason:.3f} "
+        f"creative={full_creative:.3f}->{sel_creative:.3f} "
         f"selected_score_mean={sel_score:.4f}"
     )
     return selected
 
 
 def _pick_rejected_candidate(
+    user_text: str,
     chosen_text: str,
     generated: Sequence[str],
     similarity_threshold: float,
@@ -1566,8 +1881,8 @@ def _pick_rejected_candidate(
             continue
         if sim >= float(similarity_threshold):
             continue
-        quality = _response_quality_score(c)
-        candidates.append((c, sim, quality))
+        score, _alignment = _paired_response_score(user_text, c)
+        candidates.append((c, sim, score))
 
     if not candidates:
         return "", 0.0, -1e9
@@ -1678,7 +1993,7 @@ def build_preference_pairs_with_generation(
         return []
 
     rng = random.Random(seed)
-    scored_ids: List[Tuple[float, int, str, float, str, float]] = []
+    scored_ids: List[Tuple[float, int, str, float, str, float, PairAlignmentMetrics]] = []
     for idx, pair in enumerate(train_pairs):
         chosen_text = _fast_cleanup_response_text(pair.assistant)
         if not chosen_text:
@@ -1688,16 +2003,29 @@ def build_preference_pairs_with_generation(
         if bool(skip_template_prompts) and _is_synthetic_template_prompt(pair.user):
             continue
         short_prompt = _is_short_answer_prompt(pair.user)
-        chosen_quality = _response_quality_score(chosen_text)
+        chosen_score, chosen_alignment = _paired_response_score(pair.user, chosen_text)
         chosen_words = _word_token_count(chosen_text)
         if not short_prompt and chosen_words < max(1, int(min_chosen_words)):
             continue
-        if not short_prompt and chosen_quality < float(min_chosen_quality):
+        if not short_prompt and chosen_score < float(min_chosen_quality):
             continue
         prompt_complexity = _prompt_complexity_score(pair.user)
-        score = prompt_complexity + 0.18 * max(-1.0, min(2.5, chosen_quality))
+        score = prompt_complexity + 0.18 * max(-1.0, min(2.5, chosen_score))
+        score += 0.14 * float(chosen_alignment.conversation)
+        score += 0.10 * float(chosen_alignment.reasoning)
+        score += 0.08 * float(chosen_alignment.creativity)
         score += 0.15 * rng.random()
-        scored_ids.append((score, idx, chosen_text, chosen_quality, _prompt_signature(pair.user), prompt_complexity))
+        scored_ids.append(
+            (
+                score,
+                idx,
+                chosen_text,
+                chosen_score,
+                _prompt_signature(pair.user),
+                prompt_complexity,
+                chosen_alignment,
+            )
+        )
     if not scored_ids:
         return []
     scored_ids.sort(key=lambda x: x[0], reverse=True)
@@ -1758,7 +2086,7 @@ def build_preference_pairs_with_generation(
     generation_failures = 0
 
     try:
-        for _score, idx, chosen_text, chosen_quality, user_sig, prompt_complexity in scored_ids:
+        for _score, idx, chosen_text, chosen_score, user_sig, prompt_complexity, chosen_alignment in scored_ids:
             visited += 1
             if len(out) >= max_pairs:
                 break
@@ -1839,7 +2167,8 @@ def build_preference_pairs_with_generation(
                     cf_variants = cf_variants[: max(1, int(counterfactual_rejects_per_prompt))]
                 generated.extend(cf_variants)
 
-            rejected, rejected_sim, rejected_quality = _pick_rejected_candidate(
+            rejected, rejected_sim, rejected_score = _pick_rejected_candidate(
+                user_text=pair.user,
                 chosen_text=chosen_text,
                 generated=generated,
                 similarity_threshold=float(similarity_threshold),
@@ -1873,7 +2202,7 @@ def build_preference_pairs_with_generation(
                             continue
                         rejected = candidate
                         rejected_sim = sim
-                        rejected_quality = _response_quality_score(candidate)
+                        rejected_score, _alignment = _paired_response_score(pair.user, candidate)
                         break
                     if rejected:
                         break
@@ -1882,12 +2211,12 @@ def build_preference_pairs_with_generation(
                 continue
             if _looks_like_placeholder_assistant(rejected):
                 continue
-            if float(chosen_quality) < float(rejected_quality) + float(min_quality_gap):
+            if float(chosen_score) < float(rejected_score) + float(min_quality_gap):
                 continue
 
             pair_weight = _preference_pair_weight(
-                chosen_quality=chosen_quality,
-                rejected_quality=rejected_quality,
+                chosen_quality=chosen_score,
+                rejected_quality=rejected_score,
                 rejected_similarity=rejected_sim,
                 chosen_text=chosen_text,
                 rejected_text=rejected,
@@ -1905,9 +2234,13 @@ def build_preference_pairs_with_generation(
                     chosen=chosen_text,
                     rejected=rejected,
                     weight=pair_weight,
-                    quality_gap=float(max(0.0, float(chosen_quality) - float(rejected_quality))),
+                    quality_gap=float(max(0.0, float(chosen_score) - float(rejected_score))),
                     rejected_similarity=float(max(0.0, min(1.0, float(rejected_sim)))),
                     prompt_complexity=float(max(0.0, float(prompt_complexity))),
+                    conversation_score=float(max(0.0, float(chosen_alignment.conversation))),
+                    reasoning_score=float(max(0.0, float(chosen_alignment.reasoning))),
+                    creativity_score=float(max(0.0, float(chosen_alignment.creativity))),
+                    is_followup=bool(chosen_alignment.is_followup),
                 )
             )
             user_pair_counts[user_sig] = user_pair_counts.get(user_sig, 0) + 1
@@ -2029,6 +2362,8 @@ def finetune_qwen(
     sft_events_boost: float,
     sft_reasoning_boost: float,
     sft_prompt_skill_boost: float,
+    sft_conversation_boost: float,
+    sft_creativity_boost: float,
     sft_min_quality_score: float,
     sft_filter_keep_short_answers: bool,
     sft_quality_filter_exempt_sources: Optional[Sequence[str]],
@@ -2216,6 +2551,8 @@ def finetune_qwen(
                     events_boost=float(sft_events_boost),
                     reasoning_boost=float(sft_reasoning_boost),
                     prompt_skill_boost=float(sft_prompt_skill_boost),
+                    conversation_boost=float(sft_conversation_boost),
+                    creativity_boost=float(sft_creativity_boost),
                 )
                 * float(source_balance_factors.get(str(p.source or "dataset"), 1.0)),
             ),
@@ -2613,6 +2950,8 @@ def finetune_qwen(
         "sft_source_balance_max_scale": float(sft_source_balance_max_scale),
         "sft_reasoning_boost": float(sft_reasoning_boost),
         "sft_prompt_skill_boost": float(sft_prompt_skill_boost),
+        "sft_conversation_boost": float(sft_conversation_boost),
+        "sft_creativity_boost": float(sft_creativity_boost),
         "preference_steps": float(pref_steps_done),
         "preference_loss_mean": float(pref_loss_sum / max(1, pref_steps_done)),
         "preference_pairs": float(pref_pair_count),
@@ -2938,6 +3277,18 @@ def parse_args() -> argparse.Namespace:
         help="Extra SFT weight multiplier for coding/reasoning user prompts.",
     )
     ap.add_argument(
+        "--sft_conversation_boost",
+        type=float,
+        default=1.08,
+        help="Extra SFT weight multiplier for context-following and follow-up coherence.",
+    )
+    ap.add_argument(
+        "--sft_creativity_boost",
+        type=float,
+        default=1.06,
+        help="Extra SFT weight multiplier for prompts that explicitly ask for creative answers.",
+    )
+    ap.add_argument(
         "--sft_auto_balance_sources",
         action="store_true",
         help="Auto-balance SFT source contributions via per-source sample-weight scaling.",
@@ -3156,7 +3507,7 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument(
         "--preference_selection_strategy",
-        choices=["none", "margin_topk", "capacity_aware"],
+        choices=["none", "margin_topk", "capacity_aware", "innovation_mix"],
         default="none",
         help="Post-mining preference-pair selection strategy for data curation.",
     )
@@ -3357,6 +3708,8 @@ def main() -> None:
         sft_events_boost=float(args.sft_events_boost),
         sft_reasoning_boost=float(args.sft_reasoning_boost),
         sft_prompt_skill_boost=float(args.sft_prompt_skill_boost),
+        sft_conversation_boost=float(args.sft_conversation_boost),
+        sft_creativity_boost=float(args.sft_creativity_boost),
         sft_min_quality_score=float(args.sft_min_quality_score),
         sft_filter_keep_short_answers=not bool(args.sft_filter_drop_short_answers),
         sft_quality_filter_exempt_sources=sft_filter_exempt_sources,
@@ -3484,6 +3837,8 @@ def main() -> None:
             "sft_events_boost": float(args.sft_events_boost),
             "sft_reasoning_boost": float(args.sft_reasoning_boost),
             "sft_prompt_skill_boost": float(args.sft_prompt_skill_boost),
+            "sft_conversation_boost": float(args.sft_conversation_boost),
+            "sft_creativity_boost": float(args.sft_creativity_boost),
             "sft_min_quality_score": float(args.sft_min_quality_score),
             "sft_filter_drop_short_answers": bool(args.sft_filter_drop_short_answers),
             "sft_quality_filter_exempt_sources": sft_filter_exempt_sources,

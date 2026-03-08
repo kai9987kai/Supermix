@@ -4,6 +4,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -12,11 +13,31 @@ import torch
 
 FEAT_DIM = 128
 MODEL_CLASSES = 10
+VALID_FEATURE_MODES = (
+    "legacy",
+    "context_v2",
+    "context_v3",
+    "context_v4",
+    "context_v5",
+    "context_mix_v1",
+    "context_mix_v2_mm",
+    "context_mix_v3",
+)
 TOKEN_RE = re.compile(r"[A-Za-z0-9_']+|[^\w\s]")
 SENTENCE_RE = re.compile(r"[^.!?]+[.!?]?")
 CREATIVE_HINT_RE = re.compile(r"\b(creative|imagine|story|brainstorm|novel|metaphor|analogy|invent)\b", re.I)
 CONCISE_HINT_RE = re.compile(r"\b(short|brief|concise|one line|tldr|quick answer)\b", re.I)
 ANALYST_HINT_RE = re.compile(r"\b(step by step|tradeoff|analy[sz]e|reason|plan|debug|diagnose)\b", re.I)
+FOLLOWUP_EDIT_HINT_RE = re.compile(
+    r"\b(it|that|this|same|again|continue|deeper|expand|shorter|longer|rewrite|rephrase|refine|improve|make it)\b",
+    re.I,
+)
+SHORTEN_REQUEST_RE = re.compile(r"\b(shorter|brief|concise|trim|compress|tldr|one line|one sentence)\b", re.I)
+EXPAND_REQUEST_RE = re.compile(r"\b(deeper|expand|elaborate|more detail|longer|unpack|walk through)\b", re.I)
+REWRITE_REQUEST_RE = re.compile(r"\b(rewrite|rephrase|clearer|polish|fix the wording|paraphrase)\b", re.I)
+CONTINUE_REQUEST_RE = re.compile(r"\b(continue|go on|keep going|next part|what next)\b", re.I)
+REASONING_REQUEST_RE = re.compile(r"\b(step by step|why|how|derive|prove|debug|reason|analy[sz]e|tradeoff)\b", re.I)
+CREATIVE_REQUEST_RE = re.compile(r"\b(creative|story|metaphor|analogy|brainstorm|invent|vivid|novel)\b", re.I)
 LITERARY_HINT_RE = re.compile(
     r"\b(excerpt|novel|book|chapter|character|theme|tone|narrat|prose|literary|joyce|finnegans|portmanteau|modernist|allusion-heavy)\b",
     re.I,
@@ -406,6 +427,49 @@ PROGRAMMING_WORDS = {
     "query",
     "index",
     "migration",
+}
+CONTEXT_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "our",
+    "same",
+    "that",
+    "the",
+    "their",
+    "them",
+    "they",
+    "this",
+    "to",
+    "us",
+    "we",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "you",
+    "your",
 }
 
 
@@ -941,6 +1005,16 @@ def featurize_context_v5(context_text: str, dim: int = FEAT_DIM, max_lines: int 
         recency = 0.35 + 0.65 * float(i + 1) / float(max(1, n))
         depth_count += 1
 
+        if role_key == "system":
+            if lower.startswith("conversation_tags="):
+                tag_blob = lower.split("=", 1)[1]
+                for tag in [t.strip() for t in tag_blob.split(",") if t.strip()]:
+                    _hash_add(acc, f"ctxv5|ctrl|{tag}", 0.16 * recency, dim=dim, sign_bit=78)
+            if lower.startswith("topic_terms="):
+                acc += 0.08 * featurize_text("[topic_terms] " + content[:180], dim=dim)
+            if lower.startswith("last_assistant_focus="):
+                acc += 0.09 * featurize_text("[assistant_focus] " + content[:180], dim=dim)
+
         # Chain-of-thought detection
         if re.search(r"\b(step\s*\d|first|second|third|therefore|because|so\b|thus|hence|consequently)\b", lower):
             cot_signals += 1
@@ -1164,11 +1238,100 @@ def featurize_context_mix_v2_mm(context_text: str, dim: int = FEAT_DIM) -> torch
     return acc
 
 
+def featurize_context_mix_v3(context_text: str, dim: int = FEAT_DIM) -> torch.Tensor:
+    """
+    Smarter runtime context encoder:
+    - starts from multimodal/context mix v2
+    - reads control tags injected by build_context()
+    - adds explicit task/edit intent anchors for follow-up requests
+    """
+    raw = (context_text or "").strip()
+    if not raw:
+        return torch.zeros(dim, dtype=torch.float32)
+
+    base = featurize_context_mix_v2_mm(raw, dim=dim)
+    if dim != FEAT_DIM:
+        return base
+
+    acc = 0.76 * base + 0.20 * featurize_context_v5(raw, dim=dim)
+    latest_user = ""
+    latest_assistant = ""
+    tags: List[str] = []
+    topic_terms: List[str] = []
+    assistant_focus: List[str] = []
+    previous_request = ""
+
+    for line in [ln.strip() for ln in raw.splitlines() if ln.strip()]:
+        role, content = _split_role_line(line)
+        low = content.lower()
+        if role == "system":
+            if low.startswith("conversation_tags="):
+                tags = [t.strip() for t in low.split("=", 1)[1].split(",") if t.strip()]
+            elif low.startswith("topic_terms="):
+                topic_terms = [t.strip() for t in content.split("=", 1)[1].split(",") if t.strip()]
+            elif low.startswith("last_assistant_focus="):
+                assistant_focus = [t.strip() for t in content.split("=", 1)[1].split(",") if t.strip()]
+            elif low.startswith("previous_user_request="):
+                previous_request = content.split("=", 1)[1].strip()
+            continue
+        if role == "user" and content:
+            latest_user = content
+        elif role == "assistant" and content:
+            latest_assistant = content
+
+    for tag in tags:
+        acc += 0.035 * featurize_text(f"[ctx_tag] {tag}", dim=dim)
+    if topic_terms:
+        acc += 0.09 * featurize_text("[ctx_topic] " + " ".join(topic_terms[:8]), dim=dim)
+    if assistant_focus:
+        acc += 0.08 * featurize_text("[ctx_focus] " + " ".join(assistant_focus[:6]), dim=dim)
+    if previous_request:
+        acc += 0.06 * featurize_text("[ctx_prev_user] " + previous_request[:220], dim=dim)
+
+    latest_user_low = latest_user.lower()
+    if "followup" in tags and latest_assistant:
+        acc += 0.10 * featurize_text("[followup_anchor] " + latest_assistant[:240], dim=dim)
+    if "shorten" in tags:
+        acc += 0.08 * featurize_text("[shorten_request] brief concise shorter trim", dim=dim)
+    if "expand" in tags or "continue" in tags:
+        acc += 0.08 * featurize_text("[expand_request] deeper elaborate continue explain more", dim=dim)
+    if "rewrite" in tags:
+        acc += 0.08 * featurize_text("[rewrite_request] clearer rewrite rephrase polish", dim=dim)
+    if "reasoning" in tags or REASONING_REQUEST_RE.search(latest_user_low):
+        acc += 0.09 * featurize_text("[reasoning_request] step by step because therefore verify", dim=dim)
+    if "creative" in tags or CREATIVE_REQUEST_RE.search(latest_user_low):
+        acc += 0.09 * featurize_text("[creative_request] analogy metaphor vivid story imagine", dim=dim)
+
+    flags = _domain_flags(raw)
+    if flags["code"]:
+        acc += 0.05 * featurize_text("[domain_code_focus]", dim=dim)
+    if flags["math"] or flags["science"]:
+        acc += 0.04 * featurize_text("[domain_reasoning_focus]", dim=dim)
+    if flags["english"] or flags["literary"]:
+        acc += 0.04 * featurize_text("[domain_writing_focus]", dim=dim)
+
+    n = torch.norm(acc, p=2)
+    if n > 0:
+        acc = acc / n
+    return acc
+
+
+def resolve_feature_mode(feature_mode: str, smarter_auto: bool = False) -> str:
+    mode = str(feature_mode or "legacy").strip().lower()
+    if mode not in VALID_FEATURE_MODES:
+        mode = "legacy"
+    if smarter_auto and mode in {"legacy", "context_v2"}:
+        return "context_mix_v3"
+    return mode
+
+
 def text_to_model_input(text: str, feature_mode: str = "legacy") -> torch.Tensor:
     # ChampionNet expects (B, T, 128)
-    mode = str(feature_mode or "legacy").strip().lower()
+    mode = resolve_feature_mode(feature_mode, smarter_auto=False)
     if mode == "context_mix_v2_mm":
         return featurize_context_mix_v2_mm(text).view(1, 1, FEAT_DIM)
+    if mode == "context_mix_v3":
+        return featurize_context_mix_v3(text).view(1, 1, FEAT_DIM)
     if mode == "context_mix_v1":
         return featurize_context_mix_v1(text).view(1, 1, FEAT_DIM)
     if mode == "context_v5":
@@ -1182,9 +1345,68 @@ def text_to_model_input(text: str, feature_mode: str = "legacy") -> torch.Tensor
     return featurize_text(text).view(1, 1, FEAT_DIM)
 
 
+def _salient_terms(text: str, max_terms: int = 8) -> List[str]:
+    terms: List[str] = []
+    seen: Set[str] = set()
+    for tok in _tokens(text, max_tokens=192):
+        tok = tok.lower().strip()
+        if not re.fullmatch(r"[a-z0-9_+\-']+", tok):
+            continue
+        if tok in CONTEXT_STOPWORDS:
+            continue
+        if len(tok) < 3 and not any(ch.isdigit() for ch in tok):
+            continue
+        if tok in seen:
+            continue
+        seen.add(tok)
+        terms.append(tok)
+        if len(terms) >= max_terms:
+            break
+    return terms
+
+
+def _context_control_tags(history: Sequence[Tuple[str, str]], user_text: str) -> List[str]:
+    query = (user_text or "").strip().lower()
+    tags: List[str] = []
+    if history and FOLLOWUP_EDIT_HINT_RE.search(query):
+        tags.append("followup")
+    if SHORTEN_REQUEST_RE.search(query):
+        tags.append("shorten")
+    if EXPAND_REQUEST_RE.search(query):
+        tags.append("expand")
+    if REWRITE_REQUEST_RE.search(query):
+        tags.append("rewrite")
+    if CONTINUE_REQUEST_RE.search(query):
+        tags.append("continue")
+    if REASONING_REQUEST_RE.search(query) or ANALYST_HINT_RE.search(query):
+        tags.append("reasoning")
+    if CREATIVE_REQUEST_RE.search(query) or CREATIVE_HINT_RE.search(query):
+        tags.append("creative")
+
+    flags = _domain_flags(user_text)
+    for domain in ("code", "literary", "science", "english", "math", "scripture", "dictionary"):
+        if flags.get(domain, False):
+            tags.append(domain)
+    return tags
+
+
 def build_context(history: Sequence[Tuple[str, str]], user_text: str, max_turns: int = 4) -> str:
+    recent = list(history[-max_turns:])
     parts: List[str] = []
-    for user, assistant in history[-max_turns:]:
+    tags = _context_control_tags(recent, user_text)
+    if tags:
+        parts.append(f"System: conversation_tags={','.join(tags)}")
+    topic_terms = _salient_terms(" ".join([user_text] + [u for u, _a in recent[-2:]]))
+    if topic_terms:
+        parts.append(f"System: topic_terms={', '.join(topic_terms)}")
+    if recent:
+        last_user, last_assistant = recent[-1]
+        last_assistant_focus = _salient_terms(last_assistant, max_terms=6)
+        if last_assistant_focus:
+            parts.append(f"System: last_assistant_focus={', '.join(last_assistant_focus)}")
+        if last_user:
+            parts.append(f"System: previous_user_request={last_user[:180]}")
+    for user, assistant in recent:
         parts.append(f"User: {user}")
         parts.append(f"Assistant: {assistant}")
     parts.append(f"User: {user_text}")
@@ -1456,9 +1678,11 @@ def build_training_tensors(
     labels: torch.Tensor,
     feature_mode: str = "legacy",
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    mode = str(feature_mode or "legacy").strip().lower()
+    mode = resolve_feature_mode(feature_mode, smarter_auto=False)
     if mode == "context_mix_v2_mm":
         feats = [featurize_context_mix_v2_mm(ex.context) for ex in examples]
+    elif mode == "context_mix_v3":
+        feats = [featurize_context_mix_v3(ex.context) for ex in examples]
     elif mode == "context_mix_v1":
         feats = [featurize_context_mix_v1(ex.context) for ex in examples]
     elif mode == "context_v5":
@@ -1496,9 +1720,11 @@ def build_bucket_metadata(
         # Fast mode for very large training runs: skip bucket feature materialization.
         return {"buckets": {}, "label_priors": priors}
 
-    mode = str(feature_mode or "legacy").strip().lower()
+    mode = resolve_feature_mode(feature_mode, smarter_auto=False)
     if mode == "context_mix_v2_mm":
         ctx_featurizer = featurize_context_mix_v2_mm
+    elif mode == "context_mix_v3":
+        ctx_featurizer = featurize_context_mix_v3
     elif mode == "context_mix_v1":
         ctx_featurizer = featurize_context_mix_v1
     elif mode == "context_v5":
@@ -1616,6 +1842,19 @@ def infer_style_mode(query_text: str, requested_mode: str = "auto") -> str:
     return "balanced"
 
 
+def _followup_request_profile(query_text: str) -> Dict[str, bool]:
+    query = (query_text or "").strip().lower()
+    return {
+        "followup": bool(FOLLOWUP_EDIT_HINT_RE.search(query)),
+        "shorten": bool(SHORTEN_REQUEST_RE.search(query)),
+        "expand": bool(EXPAND_REQUEST_RE.search(query)),
+        "rewrite": bool(REWRITE_REQUEST_RE.search(query)),
+        "continue": bool(CONTINUE_REQUEST_RE.search(query)),
+        "reasoning": bool(REASONING_REQUEST_RE.search(query) or ANALYST_HINT_RE.search(query)),
+        "creative": bool(CREATIVE_REQUEST_RE.search(query) or CREATIVE_HINT_RE.search(query)),
+    }
+
+
 def _token_set(text: str, max_tokens: int = 96) -> Set[str]:
     out: Set[str] = set()
     for tok in _tokens(text, max_tokens=max_tokens):
@@ -1690,6 +1929,7 @@ def rank_response_candidates(
     reference_style_vals: List[float] = []
     reasoning_depth_vals: List[float] = []
     empathy_vals: List[float] = []
+    word_count_vals: List[float] = []
     q_domains = _domain_flags(query_text)
     for row in candidates:
         text = str(row.get("text", ""))
@@ -1795,6 +2035,7 @@ def rank_response_candidates(
         reference_style_vals.append(reference_style)
         reasoning_depth_vals.append(reasoning_depth)
         empathy_vals.append(empathy_score)
+        word_count_vals.append(float(max(1, len(text.split()))))
 
     lex_sim = torch.tensor(overlap_vals, dtype=torch.float32)
     creative_signal = _normalize_01(torch.tensor(creative_vals, dtype=torch.float32))
@@ -1812,6 +2053,7 @@ def rank_response_candidates(
     reference_style_signal = torch.tensor(reference_style_vals, dtype=torch.float32)
     reasoning_depth_signal = _normalize_01(torch.tensor(reasoning_depth_vals, dtype=torch.float32))
     empathy_signal = _normalize_01(torch.tensor(empathy_vals, dtype=torch.float32))
+    word_count_signal = torch.tensor(word_count_vals, dtype=torch.float32)
 
     freq_penalty = torch.tensor([math.log1p(float(row.get("count", 1))) for row in candidates], dtype=torch.float32)
     bucket_bonus = torch.tensor([float(row.get("bucket_score", 0.0)) for row in candidates], dtype=torch.float32)
@@ -1841,6 +2083,39 @@ def rank_response_candidates(
         or q_domains["dictionary"]
     )
     q_prefers_reference = bool(q_domains.get("scripture", False) or re.search(r"\b(reference|ref|chapter|verse|citation|cite)\b", q_lower))
+    followup_profile = _followup_request_profile(query_text)
+    anchor_signal = torch.zeros(len(candidates), dtype=torch.float32)
+    edit_match_signal = torch.zeros(len(candidates), dtype=torch.float32)
+    if recent:
+        anchor_text = recent[-1]
+        anchor_signal = _normalize_01(torch.mv(cand_resp_vecs, featurize_text(anchor_text)))
+        anchor_word_count = max(1.0, float(len(anchor_text.split())))
+        edit_vals: List[float] = []
+        for idx, row in enumerate(candidates):
+            text = str(row.get("text", ""))
+            score = 0.20 * float(anchor_signal[idx].item())
+            word_count = float(word_count_signal[idx].item())
+            text_sim = float(SequenceMatcher(None, anchor_text.lower(), text.lower()).ratio()) if text else 0.0
+            if followup_profile["shorten"]:
+                if word_count < 0.92 * anchor_word_count:
+                    score += 0.55
+                else:
+                    score -= 0.12
+            if followup_profile["expand"] or followup_profile["continue"]:
+                if word_count > 1.05 * anchor_word_count:
+                    score += 0.35
+            if followup_profile["reasoning"]:
+                score += 0.28 * float(reasoning_depth_signal[idx].item())
+            if followup_profile["creative"]:
+                score += 0.28 * float(creative_signal[idx].item())
+            if followup_profile["rewrite"]:
+                if 0.18 <= text_sim <= 0.94:
+                    score += 0.22
+                elif text_sim > 0.98:
+                    score -= 0.12
+            edit_vals.append(score)
+        edit_match_signal = _normalize_01(torch.tensor(edit_vals, dtype=torch.float32))
+    followup_bonus = (0.10 * anchor_signal + 0.12 * edit_match_signal) if followup_profile["followup"] else 0.0
 
     mode = infer_style_mode(query_text, requested_mode=style_mode)
     if mode == "creative":
@@ -1856,6 +2131,7 @@ def rank_response_candidates(
             + (0.04 * reference_style_signal if q_prefers_reference else 0.0)
             + (0.10 * reasoning_depth_signal if q_needs_reasoning else 0.04 * reasoning_depth_signal)
             + (0.12 * empathy_signal if q_needs_empathy else 0.03 * empathy_signal)
+            + followup_bonus
             - (0.08 * reference_style_signal if (q_needs_exact_lookup and not q_prefers_reference) else 0.0)
             - 0.22 * sim_recent
             - 0.02 * freq_penalty
@@ -1872,6 +2148,7 @@ def rank_response_candidates(
             + (0.08 * reference_style_signal if q_prefers_reference else 0.0)
             + (0.08 * reasoning_depth_signal if q_needs_reasoning else 0.02 * reasoning_depth_signal)
             + (0.10 * empathy_signal if q_needs_empathy else 0.02 * empathy_signal)
+            + followup_bonus
             - (0.05 * creative_signal if q_needs_exact_lookup else 0.0)
             - 0.27 * sim_recent
             - 0.03 * freq_penalty
@@ -1888,6 +2165,7 @@ def rank_response_candidates(
             + (0.08 * reference_style_signal if q_prefers_reference else 0.0)
             + 0.12 * reasoning_depth_signal
             + (0.08 * empathy_signal if q_needs_empathy else 0.02 * empathy_signal)
+            + followup_bonus
             - 0.26 * sim_recent
             - 0.02 * freq_penalty
         )
@@ -1902,6 +2180,7 @@ def rank_response_candidates(
             + (0.06 * reference_style_signal if q_prefers_reference else 0.0)
             + (0.10 * reasoning_depth_signal if q_needs_reasoning else 0.04 * reasoning_depth_signal)
             + (0.10 * empathy_signal if q_needs_empathy else 0.03 * empathy_signal)
+            + followup_bonus
             - (0.04 * creative_signal if q_needs_exact_lookup else 0.0)
             - 0.28 * sim_recent
             - 0.02 * freq_penalty
@@ -1918,22 +2197,10 @@ def _stylize_response_text(text: str, query_text: str, style_mode: str, creativi
 
     mode = infer_style_mode(query_text, requested_mode=style_mode)
     if mode == "concise":
-        first = raw
-        chunks = [c.strip() for c in SENTENCE_RE.findall(raw) if c.strip()]
-        if chunks:
-            first = chunks[0]
-        words = first.split()
-        if len(words) > 24:
-            first = " ".join(words[:24]).rstrip(" ,;:.") + "."
-        return first
+        return _to_concise_answer(raw)
 
     if mode == "analyst":
-        if re.search(r"(^|\s)(1\)|1\.|first\b)", raw.lower()):
-            return raw
-        chunks = [c.strip() for c in SENTENCE_RE.findall(raw) if c.strip()]
-        if len(chunks) >= 2:
-            return f"1) {chunks[0]} 2) {chunks[1]}"
-        return f"1) {raw}"
+        return _to_analyst_answer(raw)
 
     if mode != "creative":
         return raw
@@ -1991,6 +2258,93 @@ def _stylize_response_text(text: str, query_text: str, style_mode: str, creativi
     return f"{intro} {raw} Think of it like {analogy}. {follow_up}"
 
 
+def _to_concise_answer(text: str, max_words: int = 24) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    first = raw
+    chunks = [c.strip() for c in SENTENCE_RE.findall(raw) if c.strip()]
+    if chunks:
+        first = chunks[0]
+    words = first.split()
+    if len(words) > max_words:
+        first = " ".join(words[:max_words]).rstrip(" ,;:.") + "."
+    return first
+
+
+def _to_analyst_answer(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    if re.search(r"(^|\s)(1\)|1\.|first\b)", raw.lower()):
+        return raw
+    chunks = [c.strip() for c in SENTENCE_RE.findall(raw) if c.strip()]
+    if len(chunks) >= 3:
+        return f"1) {chunks[0]} 2) {chunks[1]} 3) {chunks[2]}"
+    if len(chunks) >= 2:
+        return f"1) {chunks[0]} 2) {chunks[1]}"
+    return f"1) {raw}"
+
+
+def _reasoning_signal(text: str) -> float:
+    raw = (text or "").strip().lower()
+    if not raw:
+        return 0.0
+    score = 0.0
+    if re.search(r"(^|\s)(1\)|1\.|first\b|step\s*1)", raw):
+        score += 0.35
+    if re.search(r"\b(then|next|finally|therefore|thus|because|since|verify)\b", raw):
+        score += 0.35
+    if re.search(r"\b(let me|consider|assume|tradeoff|edge case)\b", raw):
+        score += 0.20
+    return min(1.0, score)
+
+
+def _maybe_refine_selected_response(
+    text: str,
+    query_text: str,
+    recent_assistant_messages: Sequence[str],
+    style_mode: str,
+    creativity: float,
+) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+
+    profile = _followup_request_profile(query_text)
+    anchor = ""
+    for msg in reversed(recent_assistant_messages):
+        msg = msg.strip()
+        if msg:
+            anchor = msg
+            break
+
+    if profile["followup"] and anchor:
+        anchor_clean = cleanup_response_text(anchor)
+        if profile["shorten"]:
+            if len(raw.split()) < len(anchor_clean.split()):
+                return _to_concise_answer(raw, max_words=18)
+            return _to_concise_answer(anchor_clean, max_words=18)
+        if profile["creative"] and len(query_text.split()) <= 14:
+            return _stylize_response_text(
+                anchor_clean,
+                query_text=query_text,
+                style_mode="creative",
+                creativity=max(0.55, float(creativity)),
+            )
+        if profile["expand"] or profile["continue"] or profile["reasoning"]:
+            base = raw if len(raw.split()) >= len(anchor_clean.split()) else anchor_clean
+            return _to_analyst_answer(base)
+        if profile["rewrite"]:
+            if SequenceMatcher(None, anchor_clean.lower(), raw.lower()).ratio() > 0.98:
+                return cleanup_response_text(anchor_clean)
+
+    styled = _stylize_response_text(raw, query_text=query_text, style_mode=style_mode, creativity=creativity)
+    if profile["reasoning"] and _reasoning_signal(styled) < 0.30:
+        return _to_analyst_answer(styled)
+    return styled
+
+
 def pick_response(
     candidates: Sequence[Dict[str, Any]],
     query_text: str,
@@ -2023,18 +2377,36 @@ def pick_response(
         chosen = top_idx[int(torch.multinomial(probs, num_samples=1).item())]
         text = str(candidates[chosen].get("text", "")).strip()
         if text:
-            return _stylize_response_text(text, query_text=query_text, style_mode=style_mode, creativity=creativity)
+            return _maybe_refine_selected_response(
+                text,
+                query_text=query_text,
+                recent_assistant_messages=recent_assistant_messages,
+                style_mode=style_mode,
+                creativity=creativity,
+            )
 
     for i in ranked:
         text = str(candidates[i].get("text", "")).strip()
         if text and text not in blocked:
-            return _stylize_response_text(text, query_text=query_text, style_mode=style_mode, creativity=creativity)
+            return _maybe_refine_selected_response(
+                text,
+                query_text=query_text,
+                recent_assistant_messages=recent_assistant_messages,
+                style_mode=style_mode,
+                creativity=creativity,
+            )
 
     best = filtered[0]
     text = str(candidates[best].get("text", "")).strip()
     if not text:
         return "I do not know how to answer that yet."
-    return _stylize_response_text(text, query_text=query_text, style_mode=style_mode, creativity=creativity)
+    return _maybe_refine_selected_response(
+        text,
+        query_text=query_text,
+        recent_assistant_messages=recent_assistant_messages,
+        style_mode=style_mode,
+        creativity=creativity,
+    )
 
 
 def cleanup_response_text(text: str) -> str:

@@ -359,22 +359,23 @@ class Engine:
             raise FileNotFoundError(f"Metadata not found: {meta_path}")
 
         meta = chat_app.load_metadata(meta_path)
-        feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
-        if feature_mode not in {"legacy", "context_v2", "context_v3", "context_v4", "context_mix_v1", "context_mix_v2_mm"}:
-            feature_mode = "legacy"
+        raw_feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
+        feature_mode = chat_app.resolve_feature_mode(raw_feature_mode, smarter_auto=True)
 
         sd = chat_app.safe_load_state_dict(weights)
         inferred = chat_app.detect_model_size_from_state_dict(sd)
-        resolved_model_size = self.defaults.get("model_size", "auto")
-        if resolved_model_size == "auto":
-            resolved_model_size = inferred
+        resolved_model_size, _ = chat_app.resolve_runtime_model_size(
+            str(self.defaults.get("model_size", "auto")),
+            str(meta.get("model_size", "")),
+            inferred,
+        )
 
-        expansion_dim = chat_app._resolve_expansion_dim(None, meta, "expansion_dim", 1024 if resolved_model_size in {"xxlarge","xxxlarge","ultralarge","megalarge"} else (768 if resolved_model_size == "xlarge" else 512), inferred, {"large","xlarge","xxlarge","xxxlarge","ultralarge","megalarge"}, chat_app.detect_large_head_expansion_dim, sd)
-        extra_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "extra_expansion_dim", max(2048 if resolved_model_size in {"xxlarge","xxxlarge","ultralarge","megalarge"} else 1024, expansion_dim * 2), inferred, {"xlarge","xxlarge","xxxlarge","ultralarge","megalarge"}, chat_app.detect_xlarge_aux_expansion_dim, sd)
-        third_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "third_expansion_dim", max(3072, extra_expansion_dim + expansion_dim), inferred, {"xxlarge","xxxlarge","ultralarge","megalarge"}, chat_app.detect_xxlarge_third_expansion_dim, sd)
-        fourth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fourth_expansion_dim", max(4096, third_expansion_dim + expansion_dim), inferred, {"xxxlarge","ultralarge","megalarge"}, chat_app.detect_xxxlarge_fourth_expansion_dim, sd)
-        fifth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fifth_expansion_dim", max(6144, fourth_expansion_dim + expansion_dim), inferred, {"ultralarge","megalarge"}, chat_app.detect_ultralarge_fifth_expansion_dim, sd)
-        sixth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "sixth_expansion_dim", max(8192, fifth_expansion_dim + expansion_dim), inferred, {"megalarge"}, chat_app.detect_megalarge_sixth_expansion_dim, sd)
+        expansion_dim = chat_app._resolve_expansion_dim(None, meta, "expansion_dim", chat_app._default_expansion_dim_for_model_size(resolved_model_size), inferred, chat_app.EXPANSION_DIM_MODEL_SIZES, chat_app.detect_large_head_expansion_dim, sd)
+        extra_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "extra_expansion_dim", chat_app._default_extra_expansion_dim_for_model_size(resolved_model_size, expansion_dim), inferred, chat_app.EXTRA_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_xlarge_aux_expansion_dim, sd)
+        third_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "third_expansion_dim", max(3072, extra_expansion_dim + expansion_dim), inferred, chat_app.THIRD_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_xxlarge_third_expansion_dim, sd)
+        fourth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fourth_expansion_dim", max(4096, third_expansion_dim + expansion_dim), inferred, chat_app.FOURTH_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_xxxlarge_fourth_expansion_dim, sd)
+        fifth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fifth_expansion_dim", max(6144, fourth_expansion_dim + expansion_dim), inferred, chat_app.FIFTH_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_ultralarge_fifth_expansion_dim, sd)
+        sixth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "sixth_expansion_dim", max(8192, fifth_expansion_dim + expansion_dim), inferred, chat_app.SIXTH_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_megalarge_sixth_expansion_dim, sd)
         adapter_dropout = float(meta.get("adapter_dropout", 0.1))
 
         model = chat_app.build_model(
@@ -594,7 +595,7 @@ def main() -> None:
     ap.add_argument('--torch_interop_threads', type=int, default=0)
     ap.add_argument('--matmul_precision', choices=['highest', 'high', 'medium'], default='high')
     ap.add_argument('--disable_tf32', action='store_true')
-    ap.add_argument('--model_size', choices=['auto','base','large','xlarge','xxlarge','xxxlarge','ultralarge','megalarge'], default='auto')
+    ap.add_argument('--model_size', choices=['auto', *chat_app.VALID_RUNTIME_MODEL_SIZES], default='auto')
     ap.add_argument('--max_turns', type=int, default=2)
     ap.add_argument('--top_labels', type=int, default=3)
     ap.add_argument('--pool_mode', choices=['all','topk'], default='all')

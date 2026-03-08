@@ -1,0 +1,7 @@
+{
+  "stage": "preference",
+  "sft_steps": 520,
+  "preference_steps": 140,
+  "preference_loss_mean": 1.0679943459441088,
+  "checkpoint_adapter_dir": "artifacts\\qwen_supermix_enhanced_v26_cognitive_activation\\checkpoints\\pref_step_00140\\adapter"
+}

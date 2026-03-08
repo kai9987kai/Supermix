@@ -1,5 +1,6 @@
 param(
   [string]$Name = "SupermixQwenDesktop",
+  [string]$DisplayName = "Supermix Qwen Desktop",
   [string]$Version = "",
   [switch]$SkipExeBuild,
   [switch]$SkipDependencyInstall
@@ -53,7 +54,7 @@ if (-not $IsccPath) {
 
 $SetupBaseName = "$Name-Setup-$Version"
 $CompilerArgs = @(
-  "/DMyAppName=Supermix Qwen Desktop",
+  "/DMyAppName=$DisplayName",
   "/DMyAppExeName=$Name.exe",
   "/DMyAppVersion=$Version",
   "/DMySourceDir=$DistDir",

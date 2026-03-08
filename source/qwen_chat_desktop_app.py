@@ -5,6 +5,7 @@ import html
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -447,7 +448,71 @@ def find_project_root() -> Path:
     return Path.cwd().resolve()
 
 
+def load_json_if_exists(path: Path) -> Optional[dict]:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logging.warning("Failed to load JSON from %s: %s", path, exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def format_artifact_label(value: str) -> str:
+    text = str(value or "").strip().replace("qwen_supermix_enhanced_", "")
+    text = re.sub(r"[_\-]+", " ", text).strip()
+    words = []
+    for word in text.split():
+        words.append(word.upper() if re.fullmatch(r"v\d+", word.lower()) else word.capitalize())
+    return " ".join(words) or "Latest Adapter"
+
+
+def describe_adapter_artifact(adapter_dir: Path) -> dict[str, str]:
+    artifact_dir = adapter_dir.parent
+    benchmark = load_json_if_exists(artifact_dir / "benchmark_results.json") or {}
+    base = benchmark.get("base") if isinstance(benchmark.get("base"), dict) else {}
+    tuned = benchmark.get("tuned") if isinstance(benchmark.get("tuned"), dict) else {}
+    train_stats = benchmark.get("train_stats") if isinstance(benchmark.get("train_stats"), dict) else {}
+
+    benchmark_line = ""
+    if tuned:
+        token_f1 = float(tuned.get("token_f1") or 0.0)
+        token_f1_delta = token_f1 - float(base.get("token_f1") or 0.0)
+        perplexity = float(tuned.get("perplexity") or 0.0)
+        perplexity_delta = perplexity - float(base.get("perplexity") or 0.0)
+        benchmark_line = (
+            f"token_f1={token_f1:.3f} ({token_f1_delta:+.3f}) | "
+            f"perplexity={perplexity:.2f} ({perplexity_delta:+.2f})"
+        )
+
+    training_line = ""
+    train_seconds = float(train_stats.get("train_seconds") or 0.0)
+    if train_seconds > 0:
+        training_line = f"train_time={train_seconds / 3600.0:.1f}h"
+
+    return {
+        "label": format_artifact_label(artifact_dir.name),
+        "artifact_dir": str(artifact_dir),
+        "benchmark_line": benchmark_line,
+        "training_line": training_line,
+    }
+
+
+def find_bundled_artifact_dir() -> Optional[Path]:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return None
+    candidate = Path(meipass) / "bundled_latest_artifact"
+    if (candidate / "adapter" / "adapter_config.json").exists():
+        return candidate.resolve()
+    return None
+
+
 def find_bundled_adapter_dir() -> Optional[Path]:
+    bundled_artifact = find_bundled_artifact_dir()
+    if bundled_artifact is not None:
+        return (bundled_artifact / "adapter").resolve()
     meipass = getattr(sys, "_MEIPASS", None)
     if not meipass:
         return None
@@ -794,16 +859,23 @@ def main() -> None:
     if webview is None:
         raise RuntimeError("pywebview is not installed. Run `python -m pip install pywebview` before launching the desktop app.")
 
+    artifact_info = describe_adapter_artifact(adapter_dir)
     status_lines = [
         f"project_root = {project_root}",
         f"state_dir = {state_dir}",
         f"server_script = {server_script_path}",
         f"python_exe = {python_exe}",
+        f"release = {artifact_info['label']}",
         f"adapter_dir = {adapter_dir}",
+        f"artifact_dir = {artifact_info['artifact_dir']}",
         f"base_model = {base_model}",
         f"device = {args.device}",
         f"target_url = {app.url}",
     ]
+    if artifact_info["benchmark_line"]:
+        status_lines.append(f"benchmark = {artifact_info['benchmark_line']}")
+    if artifact_info["training_line"]:
+        status_lines.append(f"training = {artifact_info['training_line']}")
     icon_path = resolve_asset_path(project_root, APP_ICON_FILENAME)
     splash_path = resolve_asset_path(project_root, SPLASH_IMAGE_FILENAME)
     splash_data_uri = encode_image_as_data_uri(splash_path)

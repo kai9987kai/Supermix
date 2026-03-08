@@ -506,7 +506,8 @@ def main():
     ap.add_argument("--meta", default="chat_model_meta.json", help="Output metadata JSON.")
     ap.add_argument(
         "--model_size",
-        choices=["base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge", "ultra_expert", "hierarchical_expert", "deep_expert", "expert_choice", "smarter_expert", "thought_expert", "recursive_expert"],
+        choices=["base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge", "ultra_expert", "hierarchical_expert", "deep_expert", "expert_choice", "smarter_expert", "thought_expert", "recursive_expert", "reflexive_expert", "metacognitive_expert", "tree_of_thought_expert", "consensus_expert"],
+
         default="base",
         help="Model variant to train.",
     )
@@ -544,8 +545,8 @@ def main():
     ap.add_argument("--adapter_dropout", type=float, default=0.1, help="Dropout used in large model adapter branch.")
     ap.add_argument(
         "--feature_mode",
-        choices=["legacy", "context_v2", "context_v3", "context_v4", "context_v5", "context_mix_v1", "context_mix_v2_mm"],
-        default="context_v2",
+        choices=["legacy", "context_v2", "context_v3", "context_v4", "context_v5", "context_mix_v1", "context_mix_v2_mm", "context_mix_v3"],
+        default="context_mix_v3",
         help="Input feature encoding mode for context understanding.",
     )
     ap.add_argument(

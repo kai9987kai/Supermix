@@ -29,6 +29,34 @@ import torch.nn.functional as F
 from run import ChampionNet, GatedFFN
 
 
+SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
+    "base",
+    "large",
+    "xlarge",
+    "xxlarge",
+    "xxxlarge",
+    "ultralarge",
+    "megalarge",
+    "ultra_expert",
+    "hierarchical_expert",
+    "deep_expert",
+    "expert_choice",
+    "smarter_expert",
+    "thought_expert",
+    "recursive_expert",
+    "reflexive_expert",
+    "metacognitive_expert",
+    "tree_of_thought_expert",
+    "consensus_expert",
+)
+EXPANSION_DIM_MODEL_SIZES = frozenset({"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
+EXTRA_EXPANSION_DIM_MODEL_SIZES = frozenset({"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
+THIRD_EXPANSION_DIM_MODEL_SIZES = frozenset({"xxlarge", "xxxlarge", "ultralarge", "megalarge"})
+FOURTH_EXPANSION_DIM_MODEL_SIZES = frozenset({"xxxlarge", "ultralarge", "megalarge"})
+FIFTH_EXPANSION_DIM_MODEL_SIZES = frozenset({"ultralarge", "megalarge"})
+SIXTH_EXPANSION_DIM_MODEL_SIZES = frozenset({"megalarge"})
+
+
 class ExpandedClassifierHead(nn.Module):
     """
     Larger classifier head that keeps base checkpoint compatibility:
@@ -1757,6 +1785,702 @@ class ChampionNetRecursiveExpert(nn.Module):
 
 
 
+class ReflexiveThoughtExpertHead(nn.Module):
+    """
+    Generation v15: ReflexiveThoughtExpert (Self-Reflection MoE)
+    Features:
+    - Initial Pass: Generates baseline logits using MoE routing.
+    - Critique Pass: Takes original features + initial logits to self-correct using specialized critique experts.
+    """
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        n_experts: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
+        self.bias = nn.Parameter(torch.zeros(out_dim))
+        self.n_experts = n_experts
+
+        # 1. Initial Pass Experts
+        self.initial_up = nn.ModuleList([nn.Linear(in_dim, 1024, bias=False) for _ in range(n_experts)])
+        self.initial_down = nn.ModuleList([nn.Linear(1024, out_dim, bias=False) for _ in range(n_experts)])
+        self.initial_gate = nn.Linear(in_dim, n_experts, bias=False)
+        self.initial_norms = nn.ModuleList([nn.LayerNorm(out_dim) for _ in range(n_experts)])
+
+        # 2. Critique Pass Experts (Input: features + intermediate logits)
+        critique_dim = in_dim + out_dim
+        self.critique_up = nn.ModuleList([nn.Linear(critique_dim, 1024, bias=False) for _ in range(n_experts)])
+        self.critique_down = nn.ModuleList([nn.Linear(1024, out_dim, bias=False) for _ in range(n_experts)])
+        self.critique_gate = nn.Linear(critique_dim, n_experts, bias=False)
+        self.critique_norms = nn.ModuleList([nn.LayerNorm(out_dim) for _ in range(n_experts)])
+
+        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+        self.dropout = nn.Dropout(dropout)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=5**0.5)
+        nn.init.zeros_(self.initial_gate.weight)
+        nn.init.zeros_(self.critique_gate.weight)
+        for i in range(self.n_experts):
+            nn.init.kaiming_uniform_(self.initial_up[i].weight, a=5**0.5)
+            nn.init.normal_(self.initial_down[i].weight, std=0.01)
+            nn.init.kaiming_uniform_(self.critique_up[i].weight, a=5**0.5)
+            nn.init.normal_(self.critique_down[i].weight, std=0.01)
+
+    def forward(self, x):
+        base_logits = F.linear(x, self.weight, self.bias)
+        
+        # --- Initial Pass ---
+        gate_init = torch.softmax(self.initial_gate(x), dim=-1) # (B, T, E)
+        init_outs = []
+        for i in range(self.n_experts):
+            h = self.dropout(F.silu(self.initial_up[i](x)))
+            init_outs.append(self.initial_norms[i](self.initial_down[i](h)))
+        init_stack = torch.stack(init_outs, dim=-2) # (B, T, E, D)
+        init_fused = (init_stack * gate_init.unsqueeze(-1)).sum(dim=-2)
+        
+        # Intermediate prediction
+        inter_logits = base_logits + self.alpha * init_fused
+        
+        # --- Critique Pass ---
+        crit_in = torch.cat([x, inter_logits], dim=-1) 
+        gate_crit = torch.softmax(self.critique_gate(crit_in), dim=-1)
+        crit_outs = []
+        for i in range(self.n_experts):
+            h = self.dropout(F.gelu(self.critique_up[i](crit_in)))
+            crit_outs.append(self.critique_norms[i](self.critique_down[i](h)))
+        crit_stack = torch.stack(crit_outs, dim=-2)
+        crit_fused = (crit_stack * gate_crit.unsqueeze(-1)).sum(dim=-2)
+        
+        # Final prediction
+        return inter_logits + self.beta * crit_fused
+
+
+class ChampionNetReflexiveExpert(nn.Module):
+    """
+    Backbone-compatible model with ReflexiveThoughtExpertHead.
+    """
+    def __init__(self, n_experts: int = 4, dropout: float = 0.1):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(ReflexiveThoughtExpertHead(256, 10, n_experts=n_experts, dropout=dropout))
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class MetaCognitiveExpertHead(nn.Module):
+    """
+    Generation v16: MetaCognitiveExpert (Iterative Reflection + PonderNet Halting)
+    Combines the best ideas from v14 (recursive reasoning, shared experts, ACE)
+    and v15 (self-reflection critique pass) into a unified "think → critique → refine"
+    loop with learned adaptive halting.
+
+    Features:
+    - Shared Expert: Always-on global expert for stable signal.
+    - ReasoningCells: Per-step feature refinement with residual MLP.
+    - Proposal MoE: Generates predictions via routed experts at each step.
+    - Critique MoE: Inspects [features || proposal_logits] to output corrections.
+    - PonderNet Halting: Learned halt probability per step for adaptive depth.
+    - Dynamic Bias Load Balancing: Buffer biases maintain expert utilization.
+    """
+
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        n_proposal_experts: int = 6,
+        n_critique_experts: int = 4,
+        reasoning_steps: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
+        self.bias = nn.Parameter(torch.zeros(out_dim))
+        self.n_proposal_experts = n_proposal_experts
+        self.n_critique_experts = n_critique_experts
+        self.reasoning_steps = reasoning_steps
+
+        # 1. Shared Expert (always-on)
+        self.shared_up = nn.Linear(in_dim, 2048, bias=False)
+        self.shared_down = nn.Linear(2048, out_dim, bias=False)
+        self.shared_norm = nn.LayerNorm(out_dim)
+        self.shared_scale = nn.Parameter(torch.tensor(1.0))
+
+        # 2. Reasoning Cells (per step)
+        self.reasoning_cells = nn.ModuleList([
+            ReasoningCell(in_dim, inner_dim=512, dropout=dropout)
+            for _ in range(reasoning_steps)
+        ])
+
+        # 3. Proposal MoE (per step routing)
+        prop_dims = [1024, 1536, 2048, 2560, 1024, 1536]
+        prop_acts = [F.silu, F.gelu, F.mish, F.relu, F.selu, torch.tanh]
+        self.proposal_up = nn.ModuleList([
+            nn.Linear(in_dim, prop_dims[i % len(prop_dims)], bias=False)
+            for i in range(n_proposal_experts)
+        ])
+        self.proposal_down = nn.ModuleList([
+            nn.Linear(prop_dims[i % len(prop_dims)], out_dim, bias=False)
+            for i in range(n_proposal_experts)
+        ])
+        self.proposal_acts = [prop_acts[i % len(prop_acts)] for i in range(n_proposal_experts)]
+        self.proposal_norms = nn.ModuleList([
+            nn.LayerNorm(out_dim) for _ in range(n_proposal_experts)
+        ])
+        self.proposal_gates = nn.ModuleList([
+            nn.Linear(in_dim, n_proposal_experts, bias=False)
+            for _ in range(reasoning_steps)
+        ])
+        self.register_buffer("proposal_bias", torch.zeros(n_proposal_experts))
+
+        # 4. Critique MoE (input: features + proposal logits)
+        critique_dim = in_dim + out_dim
+        self.critique_up = nn.ModuleList([
+            nn.Linear(critique_dim, 1024, bias=False)
+            for _ in range(n_critique_experts)
+        ])
+        self.critique_down = nn.ModuleList([
+            nn.Linear(1024, out_dim, bias=False)
+            for _ in range(n_critique_experts)
+        ])
+        self.critique_norms = nn.ModuleList([
+            nn.LayerNorm(out_dim) for _ in range(n_critique_experts)
+        ])
+        self.critique_gates = nn.ModuleList([
+            nn.Linear(critique_dim, n_critique_experts, bias=False)
+            for _ in range(reasoning_steps)
+        ])
+
+        # 5. Halting Gates (PonderNet-style)
+        self.halt_gates = nn.ModuleList([
+            nn.Linear(in_dim, 1) for _ in range(reasoning_steps)
+        ])
+
+        # Aggregation
+        self.alpha = nn.Parameter(torch.tensor(0.0))  # proposal scale
+        self.beta = nn.Parameter(torch.tensor(0.0))   # critique scale
+        self.dropout = nn.Dropout(dropout)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        if fan_in != 0:
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+        nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
+        nn.init.zeros_(self.shared_down.weight)
+
+        for i in range(self.n_proposal_experts):
+            nn.init.kaiming_uniform_(self.proposal_up[i].weight, a=math.sqrt(5))
+            nn.init.normal_(self.proposal_down[i].weight, std=0.01)
+        for i in range(self.n_critique_experts):
+            nn.init.kaiming_uniform_(self.critique_up[i].weight, a=math.sqrt(5))
+            nn.init.normal_(self.critique_down[i].weight, std=0.01)
+
+        for g in self.proposal_gates:
+            nn.init.normal_(g.weight, std=0.02)
+        for g in self.critique_gates:
+            nn.init.normal_(g.weight, std=0.02)
+        for h in self.halt_gates:
+            nn.init.constant_(h.bias, -3.0)  # start with low halt probability
+
+    def forward(self, x):
+        base_logits = F.linear(x, self.weight, self.bias)
+        shape_prefix = x.shape[:-1]
+        x_flat = x.reshape(-1, x.shape[-1])
+
+        # 1. Shared Expert (always-on)
+        shared_out = self.shared_norm(
+            self.shared_down(self.dropout(F.silu(self.shared_up(x_flat))))
+        )
+
+        # 2. Pre-compute proposal expert outputs
+        prop_outs = []
+        for i in range(self.n_proposal_experts):
+            h = self.dropout(self.proposal_acts[i](self.proposal_up[i](x_flat)))
+            prop_outs.append(self.proposal_norms[i](self.proposal_down[i](h)))
+        prop_stack = torch.stack(prop_outs, dim=1)  # (BT, E_prop, D)
+
+        # 3. Iterative Reflect Loop
+        current_features = x_flat
+        total_proposal = torch.zeros_like(base_logits.reshape(-1, base_logits.shape[-1]))
+        total_critique = torch.zeros_like(total_proposal)
+        cumulative_halt = torch.zeros(x_flat.shape[0], 1, device=x.device)
+        depth_count = 0
+
+        for step in range(self.reasoning_steps):
+            depth_count += 1
+
+            # A. Refine features
+            current_features = self.reasoning_cells[step](current_features)
+
+            # B. Proposal MoE routing (Sigma Gating)
+            gate_logits = self.proposal_gates[step](current_features)
+            if self.training:
+                gate_logits = gate_logits + self.proposal_bias
+            gate_scores = torch.sigmoid(gate_logits)  # (BT, E_prop)
+            step_proposal = (prop_stack * gate_scores.unsqueeze(-1)).sum(dim=1)
+
+            # C. Critique MoE: inspect [features || proposal]
+            crit_in = torch.cat([current_features, step_proposal], dim=-1)
+            crit_gate = torch.softmax(
+                self.critique_gates[step](crit_in), dim=-1
+            )  # (BT, E_crit)
+            crit_outs = []
+            for i in range(self.n_critique_experts):
+                h = self.dropout(F.gelu(self.critique_up[i](crit_in)))
+                crit_outs.append(self.critique_norms[i](self.critique_down[i](h)))
+            crit_stack = torch.stack(crit_outs, dim=1)  # (BT, E_crit, D)
+            step_critique = (crit_stack * crit_gate.unsqueeze(-1)).sum(dim=1)
+
+            # D. Halting gate (PonderNet-style)
+            halt_prob = torch.sigmoid(self.halt_gates[step](current_features))
+
+            # E. Accumulate weighted by remaining probability mass
+            remaining = 1.0 - cumulative_halt
+            total_proposal = total_proposal + remaining * step_proposal
+            total_critique = total_critique + remaining * step_critique
+            cumulative_halt = cumulative_halt + remaining * halt_prob
+
+            # F. Dynamic bias load balancing
+            if self.training:
+                with torch.no_grad():
+                    target_load = 1.0 / self.n_proposal_experts
+                    actual_load = gate_scores.mean(dim=0)
+                    self.proposal_bias.add_(0.01 * (target_load - actual_load))
+
+            # G. Early exit during inference
+            if not self.training and cumulative_halt.mean() > 0.9:
+                break
+
+        # Normalize by effective depth
+        total_proposal = total_proposal / max(1, depth_count)
+        total_critique = total_critique / max(1, depth_count)
+
+        # Reshape back
+        total_proposal = total_proposal.view(*shape_prefix, -1)
+        total_critique = total_critique.view(*shape_prefix, -1)
+        shared_out = shared_out.view(*shape_prefix, -1)
+
+        return (
+            base_logits
+            + self.shared_scale * shared_out
+            + (self.alpha + 1e-4) * total_proposal
+            + (self.beta + 1e-4) * total_critique
+        )
+
+
+class ChampionNetMetaCognitiveExpert(nn.Module):
+    """
+    Backbone-compatible model with MetaCognitiveExpertHead (v16).
+    """
+    def __init__(
+        self,
+        n_proposal_experts: int = 6,
+        n_critique_experts: int = 4,
+        reasoning_steps: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(MetaCognitiveExpertHead(
+            256, 10,
+            n_proposal_experts=n_proposal_experts,
+            n_critique_experts=n_critique_experts,
+            reasoning_steps=reasoning_steps,
+            dropout=dropout,
+        ))
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class TreeOfThoughtExpertHead(nn.Module):
+    """
+    Generation v17: Tree-of-Thought Expert (Latent Beam Search)
+    Embeds true test-time compute scaling into the forward pass.
+    Instead of a single trajectory, maintains a beam of k states.
+    At each step, m Action Experts propose modifications, creating k*m candidates.
+    A Value Network scores them, and the top-k are kept.
+    """
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        n_action_experts: int = 6,
+        beam_size: int = 4,
+        reasoning_steps: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.n_action_experts = n_action_experts
+        self.beam_size = beam_size
+        self.reasoning_steps = reasoning_steps
+        
+        # Base projection
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
+        self.bias = nn.Parameter(torch.zeros(out_dim))
+        
+        # 1. Global Shared Expert (always-on)
+        self.shared_up = nn.Linear(in_dim, 2048, bias=False)
+        self.shared_down = nn.Linear(2048, out_dim, bias=False)
+        self.shared_norm = nn.LayerNorm(out_dim)
+        self.shared_scale = nn.Parameter(torch.tensor(1.0))
+        
+        # 2. Value Network (Scorer)
+        # Evaluates the "goodness" of a latent state.
+        self.value_net = nn.Sequential(
+            nn.Linear(in_dim, 512),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(512, 1)
+        )
+        
+        # 3. Action MoE (Proposer)
+        # We use a set of experts that propose feature modifications
+        self.action_up = nn.ModuleList([
+            nn.Linear(in_dim, 1024, bias=False) for _ in range(n_action_experts)
+        ])
+        self.action_down = nn.ModuleList([
+            nn.Linear(1024, in_dim, bias=False) for _ in range(n_action_experts)
+        ])
+        self.action_norms = nn.ModuleList([
+            nn.LayerNorm(in_dim) for _ in range(n_action_experts)
+        ])
+        
+        # Final projection from feature to out_dim
+        self.final_up = nn.Linear(in_dim, 1024, bias=False)
+        self.final_down = nn.Linear(1024, out_dim, bias=False)
+        self.final_norm = nn.LayerNorm(out_dim)
+        
+        self.alpha = nn.Parameter(torch.tensor(0.0))  # tree scale
+        self.dropout = nn.Dropout(dropout)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        if fan_in != 0:
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+            
+        nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
+        nn.init.normal_(self.shared_down.weight, std=0.01)
+        
+        for p in self.value_net.parameters():
+            if p.dim() > 1:
+                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
+            else:
+                nn.init.zeros_(p)
+                
+        for i in range(self.n_action_experts):
+            nn.init.kaiming_uniform_(self.action_up[i].weight, a=math.sqrt(5))
+            nn.init.normal_(self.action_down[i].weight, std=0.01)
+            
+        nn.init.kaiming_uniform_(self.final_up.weight, a=math.sqrt(5))
+        nn.init.normal_(self.final_down.weight, std=0.01)
+
+    def forward(self, x):
+        N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
+        shape_prefix = x.shape[:-1]
+        x_flat = x.reshape(N, self.in_dim)
+        
+        base_logits = F.linear(x_flat, self.weight, self.bias)
+        
+        # 1. Shared Expert
+        shared_out = self.shared_norm(
+            self.shared_down(self.dropout(F.silu(self.shared_up(x_flat))))
+        )
+        
+        # 2. Tree-of-Thought Search
+        # Initial beam state: K=1
+        beam_states = x_flat.unsqueeze(1) # (N, 1, D)
+        
+        for step in range(self.reasoning_steps):
+            K = beam_states.shape[1]
+            
+            # A. Expansion: Each action expert proposes a modification to every state in the beam
+            nk_states = beam_states.reshape(N * K, self.in_dim)
+            
+            candidates = []
+            for i in range(self.n_action_experts):
+                h = self.dropout(F.gelu(self.action_up[i](nk_states)))
+                delta = self.action_norms[i](self.action_down[i](h))
+                new_state = nk_states + delta
+                candidates.append(new_state)
+                
+            # Stack candidates
+            cand_stack = torch.stack(candidates, dim=1)
+            cand_stack = cand_stack.reshape(N, K * self.n_action_experts, self.in_dim)
+            
+            # B. Evaluation (Value Network)
+            flat_cands = cand_stack.reshape(N * K * self.n_action_experts, self.in_dim)
+            scores = self.value_net(flat_cands).squeeze(-1) # (N * K * M)
+            scores = scores.reshape(N, K * self.n_action_experts) # (N, K*M)
+            
+            # C. Selection (Beam Search)
+            K_next = min(self.beam_size, K * self.n_action_experts)
+            
+            topk_scores, topk_indices = torch.topk(scores, k=K_next, dim=1) # (N, K_next)
+            
+            expanded_indices = topk_indices.unsqueeze(-1).expand(-1, -1, self.in_dim)
+            beam_states = torch.gather(cand_stack, 1, expanded_indices) # (N, K_next, D)
+            
+        # 3. Aggregation across the final beam
+        final_K = beam_states.shape[1]
+        flat_final = beam_states.reshape(N * final_K, self.in_dim)
+        
+        h_final = self.dropout(F.silu(self.final_up(flat_final)))
+        final_preds = self.final_norm(self.final_down(h_final)) # (N * final_K, out_dim)
+        final_preds = final_preds.reshape(N, final_K, self.out_dim) # (N, K, out_dim)
+        
+        final_scores = self.value_net(flat_final).squeeze(-1).reshape(N, final_K) # (N, K)
+        agg_weights = torch.softmax(final_scores, dim=1) # (N, K)
+        
+        tree_fused = (final_preds * agg_weights.unsqueeze(-1)).sum(dim=1)
+        
+        base_logits = base_logits.view(*shape_prefix, -1)
+        shared_out = shared_out.view(*shape_prefix, -1)
+        tree_fused = tree_fused.view(*shape_prefix, -1)
+        
+        return (
+            base_logits
+            + self.shared_scale * shared_out
+            + (self.alpha + 1e-4) * tree_fused
+        )
+
+
+class ChampionNetTreeOfThoughtExpert(nn.Module):
+    """
+    Backbone-compatible model with TreeOfThoughtExpertHead (v17).
+    """
+    def __init__(
+        self,
+        n_action_experts: int = 6,
+        beam_size: int = 4,
+        reasoning_steps: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(TreeOfThoughtExpertHead(
+            256, 10,
+            n_action_experts=n_action_experts,
+            beam_size=beam_size,
+            reasoning_steps=reasoning_steps,
+            dropout=dropout,
+        ))
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class ConsensusExpertHead(nn.Module):
+    """
+    Generation v18: Consensus Expert (Architectural Diversity + Learned Arbitration)
+    Uses three fundamentally different computational paradigms as independent
+    reasoning pathways, then a Consensus Network arbitrates.
+
+    Pathways:
+    1. MLP Pathway — Deep feed-forward MoE experts (fast pattern matching)
+    2. Attention Pathway — Self-attention over learned expert embeddings (relational reasoning)
+    3. Convolutional Pathway — 1D convolution over the feature vector (local pattern detection)
+
+    A Consensus Network evaluates inter-pathway agreement and produces the final answer.
+    """
+
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        n_mlp_experts: int = 6,
+        n_attn_heads: int = 4,
+        conv_channels: int = 64,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.n_mlp_experts = n_mlp_experts
+
+        # Base projection
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
+        self.bias = nn.Parameter(torch.zeros(out_dim))
+
+        # --- Pathway 1: MLP MoE ---
+        mlp_dims = [1024, 1536, 2048, 1024, 1536, 2048]
+        mlp_acts = [F.silu, F.gelu, F.mish, F.relu, F.selu, torch.tanh]
+        self.mlp_up = nn.ModuleList([
+            nn.Linear(in_dim, mlp_dims[i % len(mlp_dims)], bias=False)
+            for i in range(n_mlp_experts)
+        ])
+        self.mlp_down = nn.ModuleList([
+            nn.Linear(mlp_dims[i % len(mlp_dims)], out_dim, bias=False)
+            for i in range(n_mlp_experts)
+        ])
+        self.mlp_acts = [mlp_acts[i % len(mlp_acts)] for i in range(n_mlp_experts)]
+        self.mlp_norms = nn.ModuleList([nn.LayerNorm(out_dim) for _ in range(n_mlp_experts)])
+        self.mlp_gate = nn.Linear(in_dim, n_mlp_experts, bias=False)
+
+        # --- Pathway 2: Self-Attention ---
+        self.n_attn_heads = n_attn_heads
+        self.attn_embed = nn.Parameter(torch.randn(8, in_dim) * 0.02)
+        self.attn_q = nn.Linear(in_dim, in_dim, bias=False)
+        self.attn_k = nn.Linear(in_dim, in_dim, bias=False)
+        self.attn_v = nn.Linear(in_dim, in_dim, bias=False)
+        self.attn_proj = nn.Linear(in_dim, out_dim, bias=False)
+        self.attn_norm = nn.LayerNorm(out_dim)
+        self.attn_scale = (in_dim // n_attn_heads) ** -0.5
+
+        # --- Pathway 3: 1D Convolution ---
+        self.conv_channels = conv_channels
+        self.conv1 = nn.Conv1d(1, conv_channels, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(conv_channels, conv_channels, kernel_size=3, padding=1)
+        self.conv_pool = nn.AdaptiveAvgPool1d(1)
+        self.conv_proj = nn.Linear(conv_channels, out_dim, bias=False)
+        self.conv_norm = nn.LayerNorm(out_dim)
+
+        # --- Consensus Network (Arbiter) ---
+        consensus_in = 3 * out_dim
+        self.consensus = nn.Sequential(
+            nn.Linear(consensus_in, 128),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, 64),
+            nn.GELU(),
+            nn.Linear(64, 3),
+        )
+
+        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.dropout = nn.Dropout(dropout)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        if fan_in != 0:
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+        for i in range(self.n_mlp_experts):
+            nn.init.kaiming_uniform_(self.mlp_up[i].weight, a=math.sqrt(5))
+            nn.init.normal_(self.mlp_down[i].weight, std=0.01)
+        nn.init.normal_(self.mlp_gate.weight, std=0.02)
+
+        nn.init.kaiming_uniform_(self.attn_q.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.attn_k.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.attn_v.weight, a=math.sqrt(5))
+        nn.init.normal_(self.attn_proj.weight, std=0.01)
+
+        nn.init.normal_(self.conv_proj.weight, std=0.01)
+
+        for p in self.consensus.parameters():
+            if p.dim() > 1:
+                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
+            else:
+                nn.init.zeros_(p)
+
+    def forward(self, x):
+        N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
+        shape_prefix = x.shape[:-1]
+        x_flat = x.reshape(N, self.in_dim)
+
+        base_logits = F.linear(x_flat, self.weight, self.bias)
+
+        # --- Pathway 1: MLP MoE ---
+        gate_scores = torch.sigmoid(self.mlp_gate(x_flat))
+        mlp_outs = []
+        for i in range(self.n_mlp_experts):
+            h = self.dropout(self.mlp_acts[i](self.mlp_up[i](x_flat)))
+            mlp_outs.append(self.mlp_norms[i](self.mlp_down[i](h)))
+        mlp_stack = torch.stack(mlp_outs, dim=1)
+        mlp_pred = (mlp_stack * gate_scores.unsqueeze(-1)).sum(dim=1)
+
+        # --- Pathway 2: Self-Attention ---
+        embeds = self.attn_embed.unsqueeze(0).expand(N, -1, -1)
+        q = self.attn_q(x_flat).unsqueeze(1)
+        k = self.attn_k(embeds)
+        v = self.attn_v(embeds)
+        attn_weights = torch.softmax(
+            (q * k).sum(dim=-1, keepdim=True) * self.attn_scale, dim=1
+        )
+        attn_out = (attn_weights * v).sum(dim=1)
+        attn_pred = self.attn_norm(self.attn_proj(attn_out))
+
+        # --- Pathway 3: 1D Convolution ---
+        x_conv = x_flat.unsqueeze(1)
+        h_conv = F.gelu(self.conv1(x_conv))
+        h_conv = F.gelu(self.conv2(h_conv))
+        h_conv = self.conv_pool(h_conv).squeeze(-1)
+        conv_pred = self.conv_norm(self.conv_proj(h_conv))
+
+        # --- Consensus Network ---
+        pathway_preds = torch.stack([mlp_pred, attn_pred, conv_pred], dim=1)
+        consensus_in = torch.cat([mlp_pred, attn_pred, conv_pred], dim=-1)
+        consensus_weights = torch.softmax(self.consensus(consensus_in), dim=-1)
+        consensus_fused = (pathway_preds * consensus_weights.unsqueeze(-1)).sum(dim=1)
+
+        consensus_fused = consensus_fused.view(*shape_prefix, -1)
+        base_logits = base_logits.view(*shape_prefix, -1)
+
+        return base_logits + (self.alpha + 1e-4) * consensus_fused
+
+
+class ChampionNetConsensusExpert(nn.Module):
+    """
+    Backbone-compatible model with ConsensusExpertHead (v18).
+    """
+    def __init__(
+        self,
+        n_mlp_experts: int = 6,
+        n_attn_heads: int = 4,
+        conv_channels: int = 64,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(ConsensusExpertHead(
+            256, 10,
+            n_mlp_experts=n_mlp_experts,
+            n_attn_heads=n_attn_heads,
+            conv_channels=conv_channels,
+            dropout=dropout,
+        ))
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 class ChampionNetHierarchicalExpert(nn.Module):
     """
     Backbone-compatible model with HierarchicalMoEClassifierHead.
@@ -2224,9 +2948,17 @@ def build_model(
         return ChampionNetThoughtExpert(dropout=dropout)
     if model_size == "recursive_expert":
         return ChampionNetRecursiveExpert(dropout=dropout)
+    if model_size == "reflexive_expert":
+        return ChampionNetReflexiveExpert(dropout=dropout)
+    if model_size == "metacognitive_expert":
+        return ChampionNetMetaCognitiveExpert(dropout=dropout)
+    if model_size == "tree_of_thought_expert":
+        return ChampionNetTreeOfThoughtExpert(dropout=dropout)
+    if model_size == "consensus_expert":
+        return ChampionNetConsensusExpert(dropout=dropout)
 
     raise ValueError(
-        f"Unknown model_size={model_size!r}. Use 'base', 'large', 'xlarge', 'xxlarge', 'xxxlarge', 'ultralarge', 'megalarge', 'ultra_expert', 'hierarchical_expert', 'deep_expert', 'expert_choice', or 'smarter_expert'."
+        f"Unknown model_size={model_size!r}. Use one of {SUPPORTED_MODEL_SIZES}."
     )
 
 
@@ -2655,6 +3387,141 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
+    if model_size == "reflexive_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}initial_gate.weight",
+            f"{head_pref}critique_gate.weight",
+            f"{head_pref}alpha",
+            f"{head_pref}beta",
+        }
+        for i in range(4): # default n_experts for reflexive
+            allowed_missing.add(f"{head_pref}initial_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}initial_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}initial_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}initial_norms.{i}.bias")
+            allowed_missing.add(f"{head_pref}critique_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_norms.{i}.bias")
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "reflexive_expert":
+            filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+            
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
+    if model_size == "metacognitive_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
+            f"{head_pref}shared_scale", f"{head_pref}proposal_bias",
+            f"{head_pref}alpha", f"{head_pref}beta",
+        }
+        for i in range(6):  # n_proposal_experts
+            allowed_missing.add(f"{head_pref}proposal_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}proposal_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}proposal_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}proposal_norms.{i}.bias")
+        for i in range(4):  # n_critique_experts
+            allowed_missing.add(f"{head_pref}critique_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_norms.{i}.bias")
+        for i in range(3):  # reasoning_steps
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.bias")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.up.bias")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.down.bias")
+            allowed_missing.add(f"{head_pref}proposal_gates.{i}.weight")
+            allowed_missing.add(f"{head_pref}critique_gates.{i}.weight")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.weight")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.bias")
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "metacognitive_expert":
+            filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
+    if model_size == "tree_of_thought_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
+            f"{head_pref}shared_scale", f"{head_pref}alpha",
+            f"{head_pref}final_up.weight", f"{head_pref}final_down.weight",
+            f"{head_pref}final_norm.weight", f"{head_pref}final_norm.bias",
+        }
+        for i in range(6):  # n_action_experts
+            allowed_missing.add(f"{head_pref}action_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}action_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}action_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}action_norms.{i}.bias")
+        # Value net
+        allowed_missing.add(f"{head_pref}value_net.0.weight")
+        allowed_missing.add(f"{head_pref}value_net.0.bias")
+        allowed_missing.add(f"{head_pref}value_net.3.weight")
+        allowed_missing.add(f"{head_pref}value_net.3.bias")
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "tree_of_thought_expert":
+            filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
+    if model_size == "consensus_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}alpha",
+            f"{head_pref}mlp_gate.weight",
+            f"{head_pref}attn_embed",
+            f"{head_pref}attn_q.weight", f"{head_pref}attn_k.weight",
+            f"{head_pref}attn_v.weight", f"{head_pref}attn_proj.weight",
+            f"{head_pref}attn_norm.weight", f"{head_pref}attn_norm.bias",
+            f"{head_pref}conv1.weight", f"{head_pref}conv1.bias",
+            f"{head_pref}conv2.weight", f"{head_pref}conv2.bias",
+            f"{head_pref}conv_proj.weight",
+            f"{head_pref}conv_norm.weight", f"{head_pref}conv_norm.bias",
+            f"{head_pref}consensus.0.weight", f"{head_pref}consensus.0.bias",
+            f"{head_pref}consensus.3.weight", f"{head_pref}consensus.3.bias",
+            f"{head_pref}consensus.5.weight", f"{head_pref}consensus.5.bias",
+        }
+        for i in range(6):  # n_mlp_experts
+            allowed_missing.add(f"{head_pref}mlp_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}mlp_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}mlp_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}mlp_norms.{i}.bias")
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "consensus_expert":
+            filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
     if model_size == "deep_expert":
         allowed_missing = {
             "layers.10.shared_up.weight", "layers.10.shared_down.weight",
@@ -2776,6 +3643,14 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
             return "expert_choice"
         return "ultra_expert"
     
+    if "layers.10.halt_gates.0.weight" in state_dict and "layers.10.proposal_gates.0.weight" in state_dict:
+        return "metacognitive_expert"
+    if "layers.10.value_net.0.weight" in state_dict and "layers.10.action_up.0.weight" in state_dict:
+        return "tree_of_thought_expert"
+    if "layers.10.mlp_gate.weight" in state_dict and "layers.10.consensus.0.weight" in state_dict:
+        return "consensus_expert"
+    if "layers.10.critique_gate.weight" in state_dict:
+        return "reflexive_expert"
     if "layers.10.exit_gates.0.weight" in state_dict:
         return "recursive_expert"
     if "layers.10.reasoning_cells.0.up.weight" in state_dict:
