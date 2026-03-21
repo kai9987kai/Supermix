@@ -109,7 +109,7 @@ def main() -> None:
     qp.save_jsonl(eval_out, list(eval_pairs))
     print(f"[eval] samples={len(eval_pairs)}")
     print("[benchmark] base...")
-    base_metrics = qp.evaluate_model(
+    base_metrics, base_samples = qp.evaluate_model_detailed(
         base_model=args.base_model,
         eval_pairs=eval_pairs,
         device=device,
@@ -119,12 +119,13 @@ def main() -> None:
     )
 
     tuned_metrics: Dict[str, float] = {}
+    tuned_samples: List[Dict[str, object]] = []
     adapter_dir = Path(args.adapter_dir).expanduser().resolve() if args.adapter_dir.strip() else None
     if adapter_dir is not None:
         if not adapter_dir.exists():
             raise FileNotFoundError(f"Adapter directory not found: {adapter_dir}")
         print("[benchmark] tuned...")
-        tuned_metrics = qp.evaluate_model(
+        tuned_metrics, tuned_samples = qp.evaluate_model_detailed(
             base_model=args.base_model,
             eval_pairs=eval_pairs,
             device=device,
@@ -132,6 +133,12 @@ def main() -> None:
             max_new_tokens=int(args.max_new_tokens),
             adapter_dir=adapter_dir,
         )
+
+    artifact_paths, sample_summary = qp.save_benchmark_sample_artifacts(
+        output_dir=run_dir,
+        base_samples=base_samples,
+        tuned_samples=tuned_samples,
+    )
 
     results = {
         "config": {
@@ -148,6 +155,8 @@ def main() -> None:
             "eval_size": int(args.eval_size),
             "max_eval_samples": int(args.max_eval_samples),
         },
+        "artifacts": artifact_paths,
+        "sample_summary": sample_summary,
         "base": base_metrics,
     }
     if tuned_metrics:

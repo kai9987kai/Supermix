@@ -9,6 +9,7 @@ def configure_torch_runtime(
     torch_interop_threads: int = 0,
     allow_tf32: bool = True,
     matmul_precision: str = "high",
+    strict_determinism: bool = False,
 ) -> None:
     cpu_count = os.cpu_count() or 1
     n_threads = int(torch_num_threads)
@@ -36,7 +37,12 @@ def configure_torch_runtime(
         try:
             torch.backends.cuda.matmul.allow_tf32 = bool(allow_tf32)
             torch.backends.cudnn.allow_tf32 = bool(allow_tf32)
-            torch.backends.cudnn.benchmark = True
+            if bool(strict_determinism):
+                torch.backends.cudnn.benchmark = False
+                torch.backends.cudnn.deterministic = True
+                torch.use_deterministic_algorithms(True, warn_only=True)
+            else:
+                torch.backends.cudnn.benchmark = True
         except Exception:
             pass
 

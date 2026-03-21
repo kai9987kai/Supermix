@@ -1,6 +1,0 @@
-{
-  "stage": "sft",
-  "sft_steps": 460,
-  "sft_loss_mean": 6.007151090662987,
-  "checkpoint_adapter_dir": "artifacts\\qwen_supermix_enhanced_v25_selective_pref\\checkpoints\\sft_step_00460\\adapter"
-}

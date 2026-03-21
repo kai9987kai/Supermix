@@ -94,6 +94,7 @@ HTML = r"""<!doctype html>
     .primary-btn{background:linear-gradient(135deg,#2d74c4,var(--blue));font-weight:700}
     .card{padding:16px}
     .card h2{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+    .command-hint{margin:12px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
     .metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
     .metric{padding:12px;border-radius:var(--r-md);background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)}
     .metric .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px}
@@ -229,6 +230,7 @@ HTML += r"""
           <button class="ghost-btn" id="exportBtn">Export Chat</button>
           <button class="primary-btn" id="clearBtn">Clear Session</button>
         </div>
+        <p class="command-hint">Slash commands: <code>/help</code>, <code>/preset coding</code>, <code>/steer ...</code>, <code>/new</code>, <code>/clear</code>, <code>/export</code>, <code>/status</code></p>
         <div class="status-box" id="statusBox">Waiting for runtime status...</div>
       </section>
     </aside>
@@ -293,6 +295,7 @@ HTML += r"""
     const SETTINGS_KEY = "supermix-qwen-v26-settings";
     const SESSION_KEY = "supermix-qwen-v26-session";
     const HISTORY_KEY_PREFIX = "supermix-qwen-v26-history-";
+    const DRAFT_KEY_PREFIX = "supermix-qwen-v26-draft-";
     const PRESETS = {
       direct: { maxNew: 72, temp: 0.05, topP: 0.82 },
       balanced: { maxNew: 112, temp: 0.20, topP: 0.92 },
@@ -373,6 +376,40 @@ HTML += r"""
 
     function historyStorageKey(sessionId) {
       return HISTORY_KEY_PREFIX + String(sessionId || "");
+    }
+
+    function draftStorageKey(sessionId) {
+      return DRAFT_KEY_PREFIX + String(sessionId || "");
+    }
+
+    function currentDraftText() {
+      return String((els.prompt && els.prompt.value) || "").trim();
+    }
+
+    function saveDraft() {
+      try {
+        const value = els.prompt ? String(els.prompt.value || "") : "";
+        if (value) {
+          localStorage.setItem(draftStorageKey(state.sessionId), value);
+        } else {
+          localStorage.removeItem(draftStorageKey(state.sessionId));
+        }
+      } catch (err) {
+        /* localStorage can fail in hardened browser contexts */
+      }
+      updateConversationSummary();
+    }
+
+    function restoreDraft() {
+      let value = "";
+      try {
+        value = localStorage.getItem(draftStorageKey(state.sessionId)) || "";
+      } catch (err) {
+        value = "";
+      }
+      els.prompt.value = value;
+      autoResizePrompt();
+      updateConversationSummary();
     }
 
     function formatClock(value) {
@@ -480,6 +517,7 @@ HTML += r"""
         : text;
       els.prompt.value = next;
       autoResizePrompt();
+      saveDraft();
       els.prompt.focus();
     }
 
@@ -529,7 +567,10 @@ HTML += r"""
           : "No assistant output yet";
 
       els.contextValue.textContent = String(historyDepth);
-      els.contextDetail.textContent = state.settings.systemHint.trim() ? "Steering on" : "Steering off";
+      els.contextDetail.textContent = [
+        state.settings.systemHint.trim() ? "Steering on" : "Steering off",
+        currentDraftText() ? "draft saved" : "draft empty"
+      ].join(" · ");
     }
 
     function ensureSessionId() {
@@ -845,6 +886,12 @@ HTML += r"""
       updateConversationSummary();
     }
 
+    function addLocalNotice(text) {
+      const meta = { local_only: true };
+      addMessage("bot", text, meta, { at: new Date().toISOString() });
+      rememberMessage("bot", text, meta);
+    }
+
     function setPendingMessage() {
       if (state.pendingNode) return;
       const node = addMessage("bot", "Working on it...", { pending: "running local generation" }, { at: new Date().toISOString() });
@@ -890,14 +937,103 @@ HTML += r"""
       els.prompt.style.height = Math.min(220, els.prompt.scrollHeight) + "px";
     }
 
+    function parseSlashCommand(text) {
+      const trimmed = String(text || "").trim();
+      if (!trimmed.startsWith("/")) return null;
+      const firstSpace = trimmed.indexOf(" ");
+      const name = (firstSpace === -1 ? trimmed.slice(1) : trimmed.slice(1, firstSpace)).trim().toLowerCase();
+      const arg = firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1).trim();
+      if (!name) return null;
+      return { name: name, arg: arg };
+    }
+
+    function summarizeLocalStatus() {
+      if (!state.status) return "Runtime status has not loaded yet.";
+      const profile = state.status.profile || {};
+      const benchmark = profile.benchmark || {};
+      const parts = [
+        "Runtime " + (state.status.loaded ? "loaded" : "not ready"),
+        "device " + String(state.status.device || "unknown"),
+        "adapter " + (state.status.adapter_loaded ? "ready" : "missing"),
+        "preset " + state.settings.preset,
+        "context " + String(buildHistoryPayload().length) + " turns"
+      ];
+      if (benchmark.available && Number.isFinite(Number(benchmark.token_f1))) {
+        parts.push("F1 " + Number(benchmark.token_f1).toFixed(3));
+      }
+      return parts.join(" | ");
+    }
+
+    async function handleSlashCommand(command) {
+      if (!command) return false;
+      if (command.name === "help") {
+        addLocalNotice(
+          "Slash commands stay local:\n" +
+          "- `/help` show command help\n" +
+          "- `/preset <name>` switch presets, for example `/preset coding`\n" +
+          "- `/steer <text>` update the session steering note\n" +
+          "- `/new` start a new session\n" +
+          "- `/clear` clear the current session on the server and in the UI\n" +
+          "- `/export` download the current transcript\n" +
+          "- `/status` summarize the current runtime and session state"
+        );
+        return true;
+      }
+      if (command.name === "preset") {
+        const presetName = command.arg.toLowerCase();
+        if (!PRESETS[presetName]) {
+          addLocalNotice("Unknown preset. Available presets: `direct`, `balanced`, `reasoning`, `creative`, `coding`.");
+          return true;
+        }
+        applyPreset(presetName, true);
+        addLocalNotice("Preset changed to `" + presetName + "`.");
+        return true;
+      }
+      if (command.name === "steer") {
+        state.settings.systemHint = command.arg;
+        els.systemHint.value = command.arg;
+        saveSettings();
+        updateSendNote();
+        addLocalNotice(command.arg ? "Session steering updated." : "Session steering cleared.");
+        return true;
+      }
+      if (command.name === "new") {
+        newSession();
+        return true;
+      }
+      if (command.name === "clear") {
+        await clearSession(true);
+        return true;
+      }
+      if (command.name === "export") {
+        exportTranscript();
+        return true;
+      }
+      if (command.name === "status") {
+        addLocalNotice(summarizeLocalStatus());
+        return true;
+      }
+      addLocalNotice("Unknown slash command `/" + command.name + "`. Use `/help`.");
+      return true;
+    }
+
     async function sendMessage() {
       const text = els.prompt.value.trim();
       if (!text || state.sending) return;
+      const command = parseSlashCommand(text);
+      if (command) {
+        els.prompt.value = "";
+        autoResizePrompt();
+        saveDraft();
+        await handleSlashCommand(command);
+        return;
+      }
       const history = buildHistoryPayload();
       addMessage("user", text, {}, { at: new Date().toISOString() });
       rememberMessage("user", text);
       els.prompt.value = "";
       autoResizePrompt();
+      saveDraft();
       setSending(true);
       setPendingMessage();
       try {
@@ -948,6 +1084,7 @@ HTML += r"""
       state.lastBotText = "";
       saveConversation();
       renderConversation();
+      restoreDraft();
       showToast("Started a new blank session.", "ok");
     }
 
@@ -989,7 +1126,7 @@ HTML += r"""
       els.topP.addEventListener("input", () => { const value = Number(els.topP.value); state.settings.topP = Number.isFinite(value) ? value : 0.92; updateSendNote(); saveSettings(); });
       els.systemHint.addEventListener("input", () => { state.settings.systemHint = els.systemHint.value; updateSendNote(); saveSettings(); });
       document.querySelectorAll("[data-preset]").forEach((btn) => btn.addEventListener("click", () => applyPreset(btn.dataset.preset, true)));
-      els.prompt.addEventListener("input", autoResizePrompt);
+      els.prompt.addEventListener("input", () => { autoResizePrompt(); saveDraft(); });
       els.prompt.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } });
       document.getElementById("sendBtn").addEventListener("click", sendMessage);
       document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
@@ -1004,7 +1141,7 @@ HTML += r"""
         const button = document.createElement("button");
         button.className = "chip";
         button.textContent = text;
-        button.addEventListener("click", () => { els.prompt.value = text; autoResizePrompt(); els.prompt.focus(); });
+        button.addEventListener("click", () => { els.prompt.value = text; autoResizePrompt(); saveDraft(); els.prompt.focus(); });
         els.starterChips.appendChild(button);
       });
     }
@@ -1029,6 +1166,7 @@ HTML += r"""
     ensureSessionId();
     loadSettings();
     restoreConversation();
+    restoreDraft();
     bindInputs();
     initStarterChips();
     initFollowupChips();
@@ -1256,7 +1394,32 @@ def score_adapter_dir(adapter_dir: Path) -> Tuple[int, float]:
     return (0, adapter_dir.stat().st_mtime)
 
 
+def resolve_gui_default_adapter_dir(project_root: Path) -> Optional[Path]:
+    pointer_path = project_root / ".gui_default_adapter.txt"
+    if not pointer_path.exists():
+        return None
+    try:
+        raw = pointer_path.read_text(encoding="utf-8").lstrip("\ufeff").strip()
+    except OSError as exc:
+        logging.warning("Failed to read GUI default adapter pointer %s: %s", pointer_path, exc)
+        return None
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (project_root / candidate).resolve()
+    cfg = candidate / "adapter_config.json"
+    weights = candidate / "adapter_model.safetensors"
+    if cfg.exists() and weights.exists():
+        return candidate.resolve()
+    logging.warning("Ignoring invalid GUI default adapter pointer %s -> %s", pointer_path, candidate)
+    return None
+
+
 def find_latest_adapter_dir(project_root: Path) -> Path:
+    pinned = resolve_gui_default_adapter_dir(project_root)
+    if pinned is not None:
+        return pinned
     candidates: Dict[str, Path] = {}
     for pattern in ("artifacts/qwen_supermix_enhanced_*/adapter", "artifacts/*/adapter", "artifacts/**/adapter"):
         for candidate in project_root.glob(pattern):

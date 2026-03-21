@@ -3,12 +3,12 @@
   "refresh_seconds": "5",
   "stale_minutes": "20",
   "filter_status": "all",
-  "only_active": true,
+  "only_active": false,
   "only_issues": false,
   "search": "",
   "auto_refresh": true,
-  "trend_metric": "rate",
-  "trend_window": "60m",
+  "trend_metric": "ram",
+  "trend_window": "10m",
   "sort_col": "run",
   "sort_reverse": false
 }

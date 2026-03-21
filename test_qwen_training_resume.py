@@ -8,6 +8,7 @@ sys.path.append(os.path.join(os.getcwd(), "source"))
 
 from qwen_supermix_pipeline import (
     ChatPair,
+    _build_explicit_resume_checkpoint,
     _merge_distillation_pairs,
     _resolve_latest_resume_checkpoint,
 )
@@ -91,3 +92,20 @@ def test_resolve_latest_resume_checkpoint_falls_back_to_scan(tmp_path: Path):
     assert state.sft_steps == 120
     assert state.preference_steps == 40
     assert state.adapter_dir == newer_adapter
+
+
+def test_build_explicit_resume_checkpoint_preserves_external_sft_provenance(tmp_path: Path):
+    adapter_dir = tmp_path / "external" / "adapter"
+    adapter_dir.mkdir(parents=True)
+
+    state = _build_explicit_resume_checkpoint(
+        init_adapter_dir=str(adapter_dir),
+        sft_steps=960,
+        sft_loss_mean=63.9,
+    )
+
+    assert state is not None
+    assert state.stage == "sft"
+    assert state.sft_steps == 960
+    assert state.preference_steps == 0
+    assert state.adapter_dir == adapter_dir

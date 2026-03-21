@@ -1,5 +1,0 @@
-Warm-starting from checkpoint in artifacts\qwen_supermix_enhanced_v26_full
-[runtime] device=cpu model_dtype=torch.float32 gradient_checkpointing=False
-[data] loading Supermix pairs...
-[data] sources=6 -> conversation_data.quality_anchor_v2.jsonl, conversation_data.coding_knowledge_2026_02_19.jsonl, conversation_data.world_events_2026_02_19.jsonl, conversation_data.supermix_plus_v27_500k.jsonl, conversation_data.mega_reasoning_creative_v25_75582.jsonl, conversation_data.mega_creative_250k_v2.jsonl
-[data] progress: pairs=2000/600000 raw=2716 kept=2018 rate=190.27/s

@@ -15,8 +15,14 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 import matplotlib.pyplot as plt
 import torch
 from peft import LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
+try:
+    from peft.tuners.lora.dora import DoraLinearLayer, dequantize_module_weight, transpose
+except Exception:
+    DoraLinearLayer = None
+    dequantize_module_weight = None
+    transpose = None
 from peft.utils.save_and_load import set_peft_model_state_dict
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from chat_pipeline import (
@@ -67,6 +73,7 @@ class PreferencePair:
     conversation_score: float = 0.0
     reasoning_score: float = 0.0
     creativity_score: float = 0.0
+    knowledge_density_score: float = 0.0
     is_followup: bool = False
 
 
@@ -342,6 +349,24 @@ STOPWORDS = {
     "you",
     "your",
 }
+KNOWLEDGE_STRUCTURE_RE = re.compile(
+    r"(^|\n)\s*(?:[-*]|\d+[.)]|step\s+\d+|example:|definition:|formula:|algorithm:|key idea:|note:|code:)",
+    flags=re.IGNORECASE,
+)
+KNOWLEDGE_DENSE_TOKEN_RE = re.compile(
+    r"`[^`]+`|\b[a-z_][a-z0-9_]*\(|\b[a-z]+[0-9][a-z0-9_]*\b|\b(?:api|fft|json|sql|http|https|cuda|gpu|lora|qwen|python|torch|transformer)\b",
+    flags=re.IGNORECASE,
+)
+LOW_DENSITY_FILLER_PHRASES = (
+    "let me know if you want",
+    "i hope this helps",
+    "feel free to ask",
+    "generally speaking",
+    "it depends",
+    "useful and important",
+    "really helpful",
+    "in many ways",
+)
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -429,6 +454,84 @@ def _is_short_answer_prompt(user_text: str) -> bool:
         or "true or false" in low
         or "yes or no" in low
     )
+
+
+def _preference_stop_target_words(user_text: str) -> int:
+    low = _latest_user_text(user_text).lower()
+    if not low:
+        return 0
+    if "one word" in low:
+        return 2
+    if "yes or no" in low or "true or false" in low:
+        return 3
+    if "one sentence" in low:
+        return 18
+    if any(
+        phrase in low
+        for phrase in (
+            "just the answer",
+            "answer only",
+            "only answer",
+            "output only",
+            "just output",
+            "no explanation",
+            "without explanation",
+        )
+    ):
+        return 12
+    if SHORTEN_HINT_RE.search(low) or any(
+        phrase in low
+        for phrase in ("briefly", "succinct", "keep it short", "as short as possible", "be concise")
+    ):
+        return 40
+    return 0
+
+
+def _preference_stop_alignment_score(
+    user_text: str,
+    assistant_text: str,
+    strength: float = 1.0,
+) -> float:
+    scale = max(0.0, float(strength))
+    if scale <= 0.0:
+        return 0.0
+    target_words = _preference_stop_target_words(user_text)
+    text = _fast_cleanup_response_text(assistant_text)
+    if target_words <= 0:
+        return 0.0
+    if not text:
+        return float(-0.35 * scale)
+
+    words = max(1, _word_token_count(text))
+    sentences = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+    sentence_count = max(1, len(sentences))
+    paragraph_count = max(1, len([ln for ln in text.splitlines() if ln.strip()]))
+    low = text.lower()
+
+    bonus = 0.0
+    penalty = 0.0
+    if words <= target_words:
+        bonus += min(0.18, 0.02 * float(target_words - words + 1))
+    else:
+        excess_ratio = float(words - target_words) / float(max(1, target_words))
+        penalty += 0.22 * min(1.8, excess_ratio)
+
+    if target_words <= 4 and sentence_count > 1:
+        penalty += 0.28
+    elif target_words <= 12 and sentence_count > 1:
+        penalty += 0.12 * min(2.0, float(sentence_count - 1))
+    elif target_words <= 18 and sentence_count > 2:
+        penalty += 0.08 * min(2.0, float(sentence_count - 2))
+
+    if paragraph_count > 1:
+        penalty += 0.12
+    if "```" in text and target_words <= 18:
+        penalty += 0.18
+    filler_hits = sum(1 for phrase in LOW_DENSITY_FILLER_PHRASES if phrase in low)
+    if filler_hits > 0:
+        penalty += 0.05 * min(3, filler_hits)
+
+    return float(scale * max(-0.75, min(0.20, bonus - penalty)))
 
 
 def _is_synthetic_template_prompt(user_text: str) -> bool:
@@ -1059,6 +1162,108 @@ def _distill_candidate_temperatures(best_of: int) -> Tuple[float, ...]:
     return tuple(float(x) for x in preset[:best])
 
 
+def _distillation_compactness_score(
+    user_text: str,
+    reference_text: str,
+    candidate_text: str,
+) -> float:
+    reference_words = max(1, _word_token_count(reference_text))
+    candidate_words = max(1, _word_token_count(candidate_text))
+    ratio = float(candidate_words) / float(reference_words)
+    wants_reasoning = _looks_like_reasoning_prompt(user_text)
+    wants_coding = _looks_like_coding_prompt(user_text)
+
+    if candidate_words <= 8:
+        return 0.42
+    if candidate_words <= 16 and bool(wants_reasoning or wants_coding):
+        return 0.78
+
+    soft_limit = 1.02
+    if wants_coding:
+        soft_limit = 1.10
+    if wants_reasoning:
+        soft_limit = 1.18
+
+    score = 1.0
+    if ratio <= 0.92 and candidate_words >= 18:
+        score += 0.06
+    if ratio > soft_limit:
+        score -= min(0.70, (ratio - soft_limit) / (1.10 if wants_reasoning else 0.85))
+    if candidate_words > 150:
+        score -= min(0.35, float(candidate_words - 150) / 260.0)
+    if ratio < 0.55 and bool(wants_reasoning or wants_coding):
+        score -= min(0.28, (0.55 - ratio) / 0.55)
+    return float(max(0.30, min(1.10, score)))
+
+
+def _distillation_candidate_rank(
+    user_text: str,
+    candidate_text: str,
+    reference_text: str,
+    density_bias: float,
+    gain_bias: float,
+    compactness_bias: float,
+    source: str = "dataset",
+) -> Tuple[float, float, float, Dict[str, float]]:
+    quality_score, alignment = _paired_response_score(user_text, candidate_text)
+    knowledge_density = _pair_knowledge_density_score(
+        user_text=user_text,
+        assistant_text=candidate_text,
+        source=source,
+    )
+    reference_quality, _reference_alignment = _paired_response_score(user_text, reference_text)
+    reference_density = _pair_knowledge_density_score(
+        user_text=user_text,
+        assistant_text=reference_text,
+        source=source,
+    )
+    quality_gain = float(quality_score - reference_quality)
+    density_gain = float(knowledge_density - reference_density)
+    compactness = _distillation_compactness_score(
+        user_text=user_text,
+        reference_text=reference_text,
+        candidate_text=candidate_text,
+    )
+    alignment_bonus = (
+        0.08 * max(0.0, float(alignment.conversation))
+        + 0.06 * max(0.0, float(alignment.reasoning))
+        + 0.04 * max(0.0, float(alignment.creativity))
+        + 0.04 * max(0.0, float(alignment.constraint))
+    )
+    base_utility = float(quality_score) + max(0.0, float(density_bias)) * float(knowledge_density)
+    compactness_mix = max(0.0, min(1.0, float(compactness_bias)))
+    utility_scale = (1.0 - compactness_mix) + compactness_mix * float(compactness)
+    rank = (
+        base_utility * utility_scale
+        + max(0.0, float(gain_bias)) * float(quality_gain)
+        + 0.12 * float(density_gain)
+        + alignment_bonus
+    )
+    return float(rank), float(quality_score), float(knowledge_density), {
+        "quality_gain": float(quality_gain),
+        "density_gain": float(density_gain),
+        "compactness": float(compactness),
+        "utility_scale": float(utility_scale),
+        "alignment_bonus": float(alignment_bonus),
+    }
+
+
+def _should_log_progress_heartbeat(
+    visited: int,
+    log_every: int,
+    now: float,
+    last_log_time: float,
+    heartbeat_seconds: float,
+) -> bool:
+    if int(visited) <= 0:
+        return False
+    if int(log_every) > 0 and int(visited) % int(log_every) == 0:
+        return True
+    if float(heartbeat_seconds) > 0.0 and float(now - last_log_time) >= float(heartbeat_seconds):
+        return True
+    return False
+
+
 def apply_supermix_distillation(
     train_pairs: List[ChatPair],
     teacher: SupermixTeacher,
@@ -1071,6 +1276,10 @@ def apply_supermix_distillation(
     log_every: int = 50,
     max_seconds: float = 0.0,
     best_of: int = 1,
+    density_bias: float = 0.0,
+    gain_bias: float = 0.0,
+    compactness_bias: float = 0.0,
+    rank_margin: float = 0.0,
 ) -> Tuple[List[ChatPair], int]:
     if ratio <= 0 or max_teacher_samples <= 0:
         return train_pairs, 0
@@ -1092,7 +1301,11 @@ def apply_supermix_distillation(
         f"target={n_target} ratio={float(ratio):.3f} "
         f"max_seconds={max_seconds if max_seconds > 0 else 'off'} "
         f"best_of={max(1, int(best_of))} "
-        f"min_gain={max(0.0, float(min_quality_gain)):.3f}"
+        f"min_gain={max(0.0, float(min_quality_gain)):.3f} "
+        f"density_bias={max(0.0, float(density_bias)):.3f} "
+        f"gain_bias={max(0.0, float(gain_bias)):.3f} "
+        f"compactness_bias={max(0.0, float(compactness_bias)):.3f} "
+        f"rank_margin={max(0.0, float(rank_margin)):.3f}"
     )
 
     mixed = list(train_pairs)
@@ -1100,6 +1313,8 @@ def apply_supermix_distillation(
     chosen_sorted = sorted(chosen)
     visited = 0
     candidate_temperatures = _distill_candidate_temperatures(best_of=int(best_of))
+    progress_heartbeat_seconds = 30.0
+    last_progress_log_time = float(started)
     for idx in chosen_sorted:
         visited += 1
         if max_seconds > 0 and (time.time() - started) >= max_seconds:
@@ -1113,9 +1328,20 @@ def apply_supermix_distillation(
         if bool(skip_synthetic_prompts) and _is_synthetic_template_prompt(pair.user):
             continue
         base_score, _base_alignment = _paired_response_score(pair.user, pair.assistant)
+        base_rank, _base_rank_score, _base_rank_density, _base_rank_metrics = _distillation_candidate_rank(
+            user_text=pair.user,
+            candidate_text=pair.assistant,
+            reference_text=pair.assistant,
+            density_bias=float(density_bias),
+            gain_bias=float(gain_bias),
+            compactness_bias=float(compactness_bias),
+            source=str(pair.source or "dataset"),
+        )
         required_score = max(float(min_quality_score), base_score + max(0.0, float(min_quality_gain)))
         best_response = ""
         best_score = -1e9
+        best_rank = -1e9
+        best_density = 0.0
         for teacher_resp in teacher.generate_candidates(pair.user, temperatures=candidate_temperatures):
             teacher_resp = _clean_training_text(teacher_resp, is_user=False)
             if not teacher_resp:
@@ -1124,27 +1350,53 @@ def apply_supermix_distillation(
                 continue
             if not _is_quality_pair(pair.user, teacher_resp, min_chars=4):
                 continue
-            teacher_score, _alignment = _paired_response_score(pair.user, teacher_resp)
+            teacher_rank, teacher_score, teacher_density, teacher_metrics = _distillation_candidate_rank(
+                user_text=pair.user,
+                candidate_text=teacher_resp,
+                reference_text=pair.assistant,
+                density_bias=float(density_bias),
+                gain_bias=float(gain_bias),
+                compactness_bias=float(compactness_bias),
+                source=str(pair.source or "dataset"),
+            )
             if teacher_score < required_score:
+                continue
+            if teacher_rank < (base_rank + max(0.0, float(rank_margin))):
                 continue
             key = (pair.user, teacher_resp)
             if key in seen_keys:
                 continue
-            if teacher_score > best_score:
+            if teacher_rank > best_rank or (
+                abs(teacher_rank - best_rank) <= 1e-9
+                and (
+                    teacher_metrics.get("quality_gain", 0.0) > 0.0
+                    or teacher_density > best_density
+                )
+            ):
+                best_rank = teacher_rank
                 best_score = teacher_score
+                best_density = teacher_density
                 best_response = teacher_resp
-        if not best_response:
-            continue
-        seen_keys.add((pair.user, best_response))
-        mixed.append(ChatPair(user=pair.user, assistant=best_response, source="supermix_teacher"))
-        generated += 1
-        if log_every > 0 and visited % log_every == 0:
-            elapsed = max(1e-6, time.time() - started)
+        if best_response:
+            seen_keys.add((pair.user, best_response))
+            mixed.append(ChatPair(user=pair.user, assistant=best_response, source="supermix_teacher"))
+            generated += 1
+
+        now = time.time()
+        if _should_log_progress_heartbeat(
+            visited=visited,
+            log_every=log_every,
+            now=now,
+            last_log_time=last_progress_log_time,
+            heartbeat_seconds=progress_heartbeat_seconds,
+        ):
+            elapsed = max(1e-6, now - started)
             print(
                 "[distill] progress: "
                 f"visited={visited}/{len(chosen_sorted)} generated={generated} "
                 f"rate={visited / elapsed:.2f}/s"
             )
+            last_progress_log_time = float(now)
     rng.shuffle(mixed)
     elapsed = max(1e-6, time.time() - started)
     print(
@@ -1232,6 +1484,92 @@ class PackedChatDataset(Dataset):
         return self.rows[idx]
 
 
+class LengthBucketBatchSampler(Sampler[List[int]]):
+    def __init__(
+        self,
+        lengths: Sequence[int],
+        batch_size: int,
+        shuffle: bool = True,
+        bucket_window_multiplier: int = 16,
+        seed: int = 0,
+    ) -> None:
+        self.lengths = [max(1, int(x)) for x in lengths]
+        self.batch_size = max(1, int(batch_size))
+        self.shuffle = bool(shuffle)
+        self.bucket_window_multiplier = max(2, int(bucket_window_multiplier))
+        self.seed = int(seed)
+        self._epoch = 0
+
+    def __len__(self) -> int:
+        if not self.lengths:
+            return 0
+        return int(math.ceil(float(len(self.lengths)) / float(self.batch_size)))
+
+    def __iter__(self):
+        if not self.lengths:
+            return iter([])
+
+        if not self.shuffle:
+            ordered = sorted(range(len(self.lengths)), key=lambda idx: self.lengths[idx], reverse=True)
+            batches = [
+                ordered[start : start + self.batch_size]
+                for start in range(0, len(ordered), self.batch_size)
+            ]
+            return iter(batches)
+
+        rng = random.Random(self.seed + self._epoch)
+        self._epoch += 1
+        indices = list(range(len(self.lengths)))
+        rng.shuffle(indices)
+        window_size = max(self.batch_size, self.batch_size * self.bucket_window_multiplier)
+        batches: List[List[int]] = []
+        for start in range(0, len(indices), window_size):
+            chunk = indices[start : start + window_size]
+            chunk.sort(key=lambda idx: self.lengths[idx], reverse=True)
+            for offset in range(0, len(chunk), self.batch_size):
+                batch = chunk[offset : offset + self.batch_size]
+                if batch:
+                    batches.append(batch)
+        rng.shuffle(batches)
+        return iter(batches)
+
+
+def _build_bucketed_dataloader(
+    dataset: Dataset,
+    lengths: Sequence[int],
+    batch_size: int,
+    collate_fn,
+    shuffle: bool,
+    enabled: bool,
+    bucket_window_multiplier: int,
+    seed: int,
+    label: str,
+) -> DataLoader:
+    if bool(enabled) and len(lengths) > max(1, int(batch_size)):
+        sampler = LengthBucketBatchSampler(
+            lengths=lengths,
+            batch_size=int(batch_size),
+            shuffle=bool(shuffle),
+            bucket_window_multiplier=int(bucket_window_multiplier),
+            seed=int(seed),
+        )
+        sorted_lengths = sorted(int(x) for x in lengths)
+        median_len = sorted_lengths[len(sorted_lengths) // 2]
+        print(
+            f"[{label}] length-bucketed batches: "
+            f"rows={len(lengths)} batch_size={max(1, int(batch_size))} "
+            f"window_mult={max(2, int(bucket_window_multiplier))} "
+            f"median_tokens={median_len}"
+        )
+        return DataLoader(dataset, batch_sampler=sampler, collate_fn=collate_fn)
+    return DataLoader(
+        dataset,
+        batch_size=max(1, int(batch_size)),
+        shuffle=bool(shuffle),
+        collate_fn=collate_fn,
+    )
+
+
 def build_rows(
     tokenizer,
     pairs: Sequence[ChatPair],
@@ -1253,6 +1591,7 @@ def build_rows(
         if row is not None:
             if row_weight_fn is not None:
                 row["sample_weight"] = float(max(0.05, base_weight))
+            row["sequence_tokens"] = int(len(row["input_ids"]))
             rows.append(row)
         if int(followup_paraphrase_aug) > 0:
             for variant_user in _followup_paraphrase_variants(pair.user, max_variants=int(followup_paraphrase_aug)):
@@ -1262,6 +1601,7 @@ def build_rows(
                     continue
                 aug_weight = float(max(0.05, base_weight * float(followup_paraphrase_weight)))
                 aug_row["sample_weight"] = aug_weight
+                aug_row["sequence_tokens"] = int(len(aug_row["input_ids"]))
                 rows.append(aug_row)
                 augmented_rows += 1
     if not rows:
@@ -1361,6 +1701,74 @@ def _resolve_torch_dtype(dtype_spec: str, device: Any, resolved_backend: str = "
         print("[runtime] cpu training requires float32 weights; overriding requested dtype.")
         return torch.float32
     return resolved
+
+
+def _resolve_peft_bootstrap(
+    runtime_device: Any,
+    resolved_backend: str,
+    runtime_dtype: torch.dtype,
+) -> Tuple[Any, torch.dtype, str]:
+    backend = _device_backend_name(device=runtime_device, resolved_backend=resolved_backend)
+    if backend == "dml":
+        return (
+            torch.device("cpu"),
+            torch.float32,
+            "DirectML PEFT init uses a CPU/float32 bootstrap to avoid PiSSA/DoRA init incompatibilities.",
+        )
+    return runtime_device, runtime_dtype, ""
+
+
+def _patch_dora_linear_forward_for_dml() -> bool:
+    if DoraLinearLayer is None or dequantize_module_weight is None or transpose is None:
+        return False
+    if getattr(DoraLinearLayer.forward, "_supermix_dml_safe", False):
+        return False
+
+    original_forward = DoraLinearLayer.forward
+
+    def _dml_safe_forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
+        if _device_backend_name(device=x.device) != "dml":
+            return original_forward(
+                self,
+                x,
+                lora_A=lora_A,
+                lora_B=lora_B,
+                scaling=scaling,
+                base_layer=base_layer,
+                base_result=base_result,
+            )
+
+        lora_weight = (lora_B.weight @ lora_A.weight).to(dtype=x.dtype)
+        magnitude = self.weight.to(dtype=x.dtype)
+        weight = dequantize_module_weight(base_layer).to(x.dtype)
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling).detach()
+        mag_norm_scale = (magnitude / weight_norm).view(1, -1)
+
+        lora_result = lora_B(lora_A(x))
+
+        if base_result is not None:
+            bias = base_layer.bias
+            if bias is not None:
+                base_result = base_result - bias
+        else:
+            base_result = torch.nn.functional.linear(x, transpose(weight, self.fan_in_fan_out))
+
+        return (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
+
+    _dml_safe_forward._supermix_dml_safe = True
+    DoraLinearLayer.forward = _dml_safe_forward
+    return True
+
+
+def _disable_peft_init_for_weight_load(peft_cfg: Any) -> str:
+    init_mode = getattr(peft_cfg, "init_lora_weights", None)
+    if init_mode in (None, False):
+        return ""
+    try:
+        peft_cfg.init_lora_weights = False
+        return str(init_mode)
+    except Exception:
+        return ""
 
 
 def _load_base_model_and_tokenizer(
@@ -1584,7 +1992,7 @@ def _maybe_merge_adapter_for_inference(model, device: torch.device):
 def _load_adapter_with_compat(
     model,
     adapter_dir: Path,
-    device: torch.device,
+    device: Any,
     is_trainable: bool,
     merge_for_inference: bool = False,
 ):
@@ -1597,13 +2005,44 @@ def _load_adapter_with_compat(
     if not isinstance(peft_model, PeftModel):
         peft_cfg = PeftConfig.from_pretrained(str(adapter_dir))
         peft_cfg.inference_mode = not bool(is_trainable)
+        if _device_backend_name(device=device) == "dml" and bool(getattr(peft_cfg, "use_dora", False)):
+            if _patch_dora_linear_forward_for_dml():
+                print("[adapter] applied DirectML DoRA forward compatibility patch.")
+        disabled_init_mode = _disable_peft_init_for_weight_load(peft_cfg)
+        if disabled_init_mode:
+            print(
+                "[adapter] disabled init_lora_weights while loading saved adapter: "
+                f"{disabled_init_mode}"
+            )
         peft_model = get_peft_model(peft_model, peft_cfg)
 
     incompat = set_peft_model_state_dict(peft_model, canonical_state, adapter_name="default")
-    missing_count = len(getattr(incompat, "missing_keys", []) or [])
-    unexpected_count = len(getattr(incompat, "unexpected_keys", []) or [])
+    missing_keys = list(getattr(incompat, "missing_keys", []) or [])
+    unexpected_keys = list(getattr(incompat, "unexpected_keys", []) or [])
+
+    def _is_adapter_key(key: str) -> bool:
+        return any(
+            marker in str(key)
+            for marker in (
+                ".lora_",
+                "lora_magnitude_vector",
+                "modules_to_save",
+                "prompt_embeddings",
+                "trainable_tokens_",
+            )
+        )
+
+    adapter_missing_count = sum(1 for key in missing_keys if _is_adapter_key(key))
+    adapter_unexpected_count = sum(1 for key in unexpected_keys if _is_adapter_key(key))
+    base_missing_count = max(0, len(missing_keys) - adapter_missing_count)
+    base_unexpected_count = max(0, len(unexpected_keys) - adapter_unexpected_count)
     print(
-        f"[adapter] loaded remapped={remapped_count} missing={missing_count} unexpected={unexpected_count}"
+        "[adapter] loaded "
+        f"remapped={remapped_count} "
+        f"adapter_missing={adapter_missing_count} "
+        f"adapter_unexpected={adapter_unexpected_count} "
+        f"base_missing={base_missing_count} "
+        f"base_unexpected={base_unexpected_count}"
     )
     peft_model = peft_model.to(device)
     if merge_for_inference and not bool(is_trainable):
@@ -1646,7 +2085,9 @@ def build_preference_rows(
                 "conversation_score": float(max(0.0, pair.conversation_score)),
                 "reasoning_score": float(max(0.0, pair.reasoning_score)),
                 "creativity_score": float(max(0.0, pair.creativity_score)),
+                "knowledge_density_score": float(max(0.0, pair.knowledge_density_score)),
                 "is_followup": bool(pair.is_followup),
+                "pair_tokens": int(len(chosen["input_ids"]) + len(rejected["input_ids"])),
             }
         )
     return rows
@@ -1666,6 +2107,7 @@ def _preference_row_rescore_weight(
     conversation_score = max(0.0, float(row.get("conversation_score", 0.0)))
     reasoning_score = max(0.0, float(row.get("reasoning_score", 0.0)))
     creativity_score = max(0.0, float(row.get("creativity_score", 0.0)))
+    knowledge_density_score = max(0.0, float(row.get("knowledge_density_score", 0.0)))
     followup_bonus = 0.04 if bool(row.get("is_followup", False)) else 0.0
 
     easy_focus = 0.84 + 0.46 * min(1.0, quality_gap / 0.24)
@@ -1679,6 +2121,7 @@ def _preference_row_rescore_weight(
         + 0.05 * min(2.0, conversation_score)
         + 0.07 * min(2.0, reasoning_score)
         + 0.04 * min(2.0, creativity_score)
+        + 0.08 * min(2.0, knowledge_density_score)
         + followup_bonus
     )
     prompt_focus = 0.96 + 0.04 * min(2.5, prompt_complexity)
@@ -1784,8 +2227,9 @@ def _sequence_average_log_prob(logits: torch.Tensor, labels: torch.Tensor) -> Tu
     valid = shift_labels.ne(-100)
     safe_labels = shift_labels.masked_fill(~valid, 0)
     token_log_probs = torch.log_softmax(shift_logits, dim=-1).gather(-1, safe_labels.unsqueeze(-1)).squeeze(-1)
-    token_log_probs = token_log_probs * valid
-    lengths = valid.sum(dim=1).clamp_min(1)
+    valid_f = valid.to(token_log_probs.dtype)
+    token_log_probs = token_log_probs * valid_f
+    lengths = valid_f.sum(dim=1).clamp_min(1.0)
     avg_log_prob = token_log_probs.sum(dim=1) / lengths
     return avg_log_prob, lengths
 
@@ -1855,6 +2299,16 @@ def _sigmoid_preference_loss(logits_delta: torch.Tensor, label_smoothing: float 
     return -((1.0 - eps) * pos + eps * neg)
 
 
+def _tensor_one_minus(x: torch.Tensor) -> torch.Tensor:
+    return torch.ones_like(x) - x
+
+
+def _broadcast_margin_like(delta: torch.Tensor, margin: Any) -> torch.Tensor:
+    if isinstance(margin, torch.Tensor):
+        return margin.to(device=delta.device, dtype=delta.dtype)
+    return delta.new_full(delta.shape, float(margin))
+
+
 def _dpo_preference_loss(
     delta: torch.Tensor,
     ref_delta: torch.Tensor,
@@ -1862,12 +2316,16 @@ def _dpo_preference_loss(
     margin: float = 0.0,
     label_smoothing: float = 0.0,
 ) -> torch.Tensor:
-    logits_delta = float(beta) * ((delta - ref_delta) - float(margin))
+    margin_t = _broadcast_margin_like(delta, margin)
+    logits_delta = float(beta) * ((delta - ref_delta) - margin_t)
     return _sigmoid_preference_loss(logits_delta, label_smoothing=label_smoothing)
 
 
 def _ipo_target_gap(beta: float, margin: float = 0.0) -> float:
-    return float(margin) + 0.5 / max(1e-6, float(beta))
+    base_gap = 0.5 / max(1e-6, float(beta))
+    if isinstance(margin, torch.Tensor):
+        return margin + base_gap
+    return float(margin) + base_gap
 
 
 def _ipo_preference_loss(
@@ -1877,7 +2335,25 @@ def _ipo_preference_loss(
     margin: float = 0.0,
 ) -> torch.Tensor:
     target_gap = _ipo_target_gap(beta=beta, margin=margin)
-    return ((delta - ref_delta) - float(target_gap)).pow(2)
+    target_gap_t = _broadcast_margin_like(delta, target_gap)
+    return ((delta - ref_delta) - target_gap_t).pow(2)
+
+
+def _preference_length_control_margin(
+    chosen_len: torch.Tensor,
+    rejected_len: torch.Tensor,
+    target_ratio: float,
+    max_penalty: float,
+) -> torch.Tensor:
+    chosen = chosen_len.float().clamp_min(1.0)
+    rejected = rejected_len.float().clamp_min(1.0)
+    ratio = chosen / rejected
+    target = max(0.75, float(target_ratio))
+    penalty_cap = max(0.0, float(max_penalty))
+    excess = torch.relu(ratio - target) / target
+    if penalty_cap <= 0.0:
+        return torch.zeros_like(excess)
+    return excess.clamp(max=penalty_cap)
 
 
 def _xpo_preference_logits_delta(
@@ -1934,14 +2410,16 @@ def _robust_preference_correctness_weights(
         return torch.ones_like(logits_delta)
 
     prob_correct = torch.sigmoid(logits_delta.detach().float())
-    numerator = (1.0 - eta) * prob_correct
-    denom = numerator + eta * (1.0 - prob_correct)
+    eta_t = prob_correct.new_tensor(eta)
+    robust_alpha_t = prob_correct.new_tensor(robust_alpha)
+    numerator = (torch.ones_like(prob_correct) - eta_t) * prob_correct
+    denom = numerator + eta_t * _tensor_one_minus(prob_correct)
     posterior = numerator / denom.clamp_min(1e-6)
     weights = posterior / posterior.mean().clamp_min(1e-6)
     max_scale = max(1.0, float(clip))
     weights = weights.clamp(min=1.0 / max_scale, max=max_scale)
     weights = weights / weights.mean().clamp_min(1e-6)
-    blended = (1.0 - robust_alpha) + robust_alpha * weights
+    blended = (torch.ones_like(weights) - robust_alpha_t) + robust_alpha_t * weights
     return blended / blended.mean().clamp_min(1e-6)
 
 
@@ -1959,6 +2437,7 @@ def _pair_sft_weight(
     prompt_skill_boost: float,
     conversation_boost: float,
     creativity_boost: float,
+    knowledge_density_boost: float,
 ) -> float:
     if str(mode).strip().lower() == "none":
         return 1.0
@@ -1967,6 +2446,7 @@ def _pair_sft_weight(
     user = _coerce_text(pair.user)
     assistant = _fast_cleanup_response_text(str(pair.assistant or ""))
     paired_score, alignment = _paired_response_score(user, assistant)
+    knowledge_density = _pair_knowledge_density_score(user, assistant, source=source)
 
     # Map quality to a mild multiplier around 1.0.
     quality_factor = 1.0 + 0.22 * max(-1.0, min(1.5, (paired_score - 1.2) / 1.2))
@@ -1998,8 +2478,253 @@ def _pair_sft_weight(
         w *= 1.0 + creative_gain
     if bool(alignment.is_followup):
         w *= 1.0 + 0.05 * min(1.0, max(0.0, float(alignment.conversation)))
+    if knowledge_density > 0.0:
+        density_gain = (max(1.0, float(knowledge_density_boost)) - 1.0) * min(1.0, knowledge_density)
+        w *= 1.0 + density_gain
 
     return float(max(float(min_weight), min(float(max_weight), w)))
+
+
+def _normalized_quality_signal(score: float) -> float:
+    return float(max(0.0, min(1.25, (float(score) + 0.4) / 2.4)))
+
+
+def _sft_pair_selection_score(
+    pair: ChatPair,
+    mode: str,
+    hardness_target: float,
+    hardness_bandwidth: float,
+) -> Tuple[float, Dict[str, float]]:
+    assistant = _fast_cleanup_response_text(pair.assistant)
+    if not assistant:
+        return -1e9, {}
+
+    quality_score, alignment = _paired_response_score(pair.user, assistant)
+    quality_signal = _normalized_quality_signal(quality_score)
+    density = _pair_knowledge_density_score(pair.user, assistant, source=str(pair.source or ""))
+    reasoning_signal = max(float(alignment.reasoning), _response_reasoning_signal(assistant))
+    conversation_signal = max(0.0, float(alignment.conversation))
+    creativity_signal = max(0.0, float(alignment.creativity))
+    prompt_complexity = min(1.0, float(_prompt_complexity_score(pair.user)) / 1.35)
+    word_count = max(1, _word_token_count(assistant))
+
+    if word_count <= 18:
+        compactness = 0.55
+    elif word_count <= 96:
+        compactness = 1.0
+    else:
+        compactness = max(0.35, 1.0 - (float(word_count - 96) / 260.0))
+
+    utility = (
+        0.40 * quality_signal
+        + 0.18 * density
+        + 0.14 * reasoning_signal
+        + 0.10 * conversation_signal
+        + 0.08 * creativity_signal
+        + 0.10 * compactness
+    )
+    if _looks_like_coding_prompt(pair.user):
+        utility += 0.04
+    if _looks_like_reasoning_prompt(pair.user):
+        utility += 0.05
+    if "quality_anchor" in str(pair.source or "").lower():
+        utility += 0.03
+
+    difficulty = min(
+        1.0,
+        0.42 * prompt_complexity
+        + 0.22 * reasoning_signal
+        + 0.18 * min(1.0, float(word_count) / 180.0)
+        + 0.18 * quality_signal,
+    )
+
+    score = utility
+    mode_norm = str(mode).strip().lower()
+    if mode_norm == "capacity_aware":
+        bw = max(0.08, float(hardness_bandwidth))
+        z = (difficulty - float(hardness_target)) / bw
+        band = math.exp(-0.5 * z * z)
+        score = utility * (0.35 + 0.65 * band)
+
+    return float(score), {
+        "quality": float(quality_score),
+        "density": float(density),
+        "reasoning": float(reasoning_signal),
+        "conversation": float(conversation_signal),
+        "creativity": float(creativity_signal),
+        "prompt_complexity": float(prompt_complexity),
+        "difficulty": float(difficulty),
+        "compactness": float(compactness),
+        "words": float(word_count),
+        "utility": float(utility),
+        "score": float(score),
+    }
+
+
+def _estimated_sft_pair_tokens(pair: ChatPair) -> int:
+    user_text = _clean_training_text(pair.user, is_user=True)
+    assistant_text = _fast_cleanup_response_text(pair.assistant)
+    user_tokens = max(1, _word_token_count(user_text))
+    assistant_tokens = max(1, _word_token_count(assistant_text))
+    return max(8, int(round(user_tokens * 1.10 + assistant_tokens * 1.05 + 6.0)))
+
+
+def _is_scoped_sft_selection_pair(
+    pair: ChatPair,
+    scope: str,
+    scope_min_words: int,
+) -> bool:
+    scope_norm = str(scope).strip().lower()
+    if scope_norm in {"", "all"}:
+        return True
+
+    assistant_words = max(1, _word_token_count(_fast_cleanup_response_text(pair.assistant)))
+    source_low = str(pair.source or "").strip().lower()
+    is_teacher = source_low == "supermix_teacher"
+    is_synthetic = _is_synthetic_template_prompt(pair.user)
+
+    if scope_norm == "verbose_synthetic_teacher":
+        return bool((is_teacher or is_synthetic) and assistant_words >= max(1, int(scope_min_words)))
+
+    return True
+
+
+def _select_sft_training_pairs(
+    pairs: Sequence[ChatPair],
+    strategy: str,
+    keep_ratio: float,
+    min_keep: int,
+    max_keep: int,
+    hardness_target: float,
+    hardness_bandwidth: float,
+    budget_mode: str = "pairs",
+    budget_power: float = 0.5,
+    scope: str = "all",
+    scope_min_words: int = 40,
+) -> List[ChatPair]:
+    mode = str(strategy).strip().lower()
+    if mode not in {"none", "utility_topk", "capacity_aware"}:
+        mode = "none"
+    if mode == "none" or not pairs:
+        return list(pairs)
+
+    scope = str(scope).strip().lower()
+    if scope not in {"all", "verbose_synthetic_teacher"}:
+        scope = "all"
+    scope_min_words = max(1, int(scope_min_words))
+    budget_mode = str(budget_mode).strip().lower()
+    if budget_mode not in {"pairs", "tokens"}:
+        budget_mode = "pairs"
+    budget_power = max(0.0, min(1.0, float(budget_power)))
+    keep_ratio = max(0.0, min(1.0, float(keep_ratio)))
+    min_keep = max(0, int(min_keep))
+    max_keep = max(0, int(max_keep))
+    if keep_ratio >= 0.999 and max_keep <= 0:
+        return list(pairs)
+
+    passthrough_ids = set()
+    selectable_pairs: List[ChatPair] = []
+    for pair in pairs:
+        if _is_scoped_sft_selection_pair(pair, scope=scope, scope_min_words=scope_min_words):
+            selectable_pairs.append(pair)
+        else:
+            passthrough_ids.add(id(pair))
+    if not selectable_pairs:
+        return list(pairs)
+
+    if len(selectable_pairs) != len(pairs):
+        print(
+            "[sft] pair selection scope: "
+            f"scope={scope} candidates={len(selectable_pairs)}/{len(pairs)} "
+            f"passthrough={len(pairs) - len(selectable_pairs)} min_words={scope_min_words}"
+        )
+
+    scored: List[Tuple[float, float, ChatPair, Dict[str, float]]] = []
+    for pair in selectable_pairs:
+        score, metrics = _sft_pair_selection_score(
+            pair,
+            mode=mode,
+            hardness_target=float(hardness_target),
+            hardness_bandwidth=float(hardness_bandwidth),
+        )
+        if metrics:
+            estimated_tokens = float(_estimated_sft_pair_tokens(pair))
+            budget_value = float(score)
+            if budget_mode == "tokens":
+                budget_value = float(score) / math.pow(max(8.0, estimated_tokens), budget_power)
+            metrics["estimated_tokens"] = float(estimated_tokens)
+            metrics["budget_value"] = float(budget_value)
+            scored.append((float(budget_value), float(score), pair, metrics))
+    if not scored:
+        return list(pairs)
+
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    total = len(scored)
+    selected: List[Tuple[float, float, ChatPair, Dict[str, float]]] = []
+    total_estimated_tokens = float(sum(float(entry[3].get("estimated_tokens", 0.0)) for entry in scored))
+    selected_estimated_tokens = 0.0
+
+    if budget_mode == "tokens" and keep_ratio < 0.999:
+        token_budget = max(0.0, total_estimated_tokens * keep_ratio)
+        min_keep_target = min(min_keep, total) if min_keep > 0 else 0
+        for entry in scored:
+            if max_keep > 0 and len(selected) >= max_keep:
+                break
+            entry_tokens = float(entry[3].get("estimated_tokens", 0.0))
+            must_keep = len(selected) < max(1, min_keep_target)
+            under_budget = (selected_estimated_tokens + entry_tokens) <= token_budget
+            if not selected or must_keep or under_budget:
+                selected.append(entry)
+                selected_estimated_tokens += entry_tokens
+        if min_keep_target > 0 and len(selected) < min_keep_target:
+            selected_ids = {id(entry[2]) for entry in selected}
+            for entry in scored:
+                if id(entry[2]) in selected_ids:
+                    continue
+                selected.append(entry)
+                selected_estimated_tokens += float(entry[3].get("estimated_tokens", 0.0))
+                selected_ids.add(id(entry[2]))
+                if len(selected) >= min_keep_target:
+                    break
+        if not selected:
+            selected = [scored[0]]
+            selected_estimated_tokens = float(selected[0][3].get("estimated_tokens", 0.0))
+    else:
+        keep_n = total
+        if keep_ratio < 0.999:
+            keep_n = max(1, int(round(total * keep_ratio)))
+        if max_keep > 0:
+            keep_n = min(keep_n, max_keep)
+        if min_keep > 0:
+            keep_n = max(keep_n, min(min_keep, total))
+        keep_n = max(1, min(total, keep_n))
+        selected = scored[:keep_n]
+        selected_estimated_tokens = float(
+            sum(float(entry[3].get("estimated_tokens", 0.0)) for entry in selected)
+        )
+
+    def _mean(metric_name: str, rows: Sequence[Tuple[float, float, ChatPair, Dict[str, float]]]) -> float:
+        if not rows:
+            return 0.0
+        vals = [float(entry[3].get(metric_name, 0.0)) for entry in rows]
+        return float(sum(vals) / float(len(vals)))
+
+    print(
+        "[sft] pair selection: "
+        f"strategy={mode} scope={scope} budget_mode={budget_mode} keep={len(selected)}/{total} "
+        f"keep_ratio={len(selected)/max(1,total):.3f} "
+        f"quality={_mean('quality', scored):.3f}->{_mean('quality', selected):.3f} "
+        f"density={_mean('density', scored):.3f}->{_mean('density', selected):.3f} "
+        f"reason={_mean('reasoning', scored):.3f}->{_mean('reasoning', selected):.3f} "
+        f"difficulty={_mean('difficulty', scored):.3f}->{_mean('difficulty', selected):.3f} "
+        f"compactness={_mean('compactness', scored):.3f}->{_mean('compactness', selected):.3f} "
+        f"words={_mean('words', scored):.1f}->{_mean('words', selected):.1f} "
+        f"est_tokens={total_estimated_tokens:.0f}->{selected_estimated_tokens:.0f} "
+        f"budget_power={budget_power:.2f} "
+        f"selected_score_mean={_mean('score', selected):.4f}"
+    )
+    selected_ids = {id(pair) for _budget_value, _score, pair, _metrics in selected}
+    return [pair for pair in pairs if id(pair) in passthrough_ids or id(pair) in selected_ids]
 
 
 def filter_sft_training_pairs(
@@ -2244,6 +2969,90 @@ def _response_creativity_signal(text: str) -> float:
     return float(min(1.0, score))
 
 
+def _response_knowledge_density_score(text: str) -> float:
+    raw = _fast_cleanup_response_text(text)
+    if not raw:
+        return 0.0
+    low = raw.lower()
+    tokens = re.findall(r"[a-z0-9_+#./'-]+", low)
+    if not tokens:
+        return 0.0
+
+    content_tokens = [
+        tok
+        for tok in tokens
+        if tok not in STOPWORDS and (len(tok) >= 4 or any(ch.isdigit() for ch in tok))
+    ]
+    content_ratio = float(len(content_tokens)) / float(max(1, len(tokens)))
+    unique_content_ratio = (
+        float(len(set(content_tokens))) / float(max(1, len(content_tokens)))
+        if content_tokens
+        else 0.0
+    )
+    numeric_score = min(1.0, float(len(NUMBER_RE.findall(raw))) / 4.0)
+    dense_token_score = min(1.0, float(len(KNOWLEDGE_DENSE_TOKEN_RE.findall(raw))) / 4.0)
+    structure_score = min(1.0, float(len(KNOWLEDGE_STRUCTURE_RE.findall(raw))) / 3.0)
+    long_term_score = 0.0
+    if content_tokens:
+        long_terms = sum(1 for tok in content_tokens if len(tok) >= 8 or any(ch.isdigit() for ch in tok))
+        long_term_score = min(1.0, float(long_terms) / float(max(1, len(content_tokens) // 2)))
+
+    word_count = max(1, _word_token_count(raw))
+    if word_count <= 5:
+        brevity_factor = 0.30
+    elif word_count <= 16:
+        brevity_factor = 0.76
+    elif word_count <= 120:
+        brevity_factor = 1.0
+    else:
+        brevity_factor = max(0.58, 1.0 - (float(word_count - 120) / 260.0))
+
+    filler_hits = sum(1 for phrase in LOW_DENSITY_FILLER_PHRASES if phrase in low)
+    score = (
+        0.34 * content_ratio
+        + 0.16 * unique_content_ratio
+        + 0.14 * numeric_score
+        + 0.14 * dense_token_score
+        + 0.12 * structure_score
+        + 0.10 * long_term_score
+    )
+    score *= brevity_factor
+    score -= 0.08 * min(3, filler_hits)
+    return float(max(0.0, min(1.0, score)))
+
+
+def _pair_knowledge_density_score(user_text: str, assistant_text: str, source: str = "") -> float:
+    response_density = _response_knowledge_density_score(assistant_text)
+    prompt_complexity = min(1.0, _prompt_complexity_score(user_text) / 1.35)
+    alignment = _response_alignment_metrics(user_text, assistant_text)
+    source_low = str(source or "").lower()
+
+    source_bonus = 0.0
+    if "coding_knowledge" in source_low:
+        source_bonus += 0.12
+    elif "quality_anchor" in source_low:
+        source_bonus += 0.08
+    elif "science" in source_low or "dictionary" in source_low:
+        source_bonus += 0.06
+    elif "world_events" in source_low:
+        source_bonus += 0.05
+
+    if _looks_like_coding_prompt(user_text):
+        source_bonus += 0.06
+    if _looks_like_reasoning_prompt(user_text):
+        source_bonus += 0.05
+
+    score = (
+        0.56 * response_density
+        + 0.18 * prompt_complexity
+        + 0.10 * min(1.0, max(0.0, float(alignment.reasoning)))
+        + 0.08 * min(1.0, max(0.0, float(alignment.conversation)))
+        + 0.05 * min(1.0, max(0.0, float(alignment.creativity)))
+        + source_bonus
+    )
+    return float(max(0.0, min(1.0, score)))
+
+
 def _response_quality_score(text: str) -> float:
     t = _fast_cleanup_response_text(str(text or "")).strip()
     if not t:
@@ -2447,6 +3256,7 @@ def _preference_selection_score(
     conversation_score = max(0.0, float(pair.conversation_score))
     reasoning_score = max(0.0, float(pair.reasoning_score))
     creativity_score = max(0.0, float(pair.creativity_score))
+    knowledge_density_score = max(0.0, float(pair.knowledge_density_score))
     followup_bonus = 0.10 if bool(pair.is_followup) else 0.0
 
     if mode == "margin_topk":
@@ -2468,6 +3278,7 @@ def _preference_selection_score(
             0.12 * conversation_score
             + 0.10 * reasoning_score
             + 0.10 * creativity_score
+            + 0.12 * knowledge_density_score
             + followup_bonus
         )
         return float(
@@ -2544,6 +3355,8 @@ def _select_preference_pairs(
     sel_reason = _mean([max(0.0, float(p.reasoning_score)) for p in selected])
     full_creative = _mean([max(0.0, float(p.creativity_score)) for p in pairs])
     sel_creative = _mean([max(0.0, float(p.creativity_score)) for p in selected])
+    full_density = _mean([max(0.0, float(p.knowledge_density_score)) for p in pairs])
+    sel_density = _mean([max(0.0, float(p.knowledge_density_score)) for p in selected])
     print(
         "[pref] pair selection: "
         f"strategy={mode} keep={len(selected)}/{total} keep_ratio={len(selected)/max(1,total):.3f} "
@@ -2551,6 +3364,7 @@ def _select_preference_pairs(
         f"conv={full_conv:.3f}->{sel_conv:.3f} "
         f"reason={full_reason:.3f}->{sel_reason:.3f} "
         f"creative={full_creative:.3f}->{sel_creative:.3f} "
+        f"density={full_density:.3f}->{sel_density:.3f} "
         f"selected_score_mean={sel_score:.4f}"
     )
     return selected
@@ -2562,6 +3376,7 @@ def _pick_rejected_candidate(
     generated: Sequence[str],
     similarity_threshold: float,
     similarity_min: float = 0.0,
+    stop_signal_strength: float = 0.0,
 ) -> Tuple[str, float, float]:
     candidates: List[Tuple[str, float, float]] = []
     for cand in generated:
@@ -2576,6 +3391,11 @@ def _pick_rejected_candidate(
         if sim >= float(similarity_threshold):
             continue
         score, _alignment = _paired_response_score(user_text, c)
+        score += _preference_stop_alignment_score(
+            user_text=user_text,
+            assistant_text=c,
+            strength=float(stop_signal_strength),
+        )
         candidates.append((c, sim, score))
 
     if not candidates:
@@ -2592,11 +3412,155 @@ def _pick_rejected_candidate(
     return candidates[0]
 
 
+def _stop_overlong_reject_variants(
+    user_text: str,
+    chosen_text: str,
+    rng: random.Random,
+    max_variants: int = 2,
+) -> List[str]:
+    target_words = _preference_stop_target_words(user_text)
+    limit = max(0, int(max_variants))
+    text = _fast_cleanup_response_text(str(chosen_text or "")).strip()
+    if target_words <= 0 or limit <= 0 or not text:
+        return []
+    if "```" in text:
+        return []
+    if _word_token_count(text) > max(12, int(round(1.55 * float(target_words)))):
+        return []
+
+    bridge = [
+        "The short answer is enough, but the fuller explanation is that this follows from the core idea and standard reasoning.",
+        "More explicitly, the same answer still holds when you unpack the details step by step instead of stopping at the concise reply.",
+        "To elaborate a bit, this conclusion comes from the main constraint in the prompt and the usual interpretation of the terms.",
+    ]
+    rng.shuffle(bridge)
+
+    base = text.rstrip()
+    if base and base[-1] not in ".!?":
+        base += "."
+    variants: List[str] = []
+    for suffix in bridge[:limit]:
+        candidate = _fast_cleanup_response_text(f"{base} {suffix}")
+        if candidate and candidate != text:
+            variants.append(candidate)
+
+    dedup: List[str] = []
+    seen = set()
+    for cand in variants:
+        norm = _normalize_whitespace(cand.lower())
+        if norm in seen:
+            continue
+        seen.add(norm)
+        dedup.append(cand)
+    return dedup
+
+
+def _reorder_scored_ids_for_self_play(
+    scored_ids: Sequence[Tuple[float, int, str, float, str, float, PairAlignmentMetrics, float]],
+    budget: int,
+    curriculum: str = "easy_to_hard",
+    pool_multiplier: int = 4,
+) -> Tuple[List[Tuple[float, int, str, float, str, float, PairAlignmentMetrics, float]], set]:
+    budget = max(0, int(budget))
+    if budget <= 0 or not scored_ids:
+        return list(scored_ids), set()
+
+    mode = str(curriculum or "easy_to_hard").strip().lower()
+    if mode not in {"easy_to_hard", "hard_first"}:
+        mode = "easy_to_hard"
+
+    pool_size = min(
+        len(scored_ids),
+        max(budget, max(1, int(pool_multiplier)) * budget),
+    )
+    candidate_pool = list(scored_ids[:pool_size])
+    if mode == "hard_first":
+        candidate_pool.sort(key=lambda x: (-float(x[5]), -float(x[0]), int(x[1])))
+    else:
+        candidate_pool.sort(key=lambda x: (float(x[5]), -float(x[0]), int(x[1])))
+
+    selected = candidate_pool[:budget]
+    selected_ids = {int(item[1]) for item in selected}
+    if not selected_ids:
+        return list(scored_ids), set()
+
+    selected_order = selected
+    remainder = [item for item in scored_ids if int(item[1]) not in selected_ids]
+    return selected_order + remainder, selected_ids
+
+
+def _compact_reasoning_variant(
+    chosen_text: str,
+    max_words: int = 96,
+    max_sentences: int = 4,
+) -> str:
+    text = _fast_cleanup_response_text(str(chosen_text or "")).strip()
+    if not text or "```" in text:
+        return ""
+    if _word_token_count(text) < 40:
+        return ""
+    if (
+        _response_reasoning_signal(text) < 0.15
+        and _response_knowledge_density_score(text) < 0.42
+    ):
+        return ""
+
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+    compact_parts: List[str] = []
+    for part in parts:
+        candidate = str(part)
+        candidate = re.sub(r"^step\s*\d+[\s:.)-]*", "", candidate, flags=re.IGNORECASE)
+        candidate = re.sub(
+            r"^(?:first|second|third|next|then|finally|therefore|so|because|to solve this|the key idea is|in short)\b[\s,:-]*",
+            "",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        if _word_token_count(candidate) > 18:
+            clauses = [x.strip() for x in re.split(r"(?:;|, and |, but |, so | because | which )", candidate, maxsplit=1, flags=re.IGNORECASE) if x.strip()]
+            if clauses:
+                candidate = clauses[0]
+        candidate = _normalize_whitespace(candidate)
+        if _word_token_count(candidate) < 4:
+            continue
+        compact_parts.append(candidate)
+        if len(compact_parts) >= max(1, int(max_sentences)):
+            break
+
+    compact = _normalize_whitespace(" ".join(compact_parts))
+    if not compact:
+        return ""
+    for phrase in LOW_DENSITY_FILLER_PHRASES:
+        compact = re.sub(re.escape(phrase), "", compact, flags=re.IGNORECASE)
+    compact = _normalize_whitespace(compact)
+    words = compact.split()
+    if len(words) > max(8, int(max_words)):
+        compact = " ".join(words[: max(8, int(max_words))]).strip()
+    compact = compact.rstrip(",;:-")
+    if compact and compact[-1] not in ".!?":
+        compact += "."
+    compact = _fast_cleanup_response_text(compact)
+    if not compact or compact == text:
+        return ""
+    if _word_token_count(compact) >= _word_token_count(text):
+        return ""
+    if _word_token_count(compact) < 12:
+        return ""
+    if _response_knowledge_density_score(compact) < 0.20:
+        return ""
+    return compact
+
+
 def _counterfactual_reject_variants(chosen_text: str, rng: random.Random) -> List[str]:
     text = _fast_cleanup_response_text(str(chosen_text or "")).strip()
     if not text:
         return []
     out: List[str] = []
+
+    compact = _compact_reasoning_variant(text)
+    if compact and compact != text:
+        out.append(compact)
+
     parts = re.split(r"(?<=[.!?])\s+", text)
     if len(parts) >= 3:
         drop_idx = rng.randrange(len(parts))
@@ -2676,6 +3640,11 @@ def build_preference_pairs_with_generation(
     coding_focus_boost: float = 1.0,
     reasoning_focus_boost: float = 1.0,
     counterfactual_rejects_per_prompt: int = 2,
+    self_play_budget: int = 0,
+    self_play_curriculum: str = "easy_to_hard",
+    self_play_max_new_tokens: int = 0,
+    stop_signal_strength: float = 0.0,
+    stop_rejects_per_prompt: int = 0,
     selection_strategy: str = "none",
     selection_keep_ratio: float = 1.0,
     selection_min_keep: int = 0,
@@ -2687,7 +3656,7 @@ def build_preference_pairs_with_generation(
         return []
 
     rng = random.Random(seed)
-    scored_ids: List[Tuple[float, int, str, float, str, float, PairAlignmentMetrics]] = []
+    scored_ids: List[Tuple[float, int, str, float, str, float, PairAlignmentMetrics, float]] = []
     for idx, pair in enumerate(train_pairs):
         chosen_text = _fast_cleanup_response_text(pair.assistant)
         if not chosen_text:
@@ -2698,16 +3667,23 @@ def build_preference_pairs_with_generation(
             continue
         short_prompt = _is_short_answer_prompt(pair.user)
         chosen_score, chosen_alignment = _paired_response_score(pair.user, chosen_text)
+        chosen_density = _pair_knowledge_density_score(pair.user, chosen_text, source=str(pair.source or ""))
         chosen_words = _word_token_count(chosen_text)
         if not short_prompt and chosen_words < max(1, int(min_chosen_words)):
             continue
         if not short_prompt and chosen_score < float(min_chosen_quality):
             continue
+        chosen_stop_score = _preference_stop_alignment_score(
+            user_text=pair.user,
+            assistant_text=chosen_text,
+            strength=float(stop_signal_strength),
+        )
         prompt_complexity = _prompt_complexity_score(pair.user)
-        score = prompt_complexity + 0.18 * max(-1.0, min(2.5, chosen_score))
+        score = prompt_complexity + 0.18 * max(-1.0, min(2.5, chosen_score + chosen_stop_score))
         score += 0.14 * float(chosen_alignment.conversation)
         score += 0.10 * float(chosen_alignment.reasoning)
         score += 0.08 * float(chosen_alignment.creativity)
+        score += 0.12 * float(chosen_density)
         score += 0.15 * rng.random()
         scored_ids.append(
             (
@@ -2718,6 +3694,7 @@ def build_preference_pairs_with_generation(
                 _prompt_signature(pair.user),
                 prompt_complexity,
                 chosen_alignment,
+                chosen_density,
             )
         )
     if not scored_ids:
@@ -2748,6 +3725,18 @@ def build_preference_pairs_with_generation(
         use_generation = False
     else:
         use_generation = True
+    self_play_budget = max(0, int(self_play_budget))
+    self_play_curriculum = str(self_play_curriculum or "easy_to_hard").strip().lower()
+    if self_play_curriculum not in {"easy_to_hard", "hard_first"}:
+        self_play_curriculum = "easy_to_hard"
+    self_play_max_new_tokens = max(0, int(self_play_max_new_tokens))
+    self_play_generation_ids: set = set()
+    if not use_generation and self_play_budget > 0:
+        scored_ids, self_play_generation_ids = _reorder_scored_ids_for_self_play(
+            scored_ids,
+            budget=min(self_play_budget, len(scored_ids)),
+            curriculum=self_play_curriculum,
+        )
 
     max_pairs = max(1, int(max_pairs))
     progress_every = max(0, int(progress_every))
@@ -2762,6 +3751,9 @@ def build_preference_pairs_with_generation(
         f"mode={mining_mode_norm} generation={'on' if use_generation else 'off'} "
         f"target_pairs={max_pairs} candidates={len(scored_ids)} "
         f"max_attempts={max_attempts} "
+        f"self_play_budget={len(self_play_generation_ids)} "
+        f"self_play_curriculum={self_play_curriculum} "
+        f"self_play_max_new_tokens={self_play_max_new_tokens if self_play_max_new_tokens > 0 else max_new_tokens} "
         f"selection={str(selection_strategy).strip().lower()} "
         f"keep_ratio={max(0.0, min(1.0, float(selection_keep_ratio))):.3f} "
         f"max_seconds={mining_max_seconds if mining_max_seconds > 0 else 'off'}"
@@ -2778,9 +3770,23 @@ def build_preference_pairs_with_generation(
     mine_started = time.time()
     visited = 0
     generation_failures = 0
+    brevity_filtered = 0
+    stop_reject_variants_added = 0
+    self_play_prompts_used = 0
+    self_play_candidates_generated = 0
+    self_play_generation_failures = 0
 
     try:
-        for _score, idx, chosen_text, chosen_score, user_sig, prompt_complexity, chosen_alignment in scored_ids:
+        for (
+            _score,
+            idx,
+            chosen_text,
+            chosen_score,
+            user_sig,
+            prompt_complexity,
+            chosen_alignment,
+            chosen_density,
+        ) in scored_ids:
             visited += 1
             if len(out) >= max_pairs:
                 break
@@ -2803,11 +3809,26 @@ def build_preference_pairs_with_generation(
             prompt_is_coding = _looks_like_coding_prompt(pair.user)
             prompt_is_reasoning = _looks_like_reasoning_prompt(pair.user)
             source_key = str(pair.source or "dataset")
+            stop_target_words = _preference_stop_target_words(pair.user)
             if int(max_pairs_per_source) > 0:
                 if source_pair_counts.get(source_key, 0) >= int(max_pairs_per_source):
                     continue
+            chosen_stop_score = _preference_stop_alignment_score(
+                user_text=pair.user,
+                assistant_text=chosen_text,
+                strength=float(stop_signal_strength),
+            )
+            if (
+                stop_target_words > 0
+                and chosen_stop_score < -0.08
+                and _word_token_count(chosen_text) > max(6, int(round(1.45 * float(stop_target_words))))
+            ):
+                brevity_filtered += 1
+                continue
+            chosen_effective_score = float(chosen_score + chosen_stop_score)
             generated: List[str] = []
-            if use_generation:
+            use_self_play_generation = (not use_generation) and (int(idx) in self_play_generation_ids)
+            if use_generation or use_self_play_generation:
                 prompt = _chat_prompt_only(tokenizer, pair.user)
                 enc = tokenizer(
                     prompt,
@@ -2818,10 +3839,15 @@ def build_preference_pairs_with_generation(
                 )
                 enc = {k: v.to(device) for k, v in enc.items()}
                 try:
-                    if bool(include_greedy_candidate):
+                    if use_self_play_generation:
+                        self_play_prompts_used += 1
+                    gen_max_new_tokens = max(16, int(max_new_tokens))
+                    if use_self_play_generation and self_play_max_new_tokens > 0:
+                        gen_max_new_tokens = max(16, min(int(max_new_tokens), int(self_play_max_new_tokens)))
+                    if bool(include_greedy_candidate) or use_self_play_generation:
                         greedy = model.generate(
                             **enc,
-                            max_new_tokens=max(16, int(max_new_tokens)),
+                            max_new_tokens=gen_max_new_tokens,
                             do_sample=False,
                             eos_token_id=tokenizer.eos_token_id,
                             pad_token_id=tokenizer.pad_token_id,
@@ -2831,14 +3857,18 @@ def build_preference_pairs_with_generation(
                         greedy_pred = _fast_cleanup_response_text(greedy_pred)
                         if greedy_pred:
                             generated.append(greedy_pred)
+                            if use_self_play_generation:
+                                self_play_candidates_generated += 1
 
                     n_candidates = max(1, int(candidate_count))
+                    if use_self_play_generation:
+                        n_candidates = min(1, n_candidates)
                     for ci in range(n_candidates):
                         temp = float(temps[ci % len(temps)])
                         top_p = min(0.96, 0.86 + 0.03 * float(ci % 3))
                         gen = model.generate(
                             **enc,
-                            max_new_tokens=max(16, int(max_new_tokens)),
+                            max_new_tokens=gen_max_new_tokens,
                             do_sample=True,
                             temperature=temp,
                             top_p=top_p,
@@ -2850,8 +3880,12 @@ def build_preference_pairs_with_generation(
                         pred = _fast_cleanup_response_text(pred)
                         if pred:
                             generated.append(pred)
+                            if use_self_play_generation:
+                                self_play_candidates_generated += 1
                 except Exception as e:
                     generation_failures += 1
+                    if use_self_play_generation:
+                        self_play_generation_failures += 1
                     if generation_failures <= 3:
                         print(f"[pref] generation warning #{generation_failures}: {e}")
 
@@ -2860,6 +3894,15 @@ def build_preference_pairs_with_generation(
                 if int(counterfactual_rejects_per_prompt) > 0:
                     cf_variants = cf_variants[: max(1, int(counterfactual_rejects_per_prompt))]
                 generated.extend(cf_variants)
+            if int(stop_rejects_per_prompt) > 0:
+                stop_variants = _stop_overlong_reject_variants(
+                    user_text=pair.user,
+                    chosen_text=chosen_text,
+                    rng=rng,
+                    max_variants=int(stop_rejects_per_prompt),
+                )
+                stop_reject_variants_added += len(stop_variants)
+                generated.extend(stop_variants)
 
             rejected, rejected_sim, rejected_score = _pick_rejected_candidate(
                 user_text=pair.user,
@@ -2867,6 +3910,7 @@ def build_preference_pairs_with_generation(
                 generated=generated,
                 similarity_threshold=float(similarity_threshold),
                 similarity_min=float(reject_similarity_min),
+                stop_signal_strength=float(stop_signal_strength),
             )
 
             if not rejected:
@@ -2897,6 +3941,11 @@ def build_preference_pairs_with_generation(
                         rejected = candidate
                         rejected_sim = sim
                         rejected_score, _alignment = _paired_response_score(pair.user, candidate)
+                        rejected_score += _preference_stop_alignment_score(
+                            user_text=pair.user,
+                            assistant_text=candidate,
+                            strength=float(stop_signal_strength),
+                        )
                         break
                     if rejected:
                         break
@@ -2905,11 +3954,11 @@ def build_preference_pairs_with_generation(
                 continue
             if _looks_like_placeholder_assistant(rejected):
                 continue
-            if float(chosen_score) < float(rejected_score) + float(min_quality_gap):
+            if float(chosen_effective_score) < float(rejected_score) + float(min_quality_gap):
                 continue
 
             pair_weight = _preference_pair_weight(
-                chosen_quality=chosen_score,
+                chosen_quality=chosen_effective_score,
                 rejected_quality=rejected_score,
                 rejected_similarity=rejected_sim,
                 chosen_text=chosen_text,
@@ -2928,12 +3977,13 @@ def build_preference_pairs_with_generation(
                     chosen=chosen_text,
                     rejected=rejected,
                     weight=pair_weight,
-                    quality_gap=float(max(0.0, float(chosen_score) - float(rejected_score))),
+                    quality_gap=float(max(0.0, float(chosen_effective_score) - float(rejected_score))),
                     rejected_similarity=float(max(0.0, min(1.0, float(rejected_sim)))),
                     prompt_complexity=float(max(0.0, float(prompt_complexity))),
                     conversation_score=float(max(0.0, float(chosen_alignment.conversation))),
                     reasoning_score=float(max(0.0, float(chosen_alignment.reasoning))),
                     creativity_score=float(max(0.0, float(chosen_alignment.creativity))),
+                    knowledge_density_score=float(max(0.0, float(chosen_density))),
                     is_followup=bool(chosen_alignment.is_followup),
                 )
             )
@@ -2964,6 +4014,9 @@ def build_preference_pairs_with_generation(
     print(
         "[pref] mining complete: "
         f"pairs={len(out)} mined={mined_pairs} visited={visited} generation_failures={generation_failures} "
+        f"brevity_filtered={brevity_filtered} stop_reject_variants={stop_reject_variants_added} "
+        f"self_play_prompts={self_play_prompts_used} self_play_candidates={self_play_candidates_generated} "
+        f"self_play_failures={self_play_generation_failures} "
         f"elapsed={elapsed:.1f}s"
     )
     return out
@@ -2976,16 +4029,24 @@ def annotate_preference_rows_with_reference_logps(
     device: torch.device,
     pad_token_id: int,
     batch_size: int,
+    length_bucketed_batches: bool = False,
+    length_bucket_window_mult: int = 16,
+    seed: int = 0,
 ) -> int:
     if not pref_rows:
         return 0
 
     ref_dataset = PackedPreferenceDataset(pref_rows)
-    ref_loader = DataLoader(
-        ref_dataset,
+    ref_loader = _build_bucketed_dataloader(
+        dataset=ref_dataset,
+        lengths=[int(row.get("pair_tokens", 1)) for row in pref_rows],
         batch_size=max(1, int(batch_size)),
-        shuffle=False,
         collate_fn=lambda b: collate_preference_rows(b, pad_token_id),
+        shuffle=False,
+        enabled=bool(length_bucketed_batches),
+        bucket_window_multiplier=int(length_bucket_window_mult),
+        seed=int(seed),
+        label="pref-ref",
     )
 
     was_training = bool(model.training)
@@ -3063,6 +4124,7 @@ def finetune_qwen(
     sft_prompt_skill_boost: float,
     sft_conversation_boost: float,
     sft_creativity_boost: float,
+    sft_knowledge_density_boost: float,
     sft_followup_paraphrase_aug: int,
     sft_followup_paraphrase_weight: float,
     sft_rdrop_alpha: float,
@@ -3079,6 +4141,18 @@ def finetune_qwen(
     sft_early_stop_patience: int,
     sft_curriculum_quality_ramp: float,
     sft_grad_noise_eta: float,
+    sft_length_bucketed_batches: bool,
+    sft_length_bucket_window_mult: int,
+    sft_selection_strategy: str,
+    sft_selection_keep_ratio: float,
+    sft_selection_min_keep: int,
+    sft_selection_max_keep: int,
+    sft_selection_hardness_target: float,
+    sft_selection_hardness_bandwidth: float,
+    sft_selection_budget_mode: str,
+    sft_selection_budget_power: float,
+    sft_selection_scope: str,
+    sft_selection_scope_min_words: int,
     eval_pairs: Sequence[ChatPair],
     preference_objective: str,
     preference_steps: int,
@@ -3091,6 +4165,9 @@ def finetune_qwen(
     preference_xpo_clip: float,
     preference_sft_weight: float,
     preference_length_weight: float,
+    preference_length_control_strength: float,
+    preference_length_control_target_ratio: float,
+    preference_length_control_max_penalty: float,
     preference_hardness_gamma: float,
     preference_robust_alpha: float,
     preference_robust_eta: float,
@@ -3125,12 +4202,19 @@ def finetune_qwen(
     preference_coding_focus_boost: float,
     preference_reasoning_focus_boost: float,
     preference_counterfactual_rejects_per_prompt: int,
+    preference_self_play_budget: int,
+    preference_self_play_curriculum: str,
+    preference_self_play_max_new_tokens: int,
+    preference_stop_signal_strength: float,
+    preference_stop_rejects_per_prompt: int,
     preference_selection_strategy: str,
     preference_selection_keep_ratio: float,
     preference_selection_min_keep: int,
     preference_selection_max_keep: int,
     preference_selection_hardness_target: float,
     preference_selection_hardness_bandwidth: float,
+    preference_length_bucketed_batches: bool,
+    preference_length_bucket_window_mult: int,
     seed: int,
     save_every_steps: int,
     preference_rescore_every: int,
@@ -3156,11 +4240,23 @@ def finetune_qwen(
     if init_adapter_dir:
         init_path = Path(str(init_adapter_dir))
 
+    bootstrap_device, bootstrap_dtype, bootstrap_reason = _resolve_peft_bootstrap(
+        runtime_device=device,
+        resolved_backend=runtime_device_resolved,
+        runtime_dtype=model_dtype,
+    )
+    if bootstrap_reason:
+        print(
+            "[train] PEFT bootstrap: "
+            f"{bootstrap_reason} load_device={bootstrap_device} "
+            f"load_dtype={str(bootstrap_dtype)} runtime_device={device} "
+            f"runtime_dtype={str(model_dtype)}"
+        )
     model, tokenizer = _load_base_model_and_tokenizer(
         base_model,
-        device,
+        bootstrap_device,
         for_training=True,
-        model_dtype=model_dtype,
+        model_dtype=bootstrap_dtype,
         gradient_checkpointing=gradient_checkpointing,
     )
     print(
@@ -3207,6 +4303,9 @@ def finetune_qwen(
                 )
 
     lora_init_mode = _parse_lora_init_mode(lora_init)
+    if runtime_backend == "dml" and bool(use_dora):
+        if _patch_dora_linear_forward_for_dml():
+            print("[train] applied DirectML DoRA forward compatibility patch.")
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
@@ -3220,6 +4319,10 @@ def finetune_qwen(
     )
     print("[train] stage=lora_wrap start")
     model = get_peft_model(model, peft_config)
+    if str(bootstrap_device) != str(device) or bootstrap_dtype != model_dtype:
+        print("[train] stage=lora_wrap transfer_to_runtime start")
+        model = model.to(device=device, dtype=model_dtype)
+        print("[train] stage=lora_wrap transfer_to_runtime done")
     print("[train] stage=lora_wrap done")
     if init_path is not None:
         if init_path.exists():
@@ -3252,6 +4355,19 @@ def finetune_qwen(
         keep_short_answer_prompts=bool(sft_filter_keep_short_answers),
         drop_synthetic_prompts=bool(sft_drop_synthetic_prompts),
         exempt_sources=sft_quality_filter_exempt_sources,
+    )
+    filtered_train_pairs = _select_sft_training_pairs(
+        filtered_train_pairs,
+        strategy=str(sft_selection_strategy),
+        keep_ratio=float(sft_selection_keep_ratio),
+        min_keep=int(sft_selection_min_keep),
+        max_keep=int(sft_selection_max_keep),
+        hardness_target=float(sft_selection_hardness_target),
+        hardness_bandwidth=float(sft_selection_hardness_bandwidth),
+        budget_mode=str(sft_selection_budget_mode),
+        budget_power=float(sft_selection_budget_power),
+        scope=str(sft_selection_scope),
+        scope_min_words=int(sft_selection_scope_min_words),
     )
     print("[train] stage=filter_sft_pairs done")
     source_balance_factors: Dict[str, float] = {}
@@ -3289,6 +4405,7 @@ def finetune_qwen(
                     prompt_skill_boost=float(sft_prompt_skill_boost),
                     conversation_boost=float(sft_conversation_boost),
                     creativity_boost=float(sft_creativity_boost),
+                    knowledge_density_boost=float(sft_knowledge_density_boost),
                 )
                 * float(source_balance_factors.get(str(p.source or "dataset"), 1.0)),
             ),
@@ -3297,11 +4414,16 @@ def finetune_qwen(
         followup_paraphrase_weight=float(sft_followup_paraphrase_weight),
     )
     dataset = PackedChatDataset(train_rows)
-    loader = DataLoader(
-        dataset,
+    loader = _build_bucketed_dataloader(
+        dataset=dataset,
+        lengths=[int(row.get("sequence_tokens", len(row["input_ids"]))) for row in train_rows],
         batch_size=max(1, int(batch_size)),
-        shuffle=True,
         collate_fn=lambda b: collate_rows(b, tokenizer.pad_token_id),
+        shuffle=True,
+        enabled=bool(sft_length_bucketed_batches),
+        bucket_window_multiplier=int(sft_length_bucket_window_mult),
+        seed=int(seed),
+        label="sft",
     )
 
     optim_groups, lora_plus_stats = _build_optimizer_param_groups(
@@ -3357,11 +4479,16 @@ def finetune_qwen(
         eval_rows = build_rows(tokenizer, list(eval_pairs), max_length=max_length)
         if eval_rows:
             eval_dataset = PackedChatDataset(eval_rows)
-            eval_loader = DataLoader(
-                eval_dataset,
+            eval_loader = _build_bucketed_dataloader(
+                dataset=eval_dataset,
+                lengths=[int(row.get("sequence_tokens", len(row["input_ids"]))) for row in eval_rows],
                 batch_size=max(1, int(batch_size)),
-                shuffle=False,
                 collate_fn=lambda b: collate_rows(b, tokenizer.pad_token_id),
+                shuffle=False,
+                enabled=bool(sft_length_bucketed_batches),
+                bucket_window_multiplier=int(sft_length_bucket_window_mult),
+                seed=int(seed),
+                label="sft-eval",
             )
             print(f"[train] eval monitoring: {len(eval_rows)} eval samples, check every {eval_every} steps")
 
@@ -3404,9 +4531,13 @@ def finetune_qwen(
                         ramp_progress = float(steps) / float(max(1, sft_total_steps // 2))
                         # Scale: weights below median get reduced early, restored later.
                         ramp_scale = 1.0 - curriculum_ramp * (1.0 - ramp_progress)
+                        one_weights = torch.ones_like(sample_weights)
+                        ramp_scale_t = sample_weights.new_tensor(ramp_scale)
                         weight_median = sample_weights.median()
                         below_median = (sample_weights < weight_median).float()
-                        sample_weights = sample_weights * (1.0 - below_median * (1.0 - ramp_scale))
+                        sample_weights = sample_weights * (
+                            one_weights - below_median * (one_weights - ramp_scale_t)
+                        )
                     sft_weight_accum += float(sample_weights.sum().item())
                     sft_weight_count += int(sample_weights.numel())
 
@@ -3419,7 +4550,7 @@ def finetune_qwen(
 
                 # Focal loss: down-weight easy samples, up-weight hard ones.
                 if focal_gamma > 0.0:
-                    focal_weight = (1.0 - torch.exp(-seq_loss.detach())).pow(focal_gamma)
+                    focal_weight = _tensor_one_minus(torch.exp(-seq_loss.detach())).pow(focal_gamma)
                     if sample_weights is not None:
                         sample_weights = sample_weights * focal_weight
                     else:
@@ -3560,6 +4691,7 @@ def finetune_qwen(
     pref_reference_pairs = 0
     pref_wpo_std_sum = 0.0
     pref_robust_std_sum = 0.0
+    pref_length_control_sum = 0.0
     pref_objective_mode = str(preference_objective).strip().lower()
     pref_beta_start = float(preference_beta)
     pref_beta_final = float(preference_beta)
@@ -3575,6 +4707,16 @@ def finetune_qwen(
     pref_robust_alpha = max(0.0, min(1.0, float(preference_robust_alpha)))
     pref_robust_eta = max(0.0, min(0.49, float(preference_robust_eta)))
     pref_robust_clip = max(1.0, float(preference_robust_clip))
+    pref_length_control_strength = max(0.0, float(preference_length_control_strength))
+    pref_length_control_target_ratio = max(0.75, float(preference_length_control_target_ratio))
+    pref_length_control_max_penalty = max(0.0, float(preference_length_control_max_penalty))
+    pref_self_play_budget = max(0, int(preference_self_play_budget))
+    pref_self_play_curriculum = str(preference_self_play_curriculum or "easy_to_hard").strip().lower()
+    if pref_self_play_curriculum not in {"easy_to_hard", "hard_first"}:
+        pref_self_play_curriculum = "easy_to_hard"
+    pref_self_play_max_new_tokens = max(0, int(preference_self_play_max_new_tokens))
+    pref_stop_signal_strength = max(0.0, float(preference_stop_signal_strength))
+    pref_stop_rejects_per_prompt = max(0, int(preference_stop_rejects_per_prompt))
     pref_anchor_weight = max(0.0, float(preference_reference_anchor_weight))
     pref_ipo_target_start = (
         _ipo_target_gap(beta=pref_beta_start, margin=pref_margin_start)
@@ -3604,6 +4746,13 @@ def finetune_qwen(
             f"wpo_alpha={float(preference_wpo_alpha):.3f} "
             f"robust_alpha={pref_robust_alpha:.3f} "
             f"robust_eta={pref_robust_eta:.3f} "
+            f"len_ctrl={pref_length_control_strength:.3f} "
+            f"len_ratio={pref_length_control_target_ratio:.3f} "
+            f"self_play_budget={pref_self_play_budget} "
+            f"self_play_curriculum={pref_self_play_curriculum} "
+            f"self_play_max_new_tokens={pref_self_play_max_new_tokens if pref_self_play_max_new_tokens > 0 else preference_max_new_tokens} "
+            f"stop_signal={pref_stop_signal_strength:.3f} "
+            f"stop_rejects={pref_stop_rejects_per_prompt} "
             f"anchor_weight={pref_anchor_weight:.4f}"
         )
         pref_pairs = build_preference_pairs_with_generation(
@@ -3633,6 +4782,11 @@ def finetune_qwen(
             coding_focus_boost=float(preference_coding_focus_boost),
             reasoning_focus_boost=float(preference_reasoning_focus_boost),
             counterfactual_rejects_per_prompt=int(preference_counterfactual_rejects_per_prompt),
+            self_play_budget=int(pref_self_play_budget),
+            self_play_curriculum=str(pref_self_play_curriculum),
+            self_play_max_new_tokens=int(pref_self_play_max_new_tokens),
+            stop_signal_strength=float(pref_stop_signal_strength),
+            stop_rejects_per_prompt=int(pref_stop_rejects_per_prompt),
             selection_strategy=str(preference_selection_strategy),
             selection_keep_ratio=float(preference_selection_keep_ratio),
             selection_min_keep=int(preference_selection_min_keep),
@@ -3665,14 +4819,22 @@ def finetune_qwen(
                     device=device,
                     pad_token_id=tokenizer.pad_token_id,
                     batch_size=int(preference_reference_anchor_batch_size),
+                    length_bucketed_batches=bool(preference_length_bucketed_batches),
+                    length_bucket_window_mult=int(preference_length_bucket_window_mult),
+                    seed=int(seed),
                 )
                 print(f"[pref] reference margins cached for {pref_reference_pairs} pairs")
             pref_dataset = PackedPreferenceDataset(pref_rows)
-            pref_loader = DataLoader(
-                pref_dataset,
+            pref_loader = _build_bucketed_dataloader(
+                dataset=pref_dataset,
+                lengths=[int(row.get("pair_tokens", 1)) for row in pref_rows],
                 batch_size=max(1, int(batch_size)),
-                shuffle=True,
                 collate_fn=lambda b: collate_preference_rows(b, tokenizer.pad_token_id),
+                shuffle=True,
+                enabled=bool(preference_length_bucketed_batches),
+                bucket_window_multiplier=int(preference_length_bucket_window_mult),
+                seed=int(seed),
+                label="pref",
             )
 
             pref_optim = torch.optim.AdamW(
@@ -3734,22 +4896,35 @@ def finetune_qwen(
                         pref_steps_done,
                         target_steps,
                     )
-                    robust_logits = beta_t * (delta - margin_t)
+                    length_control_margin = torch.zeros_like(delta)
+                    if pref_length_control_strength > 0.0:
+                        length_control_margin = (
+                            _preference_length_control_margin(
+                                chosen_len=chosen_len,
+                                rejected_len=rejected_len,
+                                target_ratio=pref_length_control_target_ratio,
+                                max_penalty=pref_length_control_max_penalty,
+                            )
+                            * pref_length_control_strength
+                        )
+                        pref_length_control_sum += float(length_control_margin.mean().item())
+                    effective_margin_t = margin_t + length_control_margin
+                    robust_logits = beta_t * (delta - effective_margin_t)
 
                     if pref_objective_mode == "repo":
-                        pref_core = torch.relu(margin_t - delta)
+                        pref_core = torch.relu(effective_margin_t - delta)
                     elif pref_objective_mode == "dpo":
                         ref_chosen = batch.get("ref_chosen_logp")
                         ref_rejected = batch.get("ref_rejected_logp")
                         if ref_chosen is None or ref_rejected is None:
                             raise RuntimeError("DPO objective requires cached reference log-probabilities.")
                         ref_delta = ref_chosen.to(device).float() - ref_rejected.to(device).float()
-                        robust_logits = beta_t * ((delta - ref_delta) - margin_t)
+                        robust_logits = beta_t * ((delta - ref_delta) - effective_margin_t)
                         pref_core = _dpo_preference_loss(
                             delta=delta,
                             ref_delta=ref_delta,
                             beta=beta_t,
-                            margin=margin_t,
+                            margin=effective_margin_t,
                             label_smoothing=pref_label_smoothing,
                         )
                     elif pref_objective_mode == "ipo":
@@ -3758,12 +4933,12 @@ def finetune_qwen(
                         if ref_chosen is None or ref_rejected is None:
                             raise RuntimeError("IPO objective requires cached reference log-probabilities.")
                         ref_delta = ref_chosen.to(device).float() - ref_rejected.to(device).float()
-                        robust_logits = beta_t * ((delta - ref_delta) - margin_t)
+                        robust_logits = beta_t * ((delta - ref_delta) - effective_margin_t)
                         pref_core = _ipo_preference_loss(
                             delta=delta,
                             ref_delta=ref_delta,
                             beta=beta_t,
-                            margin=margin_t,
+                            margin=effective_margin_t,
                         )
                     elif pref_objective_mode == "xpo":
                         ref_chosen = batch.get("ref_chosen_logp")
@@ -3777,29 +4952,23 @@ def finetune_qwen(
                             ref_rejected_logp=ref_rejected.to(device).float(),
                             beta=beta_t,
                             clip=pref_xpo_clip,
-                        )
-                        pref_core = _xpo_preference_loss(
-                            chosen_logp=chosen_logp,
-                            rejected_logp=rejected_logp,
-                            ref_chosen_logp=ref_chosen.to(device).float(),
-                            ref_rejected_logp=ref_rejected.to(device).float(),
-                            beta=beta_t,
-                            clip=pref_xpo_clip,
-                            label_smoothing=pref_label_smoothing,
-                        )
+                        ) - (beta_t * length_control_margin)
+                        pref_core = _sigmoid_preference_loss(robust_logits, label_smoothing=pref_label_smoothing)
                     elif pref_objective_mode == "orpo":
                         chosen_odds = _log_odds_from_avg_log_prob(chosen_logp)
                         rejected_odds = _log_odds_from_avg_log_prob(rejected_logp)
                         odds_delta = chosen_odds - rejected_odds
-                        robust_logits = beta_t * (odds_delta - margin_t)
-                        pref_core = torch.nn.functional.softplus(-beta_t * (odds_delta - margin_t))
+                        robust_logits = beta_t * (odds_delta - effective_margin_t)
+                        pref_core = torch.nn.functional.softplus(-beta_t * (odds_delta - effective_margin_t))
                     else:
-                        z = beta_t * (delta - margin_t)
+                        z = beta_t * (delta - effective_margin_t)
                         robust_logits = z
                         pref_core = _sigmoid_preference_loss(z, label_smoothing=pref_label_smoothing)
 
                     if pref_hardness_gamma > 0.0:
-                        hardness_weight = (1.0 - torch.sigmoid((beta_t * delta).detach())).pow(pref_hardness_gamma)
+                        hardness_weight = _tensor_one_minus(
+                            torch.sigmoid((beta_t * delta).detach())
+                        ).pow(pref_hardness_gamma)
                         sample_weights = sample_weights * (1.0 + hardness_weight)
                         sample_weights = sample_weights / sample_weights.mean().clamp_min(1e-6)
 
@@ -3956,6 +5125,7 @@ def finetune_qwen(
         "sft_prompt_skill_boost": float(sft_prompt_skill_boost),
         "sft_conversation_boost": float(sft_conversation_boost),
         "sft_creativity_boost": float(sft_creativity_boost),
+        "sft_knowledge_density_boost": float(sft_knowledge_density_boost),
         "sft_followup_paraphrase_aug": float(max(0, int(sft_followup_paraphrase_aug))),
         "sft_followup_paraphrase_weight": float(sft_followup_paraphrase_weight),
         "sft_rdrop_alpha": float(max(0.0, sft_rdrop_alpha)),
@@ -3968,6 +5138,18 @@ def finetune_qwen(
         "sft_curriculum_quality_ramp": float(curriculum_ramp),
         "sft_grad_noise_eta": float(grad_noise_eta),
         "sft_lr_restart_period": float(int(sft_lr_restart_period)),
+        "sft_length_bucketed_batches": bool(sft_length_bucketed_batches),
+        "sft_length_bucket_window_mult": float(max(2, int(sft_length_bucket_window_mult))),
+        "sft_selection_strategy": str(sft_selection_strategy).strip().lower(),
+        "sft_selection_keep_ratio": float(max(0.0, min(1.0, sft_selection_keep_ratio))),
+        "sft_selection_min_keep": float(max(0, int(sft_selection_min_keep))),
+        "sft_selection_max_keep": float(max(0, int(sft_selection_max_keep))),
+        "sft_selection_hardness_target": float(sft_selection_hardness_target),
+        "sft_selection_hardness_bandwidth": float(sft_selection_hardness_bandwidth),
+        "sft_selection_budget_mode": str(sft_selection_budget_mode).strip().lower(),
+        "sft_selection_budget_power": float(max(0.0, min(1.0, sft_selection_budget_power))),
+        "sft_selection_scope": str(sft_selection_scope).strip().lower(),
+        "sft_selection_scope_min_words": float(max(1, int(sft_selection_scope_min_words))),
         "preference_rescore_every": float(pref_rescore_every),
         "preference_steps": float(pref_steps_done),
         "preference_loss_mean": float(pref_loss_sum / max(1, pref_steps_done)),
@@ -3983,6 +5165,15 @@ def finetune_qwen(
         "preference_label_smoothing": float(pref_label_smoothing),
         "preference_xpo_clip": float(pref_xpo_clip),
         "preference_hardness_gamma": float(pref_hardness_gamma),
+        "preference_length_control_strength": float(pref_length_control_strength),
+        "preference_length_control_target_ratio": float(pref_length_control_target_ratio),
+        "preference_length_control_max_penalty": float(pref_length_control_max_penalty),
+        "preference_length_control_mean": float(pref_length_control_sum / max(1, pref_steps_done)),
+        "preference_self_play_budget": float(pref_self_play_budget),
+        "preference_self_play_curriculum": str(pref_self_play_curriculum),
+        "preference_self_play_max_new_tokens": float(pref_self_play_max_new_tokens),
+        "preference_stop_signal_strength": float(pref_stop_signal_strength),
+        "preference_stop_rejects_per_prompt": float(pref_stop_rejects_per_prompt),
         "preference_robust_alpha": float(pref_robust_alpha),
         "preference_robust_eta": float(pref_robust_eta),
         "preference_robust_clip": float(pref_robust_clip),
@@ -4006,6 +5197,10 @@ def finetune_qwen(
         "preference_selection_max_keep": float(max(0, int(preference_selection_max_keep))),
         "preference_selection_hardness_target": float(preference_selection_hardness_target),
         "preference_selection_hardness_bandwidth": float(preference_selection_hardness_bandwidth),
+        "preference_length_bucketed_batches": bool(preference_length_bucketed_batches),
+        "preference_length_bucket_window_mult": float(
+            max(2, int(preference_length_bucket_window_mult))
+        ),
         "preference_lr_schedule": str(preference_lr_schedule).strip().lower(),
         "preference_warmup_steps": float(max(0, int(preference_warmup_steps))),
         "preference_min_lr_ratio": float(preference_min_lr_ratio),
@@ -4057,16 +5252,24 @@ def token_f1(reference: str, hypothesis: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def evaluate_model(
+def _preview_text(value: object, limit: int = 160) -> str:
+    text = re.sub(r"\s+", " ", _coerce_text(value))
+    if limit <= 3 or len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _evaluate_model_internal(
     base_model: str,
     eval_pairs: Sequence[ChatPair],
     device: torch.device,
     max_length: int,
     max_new_tokens: int,
     adapter_dir: Optional[Path] = None,
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], List[Dict[str, object]]]:
     model, tokenizer = _load_base_model_and_tokenizer(base_model, device, for_training=False)
     metrics: Dict[str, float] = {}
+    sample_rows: List[Dict[str, object]] = []
     try:
         if adapter_dir is not None:
             model = _load_adapter_with_compat(
@@ -4087,7 +5290,7 @@ def evaluate_model(
         generated_token_count = 0.0
         eval_start = time.time()
         with torch.inference_mode():
-            for pair in eval_pairs:
+            for sample_index, pair in enumerate(eval_pairs):
                 row = encode_for_causal_lm(tokenizer, pair, max_length=max_length)
                 if row is None:
                     continue
@@ -4095,10 +5298,12 @@ def evaluate_model(
                 for k in batch:
                     batch[k] = batch[k].to(device)
                 out = model(**batch)
-                losses.append(float(out.loss.item()))
+                loss_value = float(out.loss.item())
+                losses.append(loss_value)
 
                 prompt, _ = _chat_text_pair(tokenizer, pair.user, pair.assistant)
                 enc = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(device)
+                prompt_tokens = int(enc["input_ids"].shape[1])
                 t0 = time.time()
                 gen = model.generate(
                     **enc,
@@ -4107,13 +5312,36 @@ def evaluate_model(
                     eos_token_id=tokenizer.eos_token_id,
                     pad_token_id=tokenizer.pad_token_id,
                 )
-                latencies.append(float(time.time() - t0))
-                prompt_token_count += float(enc["input_ids"].shape[1])
+                latency_value = float(time.time() - t0)
+                latencies.append(latency_value)
+                prompt_token_count += float(prompt_tokens)
                 new_tokens = gen[0, enc["input_ids"].shape[1] :]
-                generated_token_count += float(new_tokens.shape[0])
+                generated_tokens = int(new_tokens.shape[0])
+                generated_token_count += float(generated_tokens)
                 pred = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-                f1s.append(float(token_f1(pair.assistant, pred)))
-                sims.append(float(SequenceMatcher(None, pair.assistant, pred).ratio()))
+                token_f1_value = float(token_f1(pair.assistant, pred))
+                char_similarity_value = float(SequenceMatcher(None, pair.assistant, pred).ratio())
+                f1s.append(token_f1_value)
+                sims.append(char_similarity_value)
+                sample_rows.append(
+                    {
+                        "sample_index": int(sample_index),
+                        "source": str(pair.source),
+                        "prompt_signature": _prompt_signature(pair.user),
+                        "prompt_complexity": float(_prompt_complexity_score(pair.user)),
+                        "prompt_words": int(len(pair.user.split())),
+                        "reference_words": int(len(pair.assistant.split())),
+                        "prompt_tokens": int(prompt_tokens),
+                        "generated_tokens": int(generated_tokens),
+                        "gen_seconds": float(latency_value),
+                        "loss": float(loss_value),
+                        "token_f1": float(token_f1_value),
+                        "char_similarity": float(char_similarity_value),
+                        "user": pair.user,
+                        "reference": pair.assistant,
+                        "prediction": pred,
+                    }
+                )
 
         mean_loss = float(sum(losses) / max(1, len(losses)))
         eval_seconds = float(max(1e-6, time.time() - eval_start))
@@ -4137,7 +5365,44 @@ def evaluate_model(
         except Exception:
             pass
         gc.collect()
+    return metrics, sample_rows
+
+
+def evaluate_model(
+    base_model: str,
+    eval_pairs: Sequence[ChatPair],
+    device: torch.device,
+    max_length: int,
+    max_new_tokens: int,
+    adapter_dir: Optional[Path] = None,
+) -> Dict[str, float]:
+    metrics, _sample_rows = _evaluate_model_internal(
+        base_model=base_model,
+        eval_pairs=eval_pairs,
+        device=device,
+        max_length=max_length,
+        max_new_tokens=max_new_tokens,
+        adapter_dir=adapter_dir,
+    )
     return metrics
+
+
+def evaluate_model_detailed(
+    base_model: str,
+    eval_pairs: Sequence[ChatPair],
+    device: torch.device,
+    max_length: int,
+    max_new_tokens: int,
+    adapter_dir: Optional[Path] = None,
+) -> Tuple[Dict[str, float], List[Dict[str, object]]]:
+    return _evaluate_model_internal(
+        base_model=base_model,
+        eval_pairs=eval_pairs,
+        device=device,
+        max_length=max_length,
+        max_new_tokens=max_new_tokens,
+        adapter_dir=adapter_dir,
+    )
 
 
 def save_jsonl(path: Path, pairs: Sequence[ChatPair]) -> None:
@@ -4146,6 +5411,136 @@ def save_jsonl(path: Path, pairs: Sequence[ChatPair]) -> None:
         for pair in pairs:
             row = {"user": pair.user, "assistant": pair.assistant, "source": pair.source}
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def save_jsonl_records(path: Path, rows: Sequence[Dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def build_benchmark_sample_comparison(
+    base_samples: Sequence[Dict[str, object]],
+    tuned_samples: Sequence[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    tuned_by_index: Dict[int, Dict[str, object]] = {}
+    for row in tuned_samples:
+        if not isinstance(row, dict):
+            continue
+        try:
+            sample_index = int(row.get("sample_index", -1))
+        except Exception:
+            continue
+        if sample_index >= 0:
+            tuned_by_index[sample_index] = row
+
+    comparison_rows: List[Dict[str, object]] = []
+    for base_row in base_samples:
+        if not isinstance(base_row, dict):
+            continue
+        try:
+            sample_index = int(base_row.get("sample_index", -1))
+        except Exception:
+            continue
+        if sample_index < 0:
+            continue
+        tuned_row = tuned_by_index.get(sample_index)
+        if tuned_row is None:
+            continue
+        base_f1 = float(base_row.get("token_f1", 0.0) or 0.0)
+        tuned_f1 = float(tuned_row.get("token_f1", 0.0) or 0.0)
+        base_char = float(base_row.get("char_similarity", 0.0) or 0.0)
+        tuned_char = float(tuned_row.get("char_similarity", 0.0) or 0.0)
+        base_gen = float(base_row.get("gen_seconds", 0.0) or 0.0)
+        tuned_gen = float(tuned_row.get("gen_seconds", 0.0) or 0.0)
+        base_generated_tokens = int(base_row.get("generated_tokens", 0) or 0)
+        tuned_generated_tokens = int(tuned_row.get("generated_tokens", 0) or 0)
+        comparison_rows.append(
+            {
+                "sample_index": int(sample_index),
+                "source": str(base_row.get("source", tuned_row.get("source", "")) or ""),
+                "prompt_signature": str(base_row.get("prompt_signature", tuned_row.get("prompt_signature", "")) or ""),
+                "prompt_complexity": float(
+                    base_row.get("prompt_complexity", tuned_row.get("prompt_complexity", 0.0)) or 0.0
+                ),
+                "user": str(base_row.get("user", tuned_row.get("user", "")) or ""),
+                "reference": str(base_row.get("reference", tuned_row.get("reference", "")) or ""),
+                "base_prediction": str(base_row.get("prediction", "") or ""),
+                "tuned_prediction": str(tuned_row.get("prediction", "") or ""),
+                "base_loss": float(base_row.get("loss", 0.0) or 0.0),
+                "tuned_loss": float(tuned_row.get("loss", 0.0) or 0.0),
+                "base_token_f1": float(base_f1),
+                "tuned_token_f1": float(tuned_f1),
+                "delta_token_f1": float(tuned_f1 - base_f1),
+                "base_char_similarity": float(base_char),
+                "tuned_char_similarity": float(tuned_char),
+                "delta_char_similarity": float(tuned_char - base_char),
+                "base_gen_seconds": float(base_gen),
+                "tuned_gen_seconds": float(tuned_gen),
+                "delta_gen_seconds": float(tuned_gen - base_gen),
+                "base_generated_tokens": int(base_generated_tokens),
+                "tuned_generated_tokens": int(tuned_generated_tokens),
+                "delta_generated_tokens": int(tuned_generated_tokens - base_generated_tokens),
+            }
+        )
+
+    comparison_rows.sort(
+        key=lambda row: (
+            float(row.get("delta_token_f1", 0.0)),
+            float(row.get("delta_char_similarity", 0.0)),
+            -float(row.get("delta_gen_seconds", 0.0)),
+            int(row.get("sample_index", 0)),
+        )
+    )
+    return comparison_rows
+
+
+def save_benchmark_sample_artifacts(
+    output_dir: Path,
+    base_samples: Sequence[Dict[str, object]],
+    tuned_samples: Optional[Sequence[Dict[str, object]]] = None,
+) -> Tuple[Dict[str, str], Dict[str, object]]:
+    artifacts: Dict[str, str] = {}
+    summary: Dict[str, object] = {}
+
+    base_path = output_dir / "base_samples.jsonl"
+    save_jsonl_records(base_path, base_samples)
+    artifacts["base_samples_jsonl"] = str(base_path)
+    summary["base_sample_count"] = int(len(base_samples))
+
+    tuned_rows = list(tuned_samples or [])
+    if tuned_rows:
+        tuned_path = output_dir / "tuned_samples.jsonl"
+        save_jsonl_records(tuned_path, tuned_rows)
+        artifacts["tuned_samples_jsonl"] = str(tuned_path)
+        summary["tuned_sample_count"] = int(len(tuned_rows))
+
+        comparison_rows = build_benchmark_sample_comparison(base_samples, tuned_rows)
+        comparison_path = output_dir / "sample_comparison.jsonl"
+        save_jsonl_records(comparison_path, comparison_rows)
+        artifacts["sample_comparison_jsonl"] = str(comparison_path)
+        summary["comparison_sample_count"] = int(len(comparison_rows))
+
+        if comparison_rows:
+            worst_row = comparison_rows[0]
+            summary["worst_regression"] = {
+                "sample_index": int(worst_row.get("sample_index", 0) or 0),
+                "source": str(worst_row.get("source", "") or ""),
+                "prompt_signature": str(worst_row.get("prompt_signature", "") or ""),
+                "prompt_complexity": float(worst_row.get("prompt_complexity", 0.0) or 0.0),
+                "delta_token_f1": float(worst_row.get("delta_token_f1", 0.0) or 0.0),
+                "delta_char_similarity": float(worst_row.get("delta_char_similarity", 0.0) or 0.0),
+                "delta_gen_seconds": float(worst_row.get("delta_gen_seconds", 0.0) or 0.0),
+                "user_preview": _preview_text(worst_row.get("user", ""), limit=180),
+                "reference_preview": _preview_text(worst_row.get("reference", ""), limit=140),
+                "base_prediction_preview": _preview_text(worst_row.get("base_prediction", ""), limit=140),
+                "tuned_prediction_preview": _preview_text(worst_row.get("tuned_prediction", ""), limit=140),
+            }
+
+    return artifacts, summary
 
 
 def load_saved_chat_pairs(path: Path) -> List[ChatPair]:
@@ -4336,6 +5731,37 @@ def _resolve_latest_resume_checkpoint(output_dir: Path) -> Optional[ResumeCheckp
     return latest_state
 
 
+def _build_explicit_resume_checkpoint(
+    init_adapter_dir: str,
+    sft_steps: int = 0,
+    preference_steps: int = 0,
+    sft_loss_mean: float = 0.0,
+    preference_loss_mean: float = 0.0,
+) -> Optional[ResumeCheckpoint]:
+    adapter_dir_raw = str(init_adapter_dir or "").strip()
+    if not adapter_dir_raw:
+        return None
+    sft_steps = max(0, int(sft_steps or 0))
+    preference_steps = max(0, int(preference_steps or 0))
+    sft_loss_mean = float(sft_loss_mean or 0.0)
+    preference_loss_mean = float(preference_loss_mean or 0.0)
+    if (
+        sft_steps <= 0
+        and preference_steps <= 0
+        and abs(sft_loss_mean) <= 1e-12
+        and abs(preference_loss_mean) <= 1e-12
+    ):
+        return None
+    return ResumeCheckpoint(
+        adapter_dir=Path(adapter_dir_raw),
+        stage="preference" if preference_steps > 0 else "sft",
+        sft_steps=sft_steps,
+        preference_steps=preference_steps,
+        sft_loss_mean=sft_loss_mean,
+        preference_loss_mean=preference_loss_mean,
+    )
+
+
 def plot_benchmark(results: Dict[str, Dict[str, float]], out_png: Path) -> None:
     out_png.parent.mkdir(parents=True, exist_ok=True)
     models = ["base", "tuned"]
@@ -4468,6 +5894,30 @@ def parse_args() -> argparse.Namespace:
         help="Save adapter checkpoints every N optimizer steps across SFT/preference (0 disables).",
     )
     ap.add_argument(
+        "--resume_sft_steps",
+        type=int,
+        default=0,
+        help="Explicit SFT step provenance for --init_adapter_dir when branching from an external checkpoint.",
+    )
+    ap.add_argument(
+        "--resume_sft_loss_mean",
+        type=float,
+        default=0.0,
+        help="Optional SFT mean-loss provenance paired with --resume_sft_steps for external checkpoint branches.",
+    )
+    ap.add_argument(
+        "--resume_preference_steps",
+        type=int,
+        default=0,
+        help="Explicit preference step provenance for --init_adapter_dir when branching from an external checkpoint.",
+    )
+    ap.add_argument(
+        "--resume_preference_loss_mean",
+        type=float,
+        default=0.0,
+        help="Optional preference mean-loss provenance paired with --resume_preference_steps for external checkpoint branches.",
+    )
+    ap.add_argument(
         "--skip_sft",
         action="store_true",
         help="Skip SFT stage and run only preference stage (requires --init_adapter_dir).",
@@ -4544,6 +5994,12 @@ def parse_args() -> argparse.Namespace:
         help="Extra SFT weight multiplier for prompts that explicitly ask for creative answers.",
     )
     ap.add_argument(
+        "--sft_knowledge_density_boost",
+        type=float,
+        default=1.0,
+        help="Extra SFT weight multiplier for information-dense responses (1.0 disables).",
+    )
+    ap.add_argument(
         "--sft_followup_paraphrase_aug",
         type=int,
         default=1,
@@ -4590,6 +6046,77 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Gradient noise injection eta (Neelakantan-style, decaying) for escaping sharp minima (0 disables).",
+    )
+    ap.add_argument(
+        "--sft_length_bucketed_batches",
+        action="store_true",
+        help="Bucket SFT batches by sequence length to reduce padding waste and improve throughput.",
+    )
+    ap.add_argument(
+        "--sft_length_bucket_window_mult",
+        type=int,
+        default=16,
+        help="Window multiplier used for SFT length bucketing.",
+    )
+    ap.add_argument(
+        "--sft_selection_strategy",
+        choices=["none", "utility_topk", "capacity_aware"],
+        default="none",
+        help="Optional post-filter SFT pair selection strategy for faster, denser training.",
+    )
+    ap.add_argument(
+        "--sft_selection_keep_ratio",
+        type=float,
+        default=1.0,
+        help="Fraction of filtered SFT pairs to keep after selection (1.0 disables trimming).",
+    )
+    ap.add_argument(
+        "--sft_selection_min_keep",
+        type=int,
+        default=0,
+        help="Minimum number of filtered SFT pairs to keep after selection.",
+    )
+    ap.add_argument(
+        "--sft_selection_max_keep",
+        type=int,
+        default=0,
+        help="Maximum number of filtered SFT pairs to keep after selection (0 disables cap).",
+    )
+    ap.add_argument(
+        "--sft_selection_hardness_target",
+        type=float,
+        default=0.55,
+        help="Target difficulty for capacity_aware SFT selection.",
+    )
+    ap.add_argument(
+        "--sft_selection_hardness_bandwidth",
+        type=float,
+        default=0.28,
+        help="Difficulty bandwidth for capacity_aware SFT selection.",
+    )
+    ap.add_argument(
+        "--sft_selection_budget_mode",
+        choices=["pairs", "tokens"],
+        default="pairs",
+        help="Whether SFT selection keep_ratio applies to pair count or estimated token budget.",
+    )
+    ap.add_argument(
+        "--sft_selection_budget_power",
+        type=float,
+        default=0.5,
+        help="Length penalty power for token-budgeted SFT selection (0 ignores length, 1 is score-per-token).",
+    )
+    ap.add_argument(
+        "--sft_selection_scope",
+        choices=["all", "verbose_synthetic_teacher"],
+        default="all",
+        help="Restrict SFT selection to a subset of rows while passing the rest through unchanged.",
+    )
+    ap.add_argument(
+        "--sft_selection_scope_min_words",
+        type=int,
+        default=40,
+        help="Minimum assistant word count for scoped SFT selection candidates.",
     )
     ap.add_argument(
         "--sft_auto_balance_sources",
@@ -4669,6 +6196,24 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument("--preference_sft_weight", type=float, default=0.2)
     ap.add_argument("--preference_length_weight", type=float, default=0.05)
+    ap.add_argument(
+        "--preference_length_control_strength",
+        type=float,
+        default=0.0,
+        help="LMPO-style extra margin penalty when chosen responses are much longer than rejected ones.",
+    )
+    ap.add_argument(
+        "--preference_length_control_target_ratio",
+        type=float,
+        default=1.08,
+        help="Chosen/rejected length ratio tolerated before length-control margin activates.",
+    )
+    ap.add_argument(
+        "--preference_length_control_max_penalty",
+        type=float,
+        default=0.35,
+        help="Clamp on the per-pair length-control margin penalty.",
+    )
     ap.add_argument(
         "--preference_hardness_gamma",
         type=float,
@@ -4856,6 +6401,36 @@ def parse_args() -> argparse.Namespace:
         help="Inject up to N counterfactual rejected variants for coding/reasoning prompts during preference mining.",
     )
     ap.add_argument(
+        "--preference_self_play_budget",
+        type=int,
+        default=0,
+        help="Generate current-policy self-play negatives for up to N prompts during preference mining, even on CPU.",
+    )
+    ap.add_argument(
+        "--preference_self_play_curriculum",
+        choices=["easy_to_hard", "hard_first"],
+        default="easy_to_hard",
+        help="Order prompts used for self-play negative generation.",
+    )
+    ap.add_argument(
+        "--preference_self_play_max_new_tokens",
+        type=int,
+        default=40,
+        help="Token cap for self-play negative generation (0 uses preference_max_new_tokens).",
+    )
+    ap.add_argument(
+        "--preference_stop_signal_strength",
+        type=float,
+        default=0.0,
+        help="Prompt-aware brevity penalty/bonus applied during preference mining for answer-only or concise prompts.",
+    )
+    ap.add_argument(
+        "--preference_stop_rejects_per_prompt",
+        type=int,
+        default=0,
+        help="Inject up to N synthetic overlong rejected variants for prompts that explicitly want brevity.",
+    )
+    ap.add_argument(
         "--preference_selection_strategy",
         choices=["none", "margin_topk", "capacity_aware", "innovation_mix"],
         default="none",
@@ -4891,6 +6466,17 @@ def parse_args() -> argparse.Namespace:
         default=0.24,
         help="Bandwidth around hardness target for capacity_aware pair selection.",
     )
+    ap.add_argument(
+        "--preference_length_bucketed_batches",
+        action="store_true",
+        help="Bucket preference-stage batches by pair length to reduce padding waste.",
+    )
+    ap.add_argument(
+        "--preference_length_bucket_window_mult",
+        type=int,
+        default=16,
+        help="Window multiplier used for preference length bucketing.",
+    )
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument(
         "--preference_rescore_every",
@@ -4901,8 +6487,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps", "xpu", "npu", "dml"])
     ap.add_argument(
         "--device_preference",
-        default="cuda,npu,xpu,dml,mps,cpu",
-        help="Priority order used when --device auto (supports cuda,npu,xpu,dml,mps,cpu).",
+        default="cuda,npu,xpu,mps,cpu,dml",
+        help="Priority order used when --device auto (supports cuda,npu,xpu,mps,cpu,dml).",
     )
     ap.add_argument(
         "--model_dtype",
@@ -4938,6 +6524,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable TF32 when running on CUDA-capable hardware.",
     )
+    ap.add_argument(
+        "--strict_determinism",
+        action="store_true",
+        help="Request deterministic CUDA/cuDNN algorithms where supported (may reduce throughput).",
+    )
     ap.add_argument("--supermix_distill_ratio", type=float, default=0.25)
     ap.add_argument("--supermix_distill_max", type=int, default=120)
     ap.add_argument(
@@ -4969,6 +6560,30 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Require teacher-generated distillation responses to beat the original assistant answer by this margin.",
+    )
+    ap.add_argument(
+        "--supermix_distill_density_bias",
+        type=float,
+        default=0.0,
+        help="Bias teacher distillation candidate choice toward denser answers when quality is close.",
+    )
+    ap.add_argument(
+        "--supermix_distill_gain_bias",
+        type=float,
+        default=0.35,
+        help="Extra ranking weight on teacher quality gain over the original assistant answer.",
+    )
+    ap.add_argument(
+        "--supermix_distill_compactness_bias",
+        type=float,
+        default=0.45,
+        help="Extra ranking weight favoring concise teacher rewrites when quality is comparable.",
+    )
+    ap.add_argument(
+        "--supermix_distill_rank_margin",
+        type=float,
+        default=0.04,
+        help="Minimum ranking margin a teacher response must clear over the original answer to be kept.",
     )
     ap.add_argument(
         "--supermix_distill_allow_synthetic_prompts",
@@ -5003,6 +6618,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip base/tuned benchmark generation to speed up training iteration.",
     )
+    ap.add_argument(
+        "--benchmark_eval_limit",
+        type=int,
+        default=0,
+        help="Optional cap on eval pairs used during base/tuned benchmarking (0 uses the full filtered eval set).",
+    )
     return ap.parse_args()
 
 
@@ -5015,6 +6636,7 @@ def main() -> None:
         torch_interop_threads=int(args.torch_interop_threads),
         allow_tf32=not bool(args.disable_tf32),
         matmul_precision=str(args.matmul_precision),
+        strict_determinism=bool(args.strict_determinism),
     )
     device, device_info = _resolve_device(
         str(args.device),
@@ -5033,6 +6655,7 @@ def main() -> None:
         f"device={device_info.get('device_repr', str(device))} "
         f"model_dtype={str(model_dtype)} "
         f"gradient_checkpointing={bool(args.gradient_checkpointing)} "
+        f"strict_determinism={bool(args.strict_determinism)} "
         f"torch_threads={torch.get_num_threads()} "
         f"interop_threads={torch.get_num_interop_threads()} "
         f"preference={device_info.get('preference', str(args.device_preference))}"
@@ -5060,6 +6683,23 @@ def main() -> None:
                     f"preference_steps={resume_state.preference_steps} "
                     f"adapter={resume_state.adapter_dir}"
                 )
+    if resume_state is None:
+        explicit_resume_state = _build_explicit_resume_checkpoint(
+            init_adapter_dir=str(args.init_adapter_dir or "").strip(),
+            sft_steps=int(args.resume_sft_steps),
+            preference_steps=int(args.resume_preference_steps),
+            sft_loss_mean=float(args.resume_sft_loss_mean),
+            preference_loss_mean=float(args.resume_preference_loss_mean),
+        )
+        if explicit_resume_state is not None:
+            resume_state = explicit_resume_state
+            print(
+                "[resume] using explicit resume metadata: "
+                f"stage={resume_state.stage} "
+                f"sft_steps={resume_state.sft_steps} "
+                f"preference_steps={resume_state.preference_steps} "
+                f"adapter={resume_state.adapter_dir}"
+            )
     if bool(args.skip_sft) and not str(args.init_adapter_dir or "").strip():
         raise ValueError("--skip_sft requires --init_adapter_dir to load an existing adapter.")
     prompt_sig_exempt_sources = [
@@ -5141,10 +6781,15 @@ def main() -> None:
                 )
         if not reused_cache:
             print("[distill] loading Supermix teacher...")
+            teacher_device = str(device)
+            if runtime_backend == "dml":
+                # DirectML currently fails in the teacher path on scatter_.
+                teacher_device = "cpu"
+                print("[distill] forcing Supermix teacher to cpu because DirectML inference is unsupported for this path")
             teacher = SupermixTeacher(
                 weights_path=args.supermix_weights,
                 meta_path=args.supermix_meta,
-                device=str(device),
+                device=teacher_device,
             )
             train_pairs, teacher_generated = apply_supermix_distillation(
                 train_pairs=train_pairs,
@@ -5158,6 +6803,10 @@ def main() -> None:
                 log_every=int(args.supermix_distill_log_every),
                 max_seconds=float(args.supermix_distill_max_seconds),
                 best_of=int(args.supermix_distill_best_of),
+                density_bias=float(args.supermix_distill_density_bias),
+                gain_bias=float(args.supermix_distill_gain_bias),
+                compactness_bias=float(args.supermix_distill_compactness_bias),
+                rank_margin=float(args.supermix_distill_rank_margin),
             )
             teacher_pairs = [pair for pair in train_pairs if str(pair.source) == "supermix_teacher"]
             if teacher_pairs:
@@ -5213,6 +6862,7 @@ def main() -> None:
         sft_prompt_skill_boost=float(args.sft_prompt_skill_boost),
         sft_conversation_boost=float(args.sft_conversation_boost),
         sft_creativity_boost=float(args.sft_creativity_boost),
+        sft_knowledge_density_boost=float(args.sft_knowledge_density_boost),
         sft_followup_paraphrase_aug=int(args.sft_followup_paraphrase_aug),
         sft_followup_paraphrase_weight=float(args.sft_followup_paraphrase_weight),
         sft_rdrop_alpha=float(args.sft_rdrop_alpha),
@@ -5229,6 +6879,18 @@ def main() -> None:
         sft_early_stop_patience=int(args.sft_early_stop_patience),
         sft_curriculum_quality_ramp=float(args.sft_curriculum_quality_ramp),
         sft_grad_noise_eta=float(args.sft_grad_noise_eta),
+        sft_length_bucketed_batches=bool(args.sft_length_bucketed_batches),
+        sft_length_bucket_window_mult=int(args.sft_length_bucket_window_mult),
+        sft_selection_strategy=str(args.sft_selection_strategy),
+        sft_selection_keep_ratio=float(args.sft_selection_keep_ratio),
+        sft_selection_min_keep=int(args.sft_selection_min_keep),
+        sft_selection_max_keep=int(args.sft_selection_max_keep),
+        sft_selection_hardness_target=float(args.sft_selection_hardness_target),
+        sft_selection_hardness_bandwidth=float(args.sft_selection_hardness_bandwidth),
+        sft_selection_budget_mode=str(args.sft_selection_budget_mode),
+        sft_selection_budget_power=float(args.sft_selection_budget_power),
+        sft_selection_scope=str(args.sft_selection_scope),
+        sft_selection_scope_min_words=int(args.sft_selection_scope_min_words),
         eval_pairs=eval_pairs,
         preference_objective=str(args.preference_objective),
         preference_steps=int(args.preference_steps),
@@ -5241,6 +6903,9 @@ def main() -> None:
         preference_xpo_clip=float(args.preference_xpo_clip),
         preference_sft_weight=float(args.preference_sft_weight),
         preference_length_weight=float(args.preference_length_weight),
+        preference_length_control_strength=float(args.preference_length_control_strength),
+        preference_length_control_target_ratio=float(args.preference_length_control_target_ratio),
+        preference_length_control_max_penalty=float(args.preference_length_control_max_penalty),
         preference_hardness_gamma=float(args.preference_hardness_gamma),
         preference_robust_alpha=float(args.preference_robust_alpha),
         preference_robust_eta=float(args.preference_robust_eta),
@@ -5275,12 +6940,19 @@ def main() -> None:
         preference_coding_focus_boost=float(args.preference_coding_focus_boost),
         preference_reasoning_focus_boost=float(args.preference_reasoning_focus_boost),
         preference_counterfactual_rejects_per_prompt=int(args.preference_counterfactual_rejects_per_prompt),
+        preference_self_play_budget=int(args.preference_self_play_budget),
+        preference_self_play_curriculum=str(args.preference_self_play_curriculum),
+        preference_self_play_max_new_tokens=int(args.preference_self_play_max_new_tokens),
+        preference_stop_signal_strength=float(args.preference_stop_signal_strength),
+        preference_stop_rejects_per_prompt=int(args.preference_stop_rejects_per_prompt),
         preference_selection_strategy=str(args.preference_selection_strategy),
         preference_selection_keep_ratio=float(args.preference_selection_keep_ratio),
         preference_selection_min_keep=int(args.preference_selection_min_keep),
         preference_selection_max_keep=int(args.preference_selection_max_keep),
         preference_selection_hardness_target=float(args.preference_selection_hardness_target),
         preference_selection_hardness_bandwidth=float(args.preference_selection_hardness_bandwidth),
+        preference_length_bucketed_batches=bool(args.preference_length_bucketed_batches),
+        preference_length_bucket_window_mult=int(args.preference_length_bucket_window_mult),
         seed=int(args.seed),
         save_every_steps=int(args.save_every_steps),
         preference_rescore_every=int(args.preference_rescore_every),
@@ -5299,24 +6971,39 @@ def main() -> None:
         print("[eval] skipped (--skip_benchmark)")
         base_metrics = {}
         tuned_metrics = {}
+        benchmark_artifacts = {}
+        benchmark_sample_summary = {}
     else:
+        benchmark_eval_pairs = list(eval_pairs)
+        benchmark_eval_limit = max(0, int(args.benchmark_eval_limit))
+        if benchmark_eval_limit > 0:
+            benchmark_eval_pairs = benchmark_eval_pairs[:benchmark_eval_limit]
+            print(
+                "[eval] benchmark eval limit: "
+                f"{len(benchmark_eval_pairs)}/{len(eval_pairs)} filtered eval samples"
+            )
         print("[eval] benchmarking base model...")
-        base_metrics = evaluate_model(
+        base_metrics, base_samples = evaluate_model_detailed(
             base_model=args.base_model,
-            eval_pairs=eval_pairs,
+            eval_pairs=benchmark_eval_pairs,
             device=device,
             max_length=int(args.max_length),
             max_new_tokens=int(args.max_new_tokens),
             adapter_dir=None,
         )
         print("[eval] benchmarking fine-tuned model...")
-        tuned_metrics = evaluate_model(
+        tuned_metrics, tuned_samples = evaluate_model_detailed(
             base_model=args.base_model,
-            eval_pairs=eval_pairs,
+            eval_pairs=benchmark_eval_pairs,
             device=device,
             max_length=int(args.max_length),
             max_new_tokens=int(args.max_new_tokens),
             adapter_dir=adapter_dir,
+        )
+        benchmark_artifacts, benchmark_sample_summary = save_benchmark_sample_artifacts(
+            output_dir=output_dir,
+            base_samples=base_samples,
+            tuned_samples=tuned_samples,
         )
 
     results = {
@@ -5332,6 +7019,7 @@ def main() -> None:
             "torch_interop_threads": int(torch.get_num_interop_threads()),
             "matmul_precision": str(args.matmul_precision),
             "tf32_enabled": not bool(args.disable_tf32),
+            "strict_determinism": bool(args.strict_determinism),
             "resume_from_latest_checkpoint": bool(args.resume_from_latest_checkpoint),
             "resolved_resume_stage": str(resume_state.stage) if resume_state is not None else "",
             "resolved_resume_adapter": str(resume_state.adapter_dir) if resume_state is not None else "",
@@ -5361,6 +7049,10 @@ def main() -> None:
             "supermix_distill_max_seconds": float(args.supermix_distill_max_seconds),
             "supermix_distill_min_quality": float(args.supermix_distill_min_quality),
             "supermix_distill_min_gain": float(args.supermix_distill_min_gain),
+            "supermix_distill_density_bias": float(args.supermix_distill_density_bias),
+            "supermix_distill_gain_bias": float(args.supermix_distill_gain_bias),
+            "supermix_distill_compactness_bias": float(args.supermix_distill_compactness_bias),
+            "supermix_distill_rank_margin": float(args.supermix_distill_rank_margin),
             "supermix_distill_allow_synthetic_prompts": bool(
                 args.supermix_distill_allow_synthetic_prompts
             ),
@@ -5384,6 +7076,7 @@ def main() -> None:
             "sft_prompt_skill_boost": float(args.sft_prompt_skill_boost),
             "sft_conversation_boost": float(args.sft_conversation_boost),
             "sft_creativity_boost": float(args.sft_creativity_boost),
+            "sft_knowledge_density_boost": float(args.sft_knowledge_density_boost),
             "sft_followup_paraphrase_aug": int(args.sft_followup_paraphrase_aug),
             "sft_followup_paraphrase_weight": float(args.sft_followup_paraphrase_weight),
             "sft_rdrop_alpha": float(args.sft_rdrop_alpha),
@@ -5392,6 +7085,18 @@ def main() -> None:
             "sft_early_stop_patience": int(args.sft_early_stop_patience),
             "sft_curriculum_quality_ramp": float(args.sft_curriculum_quality_ramp),
             "sft_grad_noise_eta": float(args.sft_grad_noise_eta),
+            "sft_length_bucketed_batches": bool(args.sft_length_bucketed_batches),
+            "sft_length_bucket_window_mult": int(args.sft_length_bucket_window_mult),
+            "sft_selection_strategy": str(args.sft_selection_strategy),
+            "sft_selection_keep_ratio": float(args.sft_selection_keep_ratio),
+            "sft_selection_min_keep": int(args.sft_selection_min_keep),
+            "sft_selection_max_keep": int(args.sft_selection_max_keep),
+            "sft_selection_hardness_target": float(args.sft_selection_hardness_target),
+            "sft_selection_hardness_bandwidth": float(args.sft_selection_hardness_bandwidth),
+            "sft_selection_budget_mode": str(args.sft_selection_budget_mode),
+            "sft_selection_budget_power": float(args.sft_selection_budget_power),
+            "sft_selection_scope": str(args.sft_selection_scope),
+            "sft_selection_scope_min_words": int(args.sft_selection_scope_min_words),
             "sft_lr_restart_period": int(args.sft_lr_restart_period),
             "preference_rescore_every": int(args.preference_rescore_every),
             "sft_min_quality_score": float(args.sft_min_quality_score),
@@ -5411,6 +7116,9 @@ def main() -> None:
             "preference_label_smoothing": float(args.preference_label_smoothing),
             "preference_xpo_clip": float(args.preference_xpo_clip),
             "preference_hardness_gamma": float(args.preference_hardness_gamma),
+            "preference_length_control_strength": float(args.preference_length_control_strength),
+            "preference_length_control_target_ratio": float(args.preference_length_control_target_ratio),
+            "preference_length_control_max_penalty": float(args.preference_length_control_max_penalty),
             "preference_robust_alpha": float(args.preference_robust_alpha),
             "preference_robust_eta": float(args.preference_robust_eta),
             "preference_robust_clip": float(args.preference_robust_clip),
@@ -5444,17 +7152,27 @@ def main() -> None:
             "preference_counterfactual_rejects_per_prompt": int(
                 args.preference_counterfactual_rejects_per_prompt
             ),
+            "preference_self_play_budget": int(args.preference_self_play_budget),
+            "preference_self_play_curriculum": str(args.preference_self_play_curriculum),
+            "preference_self_play_max_new_tokens": int(args.preference_self_play_max_new_tokens),
+            "preference_stop_signal_strength": float(args.preference_stop_signal_strength),
+            "preference_stop_rejects_per_prompt": int(args.preference_stop_rejects_per_prompt),
             "preference_selection_strategy": str(args.preference_selection_strategy),
             "preference_selection_keep_ratio": float(args.preference_selection_keep_ratio),
             "preference_selection_min_keep": int(args.preference_selection_min_keep),
             "preference_selection_max_keep": int(args.preference_selection_max_keep),
             "preference_selection_hardness_target": float(args.preference_selection_hardness_target),
             "preference_selection_hardness_bandwidth": float(args.preference_selection_hardness_bandwidth),
+            "preference_length_bucketed_batches": bool(args.preference_length_bucketed_batches),
+            "preference_length_bucket_window_mult": int(args.preference_length_bucket_window_mult),
             "init_adapter_dir": str(args.init_adapter_dir or ""),
             "init_adapter_match_lora": bool(args.init_adapter_match_lora),
             "skip_benchmark": bool(args.skip_benchmark),
+            "benchmark_eval_limit": int(args.benchmark_eval_limit),
         },
         "train_stats": train_stats,
+        "artifacts": benchmark_artifacts,
+        "sample_summary": benchmark_sample_summary,
         "base": base_metrics,
         "tuned": tuned_metrics,
     }

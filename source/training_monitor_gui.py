@@ -50,7 +50,8 @@ DATA_QUALITY_RE = re.compile(
 DATA_SPLIT_RE = re.compile(r"\[data\] train=(\d+) eval=(\d+)(?: \(raw_eval=(\d+)\))?")
 DATA_SYNTHETIC_RE = re.compile(r"\[data\] synthetic_kept=(\d+)/(\d+)")
 DISTILL_CONFIG_RE = re.compile(
-    r"\[distill\] config: target=(\d+) ratio=([0-9eE+\-.]+) max_seconds=(\S+) best_of=(\d+)(?: min_gain=([0-9eE+\-.]+))?"
+    r"\[distill\] config: target=(\d+) ratio=([0-9eE+\-.]+) max_seconds=(\S+) best_of=(\d+)"
+    r"(?: min_gain=([0-9eE+\-.]+))?(?: density_bias=([0-9eE+\-.]+))?"
 )
 DISTILL_PROGRESS_RE = re.compile(
     r"\[distill\] progress: visited=(\d+)/(\d+) generated=(\d+) rate=([0-9eE+\-.]+)/s"
@@ -73,18 +74,26 @@ EVAL_FILTER_FALLBACK_RE = re.compile(
     r"\(threshold=([0-9eE+\-.]+), dropped_quality=(\d+), dropped_synthetic=(\d+)\)"
 )
 PREF_MINING_CONFIG_RE = re.compile(
-    r"\[pref\] mining config: mode=(\S+) generation=(\S+) target_pairs=(\d+) candidates=(\d+) max_attempts=(\d+) "
+    r"\[pref\] mining config: mode=(\S+) generation=(\S+) target_pairs=(\d+) candidates=(\d+) max_attempts=(\d+)"
+    r"(?: self_play_budget=(\d+) self_play_curriculum=(\S+) self_play_max_new_tokens=(\d+))? "
     r"selection=(\S+) keep_ratio=([0-9eE+\-.]+) max_seconds=(\S+)"
 )
 PREF_MINING_PROGRESS_RE = re.compile(
     r"\[pref\] mining progress: visited=(\d+)/(\d+) accepted=(\d+) rate=([0-9eE+\-.]+)/s"
 )
 PREF_MINING_COMPLETE_RE = re.compile(
-    r"\[pref\] mining complete: pairs=(\d+) mined=(\d+) visited=(\d+) generation_failures=(\d+) elapsed=([0-9eE+\-.]+)s"
+    r"\[pref\] mining complete: pairs=(\d+) mined=(\d+) visited=(\d+) generation_failures=(\d+)"
+    r"(?: brevity_filtered=(\d+) stop_reject_variants=(\d+))?"
+    r"(?: self_play_prompts=(\d+) self_play_candidates=(\d+) self_play_failures=(\d+))?"
+    r" elapsed=([0-9eE+\-.]+)s"
 )
 PREF_SELECTION_RE = re.compile(
     r"\[pref\] pair selection: strategy=(\S+) keep=(\d+)/(\d+) keep_ratio=([0-9eE+\-.]+) "
     r"gap=([0-9eE+\-.]+)->([0-9eE+\-.]+) sim=([0-9eE+\-.]+)->([0-9eE+\-.]+) "
+    r"(?:conv=([0-9eE+\-.]+)->([0-9eE+\-.]+) )?"
+    r"(?:reason=([0-9eE+\-.]+)->([0-9eE+\-.]+) )?"
+    r"(?:creative=([0-9eE+\-.]+)->([0-9eE+\-.]+) )?"
+    r"(?:density=([0-9eE+\-.]+)->([0-9eE+\-.]+) )?"
     r"selected_score_mean=([0-9eE+\-.]+)"
 )
 MAX_STEPS_RE = re.compile(r"--max_steps(?:\s+|=)(\d+)")
@@ -348,6 +357,29 @@ class ProcessEntry:
     command_line: str
 
 
+@dataclass(frozen=True)
+class ResearchResult:
+    timestamp: str
+    commit: str
+    run_tag: str
+    output_dir: str
+    benchmark_json: str
+    token_f1_delta: float
+    char_similarity_delta: float
+    perplexity_delta: float
+    avg_gen_seconds_delta: float
+    status: str
+    description: str
+
+
+@dataclass(frozen=True)
+class ResearchFailureInsight:
+    summary_line: str
+    prompt_line: str
+    prediction_line: str
+    sample_comparison_jsonl: str = ""
+
+
 @dataclass
 class RunSnapshot:
     run_name: str
@@ -463,6 +495,14 @@ class ParsedLog:
     pref_mining_visited: Optional[int] = None
     pref_mining_rate_per_sec: Optional[float] = None
     pref_mining_generation_failures: Optional[int] = None
+    pref_mining_brevity_filtered: Optional[int] = None
+    pref_mining_stop_reject_variants: Optional[int] = None
+    pref_mining_self_play_budget: Optional[int] = None
+    pref_mining_self_play_curriculum: str = "-"
+    pref_mining_self_play_max_new_tokens: Optional[int] = None
+    pref_mining_self_play_prompts: Optional[int] = None
+    pref_mining_self_play_candidates: Optional[int] = None
+    pref_mining_self_play_failures: Optional[int] = None
     pref_mining_summary: str = "-"
     pref_selection_summary: str = "-"
     tail_lines: List[str] = field(default_factory=list)
@@ -1185,9 +1225,10 @@ def _parse_log(
             max_seconds = m_distill_cfg.group(3)
             best_of = int(m_distill_cfg.group(4))
             min_gain = float(m_distill_cfg.group(5)) if m_distill_cfg.group(5) is not None else 0.0
+            density_bias = float(m_distill_cfg.group(6)) if m_distill_cfg.group(6) is not None else 0.0
             parsed.distill_config_summary = (
                 f"target={parsed.distill_target} ratio={ratio:.3f} max_seconds={max_seconds} "
-                f"best_of={best_of} min_gain={min_gain:.3f}"
+                f"best_of={best_of} min_gain={min_gain:.3f} density_bias={density_bias:.3f}"
             )
 
         m_distill = DISTILL_PROGRESS_RE.search(line)
@@ -1271,14 +1312,27 @@ def _parse_log(
             generation = m_pref_cfg.group(2)
             parsed.pref_mining_target_pairs = int(m_pref_cfg.group(3))
             parsed.pref_mining_candidates = int(m_pref_cfg.group(4))
-            selection = m_pref_cfg.group(6)
-            keep_ratio = float(m_pref_cfg.group(7))
-            max_seconds = m_pref_cfg.group(8)
+            parsed.pref_mining_self_play_budget = (
+                int(m_pref_cfg.group(6)) if m_pref_cfg.group(6) is not None else None
+            )
+            parsed.pref_mining_self_play_curriculum = m_pref_cfg.group(7) if m_pref_cfg.group(7) is not None else "-"
+            parsed.pref_mining_self_play_max_new_tokens = (
+                int(m_pref_cfg.group(8)) if m_pref_cfg.group(8) is not None else None
+            )
+            selection = m_pref_cfg.group(9)
+            keep_ratio = float(m_pref_cfg.group(10))
+            max_seconds = m_pref_cfg.group(11)
             parsed.pref_mining_summary = (
                 f"mode={mode} generation={generation} target_pairs={parsed.pref_mining_target_pairs} "
                 f"candidates={parsed.pref_mining_candidates} selection={selection} keep_ratio={keep_ratio:.3f} "
                 f"max_seconds={max_seconds}"
             )
+            if parsed.pref_mining_self_play_budget is not None:
+                parsed.pref_mining_summary += (
+                    f" self_play={parsed.pref_mining_self_play_budget} "
+                    f"curriculum={parsed.pref_mining_self_play_curriculum} "
+                    f"gen_tokens={parsed.pref_mining_self_play_max_new_tokens}"
+                )
 
         m_pref_progress = PREF_MINING_PROGRESS_RE.search(line)
         if m_pref_progress:
@@ -1302,7 +1356,12 @@ def _parse_log(
             mined_pairs = int(m_pref_complete.group(2))
             parsed.pref_mining_visited = int(m_pref_complete.group(3))
             parsed.pref_mining_generation_failures = int(m_pref_complete.group(4))
-            elapsed = float(m_pref_complete.group(5))
+            parsed.pref_mining_brevity_filtered = int(m_pref_complete.group(5)) if m_pref_complete.group(5) is not None else None
+            parsed.pref_mining_stop_reject_variants = int(m_pref_complete.group(6)) if m_pref_complete.group(6) is not None else None
+            parsed.pref_mining_self_play_prompts = int(m_pref_complete.group(7)) if m_pref_complete.group(7) is not None else None
+            parsed.pref_mining_self_play_candidates = int(m_pref_complete.group(8)) if m_pref_complete.group(8) is not None else None
+            parsed.pref_mining_self_play_failures = int(m_pref_complete.group(9)) if m_pref_complete.group(9) is not None else None
+            elapsed = float(m_pref_complete.group(10))
             target_txt = (
                 str(parsed.pref_mining_target_pairs)
                 if parsed.pref_mining_target_pairs is not None and parsed.pref_mining_target_pairs > 0
@@ -1317,6 +1376,17 @@ def _parse_log(
                 f"pairs={parsed.pref_mining_accepted}/{target_txt} mined={mined_pairs} visited={parsed.pref_mining_visited}/"
                 f"{candidates_txt} generation_failures={parsed.pref_mining_generation_failures} elapsed={elapsed:.1f}s"
             )
+            if parsed.pref_mining_brevity_filtered is not None:
+                parsed.pref_mining_summary += (
+                    f" brevity_filtered={parsed.pref_mining_brevity_filtered}"
+                    f" stop_reject_variants={parsed.pref_mining_stop_reject_variants if parsed.pref_mining_stop_reject_variants is not None else 0}"
+                )
+            if parsed.pref_mining_self_play_prompts is not None:
+                parsed.pref_mining_summary += (
+                    f" self_play_prompts={parsed.pref_mining_self_play_prompts}"
+                    f" self_play_candidates={parsed.pref_mining_self_play_candidates if parsed.pref_mining_self_play_candidates is not None else 0}"
+                    f" self_play_failures={parsed.pref_mining_self_play_failures if parsed.pref_mining_self_play_failures is not None else 0}"
+                )
 
         m_pref_selection = PREF_SELECTION_RE.search(line)
         if m_pref_selection:
@@ -1328,12 +1398,28 @@ def _parse_log(
             gap_after = float(m_pref_selection.group(6))
             sim_before = float(m_pref_selection.group(7))
             sim_after = float(m_pref_selection.group(8))
-            score_mean = float(m_pref_selection.group(9))
+            conv_before = float(m_pref_selection.group(9)) if m_pref_selection.group(9) is not None else None
+            conv_after = float(m_pref_selection.group(10)) if m_pref_selection.group(10) is not None else None
+            reason_before = float(m_pref_selection.group(11)) if m_pref_selection.group(11) is not None else None
+            reason_after = float(m_pref_selection.group(12)) if m_pref_selection.group(12) is not None else None
+            creative_before = float(m_pref_selection.group(13)) if m_pref_selection.group(13) is not None else None
+            creative_after = float(m_pref_selection.group(14)) if m_pref_selection.group(14) is not None else None
+            density_before = float(m_pref_selection.group(15)) if m_pref_selection.group(15) is not None else None
+            density_after = float(m_pref_selection.group(16)) if m_pref_selection.group(16) is not None else None
+            score_mean = float(m_pref_selection.group(17))
             parsed.pref_selection_summary = (
                 f"strategy={strategy} keep={keep_n}/{total} keep_ratio={keep_ratio:.3f} "
                 f"gap={gap_before:.3f}->{gap_after:.3f} sim={sim_before:.3f}->{sim_after:.3f} "
-                f"score_mean={score_mean:.4f}"
             )
+            if conv_before is not None and conv_after is not None:
+                parsed.pref_selection_summary += f"conv={conv_before:.3f}->{conv_after:.3f} "
+            if reason_before is not None and reason_after is not None:
+                parsed.pref_selection_summary += f"reason={reason_before:.3f}->{reason_after:.3f} "
+            if creative_before is not None and creative_after is not None:
+                parsed.pref_selection_summary += f"creative={creative_before:.3f}->{creative_after:.3f} "
+            if density_before is not None and density_after is not None:
+                parsed.pref_selection_summary += f"density={density_before:.3f}->{density_after:.3f} "
+            parsed.pref_selection_summary += f"score_mean={score_mean:.4f}"
 
     parsed.tail_lines = lines[-80:]
     return parsed
@@ -1551,6 +1637,200 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
 
     snapshots.sort(key=lambda x: x.out_last_write_ts, reverse=True)
     return snapshots
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _load_research_results(root_dir: Path) -> List[ResearchResult]:
+    path = root_dir / "research" / "results.tsv"
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh, delimiter="\t")
+            rows: List[ResearchResult] = []
+            for row in reader:
+                if not isinstance(row, dict):
+                    continue
+                run_tag = str(row.get("run_tag", "") or "").strip()
+                if not run_tag:
+                    continue
+                rows.append(
+                    ResearchResult(
+                        timestamp=str(row.get("timestamp", "") or "").strip(),
+                        commit=str(row.get("commit", "") or "").strip(),
+                        run_tag=run_tag,
+                        output_dir=str(row.get("output_dir", "") or "").strip(),
+                        benchmark_json=str(row.get("benchmark_json", "") or "").strip(),
+                        token_f1_delta=_safe_float(row.get("token_f1_delta", 0.0)),
+                        char_similarity_delta=_safe_float(row.get("char_similarity_delta", 0.0)),
+                        perplexity_delta=_safe_float(row.get("perplexity_delta", 0.0)),
+                        avg_gen_seconds_delta=_safe_float(row.get("avg_gen_seconds_delta", 0.0)),
+                        status=str(row.get("status", "") or "").strip().lower() or "unknown",
+                        description=str(row.get("description", "") or "").strip(),
+                    )
+                )
+    except Exception:
+        return []
+    rows.sort(key=lambda x: x.timestamp, reverse=True)
+    return rows
+
+
+def _format_signed(value: float, digits: int = 3) -> str:
+    return f"{value:+.{digits}f}"
+
+
+def _preview_research_text(value: Any, limit: int = 150) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return "-"
+    if limit <= 3 or len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _resolve_benchmark_artifact_path(benchmark_json: Path, raw_path: str) -> Optional[Path]:
+    candidate_raw = str(raw_path or "").strip()
+    if not candidate_raw:
+        return None
+    candidate = Path(candidate_raw)
+    if not candidate.is_absolute():
+        candidate = (benchmark_json.parent / candidate).resolve()
+    return candidate
+
+
+def _research_failure_insight_from_row(
+    row: Dict[str, Any],
+    sample_comparison_jsonl: str = "",
+) -> ResearchFailureInsight:
+    sample_index = int(row.get("sample_index", 0) or 0)
+    source = str(row.get("source", "") or "").strip() or "-"
+    summary_line = (
+        f"Top regression: #{sample_index} {source} "
+        f"| dF1 {_format_signed(_safe_float(row.get('delta_token_f1', 0.0)))} "
+        f"| dChar {_format_signed(_safe_float(row.get('delta_char_similarity', 0.0)))} "
+        f"| dGen {_format_signed(_safe_float(row.get('delta_gen_seconds', 0.0), 0.0), 2)}s"
+    )
+    prompt_line = f"Prompt: {_preview_research_text(row.get('user_preview', row.get('user', '')), limit=180)}"
+    prediction_line = (
+        f"Tuned: {_preview_research_text(row.get('tuned_prediction_preview', row.get('tuned_prediction', '')), limit=150)} "
+        f"| Ref: {_preview_research_text(row.get('reference_preview', row.get('reference', '')), limit=120)}"
+    )
+    return ResearchFailureInsight(
+        summary_line=summary_line,
+        prompt_line=prompt_line,
+        prediction_line=prediction_line,
+        sample_comparison_jsonl=sample_comparison_jsonl,
+    )
+
+
+def _load_research_failure_insight(benchmark_json: Path) -> ResearchFailureInsight:
+    empty = ResearchFailureInsight(
+        summary_line="Top regression: -",
+        prompt_line="Prompt: -",
+        prediction_line="Tuned: - | Ref: -",
+    )
+    if not benchmark_json.exists():
+        return empty
+    try:
+        payload = json.loads(benchmark_json.read_text(encoding="utf-8"))
+    except Exception:
+        return empty
+    if not isinstance(payload, dict):
+        return empty
+
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    sample_path = _resolve_benchmark_artifact_path(
+        benchmark_json,
+        str(artifacts.get("sample_comparison_jsonl", "") if isinstance(artifacts, dict) else ""),
+    )
+    sample_path_text = str(sample_path) if sample_path is not None else ""
+
+    sample_summary = payload.get("sample_summary")
+    if isinstance(sample_summary, dict):
+        worst_regression = sample_summary.get("worst_regression")
+        if isinstance(worst_regression, dict):
+            return _research_failure_insight_from_row(
+                worst_regression,
+                sample_comparison_jsonl=sample_path_text,
+            )
+
+    fallback_path = sample_path if sample_path is not None else (benchmark_json.parent / "sample_comparison.jsonl")
+    if not fallback_path.exists():
+        return ResearchFailureInsight(
+            summary_line="Top regression: unavailable for this run",
+            prompt_line="Prompt: rerun the benchmark with detailed traces to generate sample_comparison.jsonl",
+            prediction_line="Tuned: - | Ref: -",
+        )
+    try:
+        with fallback_path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    return _research_failure_insight_from_row(
+                        row,
+                        sample_comparison_jsonl=str(fallback_path),
+                    )
+                break
+    except Exception:
+        return empty
+    return ResearchFailureInsight(
+        summary_line="Top regression: sample trace file is empty",
+        prompt_line="Prompt: no detailed benchmark rows were written for this run",
+        prediction_line="Tuned: - | Ref: -",
+        sample_comparison_jsonl=str(fallback_path),
+    )
+
+
+def _summarize_research_results(results: Sequence[ResearchResult]) -> Tuple[str, str, str]:
+    if not results:
+        return ("Research: no autoresearch results yet", "Best: -", "Latest: -")
+
+    counts: Dict[str, int] = {}
+    for row in results:
+        counts[row.status] = counts.get(row.status, 0) + 1
+
+    status_bits = []
+    for key in ("keep", "discard", "crash", "unknown"):
+        if counts.get(key, 0):
+            status_bits.append(f"{key} {counts[key]}")
+    summary = f"Research: {len(results)} runs | " + (" | ".join(status_bits) if status_bits else "no status data")
+
+    benchmarked = [row for row in results if row.benchmark_json or row.status in {"keep", "discard"}]
+    if benchmarked:
+        best = max(
+            benchmarked,
+            key=lambda row: (
+                float(row.token_f1_delta),
+                float(row.char_similarity_delta),
+                -float(row.avg_gen_seconds_delta),
+            ),
+        )
+        best_line = (
+            f"Best: {best.run_tag} [{best.status}] "
+            f"f1Δ {_format_signed(best.token_f1_delta)} "
+            f"charΔ {_format_signed(best.char_similarity_delta)} "
+            f"genΔ {_format_signed(best.avg_gen_seconds_delta, 2)}s"
+        )
+    else:
+        best_line = "Best: -"
+
+    latest = results[0]
+    latest_line = (
+        f"Latest: {latest.run_tag} [{latest.status}] "
+        f"f1Δ {_format_signed(latest.token_f1_delta)} "
+        f"charΔ {_format_signed(latest.char_similarity_delta)} "
+        f"| {latest.description or '-'}"
+    )
+    return summary, best_line, latest_line
 
 
 def _fmt_ts(ts: float) -> str:
@@ -1778,6 +2058,63 @@ def _compute_display_progress_percent(snap: RunSnapshot) -> Optional[float]:
     return snap.stage_progress_percent
 
 
+def _build_run_recommendation(snap: RunSnapshot) -> str:
+    if snap.err_signal == "error":
+        return "Review the ERR log first; the run is reporting a hard failure."
+    if snap.status == "stalled":
+        return f"Investigate the last {snap.stage or 'active'} stage and compare the latest OUT/ERR tails."
+    if snap.status == "finished" or snap.stage == "done":
+        return "Benchmark or promote the finished adapter, then archive the logs."
+    if snap.stage == "data":
+        return "Watch dataset throughput and filter counts before the training stages start."
+    if snap.stage == "distill":
+        return "Monitor teacher generation rate; lower best_of or max_seconds if this stage drags."
+    if snap.stage == "sft_filter":
+        return "Review the quality-filter summary to make sure useful pairs are not being dropped."
+    if snap.stage == "sft":
+        return "Track loss trend, rate, and checkpoint ETA; this is the main throughput stage."
+    if snap.stage == "preference_mining":
+        return "Check accepted pairs versus visited prompts; reduce mining cost if acceptance stays low."
+    if snap.stage == "preference":
+        return "Monitor loss, beta, and checkpoint cadence for preference stability."
+    if snap.stage == "eval":
+        return "Review eval filtering and benchmark readiness before using this adapter."
+    return "Select a run and inspect the latest tails for the next concrete action."
+
+
+def _summarize_stage_mix(snapshots: Sequence[RunSnapshot]) -> str:
+    counts: Dict[str, int] = {}
+    for snap in snapshots:
+        stage = str(snap.stage or "unknown").strip().lower() or "unknown"
+        counts[stage] = counts.get(stage, 0) + 1
+    if not counts:
+        return "Stage Mix: -"
+    parts = [f"{stage} {count}" for stage, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
+    return "Stage Mix: " + " | ".join(parts)
+
+
+def _summarize_issue_runs(snapshots: Sequence[RunSnapshot], limit: int = 3) -> str:
+    issues = [snap for snap in snapshots if snap.status in {"stalled", "stopped", "unknown"} or snap.err_signal in {"error", "warn"}]
+    if not issues:
+        return "Issue Radar: no active blockers"
+    issues.sort(
+        key=lambda snap: (
+            0 if snap.err_signal == "error" else 1,
+            0 if snap.status == "stalled" else 1,
+            -float(snap.stale_minutes),
+            snap.run_name,
+        )
+    )
+    parts = [
+        f"{snap.run_name} [{snap.status}/{snap.stage}{' ' + snap.err_signal if snap.err_signal != 'ok' else ''}]"
+        for snap in issues[: max(1, int(limit))]
+    ]
+    more = len(issues) - len(parts)
+    if more > 0:
+        parts.append(f"+{more} more")
+    return "Issue Radar: " + " | ".join(parts)
+
+
 def _resolve_canvas_size(
     width: int,
     height: int,
@@ -1858,11 +2195,21 @@ class TrainingMonitorApp:
         self.selected_ckpt_eta_var = tk.StringVar(value="Next Ckpt: -")
         self.selected_rate_var = tk.StringVar(value="Rate: -")
         self.selected_eta_confidence_var = tk.StringVar(value="ETA Confidence: -")
+        self.selected_focus_var = tk.StringVar(value="Focus: -")
         self.fleet_progress_var = tk.StringVar(value="Fleet Progress: -")
         self.fleet_eta_var = tk.StringVar(value="Fleet ETA: -")
+        self.fleet_stage_var = tk.StringVar(value="Stage Mix: -")
+        self.fleet_issue_var = tk.StringVar(value="Issue Radar: -")
+        self.research_summary_var = tk.StringVar(value="Research: -")
+        self.research_best_var = tk.StringVar(value="Best: -")
+        self.research_latest_var = tk.StringVar(value="Latest: -")
+        self.research_focus_var = tk.StringVar(value="Top regression: -")
+        self.research_prompt_var = tk.StringVar(value="Prompt: -")
+        self.research_prediction_var = tk.StringVar(value="Tuned: - | Ref: -")
         self.trend_metric_var = tk.StringVar(value="progress")
         self.trend_window_var = tk.StringVar(value="60m")
         self.current_snapshots: Dict[str, RunSnapshot] = {}
+        self.current_research_results: List[ResearchResult] = []
         self.progress_history: Dict[str, List[Tuple[float, float]]] = {}
         self.display_progress_history: Dict[str, List[Tuple[float, float]]] = {}
         self.loss_history: Dict[str, List[Tuple[float, float]]] = {}
@@ -1928,9 +2275,9 @@ class TrainingMonitorApp:
             b = int(46 + (60 * i / hw))
             color = f"#{r:02x}{g:02x}{b:02x}"
             header.create_line(i, 0, i, 48, fill=color)
-        header.create_text(20, 24, anchor="w", text="⚡ SUPERMIX TRAINING MONITOR",
+        header.create_text(20, 24, anchor="w", text="SUPERMIX TRAINING MONITOR",
                            fill="#00d4ff", font=("Segoe UI", 16, "bold"))
-        header.create_text(hw - 20, 24, anchor="e", text="v29 • Paper Fusion Architecture",
+        header.create_text(hw - 20, 24, anchor="e", text="v29 | Research Workflow",
                            fill="#6a9fb5", font=("Segoe UI", 10))
 
         # ── Controls row ──
@@ -1953,8 +2300,8 @@ class TrainingMonitorApp:
         self.refresh_entry.pack(side=tk.LEFT, padx=(8, 10))
 
         ttk.Checkbutton(controls, text="Auto", variable=self.auto_refresh_var).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Checkbutton(controls, text="🔔 Alerts", variable=self._notification_enabled_var).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(controls, text="⟳ Refresh (F5)", command=self.refresh).pack(side=tk.LEFT)
+        ttk.Checkbutton(controls, text="Alerts", variable=self._notification_enabled_var).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(controls, text="Refresh (F5)", command=self.refresh).pack(side=tk.LEFT)
 
         filter_row = ttk.Frame(self.root, padding=(10, 0, 10, 8))
         filter_row.pack(fill=tk.X)
@@ -2009,7 +2356,54 @@ class TrainingMonitorApp:
         ttk.Label(fleet, textvariable=self.fleet_progress_var).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Label(fleet, textvariable=self.fleet_eta_var).pack(side=tk.LEFT, padx=(0, 20))
 
+        fleet_notes = ttk.Frame(self.root, padding=(10, 0, 10, 10))
+        fleet_notes.pack(fill=tk.X)
+        ttk.Label(fleet_notes, textvariable=self.selected_focus_var, justify=tk.LEFT).pack(anchor="w")
+        ttk.Label(fleet_notes, textvariable=self.fleet_stage_var, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+        ttk.Label(fleet_notes, textvariable=self.fleet_issue_var, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+
         # ── GPU Stats Row ──
+        research = ttk.Frame(self.root, padding=(10, 0, 10, 10))
+        research.pack(fill=tk.X)
+        research_head = ttk.Frame(research)
+        research_head.pack(fill=tk.X)
+        ttk.Label(research_head, text="Research Board").pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(research_head, text="Open results.tsv", command=self._open_research_results).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(research_head, text="Open selected benchmark", command=self._open_selected_research_benchmark).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(research_head, text="Open selected samples", command=self._open_selected_research_samples).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(research_head, text="Open selected output", command=self._open_selected_research_output_dir).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(research_head, text="Open latest benchmark", command=self._open_latest_research_benchmark).pack(side=tk.LEFT)
+        ttk.Label(research, textvariable=self.research_summary_var, justify=tk.LEFT).pack(anchor="w", pady=(6, 0))
+        ttk.Label(research, textvariable=self.research_best_var, justify=tk.LEFT).pack(anchor="w", pady=(2, 0))
+        ttk.Label(research, textvariable=self.research_latest_var, justify=tk.LEFT).pack(anchor="w", pady=(2, 6))
+        ttk.Label(research, textvariable=self.research_focus_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(0, 2))
+        ttk.Label(research, textvariable=self.research_prompt_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(0, 2))
+        ttk.Label(research, textvariable=self.research_prediction_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(0, 6))
+
+        research_table = ttk.Frame(research)
+        research_table.pack(fill=tk.X)
+        research_cols = ("run", "status", "f1", "char", "gen", "desc")
+        self.research_tree = ttk.Treeview(research_table, columns=research_cols, show="headings", height=5)
+        for col, width in (
+            ("run", 230),
+            ("status", 90),
+            ("f1", 80),
+            ("char", 80),
+            ("gen", 90),
+            ("desc", 520),
+        ):
+            heading = {"f1": "F1Δ", "char": "CHARΔ", "gen": "GENΔ"}.get(col, col.upper())
+            self.research_tree.heading(col, text=heading)
+            self.research_tree.column(col, width=width, anchor=tk.CENTER)
+        self.research_tree.column("run", anchor=tk.W)
+        self.research_tree.column("desc", anchor=tk.W)
+        self.research_tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.research_tree.bind("<<TreeviewSelect>>", lambda _e: self._update_research_focus())
+        self.research_tree.bind("<Double-1>", lambda _e: self._open_selected_research_benchmark())
+        research_scroll = ttk.Scrollbar(research_table, orient=tk.VERTICAL, command=self.research_tree.yview)
+        self.research_tree.configure(yscrollcommand=research_scroll.set)
+        research_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
         gpu_frame = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         gpu_frame.pack(fill=tk.X)
         self.gpu_canvas = tk.Canvas(
@@ -2147,6 +2541,9 @@ class TrainingMonitorApp:
         self.tree.tag_configure("stopped", background="#4a3e14", foreground="#d4d4d4")
         self.tree.tag_configure("err_error", foreground="#f14c4c")
         self.tree.tag_configure("err_warn", foreground="#cca700")
+        self.research_tree.tag_configure("keep", background="#0e4020", foreground="#d4d4d4")
+        self.research_tree.tag_configure("discard", background="#4a3e14", foreground="#d4d4d4")
+        self.research_tree.tag_configure("crash", background="#5b1b15", foreground="#d4d4d4")
 
     def _bind_keyboard_shortcuts(self) -> None:
         self.root.bind("<F5>", lambda _e: self.refresh())
@@ -2353,6 +2750,110 @@ class TrainingMonitorApp:
         snap = self._selected_snapshot()
         if snap is not None:
             self._open_path(snap.out_log.parent)
+
+    def _open_research_results(self) -> None:
+        self._open_path(self.root_dir / "research" / "results.tsv")
+
+    def _selected_research_result(self) -> Optional[ResearchResult]:
+        selection = self.research_tree.selection()
+        if not selection:
+            return None
+        iid = str(selection[0])
+        if "::" not in iid:
+            return None
+        run_tag = iid.split("::", 1)[1]
+        for row in self.current_research_results:
+            if row.run_tag == run_tag:
+                return row
+        return None
+
+    def _open_selected_research_benchmark(self) -> None:
+        row = self._selected_research_result()
+        if row is None or not row.benchmark_json:
+            return
+        benchmark_path = Path(row.benchmark_json)
+        if benchmark_path.exists():
+            self._open_path(benchmark_path)
+
+    def _open_selected_research_samples(self) -> None:
+        row = self._selected_research_result()
+        if row is None or not row.benchmark_json:
+            return
+        insight = _load_research_failure_insight(Path(row.benchmark_json))
+        if not insight.sample_comparison_jsonl:
+            return
+        sample_path = Path(insight.sample_comparison_jsonl)
+        if sample_path.exists():
+            self._open_path(sample_path)
+
+    def _open_selected_research_output_dir(self) -> None:
+        row = self._selected_research_result()
+        if row is None or not row.output_dir:
+            return
+        output_path = Path(row.output_dir)
+        if output_path.exists():
+            self._open_path(output_path)
+
+    def _open_latest_research_benchmark(self) -> None:
+        for row in self.current_research_results:
+            benchmark_path = Path(row.benchmark_json) if row.benchmark_json else None
+            if benchmark_path is not None and benchmark_path.exists():
+                self._open_path(benchmark_path)
+                return
+
+    def _selected_or_latest_research_result(self) -> Optional[ResearchResult]:
+        selected = self._selected_research_result()
+        if selected is not None:
+            return selected
+        if self.current_research_results:
+            return self.current_research_results[0]
+        return None
+
+    def _update_research_focus(self) -> None:
+        row = self._selected_or_latest_research_result()
+        if row is None or not row.benchmark_json:
+            self.research_focus_var.set("Top regression: -")
+            self.research_prompt_var.set("Prompt: -")
+            self.research_prediction_var.set("Tuned: - | Ref: -")
+            return
+
+        insight = _load_research_failure_insight(Path(row.benchmark_json))
+        self.research_focus_var.set(insight.summary_line)
+        self.research_prompt_var.set(insight.prompt_line)
+        self.research_prediction_var.set(insight.prediction_line)
+
+    def _update_research_board(self, results: Sequence[ResearchResult]) -> None:
+        selected = self.research_tree.selection()
+        selected_iid = str(selected[0]) if selected else ""
+        self.current_research_results = list(results)
+        summary, best_line, latest_line = _summarize_research_results(results)
+        self.research_summary_var.set(summary)
+        self.research_best_var.set(best_line)
+        self.research_latest_var.set(latest_line)
+
+        for iid in self.research_tree.get_children():
+            self.research_tree.delete(iid)
+        for row in list(results)[:8]:
+            iid = f"research::{row.run_tag}"
+            self.research_tree.insert(
+                "",
+                tk.END,
+                iid=iid,
+                values=(
+                    row.run_tag,
+                    row.status,
+                    _format_signed(row.token_f1_delta),
+                    _format_signed(row.char_similarity_delta),
+                    f"{_format_signed(row.avg_gen_seconds_delta, 2)}s",
+                    row.description,
+                ),
+                tags=(row.status,),
+            )
+        if selected_iid and self.research_tree.exists(selected_iid):
+            self.research_tree.selection_set(selected_iid)
+        elif results:
+            self.research_tree.selection_set(f"research::{results[0].run_tag}")
+        self._update_research_focus()
 
     def _settings_path(self) -> Path:
         return self.root_dir / ".training_monitor_gui_state.json"
@@ -2600,6 +3101,8 @@ class TrainingMonitorApp:
             self.fleet_progress_bar["value"] = 0.0
             self.fleet_progress_var.set("Fleet Progress: -")
             self.fleet_eta_var.set("Fleet ETA: -")
+            self.fleet_stage_var.set("Stage Mix: -")
+            self.fleet_issue_var.set("Issue Radar: -")
             return
 
         progress_rows: List[Tuple[float, float]] = []
@@ -2626,6 +3129,8 @@ class TrainingMonitorApp:
             self.fleet_eta_var.set(f"Fleet ETA: {_fmt_eta(fleet_eta)}")
         else:
             self.fleet_eta_var.set("Fleet ETA: -")
+        self.fleet_stage_var.set(_summarize_stage_mix(all_snapshots))
+        self.fleet_issue_var.set(_summarize_issue_runs(all_snapshots))
 
     def _draw_selected_trend(self, run_name: Optional[str]) -> None:
         self.trend_canvas.delete("all")
@@ -3104,6 +3609,7 @@ class TrainingMonitorApp:
             pass
 
         all_snapshots = collect_run_snapshots(self.root_dir, stale_minutes_threshold=self.stale_minutes)
+        self._update_research_board(_load_research_results(self.root_dir))
         self._apply_eta_and_rate(all_snapshots)
         filtered = self._apply_filters(all_snapshots)
         snapshots = sorted(
@@ -3191,9 +3697,11 @@ class TrainingMonitorApp:
             self.selected_ckpt_eta_var.set("Next Ckpt: -")
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_focus_var.set("Focus: -")
             self._draw_phase_breakdown(None)
 
         self._update_fleet_summary(all_snapshots)
+        self._check_and_alert(all_snapshots)
 
         running_count = sum(1 for s in all_snapshots if s.status == "running")
         stalled_count = sum(1 for s in all_snapshots if s.status == "stalled")
@@ -3232,6 +3740,7 @@ class TrainingMonitorApp:
             self.selected_ckpt_eta_var.set("Next Ckpt: -")
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_focus_var.set("Focus: -")
             self._draw_selected_trend(None)
             self._draw_phase_breakdown(None)
             return
@@ -3242,6 +3751,7 @@ class TrainingMonitorApp:
             self.selected_ckpt_eta_var.set("Next Ckpt: -")
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_focus_var.set("Focus: -")
             self._draw_selected_trend(None)
             self._draw_phase_breakdown(None)
             return
@@ -3276,6 +3786,8 @@ class TrainingMonitorApp:
         self.selected_eta_confidence_var.set(
             f"ETA Confidence: {'-' if eta_conf == '-' else eta_conf.upper()}"
         )
+        recommendation = _build_run_recommendation(snap)
+        self.selected_focus_var.set(f"Focus: {recommendation}")
 
         out_last = _fmt_ts(snap.out_last_write_ts)
         err_last = "-" if snap.err_last_write_ts is None else _fmt_ts(snap.err_last_write_ts)
@@ -3290,6 +3802,7 @@ class TrainingMonitorApp:
             f"run: {snap.run_name}",
             f"status: {snap.status}",
             f"health: {snap.health_summary}",
+            f"focus: {recommendation}",
             f"stage: {snap.stage}",
             f"pid: {snap.pid if snap.pid is not None else '-'} (alive={snap.pid_alive}, source={snap.pid_source or '-'})",
             f"sft_step: {snap.sft_step} / {snap.sft_target_steps if snap.sft_target_steps is not None else '-'}",

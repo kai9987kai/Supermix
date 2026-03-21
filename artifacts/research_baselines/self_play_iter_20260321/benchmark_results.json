@@ -1,0 +1,58 @@
+{
+  "config": {
+    "benchmark_type": "autoresearch_smoke",
+    "generated_at_utc": "2026-03-21T10:02:56.503753+00:00",
+    "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "adapter_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\autoresearch\\self_play_iter_20260321\\adapter",
+    "eval_source": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\autoresearch\\self_play_iter_20260321\\eval_pairs.jsonl",
+    "eval_samples": 8,
+    "seed": 42,
+    "max_length": 448,
+    "max_new_tokens": 112,
+    "max_records": 480,
+    "eval_size": 64,
+    "max_eval_samples": 0
+  },
+  "base": {
+    "eval_samples": 8.0,
+    "eval_loss": 3.61903178691864,
+    "perplexity": 37.30143459561615,
+    "token_f1": 0.11524330317102568,
+    "char_similarity": 0.08754236306264371,
+    "avg_gen_seconds": 13.357549726963043,
+    "avg_prompt_tokens": 46.25,
+    "avg_generated_tokens": 75.5,
+    "total_prompt_tokens": 370.0,
+    "total_generated_tokens": 604.0,
+    "eval_seconds": 115.76591157913208,
+    "generated_tokens_per_sec": 5.2174253349798425
+  },
+  "tuned": {
+    "eval_samples": 8.0,
+    "eval_loss": 10.284909844398499,
+    "perplexity": 29287.31729291583,
+    "token_f1": 0.008712121212121213,
+    "char_similarity": 0.03818710299070607,
+    "avg_gen_seconds": 19.609368920326233,
+    "avg_prompt_tokens": 46.25,
+    "avg_generated_tokens": 112.0,
+    "total_prompt_tokens": 370.0,
+    "total_generated_tokens": 896.0,
+    "eval_seconds": 166.98831605911255,
+    "generated_tokens_per_sec": 5.365644861541229
+  },
+  "delta_tuned_minus_base": {
+    "avg_gen_seconds": 6.25181919336319,
+    "avg_generated_tokens": 36.5,
+    "avg_prompt_tokens": 0.0,
+    "char_similarity": -0.049355260071937634,
+    "eval_loss": 6.665878057479858,
+    "eval_samples": 0.0,
+    "eval_seconds": 51.22240447998047,
+    "generated_tokens_per_sec": 0.1482195265613866,
+    "perplexity": 29250.015858320217,
+    "token_f1": -0.10653118195890447,
+    "total_generated_tokens": 292.0,
+    "total_prompt_tokens": 0.0
+  }
+}

@@ -1,6 +1,0 @@
-{
-  "stage": "sft",
-  "sft_steps": 60,
-  "sft_loss_mean": 24.89601005932006,
-  "checkpoint_adapter_dir": "artifacts\\qwen_supermix_enhanced_v26_cognitive_activation\\checkpoints\\sft_step_00060\\adapter"
-}

@@ -4,7 +4,7 @@ import sys
 
 sys.path.append(os.path.join(os.getcwd(), "source"))
 
-from qwen_chat_web_app import build_app, normalize_history_payload
+from qwen_chat_web_app import build_app, normalize_history_payload, resolve_adapter_dir
 
 
 class _StubEngine:
@@ -63,6 +63,8 @@ def smoke_test_index_includes_enhanced_chat_controls():
     assert "toastRack" in html, "Expected toast rack for non-transcript notifications"
     assert "followupRow" in html, "Expected follow-up action row in composer"
     assert "summary-strip" in html, "Expected conversation summary strip"
+    assert "Slash commands:" in html and "/preset coding" in html, "Expected local slash-command hint"
+    assert "supermix-qwen-v26-draft-" in html, "Expected draft persistence key in chat UI"
 
 
 def smoke_test_api_chat_accepts_client_history():
@@ -86,3 +88,18 @@ def smoke_test_api_chat_accepts_client_history():
         {"role": "user", "content": "previous question"},
         {"role": "assistant", "content": "previous answer"},
     ], engine.calls[-1]
+
+
+def smoke_test_gui_default_adapter_pointer_overrides_auto_latest(tmp_path):
+    older = tmp_path / "artifacts" / "qwen_supermix_enhanced_checkpoint_model_one" / "adapter"
+    newer = tmp_path / "artifacts" / "qwen_supermix_enhanced_v28_live" / "adapter"
+    for path in (older, newer):
+        path.mkdir(parents=True)
+        (path / "adapter_config.json").write_text("{}", encoding="utf-8")
+        (path / "adapter_model.safetensors").write_bytes(b"stub")
+    pointer_path = tmp_path / ".gui_default_adapter.txt"
+    pointer_path.write_text(str(older.relative_to(tmp_path)), encoding="utf-8")
+
+    resolved = resolve_adapter_dir(tmp_path, "")
+
+    assert resolved == older.resolve(), resolved

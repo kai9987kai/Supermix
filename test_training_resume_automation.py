@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -84,10 +85,100 @@ def test_prepared_data_cache_round_trip():
         assert int(meta["raw_eval_count"]) == 3
 
 
+def test_auto_resume_dry_run_restores_last_launch_state():
+    with tempfile.TemporaryDirectory() as tmp:
+        launch_state = Path(tmp) / "last_launch.txt"
+        launch_state.write_text(
+            "\n".join(
+                [
+                    r"OUTPUT_DIR=artifacts\resume_me",
+                    r"OUT_LOG=train_resume.out.log",
+                    r"ERR_LOG=train_resume.err.log",
+                    r"DEVICE=dml",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                r"source\auto_resume_supermix_training.ps1",
+                "-LaunchStateFile",
+                str(launch_state),
+                "-DryRun",
+                "-NoMonitor",
+            ],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    stdout = result.stdout.replace("/", "\\")
+    assert "[auto-resume] restored last launch state" in stdout
+    assert "[auto-resume] dry-run config:" in stdout
+    assert r"output=artifacts\resume_me" in stdout
+    assert r"out_log=train_resume.out.log" in stdout
+    assert r"err_log=train_resume.err.log" in stdout
+
+
+def test_auto_resume_dry_run_prefers_explicit_overrides():
+    with tempfile.TemporaryDirectory() as tmp:
+        launch_state = Path(tmp) / "last_launch.txt"
+        launch_state.write_text(
+            "\n".join(
+                [
+                    r"OUTPUT_DIR=artifacts\from_state",
+                    r"OUT_LOG=state.out.log",
+                    r"ERR_LOG=state.err.log",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                r"source\auto_resume_supermix_training.ps1",
+                "-LaunchStateFile",
+                str(launch_state),
+                "-OutputDir",
+                r"artifacts\from_cli",
+                "-TrainOutLog",
+                "cli.out.log",
+                "-TrainErrLog",
+                "cli.err.log",
+                "-DryRun",
+                "-NoMonitor",
+            ],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    stdout = result.stdout.replace("/", "\\")
+    assert r"output=artifacts\from_cli" in stdout
+    assert "out_log=cli.out.log" in stdout
+    assert "err_log=cli.err.log" in stdout
+    assert r"output=artifacts\from_state" not in stdout
+
+
 def run_all():
     tests = [
         ("Preference rescoring", test_preference_rescore_shifts_focus_from_easy_to_harder_pairs),
         ("Prepared data cache", test_prepared_data_cache_round_trip),
+        ("Auto-resume dry run restores launch state", test_auto_resume_dry_run_restores_last_launch_state),
+        ("Auto-resume dry run prefers explicit overrides", test_auto_resume_dry_run_prefers_explicit_overrides),
     ]
     failures = []
     for name, fn in tests:

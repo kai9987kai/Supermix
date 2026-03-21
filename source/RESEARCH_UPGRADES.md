@@ -205,6 +205,7 @@ Repo changes inspired by those papers:
 - Added latest-checkpoint resume support in `source/qwen_supermix_pipeline.py` so long CPU runs can restart from the newest saved adapter while preserving SFT/preference step counters and LR schedules.
 - Added cached teacher-distillation reuse per output directory via `teacher_distill_pairs.jsonl`, allowing resumed runs to skip regenerating the same teacher pairs.
 - Upgraded Supermix teacher distillation from a single deterministic response to a lightweight best-of-N candidate search across a small temperature set, then kept the highest-scoring filtered response.
+- Upgraded teacher candidate ranking again to compare each generated answer against the original assistant answer using gain, density, alignment, and compactness, and require a small rank margin before a teacher rewrite is kept.
 - Added a CPU safety guard that disables SFT R-Drop automatically on CPU, because the extra forward pass was making training progress look stalled on this machine.
 
 ## March 2026: Data Hygiene + Clean Eval Upgrades
@@ -227,3 +228,135 @@ Repo changes inspired by those papers:
 - Added `--eval_min_quality_score` and `--eval_drop_synthetic_prompts` so `eval_pairs.jsonl` and benchmark inputs are less contaminated by templated prompts and low-signal responses.
 - Upgraded teacher distillation with `--supermix_distill_min_gain`, so teacher responses are only kept when they improve on the original assistant answer by a configurable margin instead of merely clearing a fixed quality floor.
 - Updated the launcher recipe toward a cleaner v28 profile with stricter synthetic caps, stronger eval curation, and a nonzero preference reference anchor for better stability.
+
+## March 2026: Throughput + Knowledge-Density Upgrades
+
+Additional primary sources reviewed:
+
+1. Fewer Truncations Improve Language Modeling  
+   https://arxiv.org/abs/2404.10830
+2. T-SHIRT: Token-Selective Data Selection for Efficient and Improved Training of Large Language Models  
+   https://arxiv.org/abs/2506.01317
+3. SFT-GO: The Key to Supervised Fine-Tuning Over Groups of Interest  
+   https://arxiv.org/abs/2507.12856
+
+Repo changes inspired by those papers:
+
+- Added optional length-bucketed SFT batches with `--sft_length_bucketed_batches` and `--sft_length_bucket_window_mult`, reducing padding waste without changing the current LoRA training objective.
+- Added matching preference-stage length bucketing with `--preference_length_bucketed_batches` and `--preference_length_bucket_window_mult`, including the reference-logprob caching pass used by DPO/IPO/XPO-style objectives.
+- Added a heuristic knowledge-density signal in `source/qwen_supermix_pipeline.py` and exposed `--sft_knowledge_density_boost` so high-information responses get a controllable weight boost during SFT.
+- Threaded knowledge density into preference mining and `innovation_mix` selection so dense reasoning/coding targets are favored during post-mining curation instead of only by source-name heuristics.
+- Added `--supermix_distill_density_bias` so teacher distillation can prefer denser candidate answers when quality is close, improving the targets before SFT weighting sees them.
+
+Notes:
+
+- These are practical adaptations guided by the above papers, not exact reproductions of their full algorithms.
+- The batching change is a safe length-bucketing proxy for more aggressive packing methods, chosen to fit the current weighted SFT/preference implementation without destabilizing resume or checkpoint flows.
+
+## March 2026: Selective SFT + Compact Reasoning Negatives
+
+Additional primary sources reviewed:
+
+1. Less is More: Improving LLM Alignment via Preference Data Selection  
+   https://arxiv.org/abs/2502.14560
+2. Principled Data Selection for Alignment: The Hidden Risks of Difficult Examples  
+   https://arxiv.org/abs/2502.09650
+3. Long-Short Chain-of-Thought Mixture Supervised Fine-Tuning: Eliciting Efficient Reasoning in Large Language Models  
+   https://arxiv.org/abs/2505.03469
+4. QFFT, Question-Free Fine-Tuning for Adaptive Reasoning  
+   https://arxiv.org/abs/2506.12860
+5. Thinking Preference Optimization  
+   https://arxiv.org/abs/2502.13173
+
+Repo changes inspired by those papers:
+
+- Added optional SFT pair selection in `source/qwen_supermix_pipeline.py`:
+  - `--sft_selection_strategy none|utility_topk|capacity_aware`
+  - `--sft_selection_keep_ratio`
+  - `--sft_selection_min_keep`
+  - `--sft_selection_max_keep`
+  - `--sft_selection_hardness_target`
+  - `--sft_selection_hardness_bandwidth`
+- The new selector scores filtered SFT pairs by a mix of response quality, knowledge density, reasoning signal, prompt complexity, and compactness, then trims low-value or overly hard examples before tokenization/training.
+- This is a practical capacity-matched data-selection pass for the current 0.5B LoRA recipe: it reduces SFT compute while favoring denser, more learnable reasoning examples.
+- Added compact reasoning variants inside `_counterfactual_reject_variants(...)`, so coding/reasoning preference mining now produces short-CoT-style rejected answers in addition to the older drop/nudge/flip variants.
+- This is an LS-Mixture / QFFT / Thinking-Preference-style adaptation to your existing preference miner: it creates concise-but-weaker reasoning negatives without introducing a separate RL stage.
+- Kept the selector opt-in after the first benchmarked candidate regressed; the smoke/full launchers stay on the last accepted baseline and `source/run_autoresearch_smoke.ps1` can pass explicit extra training args for future candidate runs.
+
+Observed effect in the first smoke benchmarked run:
+
+- Training still completed successfully on CPU/auto with the new selector enabled.
+- The selector trimmed SFT source pairs from `89` to `75` in the smoke run before augmentation.
+- The resulting candidate was benchmarked and correctly marked `discard`, so the workflow remains promotion-safe even when a paper-guided change does not improve quality.
+- Example replay command for this rejected candidate:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File source\run_autoresearch_smoke.ps1 -RunTag paper_iter_retry -Description "paper-guided sft selection + compact rejects" -ExtraTrainingArgs @("--sft_selection_strategy","capacity_aware","--sft_selection_keep_ratio","0.84","--sft_selection_hardness_target","0.56","--sft_selection_hardness_bandwidth","0.30")`
+
+## March 2026: Token-Budgeted SFT Selection
+
+Additional primary sources reviewed:
+
+1. T-SHIRT: Token-Selective Data Selection for Efficient and Improved Training of Large Language Models  
+   https://arxiv.org/abs/2506.01317
+2. Long-Short Chain-of-Thought Mixture Supervised Fine-Tuning: Eliciting Efficient Reasoning in Large Language Models  
+   https://arxiv.org/abs/2505.03469
+3. SFT-GO: Supervised Fine-Tuning with Group Optimization for Large Language Models  
+   https://arxiv.org/abs/2506.15021
+
+Repo changes inspired by those papers:
+
+- Extended SFT pair selection with `--sft_selection_budget_mode pairs|tokens`, so `keep_ratio` can target an estimated token budget instead of only a pair-count budget.
+- Added `--sft_selection_budget_power` to rank candidates by a softer utility-per-length score when token-budget mode is enabled, reducing the chance that a few long answers consume most of the training budget.
+- Added scoped selection controls, `--sft_selection_scope` and `--sft_selection_scope_min_words`, so token-budget trimming can be restricted to verbose synthetic or teacher-generated SFT rows while the rest of the curated set passes through unchanged.
+- This is a pragmatic T-SHIRT-style adaptation for the current weighted LoRA pipeline: prefer dense, useful pairs under a token budget without changing the SFT loss or resume/checkpoint flows.
+- The new mode stays opt-in through `source/run_autoresearch_smoke.ps1` extra args until it proves itself in benchmarks.
+
+## March 2026: Length-Controlled Preference Margins
+
+Additional primary sources reviewed:
+
+1. LMPO: Length-Controlled Margin-Based Preference Optimization without Reference Model  
+   https://arxiv.org/abs/2502.14643
+2. Correcting the Mythos of KL-Regularization: Direct Alignment Algorithms with Downsampled KL Divergence Better Mitigate Over-Optimization than RLHF  
+   https://arxiv.org/abs/2407.13399
+
+Repo changes inspired by those papers:
+
+- Added `--preference_length_control_strength`, `--preference_length_control_target_ratio`, and `--preference_length_control_max_penalty`.
+- These controls add an extra margin penalty inside the preference objective when the chosen response is much longer than the rejected response, instead of relying only on post-hoc sample weighting.
+- The implementation is lightweight and works directly in the current IPO/DPO-style training loop, which makes it a practical verbosity-control adaptation for this repo's benchmarked over-generation failures.
+
+## March 2026: Stop-Aware Preference Mining
+
+Repo changes:
+
+- Added `--preference_stop_signal_strength` to apply a prompt-aware brevity bonus/penalty during preference mining for answer-only, yes/no, one-word, one-sentence, and concise prompts.
+- Added `--preference_stop_rejects_per_prompt` to inject synthetic overlong rejected variants, creating hard negatives that explicitly model "kept talking after the right answer."
+- The implementation stays in the mining stage, so it works on the current CPU-safe smoke path where on-the-fly generation is usually disabled.
+- This remains opt-in through `source/run_autoresearch_smoke.ps1` extra args until it produces a benchmark win.
+
+## March 2026: Budgeted Self-Play Preference Mining
+
+Additional primary sources reviewed:
+
+1. Self-Play Fine-Tuning Converts Weak Language Models to Strong Language Models
+   https://arxiv.org/abs/2401.01335
+2. SPACE: Noise Contrastive Estimation Stabilizes Self-Play Fine-Tuning for Large Language Models
+   https://arxiv.org/abs/2512.07175
+3. Beyond Scaling Law: A Data-Efficient Distillation Framework for Reasoning
+   https://arxiv.org/abs/2508.09883
+
+Repo changes:
+
+- Added `--preference_self_play_budget`, `--preference_self_play_curriculum`, and `--preference_self_play_max_new_tokens`.
+- These controls let the current model generate a small number of self-play negatives during preference mining even on CPU, instead of relying only on static dataset negatives when `generation=off`.
+- The current implementation uses a small curated budget and reorders those prompts with an `easy_to_hard` curriculum by default. That curriculum choice is an engineering inference from the papers above, not a direct reproduction of any one method.
+- This is meant as a lightweight SPIN / SPACE style adaptation for the existing smoke workflow: keep synthetic opponent data bounded, keep the real chosen answers fixed, and make the preference stage see policy-specific mistakes earlier.
+
+## March 2026: Sample-Level Benchmark Traces and Research Board Focus
+
+Repo changes:
+
+- Benchmark runs now save `base_samples.jsonl`, `tuned_samples.jsonl`, and `sample_comparison.jsonl` alongside `benchmark_results.json`.
+- `benchmark_results.json` now also includes `artifacts` pointers and a compact `sample_summary.worst_regression` block so tools do not need to rescan the full comparison file to show the top failure.
+- The training monitor research board now surfaces the selected run's top regression, prompt preview, and tuned/reference preview, and adds a direct `Open selected samples` action.
+- Older aggregate-only benchmark artifacts remain readable; the monitor now explicitly reports when a run needs a rerun to generate detailed sample traces instead of showing a blank state.

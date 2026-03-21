@@ -728,7 +728,32 @@ def score_adapter_dir(adapter_dir: Path) -> tuple[int, float]:
     return (0, adapter_dir.stat().st_mtime)
 
 
+def resolve_gui_default_adapter_dir(project_root: Path) -> Optional[Path]:
+    pointer_path = project_root / ".gui_default_adapter.txt"
+    if not pointer_path.exists():
+        return None
+    try:
+        raw = pointer_path.read_text(encoding="utf-8").lstrip("\ufeff").strip()
+    except OSError as exc:
+        logging.warning("Failed to read GUI default adapter pointer %s: %s", pointer_path, exc)
+        return None
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (project_root / candidate).resolve()
+    cfg = candidate / "adapter_config.json"
+    weights = candidate / "adapter_model.safetensors"
+    if cfg.exists() and weights.exists():
+        return candidate.resolve()
+    logging.warning("Ignoring invalid GUI default adapter pointer %s -> %s", pointer_path, candidate)
+    return None
+
+
 def find_latest_adapter_dir(project_root: Path) -> Path:
+    pinned = resolve_gui_default_adapter_dir(project_root)
+    if pinned is not None:
+        return pinned
     bundled = find_bundled_adapter_dir()
     if bundled is not None:
         return bundled

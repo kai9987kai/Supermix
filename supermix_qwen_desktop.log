@@ -36,3 +36,22 @@
 2026-03-06 09:08:52,796 INFO 127.0.0.1 - - [06/Mar/2026 09:08:52] "GET /api/status HTTP/1.1" 200 -
 2026-03-06 09:25:05,641 INFO Launching server subprocess: ['C:\\Users\\kai99\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\python.exe', '-u', 'C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\source\\qwen_chat_web_app.py', '--base_model', 'C:\\Users\\kai99\\.cache\\huggingface\\hub\\models--Qwen--Qwen2.5-0.5B-Instruct\\snapshots\\7ae557604adf67be50417f59c2c2f167def9a775', '--adapter_dir', 'C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\qwen_supermix_enhanced_v25_selective_pref\\adapter', '--host', '127.0.0.1', '--port', '8015', '--device', 'cpu']
 2026-03-06 09:25:21,538 INFO Server-only mode ready at http://127.0.0.1:8015
+2026-03-20 15:45:15,198 INFO Launching server subprocess: ['C:\\Users\\kai99\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\python.exe', '-u', 'C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\source\\qwen_chat_web_app.py', '--base_model', 'C:\\Users\\kai99\\.cache\\huggingface\\hub\\models--Qwen--Qwen2.5-0.5B-Instruct\\snapshots\\7ae557604adf67be50417f59c2c2f167def9a775', '--adapter_dir', 'C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\qwen_supermix_enhanced_checkpoint_model_one\\adapter', '--host', '127.0.0.1', '--port', '58954', '--device', 'auto']
+2026-03-20 15:50:28,762 ERROR Desktop startup failed
+Traceback (most recent call last):
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\qwen_chat_desktop_app.py", line 979, in bootstrap
+    self.start_backend()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\qwen_chat_desktop_app.py", line 970, in start_backend
+    wait_for_server(
+    ~~~~~~~~~~~~~~~^
+        url=self.url,
+        ^^^^^^^^^^^^^
+    ...<2 lines>...
+        log_path=self.server_log_path,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\qwen_chat_desktop_app.py", line 848, in wait_for_server
+    raise TimeoutError(f"Timed out waiting for local server at {url}. Last error: {last_error}")
+TimeoutError: Timed out waiting for local server at http://127.0.0.1:58954. Last error: <urlopen error timed out>

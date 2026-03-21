@@ -2,14 +2,37 @@ param(
     [string]$BaseModel = "Qwen/Qwen2.5-0.5B-Instruct",
     [string]$OutputDir = "artifacts\qwen_supermix_enhanced_v28_improvements_smoke",
     [string]$Device = "auto",
-    [string]$ResumeWarmStartDir = "artifacts\qwen_supermix_enhanced_v26_full"
+    [string]$ResumeWarmStartDir = "artifacts\qwen_supermix_enhanced_v26_full",
+    [string[]]$ExtraArgs = @()
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+$repoRoot = (Resolve-Path $PSScriptRoot).Path
+Set-Location $repoRoot
+
 $env:HF_HUB_OFFLINE = "1"
 $env:TRANSFORMERS_OFFLINE = "1"
 $env:PYTHONUNBUFFERED = "1"
+
+function Get-PythonCommand {
+    if ($env:SUPERMIX_PYTHON -and (Test-Path $env:SUPERMIX_PYTHON)) {
+        return (Resolve-Path $env:SUPERMIX_PYTHON).Path
+    }
+    foreach ($candidate in @(
+        (Join-Path $repoRoot ".venv-dml\Scripts\python.exe"),
+        (Join-Path $repoRoot ".venv\Scripts\python.exe")
+    )) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+    return "python"
+}
 
 function Get-LatestAdapterCheckpoint([string]$RunDir) {
     if (-not (Test-Path $RunDir)) {
@@ -99,7 +122,10 @@ $argsList = @(
     "--sft_prompt_skill_boost", "1.17",
     "--sft_conversation_boost", "1.24",
     "--sft_creativity_boost", "1.16",
+    "--sft_knowledge_density_boost", "1.18",
     "--sft_rdrop_alpha", "0.05",
+    "--sft_length_bucketed_batches",
+    "--sft_length_bucket_window_mult", "12",
     "--sft_min_quality_score", "0.98",
     "--sft_quality_filter_exempt_sources", "conversation_data.quality_anchor_v2.jsonl,conversation_data.world_events_2026_02_19.jsonl",
     "--sft_drop_synthetic_prompts",
@@ -148,6 +174,8 @@ $argsList = @(
     "--preference_selection_max_keep", "220",
     "--preference_selection_hardness_target", "0.46",
     "--preference_selection_hardness_bandwidth", "0.22",
+    "--preference_length_bucketed_batches",
+    "--preference_length_bucket_window_mult", "12",
     "--preference_lr", "1.4e-5",
     "--preference_lr_schedule", "cosine",
     "--preference_warmup_steps", "18",
@@ -162,9 +190,10 @@ $argsList = @(
     "--supermix_distill_max_seconds", "12000",
     "--supermix_distill_min_quality", "0.93",
     "--supermix_distill_min_gain", "0.18",
+    "--supermix_distill_density_bias", "0.16",
     "--seed", "48",
     "--device", $Device,
-    "--device_preference", "dml,cuda,npu,xpu,mps,cpu",
+    "--device_preference", "cuda,npu,xpu,mps,cpu,dml",
     "--model_dtype", "auto",
     "--gradient_checkpointing",
     "--torch_num_threads", "$logicalCpu",
@@ -185,4 +214,16 @@ else {
     }
 }
 
-python -u @argsList
+if ($ExtraArgs.Count -gt 0) {
+    $extraArgsList = @(
+        $ExtraArgs |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            ForEach-Object { [string]$_ }
+    )
+    if ($extraArgsList.Count -gt 0) {
+        Write-Host "Applying extra training args: $($extraArgsList -join ' ')"
+        $argsList += $extraArgsList
+    }
+}
+
+& (Get-PythonCommand) -u @argsList

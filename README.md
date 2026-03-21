@@ -166,13 +166,28 @@ python source/training_monitor_gui.py --root .
 
 The monitor parses run logs, reports stage progress, and surfaces runtime/device details for active training jobs.
 
-### Register auto-resume at login
+### Register auto-resume on boot
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File source\register_supermix_auto_resume_task.ps1
 ```
 
-This tries to create a scheduled task and falls back to an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry when scheduled tasks are unavailable.
+This now creates two Windows hooks when Task Scheduler is available:
+
+- a startup task that resumes the last recorded training run on boot without opening the monitor UI
+- a logon task that opens the training monitor and only relaunches training if it is not already running
+
+When scheduled tasks are unavailable, it falls back to an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry, which restores the old login-time behavior.
+
+The boot launcher restores the most recent run from `.last_training_launch.txt`, so it resumes the last recorded output directory and log files instead of always reverting to the default v28 path.
+
+### Disable auto-resume on boot
+
+```powershell
+powershell -ExecutionPolicy Bypass -File source\unregister_supermix_auto_resume_task.ps1
+```
+
+This removes the startup task, the logon monitor task, the legacy single-task hook, and the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` fallback entry if present.
 
 ## Desktop packaging
 
