@@ -38,6 +38,8 @@ Use `runtime_python/` if you want the fastest way to run the packaged local runt
 
 Use `source/` if you want the current development scripts for training, chat app work, desktop packaging, and training-monitor automation.
 
+Use the Colab notebook if you want the same Qwen training pipeline in the cloud with Drive-backed resume and cache paths.
+
 Key files:
 
 - `source/qwen_supermix_pipeline.py`: main Qwen training pipeline
@@ -46,6 +48,17 @@ Key files:
 - `source/training_monitor_gui.py`: GUI monitor for active training runs
 - `runtime_python/chat_web_app.py`: packaged runtime web app
 - `web_static/index.html`: browser-only metadata chat UI
+- `output/jupyter-notebook/supermix-colab-current-training.ipynb`: current Google Colab training notebook
+
+## Google Colab
+
+[Open the current training notebook in Colab](https://colab.research.google.com/github/kai9987kai/Supermix_29/blob/main/output/jupyter-notebook/supermix-colab-current-training.ipynb)
+
+Notes:
+
+- The notebook still launches `source/qwen_supermix_pipeline.py`, so the model family, training stages, and architecture stay aligned with the local workflow.
+- It defaults to safer Colab free-tier T4 settings and keeps Drive-backed checkpoints, prepared-data caches, and distill caches resumable across runtime resets.
+- If Colab gives you a different GPU tier, change `GPU_PROFILE` in the notebook to `auto`, `l4`, `a100`, or `generic`.
 
 ## Prerequisites
 
