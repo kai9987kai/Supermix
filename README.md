@@ -1,6 +1,6 @@
-# Supermix_27
+# Supermix_29
 
-Supermix_27 is a mixed research and packaging workspace for local AI experiments. It combines:
+Supermix_29 is a mixed research and packaging workspace for local AI experiments. It combines:
 
 - Supermix / ChampionNet model research assets
 - Qwen-based LoRA training pipelines
