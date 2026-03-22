@@ -40,6 +40,8 @@ Use `source/` if you want the current development scripts for training, chat app
 
 Use the Colab notebook if you want the same Qwen training pipeline in the cloud with Drive-backed resume and cache paths.
 
+Use the Kaggle notebook if you want the same Qwen training pipeline on Kaggle with attached datasets and `/kaggle/working` outputs.
+
 Key files:
 
 - `source/qwen_supermix_pipeline.py`: main Qwen training pipeline
@@ -49,6 +51,7 @@ Key files:
 - `runtime_python/chat_web_app.py`: packaged runtime web app
 - `web_static/index.html`: browser-only metadata chat UI
 - `output/jupyter-notebook/supermix-colab-current-training.ipynb`: current Google Colab training notebook
+- `output/jupyter-notebook/supermix-kaggle-current-training.ipynb`: current Kaggle training notebook
 
 ## Google Colab
 
@@ -59,6 +62,16 @@ Notes:
 - The notebook still launches `source/qwen_supermix_pipeline.py`, so the model family, training stages, and architecture stay aligned with the local workflow.
 - It defaults to safer Colab free-tier T4 settings and keeps Drive-backed checkpoints, prepared-data caches, and distill caches resumable across runtime resets.
 - If Colab gives you a different GPU tier, change `GPU_PROFILE` in the notebook to `auto`, `l4`, `a100`, or `generic`.
+
+## Kaggle
+
+Use `output/jupyter-notebook/supermix-kaggle-current-training.ipynb` if you want the same Qwen training path on Kaggle.
+
+Notes:
+
+- The notebook still launches `source/qwen_supermix_pipeline.py`, so the model family, training stages, packing, grouped eval split, preference, and distillation hooks stay aligned with the local workflow.
+- It expects attached Kaggle datasets named `supermix-source`, `supermix-datasets`, and `supermix-runtime-python`, with `supermix-warm-start` optional for closer parity with the local warm-start path.
+- It writes logs, checkpoints, caches, and bundle zips under `/kaggle/working`, so save a notebook version or export the bundle if you want to reuse outputs in a later Kaggle run.
 
 ## Prerequisites
 
