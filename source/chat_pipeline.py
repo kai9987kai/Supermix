@@ -22,6 +22,7 @@ VALID_FEATURE_MODES = (
     "context_mix_v1",
     "context_mix_v2_mm",
     "context_mix_v3",
+    "context_mix_v4",
 )
 TOKEN_RE = re.compile(r"[A-Za-z0-9_']+|[^\w\s]")
 SENTENCE_RE = re.compile(r"[^.!?]+[.!?]?")
@@ -1342,18 +1343,127 @@ def featurize_context_mix_v3(context_text: str, dim: int = FEAT_DIM) -> torch.Te
     return acc
 
 
+def featurize_context_mix_v4(context_text: str, dim: int = FEAT_DIM) -> torch.Tensor:
+    """
+    Frontier control-aware encoder:
+    - starts from context_mix_v3
+    - reads explicit control tags for reasoning depth, creativity, recency, and source quality
+    - adds light anchors for research-heavy and latest-information prompts
+    """
+    raw = (context_text or "").strip()
+    if not raw:
+        return torch.zeros(dim, dtype=torch.float32)
+
+    base = featurize_context_mix_v3(raw, dim=dim)
+    if dim != FEAT_DIM:
+        return base
+
+    acc = 0.78 * base + 0.16 * featurize_context_v5(raw, dim=dim)
+
+    reasoning_budget = ""
+    creativity_level = ""
+    knowledge_recency = ""
+    source_quality = ""
+    task_mode = ""
+    research_tags: List[str] = []
+    latest_user = ""
+
+    for line in [ln.strip() for ln in raw.splitlines() if ln.strip()]:
+        role, content = _split_role_line(line)
+        low = content.lower()
+        if role == "system":
+            if low.startswith("reasoning_budget="):
+                reasoning_budget = content.split("=", 1)[1].strip().lower()
+            elif low.startswith("creativity_level="):
+                creativity_level = content.split("=", 1)[1].strip().lower()
+            elif low.startswith("knowledge_recency="):
+                knowledge_recency = content.split("=", 1)[1].strip().lower()
+            elif low.startswith("source_quality="):
+                source_quality = content.split("=", 1)[1].strip().lower()
+            elif low.startswith("task_mode="):
+                task_mode = content.split("=", 1)[1].strip().lower()
+            elif low.startswith("research_tags="):
+                research_tags = [tok.strip().lower() for tok in content.split("=", 1)[1].split(",") if tok.strip()]
+            continue
+        if role == "user" and content:
+            latest_user = content
+
+    if reasoning_budget:
+        acc += 0.07 * featurize_text(f"[reasoning_budget] {reasoning_budget}", dim=dim)
+        if reasoning_budget == "deep":
+            acc += 0.06 * featurize_text("[deep_reasoning] decompose verify compare synthesize", dim=dim)
+        elif reasoning_budget == "medium":
+            acc += 0.04 * featurize_text("[medium_reasoning] explain compare answer", dim=dim)
+        elif reasoning_budget == "short":
+            acc += 0.04 * featurize_text("[short_reasoning] direct answer concise", dim=dim)
+
+    if creativity_level:
+        acc += 0.07 * featurize_text(f"[creativity_level] {creativity_level}", dim=dim)
+        if creativity_level == "vivid":
+            acc += 0.05 * featurize_text("[creative_style] vivid metaphor analogy scene twist", dim=dim)
+        elif creativity_level == "balanced":
+            acc += 0.04 * featurize_text("[creative_style] polished engaging but grounded", dim=dim)
+        elif creativity_level == "precise":
+            acc += 0.04 * featurize_text("[creative_style] precise grounded technical", dim=dim)
+
+    if knowledge_recency:
+        acc += 0.07 * featurize_text(f"[knowledge_recency] {knowledge_recency}", dim=dim)
+        if knowledge_recency == "latest":
+            acc += 0.06 * featurize_text("[latest_info] current recent update newest paper official release", dim=dim)
+        elif knowledge_recency == "recent":
+            acc += 0.04 * featurize_text("[recent_info] recent official information", dim=dim)
+        elif knowledge_recency == "evergreen":
+            acc += 0.03 * featurize_text("[evergreen_info] stable concept fundamentals", dim=dim)
+
+    if source_quality:
+        acc += 0.06 * featurize_text(f"[source_quality] {source_quality}", dim=dim)
+        if source_quality == "research":
+            acc += 0.05 * featurize_text("[research_style] empirical result ablation benchmark tradeoff", dim=dim)
+        elif source_quality == "official":
+            acc += 0.04 * featurize_text("[official_style] documentation exact behavior supported guidance", dim=dim)
+        elif source_quality == "synthetic":
+            acc += 0.03 * featurize_text("[synthetic_style] generated candidate draft", dim=dim)
+
+    if task_mode:
+        acc += 0.07 * featurize_text(f"[task_mode] {task_mode}", dim=dim)
+        if task_mode == "knowledge":
+            acc += 0.04 * featurize_text("[knowledge_task] facts concepts research docs", dim=dim)
+        elif task_mode == "creative":
+            acc += 0.04 * featurize_text("[creative_task] brainstorm story concept", dim=dim)
+        elif task_mode == "reasoning":
+            acc += 0.04 * featurize_text("[reasoning_task] derive debug evaluate", dim=dim)
+        elif task_mode == "coding":
+            acc += 0.04 * featurize_text("[coding_task] code api bug patch", dim=dim)
+
+    for tag in research_tags[:8]:
+        acc += 0.03 * featurize_text(f"[research_tag] {tag}", dim=dim)
+
+    latest_low = latest_user.lower()
+    if ("latest" in latest_low or "newest" in latest_low or "research paper" in latest_low or "arxiv" in latest_low):
+        acc += 0.05 * featurize_text("[research_latest_request] latest paper current results", dim=dim)
+    if "creative" in latest_low and ("paper" in latest_low or "research" in latest_low):
+        acc += 0.04 * featurize_text("[creative_research_blend] analogy explain vividly but correctly", dim=dim)
+
+    n = torch.norm(acc, p=2)
+    if n > 0:
+        acc = acc / n
+    return acc
+
+
 def resolve_feature_mode(feature_mode: str, smarter_auto: bool = False) -> str:
     mode = str(feature_mode or "legacy").strip().lower()
     if mode not in VALID_FEATURE_MODES:
         mode = "legacy"
-    if smarter_auto and mode in {"legacy", "context_v2"}:
-        return "context_mix_v3"
+    if smarter_auto and mode in {"legacy", "context_v2", "context_mix_v3"}:
+        return "context_mix_v4"
     return mode
 
 
 def text_to_model_input(text: str, feature_mode: str = "legacy") -> torch.Tensor:
     # ChampionNet expects (B, T, 128)
     mode = resolve_feature_mode(feature_mode, smarter_auto=False)
+    if mode == "context_mix_v4":
+        return featurize_context_mix_v4(text).view(1, 1, FEAT_DIM)
     if mode == "context_mix_v2_mm":
         return featurize_context_mix_v2_mm(text).view(1, 1, FEAT_DIM)
     if mode == "context_mix_v3":
@@ -1785,7 +1895,9 @@ def build_training_tensors(
     feature_mode: str = "legacy",
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     mode = resolve_feature_mode(feature_mode, smarter_auto=False)
-    if mode == "context_mix_v2_mm":
+    if mode == "context_mix_v4":
+        feats = [featurize_context_mix_v4(ex.context) for ex in examples]
+    elif mode == "context_mix_v2_mm":
         feats = [featurize_context_mix_v2_mm(ex.context) for ex in examples]
     elif mode == "context_mix_v3":
         feats = [featurize_context_mix_v3(ex.context) for ex in examples]
@@ -1827,7 +1939,9 @@ def build_bucket_metadata(
         return {"buckets": {}, "label_priors": priors}
 
     mode = resolve_feature_mode(feature_mode, smarter_auto=False)
-    if mode == "context_mix_v2_mm":
+    if mode == "context_mix_v4":
+        ctx_featurizer = featurize_context_mix_v4
+    elif mode == "context_mix_v2_mm":
         ctx_featurizer = featurize_context_mix_v2_mm
     elif mode == "context_mix_v3":
         ctx_featurizer = featurize_context_mix_v3

@@ -11,9 +11,7 @@ Usage:
         --epochs 8 --batch_size 32
 
 Supported model sizes:
-    base, large, xlarge, xxlarge, xxxlarge, ultralarge, megalarge,
-    ultra_expert, hierarchical_expert, deep_expert, expert_choice,
-    smarter_expert
+    See model_variants.SUPPORTED_MODEL_SIZES.
 """
 
 import argparse
@@ -50,6 +48,7 @@ from model_variants import (
     detect_ultralarge_fifth_expansion_dim,
     detect_megalarge_sixth_expansion_dim,
     load_weights_for_model,
+    SUPPORTED_MODEL_SIZES,
 )
 from device_utils import configure_torch_runtime, resolve_device
 from run import safe_load_state_dict
@@ -506,7 +505,7 @@ def main():
     ap.add_argument("--meta", default="chat_model_meta.json", help="Output metadata JSON.")
     ap.add_argument(
         "--model_size",
-        choices=["base", "large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge", "ultra_expert", "hierarchical_expert", "deep_expert", "expert_choice", "smarter_expert", "thought_expert", "recursive_expert", "reflexive_expert", "metacognitive_expert", "tree_of_thought_expert", "consensus_expert"],
+        choices=list(SUPPORTED_MODEL_SIZES),
 
         default="base",
         help="Model variant to train.",
@@ -545,7 +544,7 @@ def main():
     ap.add_argument("--adapter_dropout", type=float, default=0.1, help="Dropout used in large model adapter branch.")
     ap.add_argument(
         "--feature_mode",
-        choices=["legacy", "context_v2", "context_v3", "context_v4", "context_v5", "context_mix_v1", "context_mix_v2_mm", "context_mix_v3"],
+        choices=["legacy", "context_v2", "context_v3", "context_v4", "context_v5", "context_mix_v1", "context_mix_v2_mm", "context_mix_v3", "context_mix_v4"],
         default="context_mix_v3",
         help="Input feature encoding mode for context understanding.",
     )

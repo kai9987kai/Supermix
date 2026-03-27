@@ -59,6 +59,9 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "active_inference_expert",
     "holographic_state_space_expert",
     "paper_fusion_expert",
+    "frontier_expert",
+    "frontier_collective_expert",
+    "frontier_verifier_expert",
 )
 EXPANSION_DIM_MODEL_SIZES = frozenset({"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
 EXTRA_EXPANSION_DIM_MODEL_SIZES = frozenset({"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
@@ -5790,6 +5793,18 @@ def build_model(
         return ChampionNetHolographicStateSpaceExpert(dropout=dropout)
     if model_size == "paper_fusion_expert":
         return ChampionNetPaperFusionExpert(dropout=dropout)
+    if model_size == "frontier_expert":
+        from model_frontier_v33 import ChampionNetFrontierExpert
+
+        return ChampionNetFrontierExpert(dropout=dropout)
+    if model_size == "frontier_collective_expert":
+        from model_frontier_v35 import ChampionNetFrontierCollectiveExpert
+
+        return ChampionNetFrontierCollectiveExpert(dropout=dropout)
+    if model_size == "frontier_verifier_expert":
+        from model_frontier_v39 import ChampionNetFrontierVerifierExpert
+
+        return ChampionNetFrontierVerifierExpert(dropout=dropout)
 
     raise ValueError(
         f"Unknown model_size={model_size!r}. Use one of {SUPPORTED_MODEL_SIZES}."
@@ -6787,6 +6802,340 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
+    if model_size == "frontier_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
+            f"{head_pref}shared_scale", f"{head_pref}alpha", f"{head_pref}beta",
+            f"{head_pref}memory_keys", f"{head_pref}memory_values",
+            f"{head_pref}memory_query.weight", f"{head_pref}memory_out.weight",
+            f"{head_pref}memory_write_gate.weight", f"{head_pref}memory_write_gate.bias",
+            f"{head_pref}memory_write_value.weight", f"{head_pref}memory_write_value.bias",
+            f"{head_pref}depth_query.weight", f"{head_pref}depth_key.weight",
+            f"{head_pref}depth_value.weight", f"{head_pref}depth_out.weight",
+            f"{head_pref}router_budget.weight", f"{head_pref}router_budget.bias",
+            f"{head_pref}expert_bias",
+        }
+        for i in range(4):
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.bias")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.weight")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.bias")
+        for i in range(10):
+            allowed_missing.add(f"{head_pref}experts_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}experts_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}expert_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}expert_norms.{i}.bias")
+        for sub in (
+            "ssm_adapter.A",
+            "ssm_adapter.B",
+            "ssm_adapter.C",
+            "ssm_adapter.D",
+            "ssm_adapter.gate",
+            "mor_router.main_router.weight",
+            "mor_router.main_router.bias",
+        ):
+            allowed_missing.add(f"{head_pref}{sub}")
+        for i in range(4):
+            allowed_missing.add(f"{head_pref}mor_router.sub_routers.{i}.weight")
+            allowed_missing.add(f"{head_pref}mor_router.sub_routers.{i}.bias")
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "frontier_expert":
+            keep_head_keys = {
+                f"{head_pref}weight",
+                f"{head_pref}bias",
+                f"{head_pref}shared_up.weight",
+                f"{head_pref}shared_down.weight",
+                f"{head_pref}shared_norm.weight",
+                f"{head_pref}shared_norm.bias",
+                f"{head_pref}shared_scale",
+                f"{head_pref}alpha",
+            }
+            filtered_sd = {
+                k: v
+                for k, v in state_dict.items()
+                if (not k.startswith(head_pref)) or (k in keep_head_keys)
+            }
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
+    if model_size == "frontier_collective_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
+            f"{head_pref}shared_scale", f"{head_pref}alpha", f"{head_pref}beta",
+            f"{head_pref}memory_keys", f"{head_pref}memory_values",
+            f"{head_pref}memory_query.weight", f"{head_pref}memory_out.weight",
+            f"{head_pref}memory_write_gate.weight", f"{head_pref}memory_write_gate.bias",
+            f"{head_pref}memory_write_value.weight", f"{head_pref}memory_write_value.bias",
+            f"{head_pref}depth_query.weight", f"{head_pref}depth_key.weight",
+            f"{head_pref}depth_value.weight", f"{head_pref}depth_out.weight",
+            f"{head_pref}router_budget.weight", f"{head_pref}router_budget.bias",
+            f"{head_pref}expert_bias",
+            f"{head_pref}shared_aux_up.weight", f"{head_pref}shared_aux_down.weight",
+            f"{head_pref}shared_aux_norm.weight", f"{head_pref}shared_aux_norm.bias",
+            f"{head_pref}shared_aux_gate.weight", f"{head_pref}shared_aux_gate.bias",
+            f"{head_pref}reflect_out.weight",
+            f"{head_pref}collective_q.weight", f"{head_pref}collective_k.weight",
+            f"{head_pref}collective_v.weight", f"{head_pref}collective_out.weight",
+            f"{head_pref}gamma", f"{head_pref}delta",
+        }
+        for i in range(5):
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.bias")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.weight")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.bias")
+        for i in range(10):
+            allowed_missing.add(f"{head_pref}experts_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}experts_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}expert_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}expert_norms.{i}.bias")
+        for i in range(2):
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.norm.bias")
+        for sub in (
+            "ssm_adapter.A",
+            "ssm_adapter.B",
+            "ssm_adapter.C",
+            "ssm_adapter.D",
+            "ssm_adapter.gate",
+            "mor_router.main_router.weight",
+            "mor_router.main_router.bias",
+        ):
+            allowed_missing.add(f"{head_pref}{sub}")
+        for i in range(4):
+            allowed_missing.add(f"{head_pref}mor_router.sub_routers.{i}.weight")
+            allowed_missing.add(f"{head_pref}mor_router.sub_routers.{i}.bias")
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "frontier_collective_expert":
+            keep_head_keys = {
+                f"{head_pref}weight",
+                f"{head_pref}bias",
+                f"{head_pref}shared_up.weight",
+                f"{head_pref}shared_down.weight",
+                f"{head_pref}shared_norm.weight",
+                f"{head_pref}shared_norm.bias",
+                f"{head_pref}shared_scale",
+                f"{head_pref}alpha",
+                f"{head_pref}beta",
+                f"{head_pref}memory_keys",
+                f"{head_pref}memory_values",
+                f"{head_pref}memory_query.weight",
+                f"{head_pref}memory_out.weight",
+                f"{head_pref}memory_write_gate.weight",
+                f"{head_pref}memory_write_gate.bias",
+                f"{head_pref}memory_write_value.weight",
+                f"{head_pref}memory_write_value.bias",
+                f"{head_pref}depth_query.weight",
+                f"{head_pref}depth_key.weight",
+                f"{head_pref}depth_value.weight",
+                f"{head_pref}depth_out.weight",
+                f"{head_pref}router_budget.weight",
+                f"{head_pref}router_budget.bias",
+                f"{head_pref}expert_bias",
+                f"{head_pref}ssm_adapter.A",
+                f"{head_pref}ssm_adapter.B",
+                f"{head_pref}ssm_adapter.C",
+                f"{head_pref}ssm_adapter.D",
+                f"{head_pref}ssm_adapter.gate",
+                f"{head_pref}mor_router.main_router.weight",
+                f"{head_pref}mor_router.main_router.bias",
+            }
+            for i in range(5):
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.up.weight")
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.down.weight")
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.norm.weight")
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.norm.bias")
+                keep_head_keys.add(f"{head_pref}halt_gates.{i}.weight")
+                keep_head_keys.add(f"{head_pref}halt_gates.{i}.bias")
+            for i in range(10):
+                keep_head_keys.add(f"{head_pref}experts_up.{i}.weight")
+                keep_head_keys.add(f"{head_pref}experts_down.{i}.weight")
+                keep_head_keys.add(f"{head_pref}expert_norms.{i}.weight")
+                keep_head_keys.add(f"{head_pref}expert_norms.{i}.bias")
+            for i in range(4):
+                keep_head_keys.add(f"{head_pref}mor_router.sub_routers.{i}.weight")
+                keep_head_keys.add(f"{head_pref}mor_router.sub_routers.{i}.bias")
+            filtered_sd = {
+                k: v
+                for k, v in state_dict.items()
+                if (not k.startswith(head_pref)) or (k in keep_head_keys)
+            }
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
+    if model_size == "frontier_verifier_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
+            f"{head_pref}shared_scale", f"{head_pref}alpha", f"{head_pref}beta",
+            f"{head_pref}memory_keys", f"{head_pref}memory_values",
+            f"{head_pref}memory_query.weight", f"{head_pref}memory_out.weight",
+            f"{head_pref}memory_write_gate.weight", f"{head_pref}memory_write_gate.bias",
+            f"{head_pref}memory_write_value.weight", f"{head_pref}memory_write_value.bias",
+            f"{head_pref}depth_query.weight", f"{head_pref}depth_key.weight",
+            f"{head_pref}depth_value.weight", f"{head_pref}depth_out.weight",
+            f"{head_pref}router_budget.weight", f"{head_pref}router_budget.bias",
+            f"{head_pref}expert_bias",
+            f"{head_pref}shared_aux_up.weight", f"{head_pref}shared_aux_down.weight",
+            f"{head_pref}shared_aux_norm.weight", f"{head_pref}shared_aux_norm.bias",
+            f"{head_pref}shared_aux_gate.weight", f"{head_pref}shared_aux_gate.bias",
+            f"{head_pref}reflect_out.weight",
+            f"{head_pref}collective_q.weight", f"{head_pref}collective_k.weight",
+            f"{head_pref}collective_v.weight", f"{head_pref}collective_out.weight",
+            f"{head_pref}revisit_gate.weight", f"{head_pref}revisit_gate.bias",
+            f"{head_pref}verifier_q.weight", f"{head_pref}verifier_k.weight",
+            f"{head_pref}verifier_v.weight", f"{head_pref}verifier_out.weight",
+            f"{head_pref}verifier_gate.weight", f"{head_pref}verifier_gate.bias",
+            f"{head_pref}correction_out.weight",
+            f"{head_pref}gamma", f"{head_pref}delta", f"{head_pref}epsilon", f"{head_pref}zeta",
+        }
+        for i in range(6):
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}reasoning_cells.{i}.norm.bias")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.weight")
+            allowed_missing.add(f"{head_pref}halt_gates.{i}.bias")
+        for i in range(12):
+            allowed_missing.add(f"{head_pref}experts_up.{i}.weight")
+            allowed_missing.add(f"{head_pref}experts_down.{i}.weight")
+            allowed_missing.add(f"{head_pref}expert_norms.{i}.weight")
+            allowed_missing.add(f"{head_pref}expert_norms.{i}.bias")
+        for i in range(3):
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}reflect_cells.{i}.norm.bias")
+        for i in range(2):
+            allowed_missing.add(f"{head_pref}verifier_cells.{i}.up.weight")
+            allowed_missing.add(f"{head_pref}verifier_cells.{i}.down.weight")
+            allowed_missing.add(f"{head_pref}verifier_cells.{i}.norm.weight")
+            allowed_missing.add(f"{head_pref}verifier_cells.{i}.norm.bias")
+        for sub in (
+            "ssm_adapter.A",
+            "ssm_adapter.B",
+            "ssm_adapter.C",
+            "ssm_adapter.D",
+            "ssm_adapter.gate",
+            "mor_router.main_router.weight",
+            "mor_router.main_router.bias",
+        ):
+            allowed_missing.add(f"{head_pref}{sub}")
+        for i in range(5):
+            allowed_missing.add(f"{head_pref}mor_router.sub_routers.{i}.weight")
+            allowed_missing.add(f"{head_pref}mor_router.sub_routers.{i}.bias")
+
+        target_state = model.state_dict()
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "frontier_verifier_expert":
+            keep_head_keys = {
+                f"{head_pref}weight",
+                f"{head_pref}bias",
+                f"{head_pref}shared_up.weight",
+                f"{head_pref}shared_down.weight",
+                f"{head_pref}shared_norm.weight",
+                f"{head_pref}shared_norm.bias",
+                f"{head_pref}shared_scale",
+                f"{head_pref}alpha",
+                f"{head_pref}beta",
+                f"{head_pref}memory_keys",
+                f"{head_pref}memory_values",
+                f"{head_pref}memory_query.weight",
+                f"{head_pref}memory_out.weight",
+                f"{head_pref}memory_write_gate.weight",
+                f"{head_pref}memory_write_gate.bias",
+                f"{head_pref}memory_write_value.weight",
+                f"{head_pref}memory_write_value.bias",
+                f"{head_pref}depth_query.weight",
+                f"{head_pref}depth_key.weight",
+                f"{head_pref}depth_value.weight",
+                f"{head_pref}depth_out.weight",
+                f"{head_pref}router_budget.weight",
+                f"{head_pref}router_budget.bias",
+                f"{head_pref}expert_bias",
+                f"{head_pref}shared_aux_up.weight",
+                f"{head_pref}shared_aux_down.weight",
+                f"{head_pref}shared_aux_norm.weight",
+                f"{head_pref}shared_aux_norm.bias",
+                f"{head_pref}shared_aux_gate.weight",
+                f"{head_pref}shared_aux_gate.bias",
+                f"{head_pref}reflect_out.weight",
+                f"{head_pref}collective_q.weight",
+                f"{head_pref}collective_k.weight",
+                f"{head_pref}collective_v.weight",
+                f"{head_pref}collective_out.weight",
+                f"{head_pref}gamma",
+                f"{head_pref}delta",
+                f"{head_pref}ssm_adapter.A",
+                f"{head_pref}ssm_adapter.B",
+                f"{head_pref}ssm_adapter.C",
+                f"{head_pref}ssm_adapter.D",
+                f"{head_pref}ssm_adapter.gate",
+                f"{head_pref}mor_router.main_router.weight",
+                f"{head_pref}mor_router.main_router.bias",
+            }
+            for i in range(5):
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.up.weight")
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.down.weight")
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.norm.weight")
+                keep_head_keys.add(f"{head_pref}reasoning_cells.{i}.norm.bias")
+                keep_head_keys.add(f"{head_pref}halt_gates.{i}.weight")
+                keep_head_keys.add(f"{head_pref}halt_gates.{i}.bias")
+            for i in range(10):
+                keep_head_keys.add(f"{head_pref}experts_up.{i}.weight")
+                keep_head_keys.add(f"{head_pref}experts_down.{i}.weight")
+                keep_head_keys.add(f"{head_pref}expert_norms.{i}.weight")
+                keep_head_keys.add(f"{head_pref}expert_norms.{i}.bias")
+            for i in range(2):
+                keep_head_keys.add(f"{head_pref}reflect_cells.{i}.up.weight")
+                keep_head_keys.add(f"{head_pref}reflect_cells.{i}.down.weight")
+                keep_head_keys.add(f"{head_pref}reflect_cells.{i}.norm.weight")
+                keep_head_keys.add(f"{head_pref}reflect_cells.{i}.norm.bias")
+            for i in range(4):
+                keep_head_keys.add(f"{head_pref}mor_router.sub_routers.{i}.weight")
+                keep_head_keys.add(f"{head_pref}mor_router.sub_routers.{i}.bias")
+            filtered_sd = {
+                k: v
+                for k, v in state_dict.items()
+                if (((not k.startswith(head_pref)) or (k in keep_head_keys))
+                    and k in target_state
+                    and tuple(target_state[k].shape) == tuple(v.shape))
+            }
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            filtered_sd = {
+                k: v
+                for k, v in state_dict.items()
+                if k in target_state and tuple(target_state[k].shape) == tuple(v.shape)
+            }
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
     raise ValueError(f"Unsupported model_size={model_size!r}")
 
 
@@ -6851,6 +7200,12 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "active_inference_expert"
     if "layers.10.holographic_memory" in state_dict and "layers.10.topology_router.weight" in state_dict:
         return "holographic_state_space_expert"
+    if "layers.10.verifier_q.weight" in state_dict and "layers.10.revisit_gate.weight" in state_dict:
+        return "frontier_verifier_expert"
+    if "layers.10.shared_aux_up.weight" in state_dict and "layers.10.collective_q.weight" in state_dict:
+        return "frontier_collective_expert"
+    if "layers.10.router_budget.weight" in state_dict and "layers.10.memory_write_gate.weight" in state_dict:
+        return "frontier_expert"
     if "layers.10.mor_router.main_router.weight" in state_dict and "layers.10.ssm_adapter.A" in state_dict:
         return "paper_fusion_expert"
     if "layers.10.adversary_up.0.weight" in state_dict and "layers.10.proposer_up.0.weight" in state_dict:

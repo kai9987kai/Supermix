@@ -1,0 +1,14 @@
+label,family,zip_name,zip_size_bytes,common_benchmark_model,common_overall_exact,recipe_eval_accuracy,score_source,note
+v33_final,champion,champion_v33_frontier_full_model_20260326.zip,36659380,v33_final,0.186667,,common,
+v34_final,champion,champion_v34_frontier_plus_full_model_20260326.zip,39809657,v34_stage2,0.160000,,common_alias,Official v34 artifact chosen from stage2.
+v36_native,native_image,champion_v36_native_image_single_checkpoint_model_20260327.zip,72345211,v36_native,0.153333,,common,
+v35_final,champion,champion_v35_collective_allteachers_full_model_20260326.zip,48785667,v35_stage2,0.153333,,common_alias,Mapped to the stronger v35_stage2 common-benchmark row.
+v31_image_variant,wrapper,champion_v31_image_variant_bundle_20260326.zip,20446544,v31_final,0.066667,,common_alias,Wrapper artifact reusing the v31_final text checkpoint.
+v31_final,champion,champion_v31_hybrid_plus_refresh_final_model_20260326.zip,20044285,v31_final,0.066667,,common,
+v32_final,champion,champion_v32_omnifuse_bundle_20260326.zip,53521722,v32_final,0.063333,,common,
+v39_final,champion,champion_v39_frontier_reasoning_plus_full_model_20260327.zip,78674889,,,0.054900,recipe_eval_only,No common-benchmark run was completed after the pod lost credit. This marker is the finished v39 recipe holdout score (29/528).
+qwen_v28,qwen,qwen_supermix_enhanced_v28_cloud_plus_runpod_budget_final_adapter.zip,68382272,qwen_v28,0.020000,,common,LoRA adapter benchmarked with the Qwen base model.
+v38_native_xlite,native_image,champion_v38_native_image_xlite_single_checkpoint_model_20260327.zip,20158956,v38_native_xlite,0.013333,,common,Represents the v38 native-image line; fp16 zip is the same model family.
+v37_native_lite,native_image,champion_v37_native_image_lite_single_checkpoint_model_20260327.zip,25622496,v37_native_lite,0.013333,,common,
+v30_lite_fp16,champion,champion_v30_lite_student_fp16_bundle_20260326.zip,8338150,v30_lite,0.010000,,common,Mapped to the existing v30_lite common-benchmark row.
+qwen_v30_experimental,qwen,qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_adapter.zip,68377426,qwen_v30,0.003333,,common,Experimental adapter benchmarked with the Qwen base model.

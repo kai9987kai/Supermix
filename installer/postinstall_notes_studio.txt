@@ -1,0 +1,7 @@
+Supermix Studio installs the bundled local model zips and the shared Qwen base model directly with the app.
+
+Notes:
+- The first time you open a model, the app may extract that zip into its local runtime cache before loading it.
+- Auto mode routes each prompt to the most appropriate bundled model instead of pinning one model for the whole session.
+- Image-capable models render images directly inside the chat thread.
+- The app stores generated images and extracted working copies under its runtime state directory in your user profile.

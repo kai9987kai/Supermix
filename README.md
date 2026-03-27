@@ -67,6 +67,10 @@ Notes:
 
 Use `output/jupyter-notebook/supermix-kaggle-current-training.ipynb` if you want the same Qwen training path on Kaggle.
 
+Full guide:
+
+- `KAGGLE_GUIDE.md`
+
 Notes:
 
 - The notebook still launches `source/qwen_supermix_pipeline.py`, so the model family, training stages, packing, grouped eval split, preference, and distillation hooks stay aligned with the local workflow.

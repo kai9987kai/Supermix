@@ -1,0 +1,8 @@
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:8043
+Press CTRL+C to quit
+127.0.0.1 - - [27/Mar/2026 15:30:56] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [27/Mar/2026 15:31:16] "POST /api/chat HTTP/1.1" 200 -
+127.0.0.1 - - [27/Mar/2026 15:31:16] "GET /api/memory?session_id=agent-test-session HTTP/1.1" 200 -
+127.0.0.1 - - [27/Mar/2026 15:31:35] "POST /api/chat HTTP/1.1" 200 -
+127.0.0.1 - - [27/Mar/2026 15:31:35] "GET /api/memory?session_id=agent-test-session HTTP/1.1" 200 -

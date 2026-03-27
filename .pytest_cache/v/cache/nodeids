@@ -1,0 +1,14 @@
+[
+  "test_math_equation_and_export.py::test_chat_export_renders_png_and_copies_image",
+  "test_math_equation_and_export.py::test_math_solver_handles_wrapped_equation_prompt",
+  "test_multimodel_catalog.py::test_auto_prefers_best_reasoning_model_for_code_prompt",
+  "test_multimodel_catalog.py::test_auto_prefers_fast_model_for_short_prompt",
+  "test_multimodel_catalog.py::test_auto_prefers_image_model_for_visual_prompt",
+  "test_multimodel_catalog.py::test_auto_prefers_math_specialist_for_equation_prompt",
+  "test_multimodel_memory_tools.py::test_memory_store_extracts_facts_and_examples",
+  "test_multimodel_memory_tools.py::test_tool_call_parsing_and_stripping",
+  "test_qwen_training_resume.py::test_build_explicit_resume_checkpoint_preserves_external_sft_provenance",
+  "test_qwen_training_resume.py::test_merge_distillation_pairs_adds_only_new_examples",
+  "test_qwen_training_resume.py::test_resolve_latest_resume_checkpoint_falls_back_to_scan",
+  "test_qwen_training_resume.py::test_resolve_latest_resume_checkpoint_reads_latest_pointer"
+]
