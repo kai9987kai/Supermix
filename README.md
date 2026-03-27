@@ -1,111 +1,176 @@
+
 # Supermix_29
 
-Supermix_29 is a mixed research and packaging workspace for local AI experiments. It combines:
+Supermix_29 is a local-first AI research, training, packaging, and desktop-delivery workspace for the broader **Supermix / ChampionNet** project line.
 
-- Supermix / ChampionNet model research assets
-- Qwen-based LoRA training pipelines
-- a packaged local Python chat runtime
-- a Windows desktop chat app build pipeline
-- a browser-only metadata chat for GitHub Pages
+It brings together:
 
-This repository is not source-only. It also contains datasets, training artifacts, logs, packaged outputs, and installer files.
+- model research and experimental architecture work
+- chat fine-tuning and dataset-building pipelines
+- packaged local Python inference/runtime code
+- static browser metadata chat assets
+- Windows desktop build and installer tooling
+- benchmark, distillation, and model-export utilities
 
-## Naming note
+This repository is intentionally **not source-only**. It also includes runtime assets, model metadata, training manifests, datasets, build outputs, installer files, and research documentation.
 
-The local folder and `origin` remote use `Supermix_27`, while some branches, documents, and artifact names refer to `Supermix_28` or `Supermix_29`. Treat those as experiment-line and snapshot names inside the same evolving project.
+---
+
+## What this repo is for
+
+Supermix_29 is best understood as a **full project workspace**, not a single script or a minimal model release.
+
+It supports several parallel use cases:
+
+1. **Run a packaged local chat runtime**
+2. **Develop and test the current source-side chat stack**
+3. **Build or package desktop variants**
+4. **Train or fine-tune chat models from curated manifests**
+5. **Export lightweight browser metadata bundles**
+6. **Experiment with benchmark, frontier, and native-image model lines**
+
+---
+
+## Core capabilities
+
+- **Local runtime interface**
+  - packaged Python runtime under `runtime_python/`
+  - web and terminal launchers for local use
+  - model metadata and runtime helpers included
+
+- **Research and development workspace**
+  - active development files under `source/`
+  - chat pipeline, memory, export, benchmarking, distillation, and dataset tooling
+  - multiple experimental model lines in one repo
+
+- **Static browser bundle**
+  - browser-only metadata chat assets under `web_static/`
+  - suitable for lightweight GitHub Pages-style hosting
+
+- **Desktop packaging**
+  - PyInstaller spec files in the repo root
+  - PowerShell build scripts for desktop EXE generation
+  - Inno Setup installer definitions under `installer/`
+
+- **Cloud training support**
+  - Kaggle workflow documented in `KAGGLE_GUIDE.md`
+  - notebook-oriented training flow kept aligned with the local pipeline
+
+---
 
 ## Repository layout
 
 ```text
 .
-|-- source/                Main development workspace
-|-- runtime_python/        Packaged local inference runtime
-|-- web_static/            Browser-only metadata chat assets
-|-- installer/             Inno Setup assets
-|-- artifacts/             Training outputs, adapters, checkpoints
-|-- datasets/              Training data inputs
-|-- dist/                  Built desktop outputs
-|-- build/                 Build staging/output
-|-- assets/                Branding and packaging assets
-|-- ARCHITECTURE.md        Architecture notes
-|-- MODEL_CARD_V28.md      Model card for the v28 line
-`-- README.md
-```
+├── source/                  Active development workspace
+├── runtime_python/          Packaged local runtime
+├── web_static/              Browser-only metadata chat bundle
+├── installer/               Inno Setup installer definitions
+├── artifacts/               Training outputs / adapters / checkpoints
+├── assets/                  Branding and packaging assets
+├── bundles/                 Packaged bundle assets
+├── databases/               Local data storage assets
+├── datasets/                Training and evaluation inputs
+├── dist/                    Built outputs
+├── output/                  Notebook and generated output area
+├── research/                Research notes and experiment material
+├── ARCHITECTURE.md          Architecture guide
+├── KAGGLE_GUIDE.md          Kaggle workflow guide
+├── MODEL_CARD_V28.md        Model card for a major earlier line
+├── CONTRIBUTING.md          Contribution guide
+├── SECURITY.md              Security policy
+└── README.md
+````
 
-## Main entrypoints
+---
 
-Use `runtime_python/` if you want the fastest way to run the packaged local runtime.
+## Important directories
 
-Use `source/` if you want the current development scripts for training, chat app work, desktop packaging, and training-monitor automation.
+### `source/`
 
-Use the Colab notebook if you want the same Qwen training pipeline in the cloud with Drive-backed resume and cache paths.
+This is the main development workspace.
 
-Use the Kaggle notebook if you want the same Qwen training pipeline on Kaggle with attached datasets and `/kaggle/working` outputs.
+Representative files include:
+
+* `chat_app.py`
+* `chat_web_app.py`
+* `chat_pipeline.py`
+* `chat_memory.py`
+* `finetune_chat.py`
+* `finetune_chat_manifest_sequential.py`
+* `benchmark.py`
+* `benchmark_all_models_common.py`
+* `build_super_dataset.py`
+* `export_browser_chat_meta.py`
+* `distill_native_image_lite_v37.py`
+* `distill_native_image_xlite_v38.py`
+* `model_frontier_v33.py`
+* `model_frontier_v35.py`
+* `model_frontier_v39.py`
+* `model_native_image_lite_v37.py`
+* `model_native_image_xlite_v38.py`
+
+Use `source/` when you want the most current development path.
+
+---
+
+### `runtime_python/`
+
+This is the packaged runtime path for local use.
+
+Key files include:
+
+* `chat_app.py`
+* `chat_web_app.py`
+* `chat_pipeline.py`
+* `chat_memory.py`
+* `device_utils.py`
+* `llm_database.py`
+* `model_variants.py`
+* `requirements_runtime_interface.txt`
+* `run.py`
+
+Use `runtime_python/` when you want the simplest path to run the packaged local runtime without entering the full development workspace.
+
+---
+
+### `web_static/`
+
+This contains the browser-only metadata bundle.
 
 Key files:
 
-- `source/qwen_supermix_pipeline.py`: main Qwen training pipeline
-- `source/qwen_chat_web_app.py`: current local web chat app
-- `source/qwen_chat_desktop_app.py`: desktop app entrypoint used by PyInstaller
-- `source/training_monitor_gui.py`: GUI monitor for active training runs
-- `runtime_python/chat_web_app.py`: packaged runtime web app
-- `web_static/index.html`: browser-only metadata chat UI
-- `output/jupyter-notebook/supermix-colab-current-training.ipynb`: current Google Colab training notebook
-- `output/jupyter-notebook/supermix-kaggle-current-training.ipynb`: current Kaggle training notebook
+* `index.html`
+* `chat_model_meta_supermix_v27_500k.browser.json`
 
-## Google Colab
+Use this path when you want a lightweight browser experience or a GitHub Pages-style static deployment.
 
-[Open the current training notebook in Colab](https://colab.research.google.com/github/kai9987kai/Supermix_29/blob/main/output/jupyter-notebook/supermix-colab-current-training.ipynb)
+---
 
-Notes:
+### `installer/`
 
-- The notebook still launches `source/qwen_supermix_pipeline.py`, so the model family, training stages, and architecture stay aligned with the local workflow.
-- It defaults to safer Colab free-tier T4 settings and keeps Drive-backed checkpoints, prepared-data caches, and distill caches resumable across runtime resets.
-- If Colab gives you a different GPU tier, change `GPU_PROFILE` in the notebook to `auto`, `l4`, `a100`, or `generic`.
+Installer definitions for Windows desktop packaging.
 
-## Kaggle
+Key files:
 
-Use `output/jupyter-notebook/supermix-kaggle-current-training.ipynb` if you want the same Qwen training path on Kaggle.
+* `SupermixQwenDesktop.iss`
+* `SupermixStudioDesktop.iss`
+* `postinstall_notes.txt`
+* `postinstall_notes_studio.txt`
 
-Full guide:
+---
 
-- `KAGGLE_GUIDE.md`
+## Quick start
 
-Notes:
-
-- The notebook still launches `source/qwen_supermix_pipeline.py`, so the model family, training stages, packing, grouped eval split, preference, and distillation hooks stay aligned with the local workflow.
-- It expects attached Kaggle datasets named `supermix-source`, `supermix-datasets`, and `supermix-runtime-python`, with `supermix-warm-start` optional for closer parity with the local warm-start path.
-- It writes logs, checkpoints, caches, and bundle zips under `/kaggle/working`, so save a notebook version or export the bundle if you want to reuse outputs in a later Kaggle run.
-
-## Prerequisites
-
-Runtime dependencies:
+## 1) Install runtime dependencies
 
 ```bash
 python -m pip install -r runtime_python/requirements_runtime_interface.txt
 ```
 
-Training and build dependencies:
+---
 
-```bash
-python -m pip install -r source/requirements_train_build.txt
-```
-
-Typical extras for desktop packaging:
-
-```bash
-python -m pip install pywebview pillow pyinstaller
-```
-
-Notes:
-
-- Windows is the primary platform for the desktop and training-automation workflows.
-- The Qwen pipelines expect a local or cached `Qwen/Qwen2.5-0.5B-Instruct` base model unless you override the default.
-- Optional accelerators include CUDA and DirectML, with fallback to CPU.
-
-## Quick start
-
-### Run the packaged local runtime
+## 2) Run the packaged local web runtime
 
 ```bash
 python runtime_python/chat_web_app.py
@@ -118,170 +183,249 @@ runtime_python\launch_chat_web_supermix.bat
 runtime_python\launch_chat_terminal_supermix.bat
 ```
 
-This path is the best fit if you want to run the packaged checkpoint and metadata bundle without using the full development workspace.
+This is the recommended entry path if your goal is to run the packaged local system rather than develop the training stack.
 
-### Run the current source web app
+---
+
+## 3) Run the current source-side web app
 
 ```bash
-python source/qwen_chat_web_app.py
+python source/chat_web_app.py
 ```
 
-Use this path when you want the current development version that works with the latest adapter artifacts and desktop packaging flow.
+Use this path when you want the actively developed version of the application and the broader development tooling around it.
 
-### Run the browser-only metadata chat
+---
 
-Open `web_static/index.html` in a browser and load:
+## 4) Run the browser-only static version
+
+Open:
+
+```text
+web_static/index.html
+```
+
+Then load:
 
 ```text
 web_static/chat_model_meta_supermix_v27_500k.browser.json
 ```
 
-Important limitation: this is metadata-driven browser chat, not full PyTorch inference in the browser.
+This mode is metadata-driven and intended for lightweight browser delivery.
 
-## Training workflows
+---
 
-The current training scripts are centered on `source/qwen_supermix_pipeline.py` and the v28 recipe family.
+## Desktop build workflow
 
-### Smoke run
+This repository includes desktop build tooling in both script and spec form.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File run_train_qwen_supermix_v28_smoke.ps1
-```
+Relevant files include:
 
-This writes a short validation run under:
+* `SupermixQwenDesktop.spec`
+* `SupermixQwenDesktopV26.spec`
+* `SupermixStudioDesktop.spec`
+* `build_qwen_chat_desktop_exe.ps1`
+* `build_qwen_chat_desktop_installer.ps1`
+
+Additional build helpers also exist inside `source/`, including:
+
+* `build_qwen_chat_desktop_exe.ps1`
+* `build_qwen_chat_desktop_installer.ps1`
+* `build_supermix_studio_desktop_exe.ps1`
+* `build_supermix_studio_desktop_installer.ps1`
+
+Installer definitions live under `installer/`.
+
+---
+
+## Training and fine-tuning
+
+The training/fine-tuning side of the project is centered in `source/`.
+
+Important categories in the repo include:
+
+* **fine-tuning scripts**
+
+  * `finetune_chat.py`
+  * `finetune_chat_manifest_sequential.py`
+
+* **dataset builders**
+
+  * `build_super_dataset.py`
+  * `build_science_knowledge_dataset.py`
+  * `build_science_novel_examples_dataset.py`
+  * `build_reasoning_benchmix_v39.py`
+  * additional domain-specific dataset builders
+
+* **training manifests**
+
+  * multiple `conversation_data.*.json` manifest files
+  * curriculum, weighted, multimodal, smoke, and broad-manifest variants
+
+* **distillation / specialist model work**
+
+  * native-image distillation scripts
+  * frontier model files
+  * image-feature and mesh-feature utilities
+
+This repo is therefore suitable both for **runtime usage** and for **iterating on training data, model variants, and evaluation flows**.
+
+---
+
+## Kaggle workflow
+
+Kaggle support is documented in:
 
 ```text
-artifacts\qwen_supermix_enhanced_v28_improvements_smoke
+KAGGLE_GUIDE.md
 ```
 
-### Full auto-resume run
-
-The repo includes a Windows launcher that starts the latest full recipe and reattaches to the newest checkpoint when possible:
-
-```bat
-launch_train_qwen_supermix_v26_full.bat
-```
-
-Equivalent direct command:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File source\auto_resume_supermix_training.ps1
-```
-
-By default this targets:
+The repo also references a notebook-based Kaggle training path under:
 
 ```text
-artifacts\qwen_supermix_enhanced_v28_clean_eval_robust_ipo
+output/jupyter-notebook/supermix-kaggle-current-training.ipynb
 ```
 
-and warm-starts from:
+The intent is to keep the cloud notebook workflow aligned with the local training pipeline while avoiding desktop-only components in the cloud environment.
 
-```text
-artifacts\qwen_supermix_enhanced_v26_full
-```
+---
 
-### Training monitor
+## Architecture and model docs
 
-Start the monitor GUI with:
+For deeper technical context, start here:
 
-```bat
-source\launch_training_monitor_gui.bat
-```
+* `ARCHITECTURE.md` — system and architecture notes
+* `MODEL_CARD_V28.md` — model-card documentation for an earlier major line
+* `KAGGLE_GUIDE.md` — cloud-training workflow
+* `CONTRIBUTING.md` — contribution rules
+* `SECURITY.md` — security process
+* `CODE_OF_CONDUCT.md` — community expectations
 
-or:
+---
+
+## Versioning and naming note
+
+This repository reflects an evolving experiment line rather than a perfectly clean single-version snapshot.
+
+You will see references to several names and generations across the project, including:
+
+* `Supermix_27`
+* `Supermix_28`
+* `Supermix_29`
+* `v26`
+* `v27`
+* `v28`
+* `v33`
+* `v35`
+* `v37`
+* `v38`
+* `v39`
+
+That is expected.
+
+Interpret the repo as a **living workspace** containing:
+
+* packaged runtime assets from earlier stable lines
+* documentation from earlier model generations
+* newer research scripts and experimental files
+* current snapshot packaging/build assets under the `Supermix_29` repo name
+
+---
+
+## Recommended entry points by goal
+
+### I just want to run it
+
+Use:
 
 ```bash
-python source/training_monitor_gui.py --root .
+python runtime_python/chat_web_app.py
 ```
 
-The monitor parses run logs, reports stage progress, and surfaces runtime/device details for active training jobs.
+### I want to work on the current source app
 
-### Register auto-resume on boot
-
-```powershell
-powershell -ExecutionPolicy Bypass -File source\register_supermix_auto_resume_task.ps1
-```
-
-This now creates two Windows hooks when Task Scheduler is available:
-
-- a startup task that resumes the last recorded training run on boot without opening the monitor UI
-- a logon task that opens the training monitor and only relaunches training if it is not already running
-
-When scheduled tasks are unavailable, it falls back to an `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry, which restores the old login-time behavior.
-
-The boot launcher restores the most recent run from `.last_training_launch.txt`, so it resumes the last recorded output directory and log files instead of always reverting to the default v28 path.
-
-### Disable auto-resume on boot
-
-```powershell
-powershell -ExecutionPolicy Bypass -File source\unregister_supermix_auto_resume_task.ps1
-```
-
-This removes the startup task, the logon monitor task, the legacy single-task hook, and the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` fallback entry if present.
-
-## Desktop packaging
-
-Build the desktop application:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File build_qwen_chat_desktop_exe.ps1
-```
-
-Expected output:
-
-```text
-dist\SupermixQwenDesktop\SupermixQwenDesktop.exe
-```
-
-The build script generates branding, resolves the latest adapter artifact automatically, stages a desktop bundle, and packages the app with PyInstaller.
-
-Build the installer:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File build_qwen_chat_desktop_installer.ps1
-```
-
-Expected output:
-
-```text
-dist\installer\
-```
-
-The installer flow requires Inno Setup 6. If `iscc.exe` is not available, install it with:
-
-```powershell
-winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements
-```
-
-## Tests
-
-This repo includes direct-run smoke and regression tests for the chat app, training pipeline, monitor, and expert variants.
-
-Examples:
+Use:
 
 ```bash
-python test_qwen_chat_web_app.py
-python test_training_monitor_gui.py
-python test_training_resume_automation.py
+python source/chat_web_app.py
 ```
 
-Additional experiment-specific tests live both at the repository root and under `source/`.
+### I want the browser-only version
 
-## Important docs
+Open:
 
-- `ARCHITECTURE.md`
-- `MODEL_CARD_V28.md`
-- `source/CHAT_FINETUNE.md`
-- `source/RESEARCH_UPGRADES.md`
+```text
+web_static/index.html
+```
 
-## Limitations and repo shape
+### I want to fine-tune or build datasets
 
-- This repo contains generated artifacts and logs alongside source code.
-- Naming is mixed across `Supermix_27`, `Supermix_28`, and `Supermix_29`.
-- The browser build is metadata-only and does not run the full model in-browser.
-- Desktop packaging and training automation are Windows-first.
-- Some flows assume a locally available base model and local Python environment.
+Start in:
+
+```text
+source/
+```
+
+### I want to build a desktop app
+
+Start with:
+
+* root `.spec` files
+* root PowerShell build scripts
+* `installer/` `.iss` files
+
+---
+
+## Platform notes
+
+* Windows appears to be the primary packaging target for the desktop workflow.
+* The repo includes batch launchers, PowerShell build scripts, PyInstaller specs, and Inno Setup definitions.
+* The project layout is mixed-purpose by design: research, runtime, packaging, and artifacts coexist in one repository.
+
+---
+
+## Contributing
+
+Please read:
+
+* `CONTRIBUTING.md`
+* `CODE_OF_CONDUCT.md`
+* `SECURITY.md`
+
+before opening major pull requests or publishing derivative builds.
+
+---
 
 ## License
 
-See `LICENSE`.
+See:
+
+```text
+LICENSE
+```
+
+---
+
+## Summary
+
+Supermix_29 is a **hybrid AI workspace** spanning:
+
+* local chat runtime
+* active source development
+* static browser deployment
+* desktop packaging
+* dataset construction
+* fine-tuning
+* benchmarking
+* experimental model lines
+
+It is best approached as a **research-and-delivery monorepo** for the Supermix ecosystem.
+
+```
+
+A stronger follow-up would be a second pass that adds badges, a small architecture diagram, and a screenshots section while keeping this version as the clean baseline.
+::contentReference[oaicite:2]{index=2}
+```
+
+[1]: https://github.com/kai9987kai/Supermix_29/tree/main "GitHub - kai9987kai/Supermix_29: Supermix v29 represents a significant architectural evolution of the ChampionNet series, introducing a Mixture-of-Experts (MoE) classifier head for enhanced retrieval and reasoning capabilities. The project is a structured AI/chat repository designed for high-performance inference, featuring a clear split between source code, runtime assets, and · GitHub"
+[2]: https://github.com/kai9987kai/Supermix_29/blob/main/README.md "Supermix_29/README.md at main · kai9987kai/Supermix_29 · GitHub"
