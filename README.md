@@ -1,203 +1,83 @@
-
 # Supermix_29
 
-Supermix_29 is a local-first AI research, training, packaging, and desktop-delivery workspace for the broader **Supermix / ChampionNet** project line.
+Supermix_29 is the working monorepo for the current Supermix / ChampionNet / Omni Collective line.
 
-It brings together:
+This repository combines:
 
-- model research and experimental architecture work
-- chat fine-tuning and dataset-building pipelines
-- packaged local Python inference/runtime code
-- static browser metadata chat assets
-- Windows desktop build and installer tooling
-- benchmark, distillation, and model-export utilities
+- local-first chat and multimodal runtime code
+- experimental training and continuation pipelines
+- desktop EXE and installer packaging
+- benchmark tooling and graph generation
+- published-model export helpers
+- bundled datasets and generated research artifacts
 
-This repository is intentionally **not source-only**. It also includes runtime assets, model metadata, training manifests, datasets, build outputs, installer files, and research documentation.
+It is intentionally a mixed workspace, not a minimal source-only model repo.
 
----
+## Current status
 
-## What this repo is for
+As of March 29, 2026:
 
-Supermix_29 is best understood as a **full project workspace**, not a single script or a minimal model release.
+- the latest finished omni checkpoint in this repo is `omni_collective_v4`
+- the latest packaged desktop release is `studio-desktop-20260329-omni-v4-allmodels`
+- the installer bundle currently includes `23` zipped model artifacts from the local model-pack directory used by the desktop build
+- a `v5` continuation path exists in `source/` and is currently an in-progress local experiment, not a finished released model
 
-It supports several parallel use cases:
+## What is in this repo
 
-1. **Run a packaged local chat runtime**
-2. **Develop and test the current source-side chat stack**
-3. **Build or package desktop variants**
-4. **Train or fine-tune chat models from curated manifests**
-5. **Export lightweight browser metadata bundles**
-6. **Experiment with benchmark, frontier, and native-image model lines**
+- `source/`
+  - active development workspace
+  - training scripts, model definitions, dataset builders, benchmark runners, desktop packaging helpers
+- `runtime_python/`
+  - packaged local runtime path
+  - simpler run path than the full `source/` workspace
+- `datasets/`
+  - conversation, coding, reasoning, science, and related local training inputs
+- `output/`
+  - generated artifacts, benchmark graphs, summaries, logs, Hugging Face upload folders
+- `installer/`
+  - Inno Setup definitions for the desktop app
+- `dist/`
+  - built EXEs and installer outputs
+- `web_static/`
+  - lightweight browser-only metadata bundle
 
----
+## Main capabilities
 
-## Core capabilities
-
-- **Local runtime interface**
-  - packaged Python runtime under `runtime_python/`
-  - web and terminal launchers for local use
-  - model metadata and runtime helpers included
-
-- **Research and development workspace**
-  - active development files under `source/`
-  - chat pipeline, memory, export, benchmarking, distillation, and dataset tooling
-  - multiple experimental model lines in one repo
-
-- **Static browser bundle**
-  - browser-only metadata chat assets under `web_static/`
-  - suitable for lightweight GitHub Pages-style hosting
-
-- **Desktop packaging**
-  - PyInstaller spec files in the repo root
-  - PowerShell build scripts for desktop EXE generation
-  - Inno Setup installer definitions under `installer/`
-
-- **Cloud training support**
-  - Kaggle workflow documented in `KAGGLE_GUIDE.md`
-  - notebook-oriented training flow kept aligned with the local pipeline
-
----
-
-## Repository layout
-
-```text
-.
-├── source/                  Active development workspace
-├── runtime_python/          Packaged local runtime
-├── web_static/              Browser-only metadata chat bundle
-├── installer/               Inno Setup installer definitions
-├── artifacts/               Training outputs / adapters / checkpoints
-├── assets/                  Branding and packaging assets
-├── bundles/                 Packaged bundle assets
-├── databases/               Local data storage assets
-├── datasets/                Training and evaluation inputs
-├── dist/                    Built outputs
-├── output/                  Notebook and generated output area
-├── research/                Research notes and experiment material
-├── ARCHITECTURE.md          Architecture guide
-├── KAGGLE_GUIDE.md          Kaggle workflow guide
-├── MODEL_CARD_V28.md        Model card for a major earlier line
-├── CONTRIBUTING.md          Contribution guide
-├── SECURITY.md              Security policy
-└── README.md
-````
-
----
-
-## Important directories
-
-### `source/`
-
-This is the main development workspace.
-
-Representative files include:
-
-* `chat_app.py`
-* `chat_web_app.py`
-* `chat_pipeline.py`
-* `chat_memory.py`
-* `finetune_chat.py`
-* `finetune_chat_manifest_sequential.py`
-* `benchmark.py`
-* `benchmark_all_models_common.py`
-* `build_super_dataset.py`
-* `export_browser_chat_meta.py`
-* `distill_native_image_lite_v37.py`
-* `distill_native_image_xlite_v38.py`
-* `model_frontier_v33.py`
-* `model_frontier_v35.py`
-* `model_frontier_v39.py`
-* `model_native_image_lite_v37.py`
-* `model_native_image_xlite_v38.py`
-
-Use `source/` when you want the most current development path.
-
----
-
-### `runtime_python/`
-
-This is the packaged runtime path for local use.
-
-Key files include:
-
-* `chat_app.py`
-* `chat_web_app.py`
-* `chat_pipeline.py`
-* `chat_memory.py`
-* `device_utils.py`
-* `llm_database.py`
-* `model_variants.py`
-* `requirements_runtime_interface.txt`
-* `run.py`
-
-Use `runtime_python/` when you want the simplest path to run the packaged local runtime without entering the full development workspace.
-
----
-
-### `web_static/`
-
-This contains the browser-only metadata bundle.
-
-Key files:
-
-* `index.html`
-* `chat_model_meta_supermix_v27_500k.browser.json`
-
-Use this path when you want a lightweight browser experience or a GitHub Pages-style static deployment.
-
----
-
-### `installer/`
-
-Installer definitions for Windows desktop packaging.
-
-Key files:
-
-* `SupermixQwenDesktop.iss`
-* `SupermixStudioDesktop.iss`
-* `postinstall_notes.txt`
-* `postinstall_notes_studio.txt`
-
----
+- multimodel desktop app with model selector, Auto routing, collective mode, and agent mode
+- local chat, image-prompt, math, science-image, and omni-fusion model families
+- native-image experimental checkpoints
+- training pipelines for frontier, omni, lite, and specialist model lines
+- benchmark sweeps across common text benchmarks
+- export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
 
 ## Quick start
 
-## 1) Install runtime dependencies
-
-```bash
-python -m pip install -r runtime_python/requirements_runtime_interface.txt
-```
-
----
-
-## 2) Run the packaged local web runtime
+### Run the packaged runtime
 
 ```bash
 python runtime_python/chat_web_app.py
 ```
 
-Windows launchers are also included:
+Windows launchers:
 
 ```bat
 runtime_python\launch_chat_web_supermix.bat
 runtime_python\launch_chat_terminal_supermix.bat
 ```
 
-This is the recommended entry path if your goal is to run the packaged local system rather than develop the training stack.
-
----
-
-## 3) Run the current source-side web app
+### Run the active source app
 
 ```bash
 python source/chat_web_app.py
 ```
 
-Use this path when you want the actively developed version of the application and the broader development tooling around it.
+### Run the desktop multimodel app from source
 
----
+```bash
+python source/supermix_multimodel_desktop_app.py
+```
 
-## 4) Run the browser-only static version
+### Run the browser-only static bundle
 
 Open:
 
@@ -205,227 +85,188 @@ Open:
 web_static/index.html
 ```
 
-Then load:
+## Current desktop release
 
-```text
-web_static/chat_model_meta_supermix_v27_500k.browser.json
-```
+Latest release published from this repo:
 
-This mode is metadata-driven and intended for lightweight browser delivery.
+- Release page:
+  - `https://github.com/kai9987kai/Supermix_29/releases/tag/studio-desktop-20260329-omni-v4-allmodels`
+- Installer:
+  - `https://github.com/kai9987kai/Supermix_29/releases/download/studio-desktop-20260329-omni-v4-allmodels/SupermixStudioDesktopSetup.exe`
+- EXE:
+  - `https://github.com/kai9987kai/Supermix_29/releases/download/studio-desktop-20260329-omni-v4-allmodels/SupermixStudioDesktop.exe`
 
----
+Local build outputs:
 
-## Desktop build workflow
+- `dist/SupermixStudioDesktop/SupermixStudioDesktop.exe`
+- `dist/installer/SupermixStudioDesktopSetup.exe`
+- `dist/installer/SupermixStudioDesktopReleaseSHA256.txt`
 
-This repository includes desktop build tooling in both script and spec form.
+## Model families in the workspace
 
-Relevant files include:
+The repo contains code and artifacts for several model lines:
 
-* `SupermixQwenDesktop.spec`
-* `SupermixQwenDesktopV26.spec`
-* `SupermixStudioDesktop.spec`
-* `build_qwen_chat_desktop_exe.ps1`
-* `build_qwen_chat_desktop_installer.ps1`
+- Qwen adapter line
+  - `v28`
+  - `v30`
+- Champion / frontier line
+  - `v31`
+  - `v32`
+  - `v33`
+  - `v34`
+  - `v35`
+  - `v39`
+- native-image line
+  - `v36`
+  - `v37`
+  - `v38`
+- omni-collective line
+  - `v1`
+  - `v2`
+  - `v3`
+  - `v4`
+- specialist lines
+  - `math_equation_micro_v1`
+  - `science_image_recognition_micro_v1`
 
-Additional build helpers also exist inside `source/`, including:
+## Latest finished omni model
 
-* `build_qwen_chat_desktop_exe.ps1`
-* `build_qwen_chat_desktop_installer.ps1`
-* `build_supermix_studio_desktop_exe.ps1`
-* `build_supermix_studio_desktop_installer.ps1`
+The latest finished omni checkpoint in this repo is `omni_collective_v4`.
 
-Installer definitions live under `installer/`.
+Key details from [`output/supermix_omni_collective_v4_frontier_20260329/omni_collective_v4_frontier_summary.json`](output/supermix_omni_collective_v4_frontier_20260329/omni_collective_v4_frontier_summary.json):
 
----
+- parameter count: `19,032,281`
+- stage-1 rows: `8,589`
+- stage-2 rows: `9,447`
+- final stage-2 weighted validation score: `0.5176`
+- final stage-2 validation:
+  - intent: `0.8195`
+  - response: `0.1402`
+  - vision: `0.9020`
+  - domain: `0.7765`
 
-## Training and fine-tuning
+Local packaged artifact:
 
-The training/fine-tuning side of the project is centered in `source/`.
+- [`output/supermix_omni_collective_v4_frontier_20260329.zip`](output/supermix_omni_collective_v4_frontier_20260329.zip)
 
-Important categories in the repo include:
+## Hugging Face models
 
-* **fine-tuning scripts**
+Public model repos already published from this workspace:
 
-  * `finetune_chat.py`
-  * `finetune_chat_manifest_sequential.py`
+- `Kai9987kai/supermix-v33-frontier`
+- `Kai9987kai/supermix-omni-collective-v1`
+- `Kai9987kai/supermix-v38-native-image-xlite-fp16`
+- `Kai9987kai/supermix-v39-frontier-reasoning-plus`
+- `Kai9987kai/supermix-omni-collective-v2-frontier`
+- `Kai9987kai/supermix-math-equation-micro-v1`
+- `Kai9987kai/supermix-omni-collective-v4-frontier`
 
-* **dataset builders**
+## Hugging Face datasets
 
-  * `build_super_dataset.py`
-  * `build_science_knowledge_dataset.py`
-  * `build_science_novel_examples_dataset.py`
-  * `build_reasoning_benchmix_v39.py`
-  * additional domain-specific dataset builders
+Public dataset repos already published from this workspace:
 
-* **training manifests**
+- `Kai9987kai/supermix-conversation-datasets`
+- `Kai9987kai/supermix-science-vision-dataset`
 
-  * multiple `conversation_data.*.json` manifest files
-  * curriculum, weighted, multimodal, smoke, and broad-manifest variants
+## Benchmarks
 
-* **distillation / specialist model work**
+The current local multibench comparison bundle is:
 
-  * native-image distillation scripts
-  * frontier model files
-  * image-feature and mesh-feature utilities
+- [`output/pdf/benchmark_local_all_models_multibench_20260329.pdf`](output/pdf/benchmark_local_all_models_multibench_20260329.pdf)
+- [`output/benchmark_local_all_models_multibench_20260329.json`](output/benchmark_local_all_models_multibench_20260329.json)
+- [`output/benchmark_local_all_models_multibench_20260329.csv`](output/benchmark_local_all_models_multibench_20260329.csv)
 
-This repo is therefore suitable both for **runtime usage** and for **iterating on training data, model variants, and evaluation flows**.
+The current graph covers `20` benchmarked local model entries and keeps specialist-only models labeled separately when the common text suite is not the right evaluation fit.
 
----
+Representative current common-benchmark leaders from the local graph JSON:
 
-## Kaggle workflow
+- `v33_final`: `0.1867`
+- `v39_final`: `0.1800`
+- `omni_collective_v1`: `0.1633`
+- `v34_final`: `0.1600`
+- `v36_native`: `0.1533`
+- `v35_final`: `0.1533`
+- `omni_collective_v4`: `0.0900`
 
-Kaggle support is documented in:
+## Training entry points
 
-```text
-KAGGLE_GUIDE.md
-```
+Representative training and continuation scripts:
 
-The repo also references a notebook-based Kaggle training path under:
+- `source/train_omni_collective_v2.py`
+- `source/train_omni_collective_v3.py`
+- `source/train_omni_collective_v4.py`
+- `source/train_omni_collective_v5.py`
+- `source/train_math_equation_model.py`
+- `source/train_image_recognition_model.py`
+- `source/build_reasoning_benchmix_v39.py`
+- `source/benchmark_all_models_common.py`
 
-```text
-output/jupyter-notebook/supermix-kaggle-current-training.ipynb
-```
+If you want the active experimental path, start in `source/`.
 
-The intent is to keep the cloud notebook workflow aligned with the local training pipeline while avoiding desktop-only components in the cloud environment.
+## Desktop build entry points
 
----
+Primary desktop build helpers:
 
-## Architecture and model docs
+- `source/build_supermix_studio_desktop_exe.ps1`
+- `source/build_supermix_studio_desktop_installer.ps1`
+- `SupermixStudioDesktop.spec`
+- `installer/SupermixStudioDesktop.iss`
 
-For deeper technical context, start here:
+The current bundled-model manifest is:
 
-* `ARCHITECTURE.md` — system and architecture notes
-* `MODEL_CARD_V28.md` — model-card documentation for an earlier major line
-* `KAGGLE_GUIDE.md` — cloud-training workflow
-* `CONTRIBUTING.md` — contribution rules
-* `SECURITY.md` — security process
-* `CODE_OF_CONDUCT.md` — community expectations
+- [`output/supermix_studio_bundled_models_manifest.json`](output/supermix_studio_bundled_models_manifest.json)
 
----
+## Research and experiment notes
 
-## Versioning and naming note
+This repo is a living experiment workspace. It contains finished artifacts, release-ready packaging, and in-progress work at the same time.
 
-This repository reflects an evolving experiment line rather than a perfectly clean single-version snapshot.
+That means you will see mixed generations such as:
 
-You will see references to several names and generations across the project, including:
-
-* `Supermix_27`
-* `Supermix_28`
-* `Supermix_29`
-* `v26`
-* `v27`
-* `v28`
-* `v33`
-* `v35`
-* `v37`
-* `v38`
-* `v39`
+- `v28`
+- `v30`
+- `v33`
+- `v34`
+- `v35`
+- `v36`
+- `v37`
+- `v38`
+- `v39`
+- `omni_collective_v1` through `omni_collective_v5`
 
 That is expected.
 
-Interpret the repo as a **living workspace** containing:
+## Recommended starting points
 
-* packaged runtime assets from earlier stable lines
-* documentation from earlier model generations
-* newer research scripts and experimental files
-* current snapshot packaging/build assets under the `Supermix_29` repo name
+If you want to:
 
----
-
-## Recommended entry points by goal
-
-### I just want to run it
-
-Use:
-
-```bash
-python runtime_python/chat_web_app.py
-```
-
-### I want to work on the current source app
-
-Use:
-
-```bash
-python source/chat_web_app.py
-```
-
-### I want the browser-only version
-
-Open:
-
-```text
-web_static/index.html
-```
-
-### I want to fine-tune or build datasets
-
-Start in:
-
-```text
-source/
-```
-
-### I want to build a desktop app
-
-Start with:
-
-* root `.spec` files
-* root PowerShell build scripts
-* `installer/` `.iss` files
-
----
+- run a packaged local system
+  - use `runtime_python/`
+- work on the active multimodel app
+  - use `source/supermix_multimodel_web_app.py`
+  - use `source/supermix_multimodel_desktop_app.py`
+- work on training
+  - start in `source/`
+- inspect the current benchmark outputs
+  - use `output/benchmark_local_all_models_multibench_20260329.*`
+- build a Windows installer
+  - use the PowerShell build scripts in `source/` plus `installer/`
 
 ## Platform notes
 
-* Windows appears to be the primary packaging target for the desktop workflow.
-* The repo includes batch launchers, PowerShell build scripts, PyInstaller specs, and Inno Setup definitions.
-* The project layout is mixed-purpose by design: research, runtime, packaging, and artifacts coexist in one repository.
+- Windows is the main desktop packaging target
+- the repo includes PyInstaller specs, PowerShell build scripts, and Inno Setup definitions
+- some training flows were designed around cloud GPU workflows, but the repo also supports local CPU experimentation
 
----
+## Security note
 
-## Contributing
+Do not commit or publish browser-session dumps, cookies, temporary automation state, or live access tokens.
 
-Please read:
+Relevant policy docs:
 
-* `CONTRIBUTING.md`
-* `CODE_OF_CONDUCT.md`
-* `SECURITY.md`
-
-before opening major pull requests or publishing derivative builds.
-
----
+- `SECURITY.md`
+- `CONTRIBUTING.md`
+- `CODE_OF_CONDUCT.md`
 
 ## License
 
-See:
-
-```text
-LICENSE
-```
-
----
-
-## Summary
-
-Supermix_29 is a **hybrid AI workspace** spanning:
-
-* local chat runtime
-* active source development
-* static browser deployment
-* desktop packaging
-* dataset construction
-* fine-tuning
-* benchmarking
-* experimental model lines
-
-It is best approached as a **research-and-delivery monorepo** for the Supermix ecosystem.
-
-```
-
-A stronger follow-up would be a second pass that adds badges, a small architecture diagram, and a screenshots section while keeping this version as the clean baseline.
-::contentReference[oaicite:2]{index=2}
-```
-
-[1]: https://github.com/kai9987kai/Supermix_29/tree/main "GitHub - kai9987kai/Supermix_29: Supermix v29 represents a significant architectural evolution of the ChampionNet series, introducing a Mixture-of-Experts (MoE) classifier head for enhanced retrieval and reasoning capabilities. The project is a structured AI/chat repository designed for high-performance inference, featuring a clear split between source code, runtime assets, and · GitHub"
-[2]: https://github.com/kai9987kai/Supermix_29/blob/main/README.md "Supermix_29/README.md at main · kai9987kai/Supermix_29 · GitHub"
+See `LICENSE`.
