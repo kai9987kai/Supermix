@@ -2,17 +2,46 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import random
 import re
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
-try:
-    from datasets import load_dataset
-except Exception as exc:  # pragma: no cover - resolved on the pod
-    raise RuntimeError("The `datasets` package is required to build the v39 reasoning benchmix dataset.") from exc
+
+def _import_hf_load_dataset():
+    try:
+        from datasets import load_dataset as hf_load_dataset
+
+        if callable(hf_load_dataset):
+            return hf_load_dataset
+    except Exception:
+        pass
+
+    repo_root = Path(__file__).resolve().parent.parent
+    masked_entries = {
+        str(repo_root).lower(),
+        str((repo_root / "datasets").resolve()).lower(),
+        "",
+    }
+    original_sys_path = list(sys.path)
+    sys.modules.pop("datasets", None)
+    try:
+        sys.path = [entry for entry in sys.path if str(entry).lower() not in masked_entries]
+        module = importlib.import_module("datasets")
+        hf_load_dataset = getattr(module, "load_dataset", None)
+        if callable(hf_load_dataset):
+            return hf_load_dataset
+    finally:
+        sys.path = original_sys_path
+
+    raise RuntimeError("The Hugging Face `datasets` package is required to build the v39 reasoning benchmix dataset.")
+
+
+load_dataset = _import_hf_load_dataset()
 
 
 NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")

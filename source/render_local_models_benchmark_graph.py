@@ -146,10 +146,10 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
         label="v39_final",
         family="champion",
         filename_tokens=("champion_v39_frontier_reasoning_plus_full_model_20260327",),
-        common_row_key=None,
+        common_row_key="v39_final",
         recipe_eval_accuracy=0.0549,
         score_source="recipe_eval_only",
-        note="No common-benchmark run was completed after the pod lost credit. This marker is the finished v39 recipe holdout score (29/528).",
+        note="Finished v39 artifact. Recipe holdout score is preserved alongside the later common-benchmark score.",
     ),
     ArtifactSpec(
         key="science_vision_micro_v1",
@@ -164,15 +164,111 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
         specialist_metric_label="vision val",
     ),
     ArtifactSpec(
+        key="dcgan_mnist_model",
+        label="dcgan_mnist_model",
+        family="gan",
+        filename_tokens=("dcgan_mnist_model.zip", "dcgan_mnist_model"),
+        common_row_key=None,
+        score_source="specialist_only",
+        note="Unconditional grayscale DCGAN trained on MNIST digits. Specialist score comes from the local GAN generation benchmark.",
+        specialist_summary_path="output/dcgan_mnist_model_20260331/dcgan_mnist_model_benchmark_summary.json",
+        specialist_metric_key="specialist_score",
+        specialist_metric_label="gan score",
+    ),
+    ArtifactSpec(
+        key="dcgan_v2_in_progress",
+        label="dcgan_v2_in_progress",
+        family="gan",
+        filename_tokens=("dcgan_v2_in_progress.zip", "dcgan_v2_in_progress"),
+        common_row_key=None,
+        score_source="specialist_only",
+        note="Unconditional RGB DCGAN v2 trained on CIFAR-style images. Specialist score comes from the local GAN generation benchmark.",
+        specialist_summary_path="output/dcgan_v2_in_progress_20260331/dcgan_v2_in_progress_benchmark_summary.json",
+        specialist_metric_key="specialist_score",
+        specialist_metric_label="gan score",
+    ),
+    ArtifactSpec(
         key="omni_collective_v1",
         label="omni_collective_v1",
         family="fusion",
         filename_tokens=("supermix_omni_collective_v1_20260327",),
-        common_row_key=None,
+        common_row_key="omni_collective_v1",
         score_source="specialist_only",
-        note="Local fused assistant model. Specialist metric uses its validation response accuracy.",
+        note="Local fused assistant model. Common benchmark row comes from the local add-on sweep.",
         specialist_summary_path="output/supermix_omni_collective_v1_20260327/omni_collective_v1_summary.json",
         specialist_metric_key="val_response_accuracy",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="omni_collective_v2",
+        label="omni_collective_v2",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v2_frontier_20260328",),
+        common_row_key="omni_collective_v2",
+        score_source="specialist_only",
+        note="Frontier omni v2 model with common-benchmark add-on results.",
+        specialist_summary_path="output/supermix_omni_collective_v2_frontier_20260328/omni_collective_v2_frontier_summary.json",
+        specialist_metric_key="best_stage2.score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="omni_collective_v3",
+        label="omni_collective_v3",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v3_frontier_20260329",),
+        common_row_key="omni_collective_v3",
+        score_source="specialist_only",
+        note="Frontier omni v3 model with common-benchmark add-on results.",
+        specialist_summary_path="output/supermix_omni_collective_v3_frontier_20260329/omni_collective_v3_frontier_summary.json",
+        specialist_metric_key="best_stage2.score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="omni_collective_v4",
+        label="omni_collective_v4",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v4_frontier_20260329",),
+        common_row_key="omni_collective_v4",
+        score_source="specialist_only",
+        note="Frontier omni v4 model with expanded sparse-routing and common-benchmark add-on results.",
+        specialist_summary_path="output/supermix_omni_collective_v4_frontier_20260329/omni_collective_v4_frontier_summary.json",
+        specialist_metric_key="stage2_val.score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="omni_collective_v5",
+        label="omni_collective_v5",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v5_frontier_20260330",),
+        common_row_key="omni_collective_v5",
+        score_source="specialist_only",
+        note="Frontier omni v5 continuation with coding, OpenSCAD, prompt-understanding deltas, and common-benchmark add-on results.",
+        specialist_summary_path="output/supermix_omni_collective_v5_frontier_20260330/omni_collective_v5_frontier_summary.json",
+        specialist_metric_key="stage2.best_score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="omni_collective_v6",
+        label="omni_collective_v6",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v6_frontier_20260331",),
+        common_row_key="omni_collective_v6",
+        score_source="specialist_only",
+        note="All-model distilled omni v6 frontier with forced small-Qwen teachers, heavier conversation/math/protein grounding, and longer deliberation.",
+        specialist_summary_path="output/supermix_omni_collective_v6_frontier_20260331/omni_collective_v6_frontier_summary.json",
+        specialist_metric_key="stage2.best_score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="v40_benchmax",
+        label="v40_benchmax",
+        family="fusion",
+        filename_tokens=("supermix_v40_benchmax_v40_v39data_v39recipe_20260330",),
+        common_row_key="v40_benchmax",
+        score_source="specialist_only",
+        note="Benchmark-maximization v40 continuation built from the v39-style benchmix recipe plus support and protein-folding rows.",
+        specialist_summary_path="output/supermix_v40_benchmax_v40_v39data_v39recipe_20260330/omni_collective_v40_benchmax_summary.json",
+        specialist_metric_key="stage2.best_score",
         specialist_metric_label="omni val",
     ),
     ArtifactSpec(
@@ -180,12 +276,24 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
         label="math_equation_micro_v1",
         family="math",
         filename_tokens=("supermix_math_equation_micro_v1_20260327",),
-        common_row_key=None,
+        common_row_key="math_equation_micro_v1",
         score_source="specialist_only",
-        note="Math specialist with exact symbolic routing. Specialist metric uses validation accuracy on the math intent set.",
+        note="Math specialist with exact symbolic routing plus a local add-on common-benchmark run.",
         specialist_summary_path="output/supermix_math_equation_micro_v1_20260327/math_equation_micro_v1_summary.json",
         specialist_metric_key="val_accuracy",
         specialist_metric_label="math val",
+    ),
+    ArtifactSpec(
+        key="protein_folding_micro_v1",
+        label="protein_folding_micro_v1",
+        family="protein",
+        filename_tokens=("supermix_protein_folding_micro_v1_20260331",),
+        common_row_key="protein_folding_micro_v1",
+        score_source="specialist_only",
+        note="Protein-folding specialist with structure-prediction concept routing plus a local add-on common-benchmark run.",
+        specialist_summary_path="output/supermix_protein_folding_micro_v1_20260331/protein_folding_micro_v1_summary.json",
+        specialist_metric_key="val_accuracy",
+        specialist_metric_label="protein val",
     ),
 )
 
@@ -196,8 +304,10 @@ FAMILY_COLORS: Dict[str, str] = {
     "native_image": "#15803d",
     "wrapper": "#6b7280",
     "vision": "#7c3aed",
+    "gan": "#b91c1c",
     "fusion": "#db2777",
     "math": "#0f766e",
+    "protein": "#6d28d9",
 }
 
 BENCHMARK_ORDER: Sequence[str] = (
@@ -217,6 +327,26 @@ BENCHMARK_LABELS: Dict[str, str] = {
     "mmlu": "MMLU",
     "piqa": "PIQA",
 }
+
+FAMILY_DESCRIPTIONS: Dict[str, str] = {
+    "qwen": "Qwen adapter scored on the common benchmark sweep",
+    "champion": "Champion-family text model",
+    "native_image": "Native image-capable checkpoint",
+    "wrapper": "Wrapper or alias artifact",
+    "vision": "Vision specialist artifact",
+    "gan": "GAN image-generation specialist",
+    "fusion": "Omni fused multimodal model",
+    "math": "Math specialist model",
+    "protein": "Protein-folding specialist model",
+}
+
+
+def _resolve_default_common_summary() -> Path:
+    output_dir = Path(__file__).resolve().parents[1] / "output"
+    candidates = sorted(output_dir.glob("benchmark_all_models_common_plus_summary_*.json"))
+    if candidates:
+        return candidates[-1]
+    return output_dir / "benchmark_all_models_common_plus_summary_20260329.json"
 
 
 def _score_for_sort(common_score: Optional[float], recipe_score: Optional[float]) -> float:
@@ -419,13 +549,27 @@ def _svg_escape(text: str) -> str:
     )
 
 
-def render_svg(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path) -> None:
+def render_svg(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, common_summary_label: str) -> None:
     row_height = 34
-    top_pad = 120
     bottom_pad = 110
     left_pad = 320
     right_pad = 120
     plot_width = 760
+    present_families: List[str] = []
+    for row in rows:
+        family = str(row["family"])
+        if family not in present_families:
+            present_families.append(family)
+    legend_items = [
+        (family, FAMILY_COLORS[family], FAMILY_DESCRIPTIONS.get(family, family))
+        for family in present_families
+        if family in FAMILY_COLORS
+    ]
+    legend_x = left_pad
+    legend_y = 96
+    legend_line_height = 18
+    marker_y = legend_y + max(len(legend_items), 1) * legend_line_height + 8
+    top_pad = marker_y + 28
     width = left_pad + plot_width + right_pad
     height = top_pad + bottom_pad + row_height * len(rows)
 
@@ -516,29 +660,21 @@ def render_svg(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path) 
             f'<text class="small" x="{left_pad + plot_width + 12}" y="{y + 4}">{_svg_escape(source_note)}</text>'
         )
 
-    legend_x = left_pad
-    legend_y = 96
-    legend_items = [
-        ("qwen", FAMILY_COLORS["qwen"], "Qwen adapter scored on saved common benchmark"),
-        ("champion", FAMILY_COLORS["champion"], "Champion-family final model"),
-        ("native_image", FAMILY_COLORS["native_image"], "Native-image text+image checkpoint"),
-        ("wrapper", FAMILY_COLORS["wrapper"], "Wrapper or alias artifact"),
-    ]
-    for idx, (name, color, text) in enumerate(legend_items):
-        yy = legend_y + idx * 18
+    for idx, (_, color, text) in enumerate(legend_items):
+        yy = legend_y + idx * legend_line_height
         lines.append(f'<rect x="{legend_x}" y="{yy - 10}" width="12" height="12" fill="{color}" />')
         lines.append(f'<text class="small" x="{legend_x + 18}" y="{yy}">{_svg_escape(text)}</text>')
 
-    lines.append(f'<circle cx="{legend_x + 515}" cy="{legend_y - 4}" r="5" fill="#b91c1c" />')
-    lines.append(f'<text class="small" x="{legend_x + 528}" y="{legend_y}">Recipe holdout marker when no common-benchmark run exists</text>')
+    lines.append(f'<circle cx="{legend_x + 5}" cy="{marker_y - 4}" r="5" fill="#b91c1c" />')
+    lines.append(f'<text class="small" x="{legend_x + 18}" y="{marker_y}">Recipe holdout marker when no common-benchmark run exists</text>')
     lines.append(
-        f'<text class="small" x="{left_pad}" y="{height - 26}">Generated {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")} from output/benchmark_all_models_common_plus_summary_20260327.json and the local models directory.</text>'
+        f'<text class="small" x="{left_pad}" y="{height - 26}">Generated {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")} from {_svg_escape(common_summary_label)} and the local models directory.</text>'
     )
     lines.append("</svg>")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, generated_at: datetime) -> None:
+def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, generated_at: datetime, common_summary_label: str) -> None:
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import landscape, letter
@@ -549,17 +685,29 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    page_width, page_height = landscape(letter)
+    page_width, base_page_height = landscape(letter)
+    row_height = 24
+    left_pad = 215
+    right_pad = 100
+    bottom_pad = 58
+    present_families: List[str] = []
+    for row in rows:
+        family = str(row["family"])
+        if family not in present_families:
+            present_families.append(family)
+    legend_items = [
+        (family, FAMILY_COLORS[family], FAMILY_DESCRIPTIONS.get(family, family))
+        for family in present_families
+        if family in FAMILY_COLORS
+    ]
+    legend_line_height = 14
+    top_pad = 150 + max(len(legend_items), 1) * legend_line_height
+    page_height = max(base_page_height, top_pad + bottom_pad + row_height * len(rows) + 48)
     c = canvas.Canvas(str(path), pagesize=(page_width, page_height))
     c.setTitle("Local Model Benchmark Graph")
 
-    left_pad = 215
-    right_pad = 100
-    top_pad = 110
-    bottom_pad = 75
-    row_height = 24
     plot_width = page_width - left_pad - right_pad
-    axis_y = page_height - bottom_pad
+    axis_y = bottom_pad
 
     numeric_scores = [
         value
@@ -591,7 +739,7 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
     c.setFont("Helvetica-Bold", 18)
     c.drawString(left_pad, page_height - 32, "Local Model Benchmark Graph")
     after_subtitle_y = draw_wrapped(
-        f"Built from local zips in {models_dir}. Common-benchmark scores come from the saved expanded sweep. v39 is recipe-eval only.",
+        f"Built from local zips in {models_dir}. Common-benchmark scores come from the saved expanded sweep plus local add-on runs for newly benchmarked models.",
         left_pad,
         page_height - 50,
         plot_width + right_pad - 10,
@@ -608,6 +756,22 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
         9,
         colors.HexColor("#4b5563"),
     )
+
+    legend_start_y = page_height - 88
+    for idx, (_, color, text) in enumerate(legend_items):
+        y = legend_start_y - idx * legend_line_height
+        c.setFillColor(colors.HexColor(color))
+        c.rect(left_pad, y - 8, 9, 9, stroke=0, fill=1)
+        c.setFillColor(colors.HexColor("#4b5563"))
+        c.setFont("Helvetica", 8)
+        c.drawString(left_pad + 14, y - 1, text)
+
+    marker_y = legend_start_y - max(len(legend_items), 1) * legend_line_height - 2
+    c.setFillColor(colors.HexColor("#b91c1c"))
+    c.circle(left_pad + 4, marker_y - 1, 3.2, stroke=0, fill=1)
+    c.setFillColor(colors.HexColor("#4b5563"))
+    c.setFont("Helvetica", 8)
+    c.drawString(left_pad + 14, marker_y - 3, "Recipe holdout marker when no common-benchmark run exists")
 
     c.setStrokeColor(colors.HexColor("#9ca3af"))
     c.line(left_pad, axis_y, left_pad + plot_width, axis_y)
@@ -670,32 +834,10 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
         c.setFillColor(colors.HexColor("#4b5563"))
         c.setFont("Helvetica", 8)
         c.drawString(left_pad + plot_width + 10, y - 1, source_note)
-
-    legend_y = 72
-    legend_items = [
-        ("qwen", FAMILY_COLORS["qwen"], "Qwen adapter scored on saved common benchmark"),
-        ("champion", FAMILY_COLORS["champion"], "Champion-family final model"),
-        ("native_image", FAMILY_COLORS["native_image"], "Native-image text+image checkpoint"),
-        ("wrapper", FAMILY_COLORS["wrapper"], "Wrapper or alias artifact"),
-    ]
-    legend_x = left_pad
-    for idx, (_, color, text) in enumerate(legend_items):
-        y = legend_y - idx * 14
-        c.setFillColor(colors.HexColor(color))
-        c.rect(legend_x, y - 8, 9, 9, stroke=0, fill=1)
-        c.setFillColor(colors.HexColor("#4b5563"))
-        c.setFont("Helvetica", 8)
-        c.drawString(legend_x + 14, y - 1, text)
-
-    c.setFillColor(colors.HexColor("#b91c1c"))
-    c.circle(left_pad + 360, legend_y - 1, 3.2, stroke=0, fill=1)
-    c.setFillColor(colors.HexColor("#4b5563"))
-    c.setFont("Helvetica", 8)
-    c.drawString(left_pad + 370, legend_y - 3, "Recipe holdout marker when no common-benchmark run exists")
     c.drawString(
         left_pad,
         20,
-        f"Generated {generated_at.strftime('%Y-%m-%d %H:%M UTC')} from output/benchmark_all_models_common_plus_summary_20260327.json and the local models directory.",
+        f"Generated {generated_at.strftime('%Y-%m-%d %H:%M UTC')} from {common_summary_label} and the local models directory.",
     )
 
     c.showPage()
@@ -792,8 +934,8 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render a local final-model benchmark graph from saved benchmark outputs and local zips.")
     parser.add_argument("--models_dir", default=r"C:\Users\kai99\Desktop\models")
-    parser.add_argument("--common_summary", default="output/benchmark_all_models_common_plus_summary_20260327.json")
-    parser.add_argument("--output_prefix", default="output/benchmark_local_final_models_20260327")
+    parser.add_argument("--common_summary", default=str(_resolve_default_common_summary()))
+    parser.add_argument("--output_prefix", default="output/benchmark_local_all_models_multibench_20260330")
     args = parser.parse_args()
 
     models_dir = Path(args.models_dir).resolve()
@@ -809,6 +951,10 @@ def main() -> int:
     artifacts = discover_artifacts(models_dir)
     inventory = build_zip_inventory(models_dir, artifacts)
     generated_at = datetime.now(timezone.utc)
+    try:
+        common_summary_label = common_summary.relative_to(repo_root).as_posix()
+    except ValueError:
+        common_summary_label = str(common_summary)
 
     json_path = output_prefix.with_suffix(".json")
     csv_path = output_prefix.with_suffix(".csv")
@@ -823,16 +969,16 @@ def main() -> int:
         "rows": rows,
         "zip_inventory": inventory,
         "notes": [
-            "Scores in common_overall_exact come from the existing expanded common-benchmark sweep in the repo output directory.",
+            "Scores in common_overall_exact come from the existing expanded common-benchmark sweep plus local add-on benchmark runs for newly scored models.",
             "Rows marked common_alias map a final artifact to the chosen or equivalent scored checkpoint.",
-            "v39_final only has recipe_eval_accuracy because its common-benchmark run never completed after the pod lost credit.",
-            "Specialist-only models expose their own validation metric in specialist_metric_value and render as N/A in the common benchmark matrix.",
+            "recipe_eval_accuracy is retained when available so the graph can still show the local recipe holdout marker alongside a later common score.",
+            "Specialist-only models that still lack a common score expose their local validation metric in specialist_metric_value and render as N/A in the common benchmark matrix.",
         ],
     }
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     write_csv(csv_path, rows)
-    render_svg(svg_path, rows, models_dir)
-    render_pdf(pdf_path, rows, models_dir, generated_at)
+    render_svg(svg_path, rows, models_dir, common_summary_label)
+    render_pdf(pdf_path, rows, models_dir, generated_at, common_summary_label)
 
     print(json_path)
     print(csv_path)

@@ -8,11 +8,17 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 DEFAULT_MODELS_DIR = Path(r"C:\Users\kai99\Desktop\models")
-DEFAULT_COMMON_SUMMARY = (
-    Path(__file__).resolve().parents[1]
-    / "output"
-    / "benchmark_all_models_common_plus_summary_20260327.json"
-)
+
+
+def _resolve_default_common_summary() -> Path:
+    output_dir = Path(__file__).resolve().parents[1] / "output"
+    candidates = sorted(output_dir.glob("benchmark_all_models_common_plus_summary_*.json"))
+    if candidates:
+        return candidates[-1]
+    return output_dir / "benchmark_all_models_common_plus_summary_20260327.json"
+
+
+DEFAULT_COMMON_SUMMARY = _resolve_default_common_summary()
 
 IMAGE_PROMPT_RE = re.compile(
     r"\b("
@@ -41,11 +47,18 @@ MATH_PROMPT_RE = re.compile(
     r"\balgebra\b|=|[\d\)\]][\+\-\*/\^])",
     re.IGNORECASE,
 )
+PROTEIN_PROMPT_RE = re.compile(
+    r"\b(protein|folding|fold|amino acid|residue|alpha helix|beta sheet|hydrophobic|"
+    r"chaperone|disulfide|contact map|plddt|msa|intrinsically disordered|"
+    r"membrane protein|tm-score|rmsd)\b",
+    re.IGNORECASE,
+)
 CREATIVE_PROMPT_RE = re.compile(
     r"\b(story|creative|poem|novel|character|rewrite|style|brainstorm|lyrics|dialogue)\b",
     re.IGNORECASE,
 )
 EXPERIMENTAL_PROMPT_RE = re.compile(r"\b(experimental|frontier|newest|latest|v39)\b", re.IGNORECASE)
+GAN_IMAGE_PROMPT_RE = re.compile(r"\b(dcgan|gan|mnist|digit grid|digit sheet|cifar|retro sample|unconditional image)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -137,6 +150,30 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         preferred_meta=("science_image_recognition_micro_v1_meta.json",),
     ),
     ModelSpec(
+        key="dcgan_mnist_model",
+        label="DCGAN MNIST",
+        family="gan",
+        kind="dcgan_image",
+        filename_tokens=("dcgan_mnist_model",),
+        common_row_key=None,
+        capabilities=("image",),
+        note="Unconditional DCGAN trained on 28x28 grayscale MNIST digits. Prompt text only seeds the latent sample grid.",
+        benchmark_hint="MNIST digit-grid generator.",
+        preferred_weights=("generator_final.pth",),
+    ),
+    ModelSpec(
+        key="dcgan_v2_in_progress",
+        label="DCGAN V2 CIFAR",
+        family="gan",
+        kind="dcgan_image",
+        filename_tokens=("dcgan_v2_in_progress",),
+        common_row_key=None,
+        capabilities=("image",),
+        note="Unconditional RGB DCGAN v2 trained on CIFAR-style images. Prompt text only seeds the latent sample grid.",
+        benchmark_hint="RGB CIFAR-style generator.",
+        preferred_weights=("generator_epoch_015.pth", "generator_epoch_010.pth", "generator_epoch_005.pth"),
+    ),
+    ModelSpec(
         key="omni_collective_v1",
         label="Omni Collective V1",
         family="fusion",
@@ -163,6 +200,76 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         preferred_meta=("omni_collective_v2_frontier_meta.json",),
     ),
     ModelSpec(
+        key="omni_collective_v3",
+        label="Omni Collective V3 Frontier",
+        family="fusion",
+        kind="omni_collective_v3",
+        filename_tokens=("supermix_omni_collective_v3_frontier_",),
+        common_row_key=None,
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.45126262626262625,
+        note="Larger routed-depth fused continuation with expanded language, science-image, 3D, video-contact, and Qwen-repair distillation data.",
+        benchmark_hint="Newest fused multimodal frontier checkpoint.",
+        preferred_weights=("omni_collective_v3_frontier.pth",),
+        preferred_meta=("omni_collective_v3_frontier_meta.json",),
+    ),
+    ModelSpec(
+        key="omni_collective_v4",
+        label="Omni Collective V4 Frontier",
+        family="fusion",
+        kind="omni_collective_v4",
+        filename_tokens=("supermix_omni_collective_v4_frontier_",),
+        common_row_key="omni_collective_v4",
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.5175903490230448,
+        note="Larger sparse-routed multimodal frontier checkpoint with teacher-league repair rows, deeper memory, and wider text/image/video/3D data.",
+        benchmark_hint="Latest fused multimodal frontier checkpoint.",
+        preferred_weights=("omni_collective_v4_frontier.pth",),
+        preferred_meta=("omni_collective_v4_frontier_meta.json",),
+    ),
+    ModelSpec(
+        key="omni_collective_v5",
+        label="Omni Collective V5 Frontier",
+        family="fusion",
+        kind="omni_collective_v5",
+        filename_tokens=("supermix_omni_collective_v5_frontier_",),
+        common_row_key="omni_collective_v5",
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.5270367807000198,
+        note="V4 continuation with extra coding, OpenSCAD, prompt-understanding rows, and a longer multi-pass deliberation path.",
+        benchmark_hint="Latest fused multimodal coding-aware frontier checkpoint.",
+        preferred_weights=("omni_collective_v5_frontier.pth",),
+        preferred_meta=("omni_collective_v5_frontier_meta.json",),
+    ),
+    ModelSpec(
+        key="omni_collective_v6",
+        label="Omni Collective V6 Frontier",
+        family="fusion",
+        kind="omni_collective_v6",
+        filename_tokens=("supermix_omni_collective_v6_frontier_",),
+        common_row_key="omni_collective_v6",
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.4939150169000483,
+        note="Larger all-model distillation frontier with forced small-Qwen teachers, heavier conversation/math/protein grounding, and longer multi-pass deliberation.",
+        benchmark_hint="Latest all-model distilled multimodal frontier checkpoint.",
+        preferred_weights=("omni_collective_v6_frontier.pth",),
+        preferred_meta=("omni_collective_v6_frontier_meta.json",),
+    ),
+    ModelSpec(
+        key="v40_benchmax",
+        label="V40 Benchmax",
+        family="fusion",
+        kind="omni_collective_v5",
+        filename_tokens=("supermix_v40_benchmax_",),
+        common_row_key="v40_benchmax",
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.4363799283154122,
+        note="Benchmark-maximization continuation using the v39-style benchmix recipe plus support rows and protein-folding knowledge rows.",
+        benchmark_hint="Latest benchmark-focused multimodal frontier checkpoint.",
+        preferred_weights=("omni_collective_v40_benchmax.pth",),
+        preferred_meta=("omni_collective_v40_benchmax_meta.json",),
+    ),
+    ModelSpec(
         key="math_equation_micro_v1",
         label="Math Equation Micro",
         family="math",
@@ -174,6 +281,19 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         benchmark_hint="Exact math/equation specialist.",
         preferred_weights=("math_equation_micro_v1.pth",),
         preferred_meta=("math_equation_micro_v1_meta.json",),
+    ),
+    ModelSpec(
+        key="protein_folding_micro_v1",
+        label="Protein Folding Micro",
+        family="protein",
+        kind="protein_folding",
+        filename_tokens=("supermix_protein_folding_micro_v1_",),
+        common_row_key=None,
+        capabilities=("chat",),
+        note="Mini protein-folding specialist trained on the benchmark protein pack plus extra structure-prediction prompt templates.",
+        benchmark_hint="Protein folding and structure-prediction specialist.",
+        preferred_weights=("protein_folding_micro_v1.pth",),
+        preferred_meta=("protein_folding_micro_v1_meta.json",),
     ),
     ModelSpec(
         key="qwen_v28",
@@ -487,9 +607,21 @@ def choose_auto_model(
     has_uploaded_image = bool(str(uploaded_image_path or "").strip())
 
     if not prompt_text:
-        return (available.get("v33_final") or (text_models[0] if text_models else None), "Empty prompt fell back to the default text model.")
+        return (
+            available.get("v40_benchmax")
+            or available.get("omni_collective_v6")
+            or available.get("omni_collective_v5")
+            or available.get("omni_collective_v4")
+            or available.get("omni_collective_v3")
+            or available.get("v33_final")
+            or (text_models[0] if text_models else None),
+            "Empty prompt fell back to the default text model.",
+        )
 
-    wants_image = action_mode == "image" or (action_mode == "auto" and bool(IMAGE_PROMPT_RE.search(prompt_text)))
+    wants_image = action_mode == "image" or (
+        action_mode == "auto"
+        and bool(IMAGE_PROMPT_RE.search(prompt_text) or GAN_IMAGE_PROMPT_RE.search(prompt_text))
+    )
     wants_vision = (
         action_mode == "vision"
         or has_uploaded_image
@@ -497,23 +629,28 @@ def choose_auto_model(
     )
     wants_fast = bool(FAST_PROMPT_RE.search(prompt_text)) or len(prompt_text) < 34
     wants_math = action_mode != "image" and bool(MATH_PROMPT_RE.search(prompt_text))
+    wants_protein = action_mode != "image" and bool(PROTEIN_PROMPT_RE.search(prompt_text))
     wants_model_selection = any(token in lowered for token in ("which model", "best model", "select a model", "pick a model"))
 
     if wants_model_selection:
-        for key in ("omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
+        for key in ("omni_collective_v6", "v40_benchmax", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
             if key in available:
                 return available[key], "Auto picked the fused catalog model because the prompt asks about model choice."
 
     if wants_vision and vision_models:
         if has_uploaded_image and any(token in lowered for token in ("compare", "explain", "teach", "why", "analyze", "analyse")):
-            for key in ("omni_collective_v2", "omni_collective_v1", "science_vision_micro_v1"):
+            for key in ("omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "science_vision_micro_v1"):
                 if key in available:
                     return available[key], "Auto picked a vision-capable chat model because an uploaded image needs analysis."
-        for key in ("science_vision_micro_v1", "omni_collective_v2", "omni_collective_v1"):
+        for key in ("science_vision_micro_v1", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v40_benchmax"):
             if key in available:
                 return available[key], "Auto picked the uploaded-image recognition model because the prompt looks visual."
 
     if wants_image and image_models:
+        if GAN_IMAGE_PROMPT_RE.search(prompt_text):
+            for key in ("dcgan_v2_in_progress", "dcgan_mnist_model", "v36_native", "v38_native_xlite", "v37_native_lite", "v31_image_variant"):
+                if key in available:
+                    return available[key], "Auto picked the DCGAN image model because the prompt explicitly mentions GAN, MNIST, CIFAR, or digit-grid generation."
         if wants_fast:
             for key in ("v38_native_xlite_fp16", "v38_native_xlite", "v37_native_lite", "v36_native"):
                 if key in available:
@@ -527,6 +664,11 @@ def choose_auto_model(
             if key in available:
                 return available[key], "Auto picked the math specialist because the prompt looks like an equation or symbolic math task."
 
+    if wants_protein:
+        for key in ("protein_folding_micro_v1", "v40_benchmax", "omni_collective_v6", "v33_final"):
+            if key in available:
+                return available[key], "Auto picked the protein-folding specialist because the prompt looks like protein structure or folding analysis."
+
     if wants_fast:
         for key in ("v30_lite", "qwen_v28", "v31_final"):
             if key in available:
@@ -536,16 +678,16 @@ def choose_auto_model(
         return available["v39_final"], "Auto picked the newest experimental reasoning checkpoint."
 
     if CODE_PROMPT_RE.search(prompt_text) or ANALYTIC_PROMPT_RE.search(prompt_text):
-        for key in ("v33_final", "v35_final", "v34_final", "qwen_v28"):
+        for key in ("v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "qwen_v28"):
             if key in available:
                 return available[key], "Auto picked the strongest benchmarked reasoning/coding text model."
 
     if CREATIVE_PROMPT_RE.search(prompt_text):
-        for key in ("qwen_v28", "v33_final", "v31_final"):
+        for key in ("qwen_v28", "omni_collective_v6", "omni_collective_v5", "v40_benchmax", "omni_collective_v4", "omni_collective_v3", "v33_final", "v31_final"):
             if key in available:
                 return available[key], "Auto picked a more open-ended text model for a creative prompt."
 
-    for key in ("v33_final", "v35_final", "v34_final", "v31_final", "qwen_v28"):
+    for key in ("v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "v31_final", "qwen_v28"):
         if key in available:
             return available[key], "Auto picked the default strongest local text model."
     return (text_models[0] if text_models else (image_models[0] if image_models else None), "Auto fell back to the first available local model.")

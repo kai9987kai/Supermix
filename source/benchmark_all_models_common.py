@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gc
+import hashlib
 import json
 import random
 import re
@@ -37,6 +38,15 @@ try:
 except Exception as exc:  # pragma: no cover - resolved in the RunPod launcher
     raise RuntimeError("The `datasets` package is required. Install it before running this benchmark.") from exc
 
+try:
+    from omni_collective_v5_model import OmniCollectiveEngineV5
+    from omni_collective_v6_model import OmniCollectiveEngineV6
+    from protein_folding_model import ProteinFoldingEngine
+except ImportError:  # pragma: no cover
+    from .omni_collective_v5_model import OmniCollectiveEngineV5
+    from .omni_collective_v6_model import OmniCollectiveEngineV6
+    from .protein_folding_model import ProteinFoldingEngine
+
 
 NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 FINAL_ANSWER_RE = re.compile(r"final answer\s*:\s*([^\n\r]+)", re.IGNORECASE)
@@ -66,6 +76,11 @@ class ModelSpec:
 
 def _normalize_text(value: object) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _stable_hash(value: object) -> str:
+    cooked = _normalize_text(value)
+    return hashlib.sha1(cooked.encode("utf-8")).hexdigest()[:16]
 
 
 def _extract_gsm8k_answer(answer_text: str) -> str:
@@ -398,6 +413,34 @@ class ChampionBenchmarkGenerator:
         return _fast_cleanup_response_text(response)
 
 
+class OmniCollectiveBenchmarkGenerator:
+    def __init__(self, *, weights_path: Path, meta_path: Path, device: str) -> None:
+        self.engine = OmniCollectiveEngineV5(weights_path=weights_path, meta_path=meta_path, device=torch.device(device))
+
+    def generate(self, user_text: str, max_new_tokens: int) -> str:
+        del max_new_tokens
+        return _normalize_response(self.engine.answer(user_text))
+
+
+class OmniCollectiveV6BenchmarkGenerator:
+    def __init__(self, *, weights_path: Path, meta_path: Path, device: str) -> None:
+        self.engine = OmniCollectiveEngineV6(weights_path=weights_path, meta_path=meta_path, device=torch.device(device))
+
+    def generate(self, user_text: str, max_new_tokens: int) -> str:
+        del max_new_tokens
+        return _normalize_response(self.engine.answer(user_text))
+
+
+class ProteinFoldingBenchmarkGenerator:
+    def __init__(self, *, weights_path: Path, meta_path: Path, device: str) -> None:
+        del device
+        self.engine = ProteinFoldingEngine(weights_path=weights_path, meta_path=meta_path)
+
+    def generate(self, user_text: str, max_new_tokens: int) -> str:
+        del max_new_tokens
+        return _normalize_response(self.engine.answer(user_text))
+
+
 def _release_cuda_memory() -> None:
     gc.collect()
     if torch.cuda.is_available():
@@ -423,7 +466,85 @@ def _overall_exact_score(per_benchmark: Dict[str, float]) -> float:
     return float(sum(per_benchmark.values()) / len(per_benchmark))
 
 
-def discover_models(persist_root: Path, include_qwen_base: bool) -> Tuple[List[ModelSpec], List[Dict[str, str]]]:
+def _append_local_v40_spec(models: List[ModelSpec], skipped: List[Dict[str, str]], local_output_root: Path) -> None:
+    if not local_output_root.exists():
+        skipped.append({"name": "v40_benchmax", "reason": f"local output root missing: {local_output_root}"})
+        return
+    candidates = sorted(
+        (path for path in local_output_root.glob("supermix_v40_benchmax_*") if path.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for artifact_dir in candidates:
+        weights_path = artifact_dir / "omni_collective_v40_benchmax.pth"
+        meta_path = artifact_dir / "omni_collective_v40_benchmax_meta.json"
+        if weights_path.exists() and meta_path.exists():
+            models.append(
+                ModelSpec(
+                    name="v40_benchmax",
+                    family="fusion",
+                    kind="omni_collective_v5",
+                    weights_path=weights_path,
+                    meta_path=meta_path,
+                )
+            )
+            return
+    skipped.append({"name": "v40_benchmax", "reason": f"missing local v40 weights/meta under {local_output_root}"})
+
+
+def _append_local_v6_spec(models: List[ModelSpec], skipped: List[Dict[str, str]], local_output_root: Path) -> None:
+    if not local_output_root.exists():
+        skipped.append({"name": "omni_collective_v6", "reason": f"local output root missing: {local_output_root}"})
+        return
+    candidates = sorted(
+        (path for path in local_output_root.glob("supermix_omni_collective_v6_frontier_*") if path.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for artifact_dir in candidates:
+        weights_path = artifact_dir / "omni_collective_v6_frontier.pth"
+        meta_path = artifact_dir / "omni_collective_v6_frontier_meta.json"
+        if weights_path.exists() and meta_path.exists():
+            models.append(
+                ModelSpec(
+                    name="omni_collective_v6",
+                    family="fusion",
+                    kind="omni_collective_v6",
+                    weights_path=weights_path,
+                    meta_path=meta_path,
+                )
+            )
+            return
+    skipped.append({"name": "omni_collective_v6", "reason": f"missing local v6 weights/meta under {local_output_root}"})
+
+
+def _append_local_protein_spec(models: List[ModelSpec], skipped: List[Dict[str, str]], local_output_root: Path) -> None:
+    if not local_output_root.exists():
+        skipped.append({"name": "protein_folding_micro_v1", "reason": f"local output root missing: {local_output_root}"})
+        return
+    candidates = sorted(
+        (path for path in local_output_root.glob("supermix_protein_folding_micro_v1_*") if path.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for artifact_dir in candidates:
+        weights_path = artifact_dir / "protein_folding_micro_v1.pth"
+        meta_path = artifact_dir / "protein_folding_micro_v1_meta.json"
+        if weights_path.exists() and meta_path.exists():
+            models.append(
+                ModelSpec(
+                    name="protein_folding_micro_v1",
+                    family="protein",
+                    kind="protein_folding",
+                    weights_path=weights_path,
+                    meta_path=meta_path,
+                )
+            )
+            return
+    skipped.append({"name": "protein_folding_micro_v1", "reason": f"missing local protein-folding weights/meta under {local_output_root}"})
+
+
+def discover_models(persist_root: Path, include_qwen_base: bool, local_output_root: Optional[Path] = None) -> Tuple[List[ModelSpec], List[Dict[str, str]]]:
     models: List[ModelSpec] = []
     skipped: List[Dict[str, str]] = []
 
@@ -509,6 +630,11 @@ def discover_models(persist_root: Path, include_qwen_base: bool) -> Tuple[List[M
         else:
             skipped.append({"name": name, "reason": f"missing weights/meta: {weights_path} | {meta_path}"})
 
+    if local_output_root is not None:
+        _append_local_v6_spec(models, skipped, local_output_root)
+        _append_local_v40_spec(models, skipped, local_output_root)
+        _append_local_protein_spec(models, skipped, local_output_root)
+
     models.sort(key=lambda item: item.name)
     return models, skipped
 
@@ -525,6 +651,18 @@ def _build_generator(spec: ModelSpec, *, device: str, qwen_base_model: Path):
         if spec.weights_path is None or spec.meta_path is None:
             raise ValueError(f"Incomplete champion spec: {spec}")
         return ChampionBenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
+    if spec.kind == "omni_collective_v5":
+        if spec.weights_path is None or spec.meta_path is None:
+            raise ValueError(f"Incomplete omni_collective_v5 spec: {spec}")
+        return OmniCollectiveBenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
+    if spec.kind == "omni_collective_v6":
+        if spec.weights_path is None or spec.meta_path is None:
+            raise ValueError(f"Incomplete omni_collective_v6 spec: {spec}")
+        return OmniCollectiveV6BenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
+    if spec.kind == "protein_folding":
+        if spec.weights_path is None or spec.meta_path is None:
+            raise ValueError(f"Incomplete protein_folding spec: {spec}")
+        return ProteinFoldingBenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
     raise ValueError(f"Unsupported model spec: {spec}")
 
 
@@ -559,12 +697,18 @@ def benchmark_models(models: Sequence[ModelSpec], items: Sequence[BenchmarkItem]
                         "model": spec.name,
                         "family": spec.family,
                         "benchmark": item.benchmark,
+                        "item_id": f"{item.benchmark}:{item_index:04d}:{_stable_hash(item.prompt)[:12]}",
+                        "item_index": item_index,
                         "prompt": item.prompt,
+                        "prompt_hash": _stable_hash(item.prompt),
                         "reference_text": item.reference_text,
+                        "reference_hash": _stable_hash(item.reference_text),
                         "reference_extracted": item.reference_extracted,
                         "prediction": prediction,
+                        "prediction_hash": _stable_hash(prediction),
                         "prediction_extracted": extracted,
                         "exact": exact,
+                        "is_exact": bool(exact >= 1.0),
                         "token_f1": token,
                         "char_similarity": char,
                         "gen_seconds": elapsed,
@@ -640,6 +784,10 @@ def _family_color(family: str) -> str:
         return "#d97706"
     if family == "native_image":
         return "#15803d"
+    if family == "fusion":
+        return "#db2777"
+    if family == "protein":
+        return "#7c3aed"
     return "#2563eb"
 
 
@@ -681,7 +829,7 @@ def draw_graph(path: Path, summary_rows: Sequence[Dict[str, object]], benchmark_
         ax_bar.text(score + 0.005, yi, f"{score:.3f}", va="center", fontsize=8)
 
     legend_handles = []
-    for family in ("qwen", "champion", "native_image"):
+    for family in ("qwen", "champion", "native_image", "protein", "fusion"):
         if family in families:
             legend_handles.append(plt.Line2D([0], [0], color=_family_color(family), lw=8, label=family))
     if legend_handles:
@@ -697,6 +845,7 @@ def main() -> int:
     parser.add_argument("--persist_root", default="/workspace/supermix_runpod_budget/persistent")
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--local_output_root", default="output")
     parser.add_argument("--sample_per_benchmark", type=int, default=20)
     parser.add_argument("--seed", type=int, default=20260327)
     parser.add_argument("--log_every", type=int, default=12)
@@ -716,17 +865,22 @@ def main() -> int:
         prompts_jsonl,
         (
             {
+                "item_id": f"{item.benchmark}:{index:04d}:{_stable_hash(item.prompt)[:12]}",
+                "item_index": index,
                 "benchmark": item.benchmark,
                 "prompt": item.prompt,
+                "prompt_hash": _stable_hash(item.prompt),
                 "reference_text": item.reference_text,
+                "reference_hash": _stable_hash(item.reference_text),
                 "reference_extracted": item.reference_extracted,
                 "max_new_tokens": item.max_new_tokens,
             }
-            for item in items
+            for index, item in enumerate(items, start=1)
         ),
     )
 
-    models, skipped = discover_models(persist_root, include_qwen_base=bool(args.include_qwen_base))
+    local_output_root = Path(args.local_output_root).resolve() if str(args.local_output_root).strip() else None
+    models, skipped = discover_models(persist_root, include_qwen_base=bool(args.include_qwen_base), local_output_root=local_output_root)
     models, skipped = _filter_models(models, skipped, requested=args.model_name)
     if not models:
         raise RuntimeError("No benchmarkable models were selected.")
@@ -753,6 +907,7 @@ def main() -> int:
             {
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "persist_root": str(persist_root),
+                "local_output_root": str(local_output_root) if local_output_root else "",
                 "output_dir": str(output_dir),
                 "device": str(args.device),
                 "sample_per_benchmark": int(args.sample_per_benchmark),

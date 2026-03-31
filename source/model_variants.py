@@ -62,6 +62,7 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "frontier_expert",
     "frontier_collective_expert",
     "frontier_verifier_expert",
+    "test_time_diff_expert",
 )
 EXPANSION_DIM_MODEL_SIZES = frozenset({"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
 EXTRA_EXPANSION_DIM_MODEL_SIZES = frozenset({"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
@@ -4918,6 +4919,299 @@ class ChampionNetActiveInferenceExpert(nn.Module):
         return x
 
 
+class TestTimeDifferentialExpertHead(nn.Module):
+    """
+    Experimental benchmark-focused head that combines:
+    - differential attention to suppress distractor context
+    - bounded hyper-connections for dynamic residual mixing
+    - a recurrent test-time refinement loop with energy/confidence halting
+
+    The implementation is intentionally additive and keeps `weight` / `bias`
+    keys so warm-starting from a base ChampionNet checkpoint remains safe.
+    """
+
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        n_heads: int = 4,
+        n_experts: int = 6,
+        expert_hidden: int = 768,
+        max_thinking_steps: int = 4,
+        halt_threshold: float = 0.72,
+        energy_threshold: float = 0.20,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        if in_dim % n_heads != 0:
+            raise ValueError(f"in_dim={in_dim} must be divisible by n_heads={n_heads}")
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.n_heads = n_heads
+        self.n_experts = n_experts
+        self.head_dim = in_dim // n_heads
+        self.max_thinking_steps = int(max(1, max_thinking_steps))
+        self.min_thinking_steps = 1
+        self.halt_threshold = float(halt_threshold)
+        self.energy_threshold = float(energy_threshold)
+
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
+        self.bias = nn.Parameter(torch.zeros(out_dim))
+
+        self.attn_norm = nn.LayerNorm(in_dim)
+        self.diff_q_pos = nn.Linear(in_dim, in_dim, bias=False)
+        self.diff_k_pos = nn.Linear(in_dim, in_dim, bias=False)
+        self.diff_q_neg = nn.Linear(in_dim, in_dim, bias=False)
+        self.diff_k_neg = nn.Linear(in_dim, in_dim, bias=False)
+        self.diff_v = nn.Linear(in_dim, in_dim, bias=False)
+        self.diff_out = nn.Linear(in_dim, in_dim, bias=False)
+        self.diff_lambda = nn.Parameter(torch.tensor(-2.0))
+
+        self.shared_norm = nn.LayerNorm(in_dim)
+        self.shared_up = nn.Linear(in_dim, expert_hidden, bias=False)
+        self.shared_down = nn.Linear(expert_hidden, in_dim, bias=False)
+        self.shared_scale = nn.Parameter(torch.tensor(0.0))
+
+        self.predictive_norm = nn.LayerNorm(in_dim)
+        self.predictive_prior = nn.Linear(in_dim, in_dim, bias=False)
+        self.error_out = nn.Linear(in_dim, in_dim, bias=False)
+
+        self.hyper_diag = nn.Linear(in_dim, in_dim)
+        self.hyper_lowrank_in = nn.Linear(in_dim, max(32, in_dim // 2), bias=False)
+        self.hyper_lowrank_out = nn.Linear(max(32, in_dim // 2), in_dim, bias=False)
+        self.hyper_gate = nn.Linear(in_dim, in_dim)
+
+        self.gate = nn.Linear(in_dim, n_experts, bias=False)
+        self.experts_up = nn.ModuleList([nn.Linear(in_dim, expert_hidden, bias=False) for _ in range(n_experts)])
+        self.experts_down = nn.ModuleList([nn.Linear(expert_hidden, in_dim, bias=False) for _ in range(n_experts)])
+        self.expert_norms = nn.ModuleList([nn.LayerNorm(in_dim) for _ in range(n_experts)])
+
+        self.delta_out = nn.Linear(in_dim, out_dim, bias=False)
+        self.reason_out = nn.Linear(in_dim, out_dim, bias=False)
+        self.energy_head = nn.Linear(in_dim, 1)
+        self.halt_gate = nn.Linear(in_dim, 1)
+
+        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+        self.gamma = nn.Parameter(torch.tensor(0.0))
+        self.dropout = nn.Dropout(dropout)
+
+        self.last_thinking_steps: int = 0
+        self.last_energy: float = 0.0
+        self.last_confidence: float = 0.0
+        self.last_update_norm: float = 0.0
+        self.last_attention_gap: float = 0.0
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=5 ** 0.5)
+        nn.init.zeros_(self.bias)
+
+        for linear in (
+            self.diff_q_pos,
+            self.diff_k_pos,
+            self.diff_q_neg,
+            self.diff_k_neg,
+            self.diff_v,
+            self.predictive_prior,
+            self.hyper_lowrank_in,
+            self.gate,
+        ):
+            nn.init.normal_(linear.weight, mean=0.0, std=0.02)
+
+        for linear in (
+            self.diff_out,
+            self.shared_up,
+            self.hyper_lowrank_out,
+            self.error_out,
+        ):
+            nn.init.normal_(linear.weight, mean=0.0, std=0.015)
+
+        for linear in (
+            self.shared_down,
+        ):
+            nn.init.zeros_(linear.weight)
+        nn.init.normal_(self.delta_out.weight, mean=0.0, std=0.01)
+        nn.init.normal_(self.reason_out.weight, mean=0.0, std=0.01)
+
+        nn.init.zeros_(self.hyper_diag.weight)
+        nn.init.zeros_(self.hyper_diag.bias)
+        nn.init.zeros_(self.hyper_gate.weight)
+        nn.init.zeros_(self.hyper_gate.bias)
+        nn.init.normal_(self.energy_head.weight, mean=0.0, std=0.01)
+        nn.init.zeros_(self.energy_head.bias)
+        nn.init.normal_(self.halt_gate.weight, mean=0.0, std=0.01)
+        nn.init.zeros_(self.halt_gate.bias)
+
+        for up, down in zip(self.experts_up, self.experts_down):
+            nn.init.normal_(up.weight, mean=0.0, std=0.02)
+            nn.init.normal_(down.weight, mean=0.0, std=0.01)
+
+    def _ensure_sequence(self, x: torch.Tensor) -> Tuple[torch.Tensor, bool]:
+        if x.ndim == 2:
+            return x.unsqueeze(1), True
+        if x.ndim == 3:
+            return x, False
+        raise ValueError(f"Expected rank-2 or rank-3 tensor, got shape={tuple(x.shape)}")
+
+    def _reshape_heads(self, tensor: torch.Tensor) -> torch.Tensor:
+        batch, steps, _ = tensor.shape
+        return tensor.view(batch, steps, self.n_heads, self.head_dim).transpose(1, 2)
+
+    def compute_differential_attention_maps(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        sequence_x, _ = self._ensure_sequence(x)
+        normalized = self.attn_norm(sequence_x)
+
+        q_pos = self._reshape_heads(self.diff_q_pos(normalized))
+        k_pos = self._reshape_heads(self.diff_k_pos(normalized))
+        q_neg = self._reshape_heads(self.diff_q_neg(normalized))
+        k_neg = self._reshape_heads(self.diff_k_neg(normalized))
+
+        scale = self.head_dim ** -0.5
+        pos_scores = torch.matmul(q_pos, k_pos.transpose(-1, -2)) * scale
+        neg_scores = torch.matmul(q_neg, k_neg.transpose(-1, -2)) * scale
+
+        pos_attn = torch.softmax(pos_scores, dim=-1)
+        neg_attn = torch.softmax(neg_scores, dim=-1)
+
+        diff_ratio = torch.sigmoid(self.diff_lambda)
+        diff_attn = pos_attn - diff_ratio * neg_attn
+        diff_attn = diff_attn / diff_attn.abs().sum(dim=-1, keepdim=True).clamp_min(1.0)
+        return pos_attn, neg_attn, diff_attn
+
+    def _differential_context(self, state: torch.Tensor) -> Tuple[torch.Tensor, dict]:
+        normalized = self.attn_norm(state)
+        values = self._reshape_heads(self.diff_v(normalized))
+        pos_attn, neg_attn, diff_attn = self.compute_differential_attention_maps(state)
+
+        context = torch.matmul(diff_attn, values)
+        context = context.transpose(1, 2).contiguous().view_as(state)
+        context = self.diff_out(context)
+        stats = {
+            "pos_attn": pos_attn,
+            "neg_attn": neg_attn,
+            "diff_attn": diff_attn,
+        }
+        return context, stats
+
+    def _expert_reason(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        flat = state.reshape(-1, self.in_dim)
+        gate_scores = torch.softmax(self.gate(flat), dim=-1)
+
+        expert_outputs = []
+        for expert_norm, expert_up, expert_down in zip(self.expert_norms, self.experts_up, self.experts_down):
+            expert_state = expert_norm(flat)
+            expert_hidden = self.dropout(F.silu(expert_up(expert_state)))
+            expert_outputs.append(expert_down(expert_hidden))
+
+        expert_stack = torch.stack(expert_outputs, dim=1)
+        mixed = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=1)
+        return mixed.view_as(state), gate_scores.view(*state.shape[:-1], self.n_experts)
+
+    def _hyper_connect(self, state: torch.Tensor, proposal: torch.Tensor) -> torch.Tensor:
+        normalized = self.predictive_norm(state)
+        diag = 1.0 + 0.15 * torch.tanh(self.hyper_diag(normalized))
+        low_rank = self.hyper_lowrank_out(self.dropout(F.silu(self.hyper_lowrank_in(normalized))))
+        low_rank = 0.10 * torch.tanh(low_rank)
+        blend = torch.sigmoid(self.hyper_gate(normalized))
+        return state * diag + blend * proposal + low_rank
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        state, squeezed = self._ensure_sequence(x)
+        base_logits = F.linear(state, self.weight, self.bias)
+
+        self.last_thinking_steps = 0
+        self.last_energy = 0.0
+        self.last_confidence = 0.0
+        self.last_update_norm = 0.0
+        self.last_attention_gap = 0.0
+
+        last_logits = base_logits
+        for step in range(self.max_thinking_steps):
+            context, attn_stats = self._differential_context(state)
+            shared_update = self.shared_down(self.dropout(F.silu(self.shared_up(self.shared_norm(state)))))
+            expert_update, _ = self._expert_reason(state)
+
+            predictive_prior = self.predictive_prior(self.predictive_norm(state))
+            prediction_error = context - predictive_prior
+            error_update = 0.25 * self.error_out(prediction_error)
+
+            proposal = (
+                context
+                + self.shared_scale * shared_update
+                + torch.tanh(self.beta) * expert_update
+                + error_update
+            )
+            candidate = self._hyper_connect(state, proposal)
+
+            delta_logits = self.delta_out(candidate)
+            reason_logits = self.reason_out(prediction_error)
+            last_logits = base_logits + self.alpha * delta_logits + torch.tanh(self.gamma) * reason_logits
+
+            confidence = torch.softmax(last_logits, dim=-1).amax(dim=-1).mean()
+            energy = F.softplus(self.energy_head(prediction_error)).mean() + (candidate - state).pow(2).mean()
+            halt_score = torch.sigmoid(self.halt_gate(self.predictive_norm(candidate))).mean()
+
+            self.last_thinking_steps = step + 1
+            self.last_energy = float(energy.detach().cpu())
+            self.last_confidence = float(confidence.detach().cpu())
+            self.last_update_norm = float((candidate - state).norm(dim=-1).mean().detach().cpu())
+            self.last_attention_gap = float(
+                (attn_stats["pos_attn"] - attn_stats["neg_attn"]).abs().mean().detach().cpu()
+            )
+
+            state = candidate
+
+            if (
+                not self.training
+                and step + 1 >= self.min_thinking_steps
+                and self.last_energy <= self.energy_threshold
+                and (
+                    self.last_confidence >= self.halt_threshold
+                    or float(halt_score.detach().cpu()) >= self.halt_threshold
+                )
+            ):
+                break
+
+        return last_logits.squeeze(1) if squeezed else last_logits
+
+
+class ChampionNetTestTimeDiffExpert(nn.Module):
+    """
+    Backbone-compatible wrapper for TestTimeDifferentialExpertHead.
+    """
+
+    def __init__(
+        self,
+        max_thinking_steps: int = 4,
+        n_experts: int = 6,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(
+            TestTimeDifferentialExpertHead(
+                256,
+                10,
+                n_experts=n_experts,
+                max_thinking_steps=max_thinking_steps,
+                dropout=dropout,
+            )
+        )
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 class StateSpaceExpert(nn.Module):
     """
     Continuous-Time State Space Model (inspired by S4/Mamba).
@@ -5805,6 +6099,8 @@ def build_model(
         from model_frontier_v39 import ChampionNetFrontierVerifierExpert
 
         return ChampionNetFrontierVerifierExpert(dropout=dropout)
+    if model_size == "test_time_diff_expert":
+        return ChampionNetTestTimeDiffExpert(dropout=dropout)
 
     raise ValueError(
         f"Unknown model_size={model_size!r}. Use one of {SUPPORTED_MODEL_SIZES}."
@@ -7136,6 +7432,40 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
+    if model_size == "test_time_diff_expert":
+        head_pref = "layers.10."
+        target_state = model.state_dict()
+        keep_head_keys = {
+            f"{head_pref}weight",
+            f"{head_pref}bias",
+        }
+        allowed_missing = {
+            key
+            for key in target_state.keys()
+            if key.startswith(head_pref) and key not in keep_head_keys
+        }
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "test_time_diff_expert":
+            candidate_state = {
+                key: value
+                for key, value in state_dict.items()
+                if (not key.startswith(head_pref)) or (key in keep_head_keys)
+            }
+        else:
+            candidate_state = dict(state_dict)
+
+        filtered_sd = {
+            key: value
+            for key, value in candidate_state.items()
+            if key in target_state and tuple(target_state[key].shape) == tuple(value.shape)
+        }
+        incompatible = model.load_state_dict(filtered_sd, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
     raise ValueError(f"Unsupported model_size={model_size!r}")
 
 
@@ -7164,6 +7494,8 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "xlarge"
     if "layers.10.adapter_up.weight" in state_dict or "layers.10.adapter_down.weight" in state_dict:
         return "large"
+    if "layers.10.diff_q_pos.weight" in state_dict and "layers.10.predictive_prior.weight" in state_dict:
+        return "test_time_diff_expert"
     if "layers.10.domain_gate.weight" in state_dict or "layers.10.expert_gates.0.weight" in state_dict:
         return "hierarchical_expert"
     if "layers.10.shared_up.weight" in state_dict and "layers.10.gate.weight" in state_dict:

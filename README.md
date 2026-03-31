@@ -51,7 +51,6 @@ As of March 29, 2026:
 - export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
 
 <img width="610" height="585" alt="image" src="https://github.com/user-attachments/assets/e9ee2188-9a40-4019-bebe-032b9e38bc4a" />
-
 ## Quick start
 
 ### Run the packaged runtime

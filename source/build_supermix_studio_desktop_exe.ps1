@@ -34,7 +34,14 @@ if (Test-Path $ModelsStageDir) { Remove-Item -Recurse -Force $ModelsStageDir }
 if (Test-Path $BaseModelStageDir) { Remove-Item -Recurse -Force $BaseModelStageDir }
 New-Item -ItemType Directory -Path $ModelsStageDir -Force | Out-Null
 
-$ModelZipFiles = Get-ChildItem -Path $ModelsDir -File -Filter *.zip | Where-Object { $_.Name -notmatch ' \(\d+\)\.zip$' }
+$RedundantBundleNames = @(
+  "champion_v31_hybrid_plus_refresh_bundle_20260326.zip",
+  "champion_v33_frontier_full_bundle_20260326.zip",
+  "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_bundle.zip"
+)
+$ModelZipFiles = Get-ChildItem -Path $ModelsDir -File -Filter *.zip | Where-Object {
+  $_.Name -notmatch ' \(\d+\)\.zip$' -and $RedundantBundleNames -notcontains $_.Name
+}
 if (-not $ModelZipFiles) {
   throw "No model zip files found in $ModelsDir"
 }
@@ -57,7 +64,7 @@ $BundleManifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $BundleMa
 & $PythonExe "source\materialize_model_dir.py" $BaseModelDir $BaseModelStageDir | Out-Host
 
 $IconPath = Join-Path $RepoRoot "assets\supermix_qwen_icon.ico"
-$SummaryPath = Join-Path $RepoRoot "output\benchmark_all_models_common_plus_summary_20260327.json"
+$SummaryPath = Get-ChildItem -Path (Join-Path $RepoRoot "output") -Filter "benchmark_all_models_common_plus_summary_*.json" -File -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1 -ExpandProperty FullName
 if (-not (Test-Path $IconPath)) {
   throw "Expected icon asset at $IconPath"
 }
