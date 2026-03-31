@@ -28,6 +28,18 @@ def test_auto_prefers_image_model_for_visual_prompt() -> None:
     assert "image" in reason.lower()
 
 
+def test_auto_prefers_dcgan_model_for_gan_prompt() -> None:
+    records = [
+        _record("v36_native", "native_image", ("image",), 0.15),
+        _record("dcgan_mnist_model", "dcgan_image", ("image",), None),
+        _record("dcgan_v2_in_progress", "dcgan_image", ("image",), None),
+    ]
+    chosen, reason = choose_auto_model(records, "Generate a DCGAN CIFAR retro sample grid.")
+    assert chosen is not None
+    assert chosen.key == "dcgan_v2_in_progress"
+    assert "dcgan" in reason.lower() or "gan" in reason.lower()
+
+
 def test_auto_prefers_fast_model_for_short_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
@@ -60,9 +72,26 @@ def test_auto_prefers_math_specialist_for_equation_prompt() -> None:
     assert "math" in reason.lower() or "equation" in reason.lower()
 
 
+def test_auto_prefers_protein_specialist_for_protein_prompt() -> None:
+    records = [
+        _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("protein_folding_micro_v1", "protein_folding", ("chat",), None),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
+    ]
+    chosen, reason = choose_auto_model(records, "Why does pLDDT matter in protein structure prediction?")
+    assert chosen is not None
+    assert chosen.key == "protein_folding_micro_v1"
+    assert "protein" in reason.lower() or "fold" in reason.lower()
+
+
 def test_auto_prefers_uploaded_image_specialist() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
+        _record("omni_collective_v5", "omni_collective_v5", ("chat", "vision"), None),
+        _record("omni_collective_v4", "omni_collective_v4", ("chat", "vision"), None),
+        _record("omni_collective_v3", "omni_collective_v3", ("chat", "vision"), None),
         _record("science_vision_micro_v1", "image_recognition", ("chat", "vision"), None),
         _record("omni_collective_v1", "omni_collective", ("chat", "vision"), None),
     ]
@@ -80,10 +109,31 @@ def test_auto_prefers_uploaded_image_specialist() -> None:
 def test_auto_prefers_newer_omni_collective_for_model_choice_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
+        _record("omni_collective_v5", "omni_collective_v5", ("chat", "vision"), None),
+        _record("omni_collective_v4", "omni_collective_v4", ("chat", "vision"), None),
+        _record("omni_collective_v3", "omni_collective_v3", ("chat", "vision"), None),
         _record("omni_collective_v1", "omni_collective", ("chat", "vision"), None),
         _record("omni_collective_v2", "omni_collective", ("chat", "vision"), None),
     ]
     chosen, reason = choose_auto_model(records, "Which model should I use for this mixed coding and image-analysis task?")
     assert chosen is not None
-    assert chosen.key == "omni_collective_v2"
+    assert chosen.key == "omni_collective_v6"
     assert "model" in reason.lower() or "fused" in reason.lower()
+
+
+def test_auto_prefers_v40_for_reasoning_prompt() -> None:
+    records = [
+        _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
+        _record("omni_collective_v5", "omni_collective_v5", ("chat", "vision"), None),
+        _record("omni_collective_v4", "omni_collective_v4", ("chat", "vision"), None),
+        _record("omni_collective_v2", "omni_collective", ("chat", "vision"), None),
+        _record("omni_collective_v3", "omni_collective_v3", ("chat", "vision"), None),
+    ]
+    chosen, reason = choose_auto_model(records, "Analyze this algorithm tradeoff and suggest the best architecture.")
+    assert chosen is not None
+    assert chosen.key == "v40_benchmax"
+    assert "reasoning" in reason.lower() or "strongest" in reason.lower()
