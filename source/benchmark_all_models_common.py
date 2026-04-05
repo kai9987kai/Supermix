@@ -41,11 +41,15 @@ except Exception as exc:  # pragma: no cover - resolved in the RunPod launcher
 try:
     from omni_collective_v5_model import OmniCollectiveEngineV5
     from omni_collective_v6_model import OmniCollectiveEngineV6
+    from omni_collective_v7_model import OmniCollectiveEngineV7
     from protein_folding_model import ProteinFoldingEngine
+    from three_d_generation_model import ThreeDGenerationEngine
 except ImportError:  # pragma: no cover
     from .omni_collective_v5_model import OmniCollectiveEngineV5
     from .omni_collective_v6_model import OmniCollectiveEngineV6
+    from .omni_collective_v7_model import OmniCollectiveEngineV7
     from .protein_folding_model import ProteinFoldingEngine
+    from .three_d_generation_model import ThreeDGenerationEngine
 
 
 NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
@@ -431,10 +435,29 @@ class OmniCollectiveV6BenchmarkGenerator:
         return _normalize_response(self.engine.answer(user_text))
 
 
+class OmniCollectiveV7BenchmarkGenerator:
+    def __init__(self, *, weights_path: Path, meta_path: Path, device: str) -> None:
+        self.engine = OmniCollectiveEngineV7(weights_path=weights_path, meta_path=meta_path, device=torch.device(device))
+
+    def generate(self, user_text: str, max_new_tokens: int) -> str:
+        del max_new_tokens
+        return _normalize_response(self.engine.answer(user_text))
+
+
 class ProteinFoldingBenchmarkGenerator:
     def __init__(self, *, weights_path: Path, meta_path: Path, device: str) -> None:
         del device
         self.engine = ProteinFoldingEngine(weights_path=weights_path, meta_path=meta_path)
+
+    def generate(self, user_text: str, max_new_tokens: int) -> str:
+        del max_new_tokens
+        return _normalize_response(self.engine.answer(user_text))
+
+
+class ThreeDGenerationBenchmarkGenerator:
+    def __init__(self, *, weights_path: Path, meta_path: Path, device: str) -> None:
+        del device
+        self.engine = ThreeDGenerationEngine(weights_path=weights_path, meta_path=meta_path)
 
     def generate(self, user_text: str, max_new_tokens: int) -> str:
         del max_new_tokens
@@ -518,6 +541,32 @@ def _append_local_v6_spec(models: List[ModelSpec], skipped: List[Dict[str, str]]
     skipped.append({"name": "omni_collective_v6", "reason": f"missing local v6 weights/meta under {local_output_root}"})
 
 
+def _append_local_v7_spec(models: List[ModelSpec], skipped: List[Dict[str, str]], local_output_root: Path) -> None:
+    if not local_output_root.exists():
+        skipped.append({"name": "omni_collective_v7", "reason": f"local output root missing: {local_output_root}"})
+        return
+    candidates = sorted(
+        (path for path in local_output_root.glob("supermix_omni_collective_v7_frontier_*") if path.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for artifact_dir in candidates:
+        weights_path = artifact_dir / "omni_collective_v7_frontier.pth"
+        meta_path = artifact_dir / "omni_collective_v7_frontier_meta.json"
+        if weights_path.exists() and meta_path.exists():
+            models.append(
+                ModelSpec(
+                    name="omni_collective_v7",
+                    family="fusion",
+                    kind="omni_collective_v7",
+                    weights_path=weights_path,
+                    meta_path=meta_path,
+                )
+            )
+            return
+    skipped.append({"name": "omni_collective_v7", "reason": f"missing local v7 weights/meta under {local_output_root}"})
+
+
 def _append_local_protein_spec(models: List[ModelSpec], skipped: List[Dict[str, str]], local_output_root: Path) -> None:
     if not local_output_root.exists():
         skipped.append({"name": "protein_folding_micro_v1", "reason": f"local output root missing: {local_output_root}"})
@@ -542,6 +591,32 @@ def _append_local_protein_spec(models: List[ModelSpec], skipped: List[Dict[str, 
             )
             return
     skipped.append({"name": "protein_folding_micro_v1", "reason": f"missing local protein-folding weights/meta under {local_output_root}"})
+
+
+def _append_local_3d_spec(models: List[ModelSpec], skipped: List[Dict[str, str]], local_output_root: Path) -> None:
+    if not local_output_root.exists():
+        skipped.append({"name": "three_d_generation_micro_v1", "reason": f"local output root missing: {local_output_root}"})
+        return
+    candidates = sorted(
+        (path for path in local_output_root.glob("supermix_3d_generation_micro_v1_*") if path.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for artifact_dir in candidates:
+        weights_path = artifact_dir / "three_d_generation_micro_v1.pth"
+        meta_path = artifact_dir / "three_d_generation_micro_v1_meta.json"
+        if weights_path.exists() and meta_path.exists():
+            models.append(
+                ModelSpec(
+                    name="three_d_generation_micro_v1",
+                    family="3d",
+                    kind="three_d_generation",
+                    weights_path=weights_path,
+                    meta_path=meta_path,
+                )
+            )
+            return
+    skipped.append({"name": "three_d_generation_micro_v1", "reason": f"missing local 3d-generation weights/meta under {local_output_root}"})
 
 
 def discover_models(persist_root: Path, include_qwen_base: bool, local_output_root: Optional[Path] = None) -> Tuple[List[ModelSpec], List[Dict[str, str]]]:
@@ -632,8 +707,10 @@ def discover_models(persist_root: Path, include_qwen_base: bool, local_output_ro
 
     if local_output_root is not None:
         _append_local_v6_spec(models, skipped, local_output_root)
+        _append_local_v7_spec(models, skipped, local_output_root)
         _append_local_v40_spec(models, skipped, local_output_root)
         _append_local_protein_spec(models, skipped, local_output_root)
+        _append_local_3d_spec(models, skipped, local_output_root)
 
     models.sort(key=lambda item: item.name)
     return models, skipped
@@ -659,10 +736,18 @@ def _build_generator(spec: ModelSpec, *, device: str, qwen_base_model: Path):
         if spec.weights_path is None or spec.meta_path is None:
             raise ValueError(f"Incomplete omni_collective_v6 spec: {spec}")
         return OmniCollectiveV6BenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
+    if spec.kind == "omni_collective_v7":
+        if spec.weights_path is None or spec.meta_path is None:
+            raise ValueError(f"Incomplete omni_collective_v7 spec: {spec}")
+        return OmniCollectiveV7BenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
     if spec.kind == "protein_folding":
         if spec.weights_path is None or spec.meta_path is None:
             raise ValueError(f"Incomplete protein_folding spec: {spec}")
         return ProteinFoldingBenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
+    if spec.kind == "three_d_generation":
+        if spec.weights_path is None or spec.meta_path is None:
+            raise ValueError(f"Incomplete three_d_generation spec: {spec}")
+        return ThreeDGenerationBenchmarkGenerator(weights_path=spec.weights_path, meta_path=spec.meta_path, device=device)
     raise ValueError(f"Unsupported model spec: {spec}")
 
 

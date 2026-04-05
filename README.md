@@ -50,9 +50,6 @@ As of March 29, 2026:
 - benchmark sweeps across common text benchmarks
 - export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
 
-<img width="554" height="602" alt="image" src="https://github.com/user-attachments/assets/3af6e7bd-00c3-4e6f-a10c-3cab73320fc6" />
-
-
 ## Quick start
 
 ### Run the packaged runtime

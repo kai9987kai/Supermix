@@ -23,6 +23,7 @@ if str(SOURCE_DIR) not in sys.path:
 
 try:
     from image_recognition_model import SCIENCE_IMAGE_CLASSES
+    from omni_training_runtime import ModelEma, TrainingRuntime, create_warmup_cosine_scheduler, maybe_compile_model, resolve_training_runtime
     from omni_collective_model import OMNI_DOMAIN_LABELS_V2, OMNI_INTENTS_V2, build_char_vocab
     from omni_collective_v4_model import OmniCollectiveEngineV4, OmniCollectiveNetV4
     from train_image_recognition_model import ensure_base_images
@@ -52,6 +53,7 @@ try:
     )
 except ImportError:  # pragma: no cover
     from .image_recognition_model import SCIENCE_IMAGE_CLASSES
+    from .omni_training_runtime import ModelEma, TrainingRuntime, create_warmup_cosine_scheduler, maybe_compile_model, resolve_training_runtime
     from .omni_collective_model import OMNI_DOMAIN_LABELS_V2, OMNI_INTENTS_V2, build_char_vocab
     from .omni_collective_v4_model import OmniCollectiveEngineV4, OmniCollectiveNetV4
     from .train_image_recognition_model import ensure_base_images
@@ -311,55 +313,221 @@ def _load_expanded_state_from_zip(model: OmniCollectiveNetV4, base_zip: Path) ->
         return {"loaded": True, "source_weights": weight_candidates[0].name, "exact_match_keys": exact_keys, "partial_resize_keys": partial_keys, "missing_key_count": len(info.missing_keys), "unexpected_key_count": len(info.unexpected_keys)}
 
 
-def _train_stage(*, model: OmniCollectiveNetV4, train_rows: Sequence[OmniRow], val_rows: Sequence[OmniRow], vocab: Dict[str, int], response_bank: Sequence[str], image_size: int, max_len: int, max_words: int, word_buckets: int, batch_size: int, learning_rate: float, epochs: int, seed: int, device: torch.device, loss_weights: Dict[str, float], balance_weight: float) -> Dict[str, object]:
+def _train_stage(
+    *,
+    model: OmniCollectiveNetV4,
+    train_rows: Sequence[OmniRow],
+    val_rows: Sequence[OmniRow],
+    vocab: Dict[str, int],
+    response_bank: Sequence[str],
+    image_size: int,
+    max_len: int,
+    max_words: int,
+    word_buckets: int,
+    batch_size: int,
+    learning_rate: float,
+    epochs: int,
+    seed: int,
+    device: torch.device,
+    loss_weights: Dict[str, float],
+    balance_weight: float,
+    runtime: Optional[TrainingRuntime] = None,
+    forward_model: Optional[torch.nn.Module] = None,
+    grad_accum_steps: int = 1,
+) -> Dict[str, object]:
     response_to_index = {text: idx for idx, text in enumerate(response_bank)}
     train_ds = OmniDatasetV2(train_rows, vocab=vocab, max_len=max_len, image_size=image_size, max_words=max_words, word_buckets=word_buckets, response_to_index=response_to_index)
     val_ds = OmniDatasetV2(val_rows, vocab=vocab, max_len=max_len, image_size=image_size, max_words=max_words, word_buckets=word_buckets, response_to_index=response_to_index)
     generator = torch.Generator().manual_seed(int(seed))
     train_loader = DataLoader(train_ds, batch_size=int(batch_size), shuffle=True, generator=generator)
     val_loader = DataLoader(val_ds, batch_size=int(batch_size), shuffle=False)
+    runtime = runtime or resolve_training_runtime(
+        repo_root=Path.cwd(),
+        requested_device=str(device),
+        amp_mode="off",
+        amp_dtype="auto",
+        compile_requested=False,
+        compile_mode="reduce-overhead",
+        grad_accum_steps=grad_accum_steps,
+        ema_decay=0.0,
+        warmup_steps=0,
+        warmup_ratio=0.05,
+        min_lr_scale=0.05,
+        batch_size=batch_size,
+    )
+    forward_model = forward_model or model
+    grad_accum = max(1, int(grad_accum_steps))
+    optimizer_steps_per_epoch = max(1, (max(1, len(train_loader)) + grad_accum - 1) // grad_accum)
+    total_optimizer_steps = max(1, int(epochs) * optimizer_steps_per_epoch)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(learning_rate), weight_decay=0.022)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, int(epochs) * max(1, len(train_loader))))
+    scheduler = create_warmup_cosine_scheduler(
+        optimizer,
+        total_steps=total_optimizer_steps,
+        warmup_steps=runtime.warmup_steps,
+        warmup_ratio=runtime.warmup_ratio,
+        min_lr_scale=runtime.min_lr_scale,
+    )
     intent_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.03)
     response_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.02)
     vision_loss_fn = nn.CrossEntropyLoss(ignore_index=-1, label_smoothing=0.01)
     domain_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.02)
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        scaler = torch.amp.GradScaler("cuda", enabled=bool(runtime.scaler_enabled))
+    else:  # pragma: no cover
+        scaler = torch.cuda.amp.GradScaler(enabled=bool(runtime.scaler_enabled))
+    ema = ModelEma(model, runtime.ema_decay) if float(runtime.ema_decay) > 0.0 else None
     best_state = None
     best_score = -1.0
     history: List[Dict[str, float]] = []
-    print(json.dumps({"event": "stage_start", "train_rows": len(train_rows), "val_rows": len(val_rows), "response_bank": len(response_bank), "batch_size": int(batch_size), "learning_rate": float(learning_rate), "epochs": int(epochs), "loss_weights": loss_weights, "balance_weight": float(balance_weight)}, ensure_ascii=True), flush=True)
+    optimizer_steps_done = 0
+    print(
+        json.dumps(
+            {
+                "event": "stage_start",
+                "train_rows": len(train_rows),
+                "val_rows": len(val_rows),
+                "response_bank": len(response_bank),
+                "batch_size": int(batch_size),
+                "learning_rate": float(learning_rate),
+                "epochs": int(epochs),
+                "loss_weights": loss_weights,
+                "balance_weight": float(balance_weight),
+                "device": runtime.resolved_device,
+                "amp_enabled": bool(runtime.amp_enabled),
+                "amp_dtype": runtime.amp_dtype_name,
+                "grad_accum_steps": grad_accum,
+                "effective_batch_size": int(batch_size) * grad_accum,
+                "ema_decay": float(runtime.ema_decay),
+                "warmup_steps": int(runtime.warmup_steps),
+                "warmup_ratio": float(runtime.warmup_ratio),
+            },
+            ensure_ascii=True,
+        ),
+        flush=True,
+    )
     for epoch in range(1, int(epochs) + 1):
         model.train()
         total_loss = 0.0
         total_items = 0
-        for batch in train_loader:
-            optimizer.zero_grad(set_to_none=True)
-            outputs = model(batch["token_ids"].to(device), batch["image_tensor"].to(device), batch["has_image"].to(device), batch["word_ids"].to(device), batch["prompt_features"].to(device))
-            loss = float(loss_weights["intent"]) * intent_loss_fn(outputs["intent"], batch["intent"].to(device)) + float(loss_weights["response"]) * response_loss_fn(outputs["response"], batch["response"].to(device)) + float(loss_weights["domain"]) * domain_loss_fn(outputs["domain"], batch["domain"].to(device))
-            if bool(batch["vision"].ge(0).any()):
-                loss = loss + float(loss_weights["vision"]) * vision_loss_fn(outputs["vision"], batch["vision"].to(device))
-            if "balance_loss" in outputs:
-                loss = loss + float(balance_weight) * outputs["balance_loss"]
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            scheduler.step()
-            total_loss += float(loss.item()) * int(batch["intent"].size(0))
+        avg_balance_loss = 0.0
+        balance_count = 0
+        optimizer.zero_grad(set_to_none=True)
+        for batch_index, batch in enumerate(train_loader, start=1):
+            token_ids = batch["token_ids"].to(runtime.device)
+            image_tensor = batch["image_tensor"].to(runtime.device)
+            has_image = batch["has_image"].to(runtime.device)
+            word_ids = batch["word_ids"].to(runtime.device)
+            prompt_features = batch["prompt_features"].to(runtime.device)
+            intent_targets = batch["intent"].to(runtime.device)
+            response_targets = batch["response"].to(runtime.device)
+            domain_targets = batch["domain"].to(runtime.device)
+            vision_targets = batch["vision"].to(runtime.device)
+            with torch.amp.autocast(
+                device_type="cuda" if runtime.device_type == "cuda" else "cpu",
+                dtype=runtime.amp_dtype,
+                enabled=bool(runtime.amp_enabled and runtime.amp_dtype is not None),
+            ):
+                outputs = forward_model(token_ids, image_tensor, has_image, word_ids, prompt_features)
+                raw_loss = (
+                    float(loss_weights["intent"]) * intent_loss_fn(outputs["intent"], intent_targets)
+                    + float(loss_weights["response"]) * response_loss_fn(outputs["response"], response_targets)
+                    + float(loss_weights["domain"]) * domain_loss_fn(outputs["domain"], domain_targets)
+                )
+                if bool(vision_targets.ge(0).any()):
+                    raw_loss = raw_loss + float(loss_weights["vision"]) * vision_loss_fn(outputs["vision"], vision_targets)
+                if "balance_loss" in outputs:
+                    raw_loss = raw_loss + float(balance_weight) * outputs["balance_loss"]
+                    avg_balance_loss += float(outputs["balance_loss"].detach().item())
+                    balance_count += 1
+                loss = raw_loss / float(grad_accum)
+            if bool(runtime.scaler_enabled):
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+            if (batch_index % grad_accum == 0) or (batch_index == len(train_loader)):
+                if bool(runtime.scaler_enabled):
+                    scaler.unscale_(optimizer)
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                if bool(runtime.scaler_enabled):
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                scheduler.step()
+                optimizer_steps_done += 1
+                if ema is not None:
+                    ema.update(model)
+            total_loss += float(raw_loss.detach().item()) * int(batch["intent"].size(0))
             total_items += int(batch["intent"].size(0))
-        val_metrics = evaluate(model, val_loader, device)
+        if ema is not None:
+            with ema.apply_to(model):
+                val_metrics = evaluate(model, val_loader, runtime.device)
+                candidate_best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+        else:
+            val_metrics = evaluate(model, val_loader, runtime.device)
+            candidate_best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
         score = _weighted_score(val_metrics)
-        history.append({"epoch": float(epoch), "train_loss": float(total_loss / max(total_items, 1)), "val_intent_accuracy": val_metrics["intent_accuracy"], "val_response_accuracy": val_metrics["response_accuracy"], "val_vision_accuracy": val_metrics["vision_accuracy"], "val_domain_accuracy": val_metrics["domain_accuracy"], "score": score, "lr": float(scheduler.get_last_lr()[0])})
+        history.append(
+            {
+                "epoch": float(epoch),
+                "train_loss": float(total_loss / max(total_items, 1)),
+                "val_intent_accuracy": val_metrics["intent_accuracy"],
+                "val_response_accuracy": val_metrics["response_accuracy"],
+                "val_vision_accuracy": val_metrics["vision_accuracy"],
+                "val_domain_accuracy": val_metrics["domain_accuracy"],
+                "score": score,
+                "lr": float(scheduler.get_last_lr()[0]),
+                "optimizer_steps": float(optimizer_steps_done),
+                "avg_balance_loss": float(avg_balance_loss / balance_count) if balance_count else 0.0,
+                "ema_enabled": 1.0 if ema is not None else 0.0,
+            }
+        )
         print(json.dumps({"event": "epoch_end", **history[-1]}, ensure_ascii=True), flush=True)
         if score >= best_score:
             best_score = score
-            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            best_state = candidate_best_state
     if best_state is None:
         raise RuntimeError("No model state captured during training stage.")
     model.load_state_dict(best_state)
-    return {"history": history, "best_score": best_score, "val_metrics": evaluate(model, val_loader, device), "train_rows": len(train_rows), "val_rows": len(val_rows)}
+    return {
+        "history": history,
+        "best_score": best_score,
+        "val_metrics": evaluate(model, val_loader, runtime.device),
+        "train_rows": len(train_rows),
+        "val_rows": len(val_rows),
+        "runtime": runtime.to_payload(),
+        "effective_batch_size": int(batch_size) * grad_accum,
+    }
 
 
-def train_model(*, repo_root: Path, output_dir: Path, models_dir: Path, base_zip: Path, adapter_zip: Path, images_dir: Path, image_size: int, batch_size: int, stage1_epochs: int, stage2_epochs: int, stage1_lr: float, stage2_lr: float, seed: int, qwen_distill_limit: int) -> Dict[str, object]:
+def train_model(
+    *,
+    repo_root: Path,
+    output_dir: Path,
+    models_dir: Path,
+    base_zip: Path,
+    adapter_zip: Path,
+    images_dir: Path,
+    image_size: int,
+    batch_size: int,
+    stage1_epochs: int,
+    stage2_epochs: int,
+    stage1_lr: float,
+    stage2_lr: float,
+    seed: int,
+    qwen_distill_limit: int,
+    requested_device: str,
+    amp_mode: str,
+    amp_dtype: str,
+    compile_model: bool,
+    compile_mode: str,
+    grad_accum_steps: int,
+    ema_decay: float,
+    warmup_steps: int,
+    warmup_ratio: float,
+    min_lr_scale: float,
+) -> Dict[str, object]:
     torch.manual_seed(int(seed))
     random.seed(int(seed))
     _stage1_rows, full_rows, dataset_summary = build_training_rows(repo_root=repo_root, models_dir=models_dir, images_dir=images_dir, adapter_zip=adapter_zip, seed=seed, qwen_distill_limit=qwen_distill_limit)
@@ -372,12 +540,68 @@ def train_model(*, repo_root: Path, output_dir: Path, models_dir: Path, base_zip
     max_len = 288
     max_words = 64
     word_buckets = 12288
-    device = torch.device("cpu")
-    model = OmniCollectiveNetV4(vocab_size=max(len(vocab), 2), num_intents=len(OMNI_INTENTS_V2), num_responses=max(len(response_bank), 1), num_vision_classes=len(SCIENCE_IMAGE_CLASSES), num_domains=len(OMNI_DOMAIN_LABELS_V2)).to(device)
+    runtime = resolve_training_runtime(
+        repo_root=repo_root,
+        requested_device=requested_device,
+        amp_mode=amp_mode,
+        amp_dtype=amp_dtype,
+        compile_requested=compile_model,
+        compile_mode=compile_mode,
+        grad_accum_steps=grad_accum_steps,
+        ema_decay=ema_decay,
+        warmup_steps=warmup_steps,
+        warmup_ratio=warmup_ratio,
+        min_lr_scale=min_lr_scale,
+        batch_size=batch_size,
+    )
+    print(json.dumps({"event": "runtime_config", "runtime": runtime.to_payload()}, ensure_ascii=True), flush=True)
+    model = OmniCollectiveNetV4(vocab_size=max(len(vocab), 2), num_intents=len(OMNI_INTENTS_V2), num_responses=max(len(response_bank), 1), num_vision_classes=len(SCIENCE_IMAGE_CLASSES), num_domains=len(OMNI_DOMAIN_LABELS_V2))
     warm_start = _load_expanded_state_from_zip(model, base_zip)
+    model = model.to(runtime.device)
+    forward_model, runtime = maybe_compile_model(model, runtime)
     print(json.dumps({"event": "warm_start", "info": warm_start}, ensure_ascii=True), flush=True)
-    stage1 = _train_stage(model=model, train_rows=train_stage1, val_rows=val_rows, vocab=vocab, response_bank=response_bank, image_size=image_size, max_len=max_len, max_words=max_words, word_buckets=word_buckets, batch_size=batch_size, learning_rate=stage1_lr, epochs=stage1_epochs, seed=seed + 101, device=device, loss_weights={"intent": 0.58, "response": 1.00, "domain": 0.72, "vision": 0.72}, balance_weight=0.025)
-    stage2 = _train_stage(model=model, train_rows=train_rows, val_rows=val_rows, vocab=vocab, response_bank=response_bank, image_size=image_size, max_len=max_len, max_words=max_words, word_buckets=word_buckets, batch_size=max(24, int(batch_size) // 2), learning_rate=stage2_lr, epochs=stage2_epochs, seed=seed + 151, device=device, loss_weights={"intent": 0.50, "response": 1.00, "domain": 0.68, "vision": 1.12}, balance_weight=0.035)
+    stage1 = _train_stage(
+        model=model,
+        forward_model=forward_model,
+        train_rows=train_stage1,
+        val_rows=val_rows,
+        vocab=vocab,
+        response_bank=response_bank,
+        image_size=image_size,
+        max_len=max_len,
+        max_words=max_words,
+        word_buckets=word_buckets,
+        batch_size=batch_size,
+        learning_rate=stage1_lr,
+        epochs=stage1_epochs,
+        seed=seed + 101,
+        device=runtime.device,
+        loss_weights={"intent": 0.58, "response": 1.00, "domain": 0.72, "vision": 0.72},
+        balance_weight=0.025,
+        runtime=runtime,
+        grad_accum_steps=grad_accum_steps,
+    )
+    stage2 = _train_stage(
+        model=model,
+        forward_model=forward_model,
+        train_rows=train_rows,
+        val_rows=val_rows,
+        vocab=vocab,
+        response_bank=response_bank,
+        image_size=image_size,
+        max_len=max_len,
+        max_words=max_words,
+        word_buckets=word_buckets,
+        batch_size=max(24, int(batch_size) // 2),
+        learning_rate=stage2_lr,
+        epochs=stage2_epochs,
+        seed=seed + 151,
+        device=runtime.device,
+        loss_weights={"intent": 0.50, "response": 1.00, "domain": 0.68, "vision": 1.12},
+        balance_weight=0.035,
+        runtime=runtime,
+        grad_accum_steps=grad_accum_steps,
+    )
     stamp = datetime.now().strftime("%Y%m%d")
     artifact_dir = output_dir / f"supermix_omni_collective_v4_frontier_{stamp}"
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -389,11 +613,11 @@ def train_model(*, repo_root: Path, output_dir: Path, models_dir: Path, base_zip
     torch.save(model.state_dict(), weights_path)
     parameter_count = int(sum(parameter.numel() for parameter in model.parameters()))
     class_info = ensure_base_images(images_dir)
-    meta = {"architecture_version": 4, "vocab": vocab, "response_bank": response_bank, "class_info": class_info, "intent_labels": list(OMNI_INTENTS_V2), "domain_labels": list(OMNI_DOMAIN_LABELS_V2), "max_len": max_len, "image_size": int(image_size), "embed_dim": 84, "text_hidden": 160, "image_channels": 36, "word_buckets": word_buckets, "max_words": max_words, "word_embed_dim": 72, "deep_text_channels": 192, "deep_image_channels": 64, "fusion_hidden": 576, "memory_slots": 12, "depth_steps": 5, "expert_count": 4, "expert_hidden": 896, "context_top_k": 3, "expert_top_k": 2, "parameter_count": parameter_count, "warm_start": warm_start, "stage1": stage1, "stage2": stage2, "seed": int(seed)}
+    meta = {"architecture_version": 4, "vocab": vocab, "response_bank": response_bank, "class_info": class_info, "intent_labels": list(OMNI_INTENTS_V2), "domain_labels": list(OMNI_DOMAIN_LABELS_V2), "max_len": max_len, "image_size": int(image_size), "embed_dim": 84, "text_hidden": 160, "image_channels": 36, "word_buckets": word_buckets, "max_words": max_words, "word_embed_dim": 72, "deep_text_channels": 192, "deep_image_channels": 64, "fusion_hidden": 576, "memory_slots": 12, "depth_steps": 5, "expert_count": 4, "expert_hidden": 896, "context_top_k": 3, "expert_top_k": 2, "parameter_count": parameter_count, "warm_start": warm_start, "stage1": stage1, "stage2": stage2, "seed": int(seed), "training_runtime": runtime.to_payload()}
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=True), encoding="utf-8")
-    engine = OmniCollectiveEngineV4(weights_path=weights_path, meta_path=meta_path, device=device)
+    engine = OmniCollectiveEngineV4(weights_path=weights_path, meta_path=meta_path, device=runtime.device)
     sample_prompts = ["Debug this Python stack trace and explain the root cause.", "Describe the key motion shown across these video frames.", "Make a photorealistic image prompt for a storm-battered lighthouse.", "Explain the phrase break the ice in simple language."]
-    summary = {"artifact": zip_path.name, "parameter_count": parameter_count, "dataset_summary": dataset_summary, "warm_start": warm_start, "stage1": stage1, "stage2": stage2, "sample_outputs": [{"prompt": prompt, "answer": engine.answer(prompt)} for prompt in sample_prompts], "notes": ["v4 adds shared sparse experts, per-depth modality-context routing, balance regularization, and partial tensor warm-start from v3.", "The dataset is wider than v3 across coding, knowledge, image prompts, science images, 3D rows, video contact sheets, and Qwen teacher-league repair rows."]}
+    summary = {"artifact": zip_path.name, "parameter_count": parameter_count, "dataset_summary": dataset_summary, "warm_start": warm_start, "stage1": stage1, "stage2": stage2, "training_runtime": runtime.to_payload(), "sample_outputs": [{"prompt": prompt, "answer": engine.answer(prompt)} for prompt in sample_prompts], "notes": ["v4 adds shared sparse experts, per-depth modality-context routing, balance regularization, and partial tensor warm-start from v3.", "The dataset is wider than v3 across coding, knowledge, image prompts, science images, 3D rows, video contact sheets, and Qwen teacher-league repair rows.", "Future runs support configurable device selection, AMP, gradient accumulation, EMA, compile, and warmup-plus-cosine scheduling."]}
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         archive.write(weights_path, arcname=weights_path.name)
@@ -401,7 +625,7 @@ def train_model(*, repo_root: Path, output_dir: Path, models_dir: Path, base_zip
         archive.write(summary_path, arcname=summary_path.name)
     models_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(zip_path, desktop_zip_path)
-    return {"zip_path": str(zip_path), "desktop_zip_path": str(desktop_zip_path), "artifact_dir": str(artifact_dir), "parameter_count": parameter_count, "stage1_val": stage1["val_metrics"], "stage2_val": stage2["val_metrics"], "warm_start": warm_start, "dataset_summary": dataset_summary}
+    return {"zip_path": str(zip_path), "desktop_zip_path": str(desktop_zip_path), "artifact_dir": str(artifact_dir), "parameter_count": parameter_count, "stage1_val": stage1["val_metrics"], "stage2_val": stage2["val_metrics"], "warm_start": warm_start, "dataset_summary": dataset_summary, "training_runtime": runtime.to_payload()}
 
 
 def parse_args() -> argparse.Namespace:
@@ -420,12 +644,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stage2_lr", type=float, default=0.00034)
     parser.add_argument("--seed", type=int, default=131)
     parser.add_argument("--qwen_distill_limit", type=int, default=36)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--amp", default="auto")
+    parser.add_argument("--amp_dtype", default="auto")
+    parser.add_argument("--compile_model", action="store_true")
+    parser.add_argument("--compile_mode", default="reduce-overhead")
+    parser.add_argument("--grad_accum_steps", type=int, default=1)
+    parser.add_argument("--ema_decay", type=float, default=0.999)
+    parser.add_argument("--warmup_steps", type=int, default=0)
+    parser.add_argument("--warmup_ratio", type=float, default=0.05)
+    parser.add_argument("--min_lr_scale", type=float, default=0.05)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    result = train_model(repo_root=Path(args.repo_root).resolve(), output_dir=Path(args.output_dir).resolve(), models_dir=Path(args.models_dir).resolve(), base_zip=Path(args.base_zip).resolve(), adapter_zip=Path(args.qwen_adapter_zip).resolve(), images_dir=Path(args.images_dir).resolve(), image_size=int(args.image_size), batch_size=int(args.batch_size), stage1_epochs=int(args.stage1_epochs), stage2_epochs=int(args.stage2_epochs), stage1_lr=float(args.stage1_lr), stage2_lr=float(args.stage2_lr), seed=int(args.seed), qwen_distill_limit=int(args.qwen_distill_limit))
+    result = train_model(repo_root=Path(args.repo_root).resolve(), output_dir=Path(args.output_dir).resolve(), models_dir=Path(args.models_dir).resolve(), base_zip=Path(args.base_zip).resolve(), adapter_zip=Path(args.qwen_adapter_zip).resolve(), images_dir=Path(args.images_dir).resolve(), image_size=int(args.image_size), batch_size=int(args.batch_size), stage1_epochs=int(args.stage1_epochs), stage2_epochs=int(args.stage2_epochs), stage1_lr=float(args.stage1_lr), stage2_lr=float(args.stage2_lr), seed=int(args.seed), qwen_distill_limit=int(args.qwen_distill_limit), requested_device=str(args.device), amp_mode=str(args.amp), amp_dtype=str(args.amp_dtype), compile_model=bool(args.compile_model), compile_mode=str(args.compile_mode), grad_accum_steps=int(args.grad_accum_steps), ema_decay=float(args.ema_decay), warmup_steps=int(args.warmup_steps), warmup_ratio=float(args.warmup_ratio), min_lr_scale=float(args.min_lr_scale))
     print(json.dumps(result, indent=2))
 
 

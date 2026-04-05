@@ -9,6 +9,9 @@ sys.path.append(os.path.join(os.getcwd(), "source"))
 from training_monitor_gui import (
     RunSnapshot,
     _build_run_recommendation,
+    _build_run_watch_summary,
+    _build_runtime_headline,
+    _build_selected_vs_fleet_summary,
     _build_health_summary,
     _build_launch_command,
     _compute_display_progress_percent,
@@ -20,6 +23,9 @@ from training_monitor_gui import (
     _phase_breakdown_rows,
     _resolve_canvas_size,
     _runtime_device_value,
+    _summarize_backend_mix,
+    _summarize_fleet_spotlight,
+    _summarize_fleet_watchlist,
     _summarize_research_results,
     _summarize_issue_runs,
     _summarize_stage_mix,
@@ -290,6 +296,112 @@ def test_monitor_focus_and_issue_summaries():
     assert issue_summary.startswith("Issue Radar:")
     assert "run_error [running/sft error]" in issue_summary
     assert "run_stalled [stalled/preference_mining]" in issue_summary
+
+    fleet_watch = _summarize_fleet_watchlist([finished, stalled, errored], limit=2)
+    assert fleet_watch.startswith("Fleet Watch:")
+    assert "run_error" in fleet_watch
+    assert "run_stalled" in fleet_watch
+
+
+def test_run_watch_summary_and_runtime_headline():
+    snap = _make_snapshot(
+        stage="data",
+        status="running",
+        cpu_percent=92.0,
+        ram_gb=3.2,
+        stale_minutes=0.4,
+        checkpoint_eta_seconds=4.0 * 3600.0,
+        runtime_summary="device=cpu model_dtype=torch.float32 gradient_checkpointing=False",
+        data_summary="pairs=100/200 raw=400 kept=120 synthetic=80/200 rate=0.40/s",
+    )
+
+    watch = _build_run_watch_summary(snap)
+    assert watch.startswith("Watch:")
+    assert "CPU-bound backend" in watch
+    assert "keeping 30%" in watch
+    assert "synthetic share is elevated at 40%" in watch
+
+    runtime = _build_runtime_headline(snap)
+    assert runtime.startswith("Runtime: cpu")
+    assert "CPU 92%" in runtime
+    assert "RAM 3.2G" in runtime
+    assert "stale 0.4m" in runtime
+
+
+def test_backend_mix_summary():
+    cpu_snap = _make_snapshot(run_name="cpu_run", runtime_summary="device=cpu model_dtype=torch.float32")
+    dml_snap = _make_snapshot(run_name="dml_run", runtime_summary="device=privateuseone:0 model_dtype=torch.float16")
+    cuda_snap = _make_snapshot(run_name="cuda_run", runtime_summary="resolved=cuda device=cuda model_dtype=torch.bfloat16")
+
+    summary = _summarize_backend_mix([cpu_snap, dml_snap, cuda_snap])
+    assert summary.startswith("Backend Mix:")
+    assert "cpu 1" in summary
+    assert "dml 1" in summary
+    assert "cuda 1" in summary
+
+
+def test_fleet_spotlight_summary():
+    running = _make_snapshot(
+        run_name="run_fast",
+        status="running",
+        stage="sft",
+        progress_percent=40.0,
+        eta_seconds=1800.0,
+        out_last_write_ts=time.time(),
+    )
+    stalled = _make_snapshot(
+        run_name="run_stalled",
+        status="stalled",
+        stage="distill",
+        stale_minutes=35.0,
+        eta_seconds=7200.0,
+        progress_percent=20.0,
+        out_last_write_ts=time.time() - 60.0,
+    )
+    spotlight = _summarize_fleet_spotlight([running, stalled])
+    assert spotlight.startswith("Spotlight:")
+    assert "lead progress run_fast" in spotlight
+    assert "fastest ETA run_fast 30m" in spotlight
+    assert "top attention run_stalled stalled" in spotlight
+
+
+def test_selected_vs_fleet_summary():
+    selected = _make_snapshot(
+        run_name="run_selected",
+        stage="sft",
+        status="running",
+        sft_step=240,
+        sft_target_steps=400,
+        eta_seconds=1800.0,
+        step_rate_per_hour=120.0,
+        runtime_summary="device=cpu model_dtype=torch.float32",
+    )
+    peer = _make_snapshot(
+        run_name="run_peer",
+        stage="sft",
+        status="running",
+        sft_step=120,
+        sft_target_steps=400,
+        eta_seconds=3600.0,
+        step_rate_per_hour=60.0,
+        runtime_summary="device=cpu model_dtype=torch.float32",
+    )
+    other = _make_snapshot(
+        run_name="run_other",
+        stage="preference",
+        status="running",
+        pref_step=10,
+        pref_target_steps=100,
+        eta_seconds=7200.0,
+        step_rate_per_hour=40.0,
+        runtime_summary="resolved=cuda device=cuda model_dtype=torch.bfloat16",
+    )
+
+    summary = _build_selected_vs_fleet_summary(selected, [selected, peer, other])
+    assert summary.startswith("Compare:")
+    assert "progress" in summary
+    assert "ETA faster than fleet median" in summary
+    assert "throughput" in summary
 
 
 def test_phase_breakdown_rows():

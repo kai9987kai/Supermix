@@ -53,6 +53,19 @@ PROTEIN_PROMPT_RE = re.compile(
     r"membrane protein|tm-score|rmsd)\b",
     re.IGNORECASE,
 )
+MATERIALS_PROMPT_RE = re.compile(
+    r"(?:\bmattergen\b|\bmaterials? design\b|\bcrystal(?:line)?\b|\bspace group\b|\blattice\b|"
+    r"\bfractional coordinates\b|\bcif\b|\bperovskite\b|\bspinel\b|\bgarnet\b|\bthermoelectric\b|"
+    r"\bband gap\b|\benergy above hull\b|\bionic conductivity\b|\bhard magnet\b|\bphotocatalyst\b|"
+    r"\btransparent conductor\b|\b2d semiconductor\b|\bmof\b|\bmaterials discovery\b)",
+    re.IGNORECASE,
+)
+THREE_D_PROMPT_RE = re.compile(
+    r"(?:\b3d\b|\bopen(?:scad)?\b|\bmesh\b|\bobj\b|\bstl\b|\bcad\b|\bparametric\b|"
+    r"\bphone stand\b|\bhollow box\b|\bcountersunk\b|\bmounting holes\b|\bprism\b|"
+    r"\bpyramid\b|\btetrahedron\b|\bgrid plane\b|\bspokes\b|\bpolyhedron\b)",
+    re.IGNORECASE,
+)
 CREATIVE_PROMPT_RE = re.compile(
     r"\b(story|creative|poem|novel|character|rewrite|style|brainstorm|lyrics|dialogue)\b",
     re.IGNORECASE,
@@ -256,6 +269,20 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         preferred_meta=("omni_collective_v6_frontier_meta.json",),
     ),
     ModelSpec(
+        key="omni_collective_v7",
+        label="Omni Collective V7 Frontier",
+        family="fusion",
+        kind="omni_collective_v7",
+        filename_tokens=("supermix_omni_collective_v7_frontier_",),
+        common_row_key="omni_collective_v7",
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.4114727927356718,
+        note="Largest omni frontier so far with full-model distillation, broader conversation/math/protein data, and longer multi-pass deliberation.",
+        benchmark_hint="Largest all-model distilled multimodal frontier checkpoint.",
+        preferred_weights=("omni_collective_v7_frontier.pth",),
+        preferred_meta=("omni_collective_v7_frontier_meta.json",),
+    ),
+    ModelSpec(
         key="v40_benchmax",
         label="V40 Benchmax",
         family="fusion",
@@ -294,6 +321,32 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         benchmark_hint="Protein folding and structure-prediction specialist.",
         preferred_weights=("protein_folding_micro_v1.pth",),
         preferred_meta=("protein_folding_micro_v1_meta.json",),
+    ),
+    ModelSpec(
+        key="mattergen_micro_v1",
+        label="MatterGen Micro",
+        family="materials",
+        kind="mattergen_generation",
+        filename_tokens=("supermix_mattergen_micro_v1_",),
+        common_row_key=None,
+        capabilities=("chat",),
+        note="Small MatterGen-inspired crystalline-materials generator with property-conditioned prototype seeds and CIF-style outputs.",
+        benchmark_hint="Materials-generation and crystal-design specialist.",
+        preferred_weights=("mattergen_micro_v1.pth",),
+        preferred_meta=("mattergen_micro_v1_meta.json",),
+    ),
+    ModelSpec(
+        key="three_d_generation_micro_v1",
+        label="3D Generation Micro",
+        family="3d",
+        kind="three_d_generation",
+        filename_tokens=("supermix_3d_generation_micro_v1_",),
+        common_row_key=None,
+        capabilities=("chat",),
+        note="Mini OpenSCAD-oriented 3D generation specialist trained on curated parametric modeling prompts and primitive-shape templates.",
+        benchmark_hint="OpenSCAD and small 3D generation specialist.",
+        preferred_weights=("three_d_generation_micro_v1.pth",),
+        preferred_meta=("three_d_generation_micro_v1_meta.json",),
     ),
     ModelSpec(
         key="qwen_v28",
@@ -630,6 +683,8 @@ def choose_auto_model(
     wants_fast = bool(FAST_PROMPT_RE.search(prompt_text)) or len(prompt_text) < 34
     wants_math = action_mode != "image" and bool(MATH_PROMPT_RE.search(prompt_text))
     wants_protein = action_mode != "image" and bool(PROTEIN_PROMPT_RE.search(prompt_text))
+    wants_materials = action_mode != "image" and bool(MATERIALS_PROMPT_RE.search(prompt_text))
+    wants_3d = action_mode != "image" and bool(THREE_D_PROMPT_RE.search(prompt_text))
     wants_model_selection = any(token in lowered for token in ("which model", "best model", "select a model", "pick a model"))
 
     if wants_model_selection:
@@ -668,6 +723,16 @@ def choose_auto_model(
         for key in ("protein_folding_micro_v1", "v40_benchmax", "omni_collective_v6", "v33_final"):
             if key in available:
                 return available[key], "Auto picked the protein-folding specialist because the prompt looks like protein structure or folding analysis."
+
+    if wants_materials:
+        for key in ("mattergen_micro_v1", "v40_benchmax", "omni_collective_v6", "v33_final"):
+            if key in available:
+                return available[key], "Auto picked the materials-generation specialist because the prompt looks like crystal or property-conditioned materials design."
+
+    if wants_3d:
+        for key in ("three_d_generation_micro_v1", "omni_collective_v6", "omni_collective_v5", "v40_benchmax", "v33_final"):
+            if key in available:
+                return available[key], "Auto picked the 3D-generation specialist because the prompt looks like OpenSCAD, CAD, or small 3D model generation."
 
     if wants_fast:
         for key in ("v30_lite", "qwen_v28", "v31_final"):

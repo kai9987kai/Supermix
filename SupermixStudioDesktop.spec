@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\build\\studio_models_stage', 'bundled_models'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\build\\studio_base_model_stage', 'bundled_base_model'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_all_models_common_plus_summary_20260331.json', 'output'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_studio_bundled_models_manifest.json', 'output')]
+datas = [('assets', 'assets'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\build\\studio_models_stage', 'bundled_models'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\build\\studio_base_model_stage', 'bundled_base_model'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_all_models_common_plus_summary_20260403.json', 'output'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_studio_bundled_models_manifest.json', 'output')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('webview')

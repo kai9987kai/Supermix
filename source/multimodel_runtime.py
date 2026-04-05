@@ -37,7 +37,9 @@ from multimodel_tools import (
 )
 from dcgan_image_model import DCGANImageEngine, DCGAN_SPECS, _find_generator_weights
 from math_equation_model import MathEquationEngine, format_math_response
+from mattergen_generation_model import MatterGenMicroEngine, format_mattergen_response
 from protein_folding_model import ProteinFoldingEngine, format_protein_response
+from three_d_generation_model import ThreeDGenerationEngine, format_3d_generation_response
 from native_image_infer_v36 import ChampionNetFrontierCollectiveNativeImage, save_prompt_image as save_prompt_image_v36
 from native_image_infer_v37_lite import ChampionNetUltraExpertNativeImageLite, save_prompt_image as save_prompt_image_v37
 from native_image_infer_v38_xlite import ChampionNetUltraExpertNativeImageExtraLite, save_prompt_image as save_prompt_image_v38
@@ -47,6 +49,7 @@ from omni_collective_v3_model import OmniCollectiveEngineV3
 from omni_collective_v4_model import OmniCollectiveEngineV4
 from omni_collective_v5_model import OmniCollectiveEngineV5
 from omni_collective_v6_model import OmniCollectiveEngineV6
+from omni_collective_v7_model import OmniCollectiveEngineV7
 from run import safe_load_state_dict
 
 
@@ -585,6 +588,74 @@ class ProteinFoldingBackend(BaseBackend):
         )
 
 
+class MatterGenGenerationBackend(BaseBackend):
+    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
+        super().__init__(record, extracted_dir, generated_dir)
+        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
+        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
+        if weights_path is None or meta_path is None:
+            raise FileNotFoundError(f"Missing MatterGen weights/meta for {record.label} in {extracted_dir}")
+        self.weights_path = weights_path.resolve()
+        self.meta_path = meta_path.resolve()
+        self.engine = MatterGenMicroEngine(weights_path=self.weights_path, meta_path=self.meta_path)
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "mattergen_generation",
+            "record": self.record.to_dict(),
+            "weights_path": str(self.weights_path),
+            "meta_path": str(self.meta_path),
+            "runtime": self.engine.status(),
+        }
+
+    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
+        prediction = self.engine.predict(prompt)
+        response = format_mattergen_response(self.engine.answer(prompt), prediction)
+        return ChatResult(
+            kind="text",
+            model_key=self.record.key,
+            model_label=self.record.label,
+            route_reason=str(settings.get("route_reason") or ""),
+            response=response,
+            timing={},
+            prompt_used=str(prompt),
+        )
+
+
+class ThreeDGenerationBackend(BaseBackend):
+    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
+        super().__init__(record, extracted_dir, generated_dir)
+        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
+        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
+        if weights_path is None or meta_path is None:
+            raise FileNotFoundError(f"Missing 3D-generation weights/meta for {record.label} in {extracted_dir}")
+        self.weights_path = weights_path.resolve()
+        self.meta_path = meta_path.resolve()
+        self.engine = ThreeDGenerationEngine(weights_path=self.weights_path, meta_path=self.meta_path)
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "three_d_generation",
+            "record": self.record.to_dict(),
+            "weights_path": str(self.weights_path),
+            "meta_path": str(self.meta_path),
+            "runtime": self.engine.status(),
+        }
+
+    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
+        prediction = self.engine.predict(prompt)
+        response = format_3d_generation_response(self.engine.answer(prompt), prediction)
+        return ChatResult(
+            kind="text",
+            model_key=self.record.key,
+            model_label=self.record.label,
+            route_reason=str(settings.get("route_reason") or ""),
+            response=response,
+            timing={},
+            prompt_used=str(prompt),
+        )
+
+
 class ImageRecognitionBackend(BaseBackend):
     def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
         super().__init__(record, extracted_dir, generated_dir)
@@ -819,6 +890,48 @@ class OmniCollectiveV6Backend(BaseBackend):
         )
 
 
+class OmniCollectiveV7Backend(BaseBackend):
+    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
+        super().__init__(record, extracted_dir, generated_dir)
+        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
+        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
+        if weights_path is None or meta_path is None:
+            raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
+        self.weights_path = weights_path.resolve()
+        self.meta_path = meta_path.resolve()
+        self.engine = OmniCollectiveEngineV7(weights_path=self.weights_path, meta_path=self.meta_path)
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "omni_collective_v7",
+            "record": self.record.to_dict(),
+            "weights_path": str(self.weights_path),
+            "meta_path": str(self.meta_path),
+            "runtime": {
+                "device": str(self.engine.device),
+                "image_size": int(self.engine.image_size),
+                "vocab_size": len(self.engine.vocab),
+                "response_count": len(self.engine.responses),
+                "deliberation_passes": int(self.engine.deliberation_passes),
+                "minimum_passes": int(self.engine.minimum_passes),
+            },
+        }
+
+    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
+        image_path = str(settings.get("uploaded_image_path") or "").strip()
+        effective_prompt = _compose_text_prompt(prompt, settings)
+        response = self.engine.answer(effective_prompt, image_path=image_path or None)
+        return ChatResult(
+            kind="text",
+            model_key=self.record.key,
+            model_label=self.record.label,
+            route_reason=str(settings.get("route_reason") or ""),
+            response=response,
+            timing={},
+            prompt_used=effective_prompt,
+        )
+
+
 class UnifiedModelManager:
     def __init__(
         self,
@@ -867,6 +980,10 @@ class UnifiedModelManager:
             return MathEquationBackend(record, extracted_dir, self.generated_dir)
         if record.kind == "protein_folding":
             return ProteinFoldingBackend(record, extracted_dir, self.generated_dir)
+        if record.kind == "mattergen_generation":
+            return MatterGenGenerationBackend(record, extracted_dir, self.generated_dir)
+        if record.kind == "three_d_generation":
+            return ThreeDGenerationBackend(record, extracted_dir, self.generated_dir)
         if record.kind == "image_recognition":
             return ImageRecognitionBackend(record, extracted_dir, self.generated_dir)
         if record.kind == "omni_collective":
@@ -879,6 +996,8 @@ class UnifiedModelManager:
             return OmniCollectiveV5Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "omni_collective_v6":
             return OmniCollectiveV6Backend(record, extracted_dir, self.generated_dir)
+        if record.kind == "omni_collective_v7":
+            return OmniCollectiveV7Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "qwen_adapter":
             return QwenBackend(record, extracted_dir, self.generated_dir)
         raise RuntimeError(f"Unsupported model kind: {record.kind}")
@@ -898,7 +1017,7 @@ class UnifiedModelManager:
         return f"{session_id}::{purpose}::{record_key}"
 
     def _default_text_record(self) -> ModelRecord:
-        for key in ("v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
+        for key in ("v40_benchmax", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
             if key in self.record_map and self.record_map[key].supports_chat:
                 return self.record_map[key]
         for record in self.records:
@@ -1205,6 +1324,50 @@ class UnifiedModelManager:
     def session_memory_snapshot(self, session_id: str) -> Dict[str, Any]:
         with self._lock:
             return self.memory_store.session_snapshot(session_id)
+
+    def three_d_model_view(self) -> Dict[str, Any]:
+        record = self.record_map.get("three_d_generation_micro_v1")
+        if record is None:
+            raise FileNotFoundError("three_d_generation_micro_v1 is not available in the local catalog.")
+        extracted_dir = _extract_zip_once(record.zip_path, self.extraction_root)
+        summary_path = _find_matching_file(
+            extracted_dir,
+            ("three_d_generation_micro_v1_summary.json",),
+            "_summary.json",
+        )
+        meta_path = _find_matching_file(
+            extracted_dir,
+            ("three_d_generation_micro_v1_meta.json",),
+            ".json",
+        )
+        summary_payload: Dict[str, Any] = {}
+        meta_payload: Dict[str, Any] = {}
+        if summary_path is not None:
+            summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        if meta_path is not None:
+            meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        row_summary = summary_payload.get("row_summary") if isinstance(summary_payload.get("row_summary"), dict) else {}
+        sample_predictions = summary_payload.get("sample_predictions") if isinstance(summary_payload.get("sample_predictions"), list) else []
+        return {
+            "key": record.key,
+            "label": record.label,
+            "zip_path": str(record.zip_path.resolve()),
+            "zip_name": record.zip_path.name,
+            "zip_size_bytes": record.zip_path.stat().st_size,
+            "summary_path": str(summary_path.resolve()) if summary_path is not None else "",
+            "summary_name": summary_path.name if summary_path is not None else "",
+            "meta_path": str(meta_path.resolve()) if meta_path is not None else "",
+            "meta_name": meta_path.name if meta_path is not None else "",
+            "parameter_count": summary_payload.get("parameter_count"),
+            "train_accuracy": summary_payload.get("train_accuracy"),
+            "val_accuracy": summary_payload.get("val_accuracy"),
+            "concept_count": row_summary.get("concepts"),
+            "source_rows": row_summary.get("source_rows"),
+            "train_rows": row_summary.get("train_rows"),
+            "val_rows": row_summary.get("val_rows"),
+            "concept_labels": list(meta_payload.get("labels") or []),
+            "sample_predictions": sample_predictions[:6],
+        }
 
     def select_model(self, model_key: str, eager: bool = False) -> Dict[str, Any]:
         if model_key != "auto" and model_key not in self.record_map:

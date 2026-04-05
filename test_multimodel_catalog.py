@@ -84,6 +84,30 @@ def test_auto_prefers_protein_specialist_for_protein_prompt() -> None:
     assert "protein" in reason.lower() or "fold" in reason.lower()
 
 
+def test_auto_prefers_mattergen_specialist_for_materials_prompt() -> None:
+    records = [
+        _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("mattergen_micro_v1", "mattergen_generation", ("chat",), None),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
+    ]
+    chosen, reason = choose_auto_model(records, "Generate a CIF-style perovskite absorber candidate with a 1.8 eV band gap.")
+    assert chosen is not None
+    assert chosen.key == "mattergen_micro_v1"
+    assert "material" in reason.lower() or "crystal" in reason.lower()
+
+
+def test_auto_prefers_3d_specialist_for_openscad_prompt() -> None:
+    records = [
+        _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("three_d_generation_micro_v1", "three_d_generation", ("chat",), None),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
+    ]
+    chosen, reason = choose_auto_model(records, "Write a small OpenSCAD model for a phone stand with a centered hole.")
+    assert chosen is not None
+    assert chosen.key == "three_d_generation_micro_v1"
+    assert "3d" in reason.lower() or "openscad" in reason.lower() or "cad" in reason.lower()
+
+
 def test_auto_prefers_uploaded_image_specialist() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
@@ -109,6 +133,7 @@ def test_auto_prefers_uploaded_image_specialist() -> None:
 def test_auto_prefers_newer_omni_collective_for_model_choice_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v7", "omni_collective_v7", ("chat", "vision"), 0.1067),
         _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
         _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
         _record("omni_collective_v5", "omni_collective_v5", ("chat", "vision"), None),
@@ -126,6 +151,7 @@ def test_auto_prefers_newer_omni_collective_for_model_choice_prompt() -> None:
 def test_auto_prefers_v40_for_reasoning_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v7", "omni_collective_v7", ("chat", "vision"), 0.1067),
         _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
         _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
         _record("omni_collective_v5", "omni_collective_v5", ("chat", "vision"), None),

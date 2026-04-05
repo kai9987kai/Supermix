@@ -260,6 +260,18 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
         specialist_metric_label="omni val",
     ),
     ArtifactSpec(
+        key="omni_collective_v7",
+        label="omni_collective_v7",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v7_frontier_20260403",),
+        common_row_key="omni_collective_v7",
+        score_source="specialist_only",
+        note="All-model distilled omni v7 frontier with a larger teacher league, broader conversation/math/protein mix, and longer deliberation.",
+        specialist_summary_path="output/supermix_omni_collective_v7_frontier_20260403/omni_collective_v7_frontier_summary.json",
+        specialist_metric_key="stage2.best_score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
         key="v40_benchmax",
         label="v40_benchmax",
         family="fusion",
@@ -295,6 +307,18 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
         specialist_metric_key="val_accuracy",
         specialist_metric_label="protein val",
     ),
+    ArtifactSpec(
+        key="three_d_generation_micro_v1",
+        label="three_d_generation_micro_v1",
+        family="3d",
+        filename_tokens=("supermix_3d_generation_micro_v1_20260403",),
+        common_row_key="three_d_generation_micro_v1",
+        score_source="specialist_only",
+        note="Small OpenSCAD / CAD generation specialist with a local add-on common-benchmark run.",
+        specialist_summary_path="output/supermix_3d_generation_micro_v1_20260403/three_d_generation_micro_v1_summary.json",
+        specialist_metric_key="val_accuracy",
+        specialist_metric_label="3d val",
+    ),
 )
 
 
@@ -308,6 +332,7 @@ FAMILY_COLORS: Dict[str, str] = {
     "fusion": "#db2777",
     "math": "#0f766e",
     "protein": "#6d28d9",
+    "3d": "#0891b2",
 }
 
 BENCHMARK_ORDER: Sequence[str] = (

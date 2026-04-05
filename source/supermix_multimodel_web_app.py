@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import os
@@ -44,7 +44,7 @@ HTML = """<!doctype html>
     .eyebrow::before{content:"";width:10px;height:10px;border-radius:999px;background:var(--blue);box-shadow:0 0 16px rgba(112,184,255,.75)}
     h1{margin:0;font-size:31px;line-height:1.02;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
     p{margin:10px 0 0;color:var(--muted);line-height:1.58;font-size:14px}
-    .pill-row,.cap-row,.chip-row,.action-row{display:flex;flex-wrap:wrap;gap:8px}
+    .pill-row,.cap-row,.chip-row,.action-row,.focus-row,.live-row{display:flex;flex-wrap:wrap;gap:8px}
     .pill,.cap,.chip,.ghost,.primary,select,input,textarea{
       border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);font:inherit
     }
@@ -73,6 +73,8 @@ HTML = """<!doctype html>
     .chat-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 22px;border-bottom:1px solid var(--line);background:rgba(12,24,38,.94)}
     .chat-head h3{margin:0;font-size:24px;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
     .chat-sub{margin-top:8px;color:var(--muted);font-size:13px;line-height:1.58}
+    .live-strip{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:12px 22px;border-bottom:1px solid rgba(255,255,255,.05);background:rgba(8,16,27,.92)}
+    .live-strip .note{margin-top:4px}
     .thread{padding:20px 22px;overflow:auto;display:flex;flex-direction:column;gap:16px;background:
       radial-gradient(circle at top right, rgba(112,184,255,.08), transparent 24%),
       linear-gradient(180deg, rgba(7,12,20,.48), rgba(10,18,29,.92))
@@ -86,6 +88,7 @@ HTML = """<!doctype html>
     .who{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
     .msg-meta{display:flex;flex-wrap:wrap;gap:8px}
     .meta-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);font-size:12px;color:#d1e1f5}
+    .meta-pill.accent{border-color:rgba(99,217,200,.24);background:rgba(99,217,200,.09)}
     .body{white-space:pre-wrap;line-height:1.62;font-size:15px}
     .route{margin-top:10px;color:var(--muted);font-size:12px;line-height:1.5}
     .image-card{display:grid;gap:12px}
@@ -102,6 +105,18 @@ HTML = """<!doctype html>
     .composer{padding:18px 22px;border-top:1px solid var(--line);background:rgba(9,18,29,.94);display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end}
     .composer-main{display:grid;gap:10px}
     .mode-row{display:grid;grid-template-columns:180px 180px 1fr;gap:10px}
+    .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .thread-tools{display:grid;gap:10px}
+    .thread-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    .thread-kpi{padding:10px 11px;border-radius:12px;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.03)}
+    .thread-kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    .thread-kpi .v{margin-top:6px;font-size:18px;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
+    .focus-chip{cursor:pointer}
+    .focus-chip.active{border-color:rgba(112,184,255,.36);background:rgba(112,184,255,.10)}
+    .msg.dim{opacity:.28;transform:scale(.992)}
+    .composer-meta{display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .composer-stats{display:flex;flex-wrap:wrap;gap:8px}
+    .composer-stat{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);font-size:12px;color:#d1e1f5}
     .note{font-size:12px;color:var(--muted);line-height:1.45}
     .send-col{display:grid;gap:10px;min-width:150px}
     .toast-rack{position:fixed;right:16px;bottom:16px;display:grid;gap:10px;z-index:20}
@@ -110,7 +125,7 @@ HTML = """<!doctype html>
     .thread::-webkit-scrollbar,.side::-webkit-scrollbar,.status-box::-webkit-scrollbar{width:8px}
     .thread::-webkit-scrollbar-thumb,.side::-webkit-scrollbar-thumb,.status-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px}
     @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}}
-    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side{padding-left:14px;padding-right:14px}.stats{grid-template-columns:1fr 1fr}.mode-row{grid-template-columns:1fr}.composer{grid-template-columns:1fr}}
+    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.live-strip{display:grid}}
   </style>
 </head>
 <body>
@@ -151,6 +166,25 @@ HTML = """<!doctype html>
       </section>
 
       <section class="card">
+        <h2>Discovery</h2>
+        <div class="field">
+          <label>Find Model</label>
+          <input id="modelSearch" placeholder="Search family, label, capability, or note">
+        </div>
+        <div class="field">
+          <label>Capability Filter</label>
+          <select id="capabilityFilter">
+            <option value="all">All Models</option>
+            <option value="chat">Chat</option>
+            <option value="vision">Vision</option>
+            <option value="image">Image</option>
+          </select>
+        </div>
+        <div class="chip-row" id="quickPickChips"></div>
+        <div class="note" id="discoveryNote">Use search and capability filters to narrow the bundled model catalog.</div>
+      </section>
+
+      <section class="card">
         <h2>Runtime Snapshot</h2>
         <div class="stats">
           <div class="stat"><div class="k">Benchmark</div><div class="v" id="statBenchmark">-</div><div class="d" id="statBenchmarkDetail">Saved score</div></div>
@@ -158,6 +192,22 @@ HTML = """<!doctype html>
           <div class="stat"><div class="k">Package</div><div class="v" id="statPackage">-</div><div class="d" id="statPackageDetail">Zip size</div></div>
           <div class="stat"><div class="k">Active</div><div class="v" id="statActive">-</div><div class="d" id="statActiveDetail">Loaded backend</div></div>
         </div>
+      </section>
+
+      <section class="card" id="threeDViewerCard" style="display:none">
+        <h2>3D Model Viewer</h2>
+        <div class="stats">
+          <div class="stat"><div class="k">Parameters</div><div class="v" id="threeDStatParams">-</div><div class="d">Small specialist size</div></div>
+          <div class="stat"><div class="k">Train Acc</div><div class="v" id="threeDStatTrain">-</div><div class="d">Last training run</div></div>
+          <div class="stat"><div class="k">Val Acc</div><div class="v" id="threeDStatVal">-</div><div class="d">Holdout accuracy</div></div>
+          <div class="stat"><div class="k">Concepts</div><div class="v" id="threeDStatConcepts">-</div><div class="d">OpenSCAD targets</div></div>
+        </div>
+        <p class="model-note" id="threeDViewerNote">Select the 3D model to inspect its packaged artifact.</p>
+        <div class="action-row" style="margin-top:12px">
+          <a class="ghost" id="threeDZipLink" href="#" download>Download Model ZIP</a>
+          <a class="ghost" id="threeDSummaryLink" href="#" download>Download Summary JSON</a>
+        </div>
+        <div class="status-box" id="threeDViewerSummary" style="margin-top:12px">Waiting for 3D model details...</div>
       </section>
 
       <section class="card">
@@ -225,6 +275,28 @@ HTML = """<!doctype html>
       </section>
 
       <section class="card">
+        <h2>Thread Tools</h2>
+        <div class="thread-tools">
+          <div class="thread-kpis">
+            <div class="thread-kpi"><div class="k">Messages</div><div class="v" id="threadMessageCount">0</div></div>
+            <div class="thread-kpi"><div class="k">Assistant</div><div class="v" id="threadAssistantCount">0</div></div>
+            <div class="thread-kpi"><div class="k">Images</div><div class="v" id="threadImageCount">0</div></div>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Find In Thread</label>
+            <input id="threadFilter" placeholder="Filter replies, prompts, or route notes">
+          </div>
+          <div class="subgrid">
+            <button class="ghost" id="copyLastBtn">Copy Last Reply</button>
+            <button class="ghost" id="jumpBottomBtn">Jump To Latest</button>
+            <button class="ghost" id="copyThreadBtn">Copy Full Thread</button>
+            <button class="ghost" id="downloadThreadBtn">Download JSON</button>
+          </div>
+          <div class="note">Filter dims non-matching messages. Copy and download actions use the live session transcript you see in the thread.</div>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>Status</h2>
         <div class="status-box" id="statusBox">Waiting for runtime status...</div>
       </section>
@@ -243,6 +315,14 @@ HTML = """<!doctype html>
         </div>
         <div class="pill" id="sessionBadge">session pending</div>
       </header>
+
+      <section class="live-strip">
+        <div>
+          <div class="live-row" id="liveStateChips"></div>
+          <div class="note" id="liveStateNote">Checking runtime state...</div>
+        </div>
+        <div class="composer-stats" id="sessionMetrics"></div>
+      </section>
 
       <section class="thread" id="thread">
         <div class="welcome" id="welcomeCard">
@@ -269,6 +349,11 @@ HTML = """<!doctype html>
           </div>
           <textarea id="prompt" placeholder="Type a message, coding question, reasoning task, or image prompt. Press Enter to send, Shift+Enter for a new line."></textarea>
           <div class="chip-row" id="starterChips"></div>
+          <div class="focus-row" id="focusChips"></div>
+          <div class="composer-meta">
+            <div class="composer-stats" id="promptStats"></div>
+            <div class="note" id="shortcutNote">Enter sends, Shift+Enter adds a new line.</div>
+          </div>
         </div>
         <div class="send-col">
           <button class="primary" id="sendBtn">Send</button>
@@ -297,6 +382,13 @@ HTML = """<!doctype html>
       'Rewrite this draft so it sounds more direct and professional.',
       'Give me a compact step-by-step plan to finish this task.'
     ];
+    const FOCUS_PACKS = [
+      {key:'grounded', label:'Grounded', style:'analyst', hint:'Use only claims you can support from the prompt, chat context, or available tools. Flag uncertainty explicitly.'},
+      {key:'think', label:'Think Longer', style:'balanced', hint:'Spend extra time comparing options, checking for contradictions, and tightening the final answer before responding.'},
+      {key:'coding', label:'Coding', style:'coding', hint:'Prefer concrete debugging steps, direct fixes, and implementation detail over generic advice.'},
+      {key:'compare', label:'Compare', style:'analyst', hint:'Structure the answer as a compact comparison with tradeoffs, risks, and the strongest recommendation.'},
+      {key:'creative', label:'Creative', style:'creative', hint:'Keep the answer imaginative but coherent, with vivid detail and a clear final shape.'}
+    ];
 
     let catalog = [];
     let selectedModelKey = 'auto';
@@ -305,6 +397,7 @@ HTML = """<!doctype html>
     let currentUploadedImagePath = '';
     let currentUploadedImageUrl = '';
     let currentUploadedImageName = '';
+    let activeFocusKey = '';
 
     function escapeHtml(value){
       return String(value || '')
@@ -319,6 +412,15 @@ HTML = """<!doctype html>
       item.textContent = message;
       el('toastRack').appendChild(item);
       setTimeout(() => item.remove(), 3200);
+    }
+
+    async function copyText(text, successMessage){
+      try{
+        await navigator.clipboard.writeText(text);
+        showToast('ok', successMessage || 'Copied.');
+      }catch(error){
+        showToast('err', 'Clipboard error: ' + error.message);
+      }
     }
 
     async function jget(path){
@@ -373,6 +475,88 @@ HTML = """<!doctype html>
 
     function findRecord(key){
       return catalog.find(item => item.key === key) || null;
+    }
+
+    function filteredCatalogRecords(){
+      const search = (el('modelSearch')?.value || '').trim().toLowerCase();
+      const capability = (el('capabilityFilter')?.value || 'all').trim().toLowerCase();
+      let rows = catalog.filter((record) => {
+        if(capability !== 'all' && !(record.capabilities || []).includes(capability)) return false;
+        if(!search) return true;
+        const hay = [
+          record.key,
+          record.label,
+          record.family,
+          record.kind,
+          record.note,
+          record.benchmark_hint,
+          (record.capabilities || []).join(' ')
+        ].join(' ').toLowerCase();
+        return hay.includes(search);
+      });
+      const selected = findRecord(selectedModelKey);
+      if(selected && !rows.some((item) => item.key === selected.key)){
+        rows = [selected, ...rows];
+      }
+      const autoRecord = findRecord('auto');
+      if(autoRecord && !rows.some((item) => item.key === 'auto')){
+        rows = [autoRecord, ...rows];
+      }
+      return rows;
+    }
+
+    function catalogBestRecord(predicate){
+      const matches = catalog.filter((record) => record.key !== 'auto' && (!predicate || predicate(record)));
+      if(!matches.length) return null;
+      return matches.sort((a, b) => {
+        const scoreA = Number(a.common_overall_exact ?? a.recipe_eval_accuracy ?? -1);
+        const scoreB = Number(b.common_overall_exact ?? b.recipe_eval_accuracy ?? -1);
+        return scoreB - scoreA;
+      })[0];
+    }
+
+    function buildQuickPickRows(){
+      const rows = [];
+      const overall = catalogBestRecord(() => true);
+      if(overall) rows.push({label:'Top Benchmark', key:overall.key});
+      const image = catalogBestRecord((record) => (record.capabilities || []).includes('image'));
+      if(image) rows.push({label:'Best Image', key:image.key});
+      const vision = catalogBestRecord((record) => (record.capabilities || []).includes('vision'));
+      if(vision) rows.push({label:'Best Vision', key:vision.key});
+      const omni = catalogBestRecord((record) => String(record.family || '').toLowerCase().includes('omni'));
+      if(omni) rows.push({label:'Latest Omni', key:omni.key});
+      const specialist3d = catalog.find((record) => record.key === 'three_d_generation_micro_v1');
+      if(specialist3d) rows.push({label:'3D Specialist', key:specialist3d.key});
+      return rows;
+    }
+
+    function renderQuickPickChips(){
+      const box = el('quickPickChips');
+      box.innerHTML = '';
+      buildQuickPickRows().forEach((item) => {
+        const button = document.createElement('button');
+        button.className = 'ghost';
+        button.textContent = item.label;
+        button.onclick = () => {
+          selectedModelKey = item.key;
+          el('modelSelect').value = item.key;
+          updateModelPanel(findRecord(item.key));
+          updateLiveState();
+          showToast('ok', `Selected ${findRecord(item.key)?.label || item.key}.`);
+        };
+        box.appendChild(button);
+      });
+    }
+
+    function updateDiscoveryNote(rows){
+      const capability = (el('capabilityFilter')?.value || 'all').trim().toLowerCase();
+      const search = (el('modelSearch')?.value || '').trim();
+      const topVisible = catalogBestRecord((record) => rows.some((item) => item.key === record.key));
+      const parts = [`${Math.max(0, rows.filter((row) => row.key !== 'auto').length)} visible`];
+      parts.push(capability === 'all' ? 'all capabilities' : capability);
+      if(search) parts.push(`search: ${search}`);
+      if(topVisible) parts.push(`top visible: ${topVisible.label}`);
+      el('discoveryNote').textContent = parts.join(' | ');
     }
 
     function renderCapabilities(record){
@@ -434,12 +618,142 @@ HTML = """<!doctype html>
       el('statFamilyDetail').textContent = record.kind || '-';
       el('statPackage').textContent = bytesToText(record.zip_size_bytes);
       el('statPackageDetail').textContent = record.zip_name || '';
+      refreshThreeDViewer(findRecord(el('modelSelect').value) || record);
+    }
+
+    function summarizeTranscript(){
+      const messages = transcript.length;
+      const assistant = transcript.filter(item => item.role === 'assistant').length;
+      const images = transcript.filter(item => item.kind === 'image' || item.image_url).length;
+      el('threadMessageCount').textContent = String(messages);
+      el('threadAssistantCount').textContent = String(assistant);
+      el('threadImageCount').textContent = String(images);
+      const sessionBits = [
+        `${messages} msgs`,
+        `${assistant} replies`,
+        images ? `${images} image outputs` : 'text-first session'
+      ];
+      el('sessionMetrics').innerHTML = sessionBits.map((bit) => `<div class="composer-stat">${escapeHtml(bit)}</div>`).join('');
+    }
+
+    function updatePromptStats(){
+      const text = el('prompt').value || '';
+      const words = text.trim() ? text.trim().split(/\\s+/).length : 0;
+      const chars = text.length;
+      const bits = [
+        `${words} words`,
+        `${chars} chars`,
+        currentUploadedImagePath ? 'image attached' : 'no image',
+        activeFocusKey ? `focus: ${activeFocusKey}` : 'focus: standard'
+      ];
+      el('promptStats').innerHTML = bits.map((bit) => `<div class="composer-stat">${escapeHtml(bit)}</div>`).join('');
+    }
+
+    function updateLiveState(status){
+      const chips = [];
+      chips.push(selectedModelKey === 'auto' ? 'Auto route' : (findRecord(selectedModelKey)?.label || selectedModelKey));
+      chips.push('action ' + el('actionMode').value);
+      chips.push(el('agentMode').value === 'collective' ? 'collective panel' : 'single reply');
+      chips.push(el('memoryMode').value === 'on' ? 'memory on' : 'memory off');
+      chips.push(el('webSearchMode').value === 'on' ? 'web tool on' : 'web tool off');
+      if(currentUploadedImagePath) chips.push('image attached');
+      el('liveStateChips').innerHTML = chips.map((bit, idx) => `<div class="meta-pill ${idx === 0 ? 'accent' : ''}">${escapeHtml(bit)}</div>`).join('');
+      el('liveStateNote').textContent = status?.last_route_reason || 'Use focus packs to bias how the assistant approaches the next prompt.';
+    }
+
+    function applyThreadFilter(){
+      const query = (el('threadFilter').value || '').trim().toLowerCase();
+      thread.querySelectorAll('.msg').forEach((node) => {
+        const text = (node.dataset.search || '').toLowerCase();
+        node.classList.toggle('dim', Boolean(query) && !text.includes(query));
+      });
+    }
+
+    function transcriptAsText(){
+      return transcript.map((item, index) => {
+        const role = item.role === 'assistant' ? 'Assistant' : 'You';
+        const route = item.route_reason ? `\\nRoute: ${item.route_reason}` : '';
+        const content = item.kind === 'image'
+          ? (item.prompt_used || item.response || '[image output]')
+          : (item.response || '');
+        return `${index + 1}. ${role} (${item.model_label || '-'})\\n${content}${route}`;
+      }).join('\\n\\n');
+    }
+
+    function downloadTranscriptJson(){
+      const blob = new Blob([JSON.stringify({session_id: sessionId, transcript}, null, 2)], {type:'application/json'});
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `supermix_thread_${sessionId.slice(0, 8)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(link.href);
+        link.remove();
+      }, 0);
+    }
+
+    function jumpToLatest(){
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function formatMetric(value){
+      if(value == null || Number.isNaN(Number(value))) return '-';
+      return Number(value).toFixed(3);
+    }
+
+    function setThreeDDownloadLink(id, href, label){
+      const link = el(id);
+      link.href = href || '#';
+      link.textContent = label;
+      link.style.pointerEvents = href ? 'auto' : 'none';
+      link.style.opacity = href ? '1' : '.45';
+    }
+
+    async function refreshThreeDViewer(record){
+      const card = el('threeDViewerCard');
+      if(!record || record.key !== 'three_d_generation_micro_v1'){
+        card.style.display = 'none';
+        return;
+      }
+      card.style.display = 'block';
+      el('threeDViewerSummary').textContent = 'Loading packaged 3D model details...';
+      try{
+        const data = await jget('/api/three_d_model_view');
+        const model = data.model || {};
+        el('threeDStatParams').textContent = model.parameter_count != null ? String(model.parameter_count) : '-';
+        el('threeDStatTrain').textContent = formatMetric(model.train_accuracy);
+        el('threeDStatVal').textContent = formatMetric(model.val_accuracy);
+        el('threeDStatConcepts').textContent = model.concept_count != null ? String(model.concept_count) : '-';
+        const counts = [
+          model.zip_name || '',
+          model.source_rows != null ? `${model.source_rows} source rows` : '',
+          model.train_rows != null ? `${model.train_rows} train` : '',
+          model.val_rows != null ? `${model.val_rows} val` : ''
+        ].filter(Boolean).join(' | ');
+        const concepts = (model.concept_labels || []).slice(0, 10).join(', ');
+        el('threeDViewerNote').textContent = [counts, concepts ? `Concepts: ${concepts}` : ''].filter(Boolean).join('\n');
+        const samples = (model.sample_predictions || []).map((item) => {
+          const confidence = item.confidence != null ? ` (${formatMetric(item.confidence)})` : '';
+          return `${item.predicted_label || item.predicted_concept || 'prediction'}${confidence}\nPrompt: ${item.prompt || ''}`;
+        });
+        el('threeDViewerSummary').textContent = samples.length
+          ? samples.join('\n\n')
+          : 'No sample predictions were packaged with this model.';
+        setThreeDDownloadLink('threeDZipLink', model.download_zip_url || '', 'Download Model ZIP');
+        setThreeDDownloadLink('threeDSummaryLink', model.download_summary_url || '', 'Download Summary JSON');
+      }catch(error){
+        el('threeDViewerSummary').textContent = '3D model viewer error: ' + error.message;
+        setThreeDDownloadLink('threeDZipLink', '', 'Download Model ZIP');
+        setThreeDDownloadLink('threeDSummaryLink', '', 'Download Summary JSON');
+      }
     }
 
     function renderCatalog(){
       const select = el('modelSelect');
       select.innerHTML = '';
-      catalog.forEach(record => {
+      const rows = filteredCatalogRecords();
+      rows.forEach(record => {
         const option = document.createElement('option');
         option.value = record.key;
         option.textContent = record.key === 'auto'
@@ -447,8 +761,12 @@ HTML = """<!doctype html>
           : `${record.label} (${record.family}, ${scoreText(record)})`;
         select.appendChild(option);
       });
+      if(rows.length && !rows.some((item) => item.key === selectedModelKey)){
+        selectedModelKey = rows[0].key;
+      }
       select.value = selectedModelKey;
       el('catalogCount').textContent = String(Math.max(0, catalog.length - 1));
+      updateDiscoveryNote(rows);
       updateModelPanel(findRecord(selectedModelKey) || findRecord('auto'));
       refreshUploadPanel();
     }
@@ -465,6 +783,8 @@ HTML = """<!doctype html>
           <div class="msg-meta">${metaBadges.join('')}</div>
         </div>
       `;
+      const actions = document.createElement('div');
+      actions.className = 'msg-actions';
       if(payload.kind === 'image'){
         const block = document.createElement('div');
         block.className = 'image-card';
@@ -475,10 +795,7 @@ HTML = """<!doctype html>
         `;
         card.appendChild(block);
         if(payload.output_path){
-          const actions = document.createElement('div');
-          actions.className = 'msg-actions';
           actions.innerHTML = `<button class="mini-btn save-image-btn" data-output-path="${escapeHtml(payload.output_path || '')}">Save Image To Path</button>`;
-          card.appendChild(actions);
           lastGeneratedImagePath = payload.output_path || lastGeneratedImagePath;
         }
       } else {
@@ -495,6 +812,12 @@ HTML = """<!doctype html>
           `;
           card.appendChild(preview);
         }
+      }
+      if(payload.response){
+        actions.innerHTML += `<button class="mini-btn copy-text-btn" data-copy-text="${escapeHtml(payload.response || '')}">Copy Text</button>`;
+      }
+      if(kind === 'assistant' && payload.response){
+        actions.innerHTML += `<button class="mini-btn reuse-msg-btn" data-reuse-text="${escapeHtml(payload.response || '')}">Reuse In Prompt</button>`;
       }
       if(payload.route_reason){
         const route = document.createElement('div');
@@ -527,9 +850,21 @@ HTML = """<!doctype html>
           card.appendChild(trace);
         }
       }
+      if(actions.children.length){
+        card.appendChild(actions);
+      }
+      card.dataset.search = [
+        payload.model_label || '',
+        payload.response || '',
+        payload.prompt_used || '',
+        payload.route_reason || '',
+        payload.uploaded_image_name || ''
+      ].join(' ');
       thread.appendChild(card);
-      thread.scrollTop = thread.scrollHeight;
+      jumpToLatest();
       transcript.push(buildTranscriptEntry(kind, payload));
+      summarizeTranscript();
+      applyThreadFilter();
     }
 
     async function refresh(){
@@ -541,6 +876,7 @@ HTML = """<!doctype html>
         ]);
         catalog = catalogResp.models || [];
         selectedModelKey = statusResp.status.selected_model_key || selectedModelKey || 'auto';
+        renderQuickPickChips();
         renderCatalog();
         const activeRecord = findRecord(statusResp.status.active_model_key || selectedModelKey) || findRecord(selectedModelKey) || findRecord('auto');
         updateModelPanel(activeRecord);
@@ -554,6 +890,9 @@ HTML = """<!doctype html>
           : 'Supermix Studio';
         el('chatSub').textContent = statusResp.status.last_route_reason || 'Auto chooses a model per prompt, while manual selection pins one model.';
         el('routeNote').textContent = 'Route: ' + (selectedModelKey === 'auto' ? 'Auto' : (findRecord(selectedModelKey)?.label || selectedModelKey));
+        updateLiveState(statusResp.status);
+        summarizeTranscript();
+        updatePromptStats();
       }catch(error){
         el('statusBox').textContent = 'Status error: ' + error.message;
       }
@@ -583,6 +922,8 @@ HTML = """<!doctype html>
         welcome.className = 'welcome';
         welcome.textContent = 'Session cleared.';
         thread.appendChild(welcome);
+        summarizeTranscript();
+        updatePromptStats();
       }catch(error){
         showToast('err', error.message);
       }
@@ -671,6 +1012,12 @@ HTML = """<!doctype html>
         const data = await jpost('/api/chat', payload);
         addMessage('assistant', data);
         selectedModelKey = data.selected_model_key || selectedModelKey;
+        if(activeFocusKey){
+          el('systemHint').value = '';
+          activeFocusKey = '';
+          renderFocusChips();
+        }
+        clearUploadedImage();
         refresh();
       }catch(error){
         addMessage('assistant', {response: 'Error: ' + error.message, kind: 'text'});
@@ -700,6 +1047,7 @@ HTML = """<!doctype html>
         currentUploadedImageName = data.filename || file.name;
         el('uploadStatus').textContent = 'Uploaded image is attached to the next prompt.';
         renderUploadPreview();
+        updatePromptStats();
         showToast('ok', 'Image uploaded.');
       }catch(error){
         showToast('err', error.message);
@@ -712,6 +1060,7 @@ HTML = """<!doctype html>
       currentUploadedImageName = '';
       el('imageUpload').value = '';
       refreshUploadPanel();
+      updatePromptStats();
     }
 
     function buildStarterChips(){
@@ -728,6 +1077,30 @@ HTML = """<!doctype html>
       });
     }
 
+    function renderFocusChips(){
+      const box = el('focusChips');
+      box.innerHTML = '';
+      FOCUS_PACKS.forEach((pack) => {
+        const chip = document.createElement('button');
+        chip.className = 'chip focus-chip' + (activeFocusKey === pack.key ? ' active' : '');
+        chip.textContent = pack.label;
+        chip.onclick = () => {
+          if(activeFocusKey === pack.key){
+            activeFocusKey = '';
+            el('systemHint').value = '';
+          } else {
+            activeFocusKey = pack.key;
+            el('systemHint').value = pack.hint;
+            if(pack.style) el('styleMode').value = pack.style;
+          }
+          renderFocusChips();
+          updatePromptStats();
+          updateLiveState();
+        };
+        box.appendChild(chip);
+      });
+    }
+
     el('loadModelBtn').onclick = selectModel;
     el('refreshBtn').onclick = refresh;
     el('clearBtn').onclick = clearChat;
@@ -736,12 +1109,38 @@ HTML = """<!doctype html>
     el('clearUploadBtn').onclick = clearUploadedImage;
     el('saveChatImageBtn').onclick = exportChatImage;
     el('saveLastImageBtn').onclick = saveLastImage;
-    el('modelSelect').addEventListener('change', refreshUploadPanel);
-    el('agentMode').addEventListener('change', refreshUploadPanel);
+    el('modelSearch').addEventListener('input', renderCatalog);
+    el('capabilityFilter').addEventListener('change', renderCatalog);
+    el('modelSelect').addEventListener('change', () => {
+      refreshUploadPanel();
+      refreshThreeDViewer(findRecord(el('modelSelect').value));
+      updateLiveState();
+      updateDiscoveryNote(filteredCatalogRecords());
+    });
+    el('agentMode').addEventListener('change', () => { refreshUploadPanel(); updateLiveState(); });
+    el('actionMode').addEventListener('change', () => { refreshUploadPanel(); updateLiveState(); updatePromptStats(); });
+    el('memoryMode').addEventListener('change', updateLiveState);
+    el('webSearchMode').addEventListener('change', updateLiveState);
+    el('styleMode').addEventListener('change', updatePromptStats);
+    el('systemHint').addEventListener('input', updatePromptStats);
+    el('threadFilter').addEventListener('input', applyThreadFilter);
     thread.addEventListener('click', (event) => {
       const button = event.target.closest('.save-image-btn');
-      if(!button) return;
-      saveGeneratedImage(button.dataset.outputPath || '');
+      if(button){
+        saveGeneratedImage(button.dataset.outputPath || '');
+        return;
+      }
+      const copyButton = event.target.closest('.copy-text-btn');
+      if(copyButton){
+        copyText(copyButton.dataset.copyText || '', 'Message copied.');
+        return;
+      }
+      const reuseButton = event.target.closest('.reuse-msg-btn');
+      if(reuseButton){
+        el('prompt').value = reuseButton.dataset.reuseText || '';
+        el('prompt').focus();
+        updatePromptStats();
+      }
     });
     el('prompt').addEventListener('keydown', (event) => {
       if(event.key === 'Enter' && !event.shiftKey){
@@ -749,8 +1148,37 @@ HTML = """<!doctype html>
         sendPrompt();
       }
     });
+    el('prompt').addEventListener('input', updatePromptStats);
+    el('copyLastBtn').onclick = () => {
+      const last = [...transcript].reverse().find((item) => item.role === 'assistant' && item.response);
+      if(!last){
+        showToast('err', 'No assistant reply yet.');
+        return;
+      }
+      copyText(last.response || '', 'Last reply copied.');
+    };
+    el('copyThreadBtn').onclick = () => {
+      if(!transcript.length){
+        showToast('err', 'No thread to copy yet.');
+        return;
+      }
+      copyText(transcriptAsText(), 'Thread copied.');
+    };
+    el('downloadThreadBtn').onclick = () => {
+      if(!transcript.length){
+        showToast('err', 'No thread to download yet.');
+        return;
+      }
+      downloadTranscriptJson();
+      showToast('ok', 'Thread JSON downloaded.');
+    };
+    el('jumpBottomBtn').onclick = jumpToLatest;
 
     buildStarterChips();
+    renderFocusChips();
+    summarizeTranscript();
+    updatePromptStats();
+    updateLiveState();
     refresh();
   </script>
 </body>
@@ -779,6 +1207,16 @@ def build_app(manager: UnifiedModelManager) -> Flask:
         if not session_id:
             return jsonify({"ok": False, "error": "session_id is required"}), 400
         return jsonify({"ok": True, "memory": manager.session_memory_snapshot(session_id)})
+
+    @app.get("/api/three_d_model_view")
+    def api_three_d_model_view():
+        try:
+            payload = dict(manager.three_d_model_view())
+            payload["download_zip_url"] = "/download/three_d_model_zip"
+            payload["download_summary_url"] = "/download/three_d_model_summary" if payload.get("summary_path") else ""
+            return jsonify({"ok": True, "model": payload})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
 
     @app.post("/api/upload_image")
     def api_upload_image():
@@ -873,6 +1311,26 @@ def build_app(manager: UnifiedModelManager) -> Flask:
     def uploaded_file(session_key: str, filename: str):
         target_dir = manager.uploads_dir / session_key
         return send_from_directory(target_dir, filename)
+
+    @app.get("/download/three_d_model_zip")
+    def download_three_d_model_zip():
+        try:
+            payload = manager.three_d_model_view()
+            zip_path = Path(str(payload.get("zip_path") or "")).resolve()
+            return send_from_directory(str(zip_path.parent), zip_path.name, as_attachment=True)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+
+    @app.get("/download/three_d_model_summary")
+    def download_three_d_model_summary():
+        try:
+            payload = manager.three_d_model_view()
+            summary_path = Path(str(payload.get("summary_path") or "")).resolve()
+            if not summary_path.exists():
+                raise FileNotFoundError(summary_path)
+            return send_from_directory(str(summary_path.parent), summary_path.name, as_attachment=True)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
 
     return app
 

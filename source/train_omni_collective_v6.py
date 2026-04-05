@@ -24,6 +24,7 @@ try:
     from multimodel_catalog import discover_model_records
     from multimodel_runtime import UnifiedModelManager
     from omni_collective_model import OMNI_DOMAIN_LABELS_V2, OMNI_INTENTS_V2, build_char_vocab
+    from omni_training_runtime import maybe_compile_model, resolve_training_runtime
     from omni_collective_v6_model import OmniCollectiveEngineV6, OmniCollectiveNetV6
     from train_image_recognition_model import ensure_base_images
     from train_math_equation_model import build_rows as build_math_prompt_rows
@@ -43,6 +44,7 @@ except ImportError:  # pragma: no cover
     from .multimodel_catalog import discover_model_records
     from .multimodel_runtime import UnifiedModelManager
     from .omni_collective_model import OMNI_DOMAIN_LABELS_V2, OMNI_INTENTS_V2, build_char_vocab
+    from .omni_training_runtime import maybe_compile_model, resolve_training_runtime
     from .omni_collective_v6_model import OmniCollectiveEngineV6, OmniCollectiveNetV6
     from .train_image_recognition_model import ensure_base_images
     from .train_math_equation_model import build_rows as build_math_prompt_rows
@@ -465,6 +467,16 @@ def train_model(
     seed: int,
     distill_limit: int,
     teacher_model_limit: int,
+    requested_device: str,
+    amp_mode: str,
+    amp_dtype: str,
+    compile_model: bool,
+    compile_mode: str,
+    grad_accum_steps: int,
+    ema_decay: float,
+    warmup_steps: int,
+    warmup_ratio: float,
+    min_lr_scale: float,
 ) -> Dict[str, object]:
     torch.manual_seed(int(seed))
     random.seed(int(seed))
@@ -498,7 +510,21 @@ def train_model(
     max_len = 360
     max_words = 80
     word_buckets = 16384
-    device = torch.device("cpu")
+    runtime = resolve_training_runtime(
+        repo_root=repo_root,
+        requested_device=requested_device,
+        amp_mode=amp_mode,
+        amp_dtype=amp_dtype,
+        compile_requested=compile_model,
+        compile_mode=compile_mode,
+        grad_accum_steps=grad_accum_steps,
+        ema_decay=ema_decay,
+        warmup_steps=warmup_steps,
+        warmup_ratio=warmup_ratio,
+        min_lr_scale=min_lr_scale,
+        batch_size=batch_size,
+    )
+    print(json.dumps({"event": "runtime_config", "runtime": runtime.to_payload()}, ensure_ascii=True), flush=True)
     model = OmniCollectiveNetV6(
         vocab_size=max(len(vocab), 2),
         num_intents=len(OMNI_INTENTS_V2),
@@ -519,12 +545,14 @@ def train_model(
         expert_hidden=1152,
         context_top_k=3,
         expert_top_k=2,
-    ).to(device)
+    ).to(runtime.device)
     warm_start = _load_expanded_state_from_zip(model, base_zip)
+    forward_model, runtime = maybe_compile_model(model, runtime)
     print(json.dumps({"event": "warm_start", "info": warm_start}, ensure_ascii=True), flush=True)
 
     stage1 = _train_stage(
         model=model,
+        forward_model=forward_model,
         train_rows=train_stage1,
         val_rows=val_rows,
         vocab=vocab,
@@ -537,12 +565,15 @@ def train_model(
         learning_rate=stage1_lr,
         epochs=stage1_epochs,
         seed=seed + 101,
-        device=device,
+        device=runtime.device,
         loss_weights={"intent": 0.60, "response": 1.00, "domain": 0.78, "vision": 0.70},
         balance_weight=0.030,
+        runtime=runtime,
+        grad_accum_steps=grad_accum_steps,
     )
     stage2 = _train_stage(
         model=model,
+        forward_model=forward_model,
         train_rows=train_rows,
         val_rows=val_rows,
         vocab=vocab,
@@ -555,9 +586,11 @@ def train_model(
         learning_rate=stage2_lr,
         epochs=stage2_epochs,
         seed=seed + 151,
-        device=device,
+        device=runtime.device,
         loss_weights={"intent": 0.54, "response": 1.00, "domain": 0.74, "vision": 1.02},
         balance_weight=0.040,
+        runtime=runtime,
+        grad_accum_steps=grad_accum_steps,
     )
 
     stamp = datetime.now().strftime("%Y%m%d")
@@ -601,6 +634,7 @@ def train_model(
         "stage1": stage1,
         "stage2": stage2,
         "seed": int(seed),
+        "training_runtime": runtime.to_payload(),
         "deliberation_passes": 6,
         "minimum_passes": 3,
         "grounding_threshold": 0.46,
@@ -611,7 +645,7 @@ def train_model(
         ],
     }
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=True), encoding="utf-8")
-    engine = OmniCollectiveEngineV6(weights_path=weights_path, meta_path=meta_path, device=device)
+    engine = OmniCollectiveEngineV6(weights_path=weights_path, meta_path=meta_path, device=runtime.device)
     sample_prompts = [
         "Reply in exactly two sentences explaining why regression tests matter.",
         "Solve 3*x + 7 = 19.",
@@ -626,10 +660,12 @@ def train_model(
         "warm_start": warm_start,
         "stage1": stage1,
         "stage2": stage2,
+        "training_runtime": runtime.to_payload(),
         "sample_outputs": [{"prompt": prompt, "answer": engine.answer(prompt)} for prompt in sample_prompts],
         "notes": [
             "v6 grows v5 again and blends full-catalog distillation with conversation, grounding, math, and protein-folding supervision.",
             "Inference uses a longer grounded deliberation loop to reduce hallucinated specifics on weak-confidence prompts.",
+            "Future runs support configurable device selection, AMP, gradient accumulation, EMA, compile, and warmup-plus-cosine scheduling.",
         ],
     }
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
@@ -648,6 +684,7 @@ def train_model(
         "stage2_val": stage2["val_metrics"],
         "warm_start": warm_start,
         "dataset_summary": dataset_summary,
+        "training_runtime": runtime.to_payload(),
     }
 
 
@@ -667,6 +704,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=211)
     parser.add_argument("--distill_limit", type=int, default=64)
     parser.add_argument("--teacher_model_limit", type=int, default=0)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--amp", default="auto")
+    parser.add_argument("--amp_dtype", default="auto")
+    parser.add_argument("--compile_model", action="store_true")
+    parser.add_argument("--compile_mode", default="reduce-overhead")
+    parser.add_argument("--grad_accum_steps", type=int, default=1)
+    parser.add_argument("--ema_decay", type=float, default=0.999)
+    parser.add_argument("--warmup_steps", type=int, default=0)
+    parser.add_argument("--warmup_ratio", type=float, default=0.05)
+    parser.add_argument("--min_lr_scale", type=float, default=0.05)
     return parser.parse_args()
 
 
@@ -687,6 +734,16 @@ def main() -> None:
         seed=int(args.seed),
         distill_limit=int(args.distill_limit),
         teacher_model_limit=int(args.teacher_model_limit),
+        requested_device=str(args.device),
+        amp_mode=str(args.amp),
+        amp_dtype=str(args.amp_dtype),
+        compile_model=bool(args.compile_model),
+        compile_mode=str(args.compile_mode),
+        grad_accum_steps=int(args.grad_accum_steps),
+        ema_decay=float(args.ema_decay),
+        warmup_steps=int(args.warmup_steps),
+        warmup_ratio=float(args.warmup_ratio),
+        min_lr_scale=float(args.min_lr_scale),
     )
     print(json.dumps(result, indent=2))
 
