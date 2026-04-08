@@ -36,6 +36,9 @@ HTML = """<!doctype html>
         linear-gradient(160deg,#040b14 0%,#081321 48%,#071019 100%);
     }
     .shell{display:grid;grid-template-columns:clamp(320px,23vw,380px) minmax(0,1fr);gap:18px;width:min(1560px,calc(100vw - 24px));height:calc(100vh - 24px);margin:12px auto}
+    .shell.focus-chat{grid-template-columns:minmax(0,1fr)}
+    .shell.focus-chat .side{display:none}
+    .shell.focus-chat .msg{max-width:min(1180px,94%)}
     .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow);backdrop-filter:blur(18px);overflow:hidden}
     .side{padding:18px;display:grid;grid-template-rows:auto auto auto auto 1fr;gap:14px;overflow:auto}
     .hero,.card,.thread-card{border-radius:var(--r-lg);border:1px solid var(--line);background:var(--panel-2)}
@@ -75,10 +78,14 @@ HTML = """<!doctype html>
     .chat-sub{margin-top:8px;color:var(--muted);font-size:13px;line-height:1.58}
     .live-strip{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:12px 22px;border-bottom:1px solid rgba(255,255,255,.05);background:rgba(8,16,27,.92)}
     .live-strip .note{margin-top:4px}
-    .thread{padding:20px 22px;overflow:auto;display:flex;flex-direction:column;gap:16px;min-width:0;background:
+    .thread{padding:20px 22px;overflow:auto;display:flex;flex-direction:column;gap:16px;min-width:0;scrollbar-gutter:stable;background:
       radial-gradient(circle at top right, rgba(112,184,255,.08), transparent 24%),
       linear-gradient(180deg, rgba(7,12,20,.48), rgba(10,18,29,.92))
     }
+    .thread.compact{padding:14px 18px;gap:10px}
+    .thread.compact .msg{padding:11px 13px;border-radius:18px}
+    .thread.compact .body{font-size:14px;line-height:1.54}
+    .thread.compact .msg-top{margin-bottom:8px}
     .welcome{padding:18px;border-radius:18px;border:1px solid rgba(112,184,255,.15);background:rgba(112,184,255,.06);color:var(--muted);line-height:1.62}
     .msg{max-width:min(980px,92%);padding:14px 16px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03);box-shadow:0 10px 28px rgba(0,0,0,.16)}
     .msg.user{align-self:flex-end;background:linear-gradient(145deg,rgba(30,82,136,.92),rgba(17,49,84,.95));border-color:rgba(112,184,255,.28)}
@@ -102,8 +109,17 @@ HTML = """<!doctype html>
     .msg-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
     .mini-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;font:inherit}
     .trace-box{margin-top:12px;padding:12px 13px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(6,12,20,.72);color:#c6d7ec;font-size:12px;line-height:1.55;white-space:pre-wrap}
-    .composer{padding:18px 22px;border-top:1px solid var(--line);background:rgba(9,18,29,.94);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:end}
-    .composer-main{display:grid;gap:10px;min-width:0}
+    .composer{padding:16px 22px;border-top:1px solid var(--line);background:rgba(9,18,29,.94);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:stretch;min-height:0}
+    .composer-main{display:grid;grid-template-rows:auto minmax(0,1fr);gap:10px;min-width:0;min-height:0}
+    .compose-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .deck-tabs{display:flex;flex-wrap:wrap;gap:8px}
+    .deck-tab{cursor:pointer}
+    .deck-tab.active{border-color:rgba(112,184,255,.36);background:rgba(112,184,255,.10)}
+    .compose-scroll{display:grid;gap:12px;max-height:min(42vh,430px);overflow:auto;padding-right:4px;min-height:0;scrollbar-gutter:stable}
+    .compose-panel{display:grid;gap:10px}
+    .compose-panel[hidden]{display:none}
+    .workbench-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:12px;align-items:start}
+    .response-deck{display:flex;flex-wrap:wrap;gap:8px}
     .mode-row{display:grid;grid-template-columns:180px 180px 1fr;gap:10px}
     .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .thread-tools{display:grid;gap:10px}
@@ -139,18 +155,21 @@ HTML = """<!doctype html>
     .composer-stats{display:flex;flex-wrap:wrap;gap:8px}
     .composer-stat{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);font-size:12px;color:#d1e1f5}
     .note{font-size:12px;color:var(--muted);line-height:1.45}
-    .send-col{display:grid;gap:10px;min-width:150px}
+    .send-col{display:grid;grid-template-rows:auto auto 1fr;gap:10px;min-width:170px;align-items:stretch}
+    .send-col .primary{justify-content:center;min-height:54px}
+    .send-support{display:grid;gap:8px;align-content:start}
     .toast-rack{position:fixed;right:16px;bottom:16px;display:grid;gap:10px;z-index:20}
     .toast{padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(7,15,24,.94);box-shadow:0 18px 42px rgba(0,0,0,.28);max-width:380px}
     .toast.err{border-color:rgba(255,141,154,.28)} .toast.ok{border-color:rgba(139,225,167,.22)}
-    .thread::-webkit-scrollbar,.side::-webkit-scrollbar,.status-box::-webkit-scrollbar{width:8px}
-    .thread::-webkit-scrollbar-thumb,.side::-webkit-scrollbar-thumb,.status-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px}
-    @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}}
-    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.send-col{min-width:0}.live-strip{display:grid}}
+    .thread::-webkit-scrollbar,.side::-webkit-scrollbar,.status-box::-webkit-scrollbar,.compose-scroll::-webkit-scrollbar,.draft-list::-webkit-scrollbar,.context-list::-webkit-scrollbar,.bookmark-list::-webkit-scrollbar{width:8px}
+    .thread::-webkit-scrollbar-thumb,.side::-webkit-scrollbar-thumb,.status-box::-webkit-scrollbar-thumb,.compose-scroll::-webkit-scrollbar-thumb,.draft-list::-webkit-scrollbar-thumb,.context-list::-webkit-scrollbar-thumb,.bookmark-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px}
+    @media (max-height:900px){.compose-scroll{max-height:min(34vh,300px)}}
+    @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}.workbench-grid{grid-template-columns:1fr}.compose-toolbar{display:grid}}
+    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row,.workbench-grid{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.send-col{min-width:0}.live-strip{display:grid}.compose-toolbar{display:grid}}
   </style>
 </head>
 <body>
-  <div class="shell">
+  <div class="shell" id="appShell">
     <aside class="panel side">
       <section class="hero">
         <div class="eyebrow">Bundled Local Model Studio</div>
@@ -428,35 +447,64 @@ HTML = """<!doctype html>
 
       <footer class="composer">
         <div class="composer-main">
-          <div class="mode-row">
-            <input id="imageWidth" type="number" min="64" max="1024" step="64" value="512" placeholder="Width">
-            <input id="imageHeight" type="number" min="64" max="1024" step="64" value="512" placeholder="Height">
-            <input id="imageSteps" type="number" min="1" max="4" step="1" value="2" placeholder="Steps">
-          </div>
-          <div class="upload-box" id="uploadBox" style="display:none">
-            <div class="upload-row">
-              <input id="imageUpload" type="file" accept="image/*">
-              <button class="ghost" id="uploadBtn">Upload Image</button>
-              <button class="ghost" id="clearUploadBtn">Clear Upload</button>
+          <div class="compose-toolbar">
+            <div class="deck-tabs">
+              <button class="mini-btn deck-tab" id="composeQuickBtn" data-compose-tab="quick">Quick</button>
+              <button class="mini-btn deck-tab" id="composeMediaBtn" data-compose-tab="media">Media</button>
+              <button class="mini-btn deck-tab" id="composeWorkbenchBtn" data-compose-tab="workbench">Workbench</button>
             </div>
-            <div class="note" id="uploadStatus">Select a vision-capable model or Auto to attach an image.</div>
-            <div class="upload-preview" id="uploadPreview"></div>
+            <div class="action-row">
+              <button class="ghost" id="toggleSidebarBtn">Focus Layout</button>
+              <button class="ghost" id="toggleThreadDensityBtn">Compact Thread</button>
+            </div>
           </div>
-          <textarea id="prompt" placeholder="Type a message, coding question, reasoning task, or image prompt. Press Enter to send, Shift+Enter for a new line."></textarea>
-          <div class="chip-row" id="starterChips"></div>
-          <div class="focus-row" id="focusChips"></div>
-          <div class="dispatch-box" id="dispatchPreview">
-            <strong>Dispatch Preview</strong>
-            Route planning is loading.
-          </div>
-          <div class="composer-meta">
-            <div class="composer-stats" id="promptStats"></div>
-            <div class="note" id="shortcutNote">Enter sends, Shift+Enter adds a new line.</div>
+          <div class="compose-scroll" id="composeScroll">
+            <section class="compose-panel" data-compose-panel="quick">
+              <textarea id="prompt" placeholder="Type a message, coding question, reasoning task, or image prompt. Press Enter to send, Shift+Enter for a new line."></textarea>
+              <div class="chip-row" id="starterChips"></div>
+              <div class="focus-row" id="focusChips"></div>
+            </section>
+            <section class="compose-panel" data-compose-panel="media" hidden>
+              <div class="mode-row">
+                <input id="imageWidth" type="number" min="64" max="1024" step="64" value="512" placeholder="Width">
+                <input id="imageHeight" type="number" min="64" max="1024" step="64" value="512" placeholder="Height">
+                <input id="imageSteps" type="number" min="1" max="4" step="1" value="2" placeholder="Steps">
+              </div>
+              <div class="upload-box" id="uploadBox" style="display:none">
+                <div class="upload-row">
+                  <input id="imageUpload" type="file" accept="image/*">
+                  <button class="ghost" id="uploadBtn">Upload Image</button>
+                  <button class="ghost" id="clearUploadBtn">Clear Upload</button>
+                </div>
+                <div class="note" id="uploadStatus">Select a vision-capable model or Auto to attach an image.</div>
+                <div class="upload-preview" id="uploadPreview"></div>
+              </div>
+            </section>
+            <section class="compose-panel" data-compose-panel="workbench" hidden>
+              <div class="workbench-grid">
+                <div class="dispatch-box" id="dispatchPreview">
+                  <strong>Dispatch Preview</strong>
+                  Route planning is loading.
+                </div>
+                <div class="dispatch-box">
+                  <strong>Response Deck</strong>
+                  <div class="response-deck" id="responseDeck"></div>
+                  <div class="note" id="responseDeckNote">Add a response shape or output contract without rewriting the whole prompt.</div>
+                </div>
+              </div>
+              <div class="composer-meta">
+                <div class="composer-stats" id="promptStats"></div>
+                <div class="note" id="shortcutNote">Enter sends, Shift+Enter adds a new line.</div>
+              </div>
+            </section>
           </div>
         </div>
         <div class="send-col">
           <button class="primary" id="sendBtn">Send</button>
-          <div class="note" id="routeNote">Route: Auto</div>
+          <div class="send-support">
+            <div class="note" id="routeNote">Route: Auto</div>
+            <div class="note" id="composerDockNote">Quick keeps the prompt visible. Media holds image controls. Workbench holds route preview and response shaping.</div>
+          </div>
         </div>
       </footer>
     </main>
@@ -481,6 +529,13 @@ HTML = """<!doctype html>
       'Rewrite this draft so it sounds more direct and professional.',
       'Give me a compact step-by-step plan to finish this task.'
     ];
+    const RESPONSE_DECK = [
+      {key:'brief', label:'Brief', text:'Keep the answer compact and high-signal. Prefer a short paragraph or a tight bullet list.'},
+      {key:'checklist', label:'Checklist', text:'Return the answer as a practical checklist with only the steps that matter.'},
+      {key:'compare', label:'Compare', text:'Structure the answer as a comparison table or clear tradeoff breakdown before recommending one option.'},
+      {key:'json', label:'JSON', text:'Return the result as strict JSON with stable field names and no prose outside the JSON block.'},
+      {key:'deep', label:'Deep Dive', text:'Take extra time, show the reasoning path explicitly, and include the strongest caveats or failure modes.'},
+    ];
     const FOCUS_PACKS = [
       {key:'grounded', label:'Grounded', style:'analyst', hint:'Use only claims you can support from the prompt, chat context, or available tools. Flag uncertainty explicitly.'},
       {key:'think', label:'Think Longer', style:'balanced', hint:'Spend extra time comparing options, checking for contradictions, and tightening the final answer before responding.'},
@@ -502,6 +557,9 @@ HTML = """<!doctype html>
     let currentUploadedImageUrl = '';
     let currentUploadedImageName = '';
     let activeFocusKey = '';
+    let composeTab = 'quick';
+    let focusLayout = false;
+    let compactThread = false;
     let sessionBrief = {objective:'', constraints:'', done:''};
     let savedDrafts = [];
     let contextBank = [];
@@ -523,6 +581,9 @@ HTML = """<!doctype html>
     sessionBrief = Object.assign({}, sessionBrief, bootState.sessionBrief || {});
     savedDrafts = Array.isArray(bootState.savedDrafts) ? bootState.savedDrafts.slice(0, 10) : [];
     contextBank = Array.isArray(bootState.contextBank) ? bootState.contextBank.slice(0, 12) : [];
+    composeTab = typeof bootState.composeTab === 'string' ? bootState.composeTab : 'quick';
+    focusLayout = Boolean(bootState.focusLayout);
+    compactThread = Boolean(bootState.compactThread);
 
     function escapeHtml(value){
       return String(value || '')
@@ -534,6 +595,9 @@ HTML = """<!doctype html>
     function persistUiState(){
       localStorage.setItem(uiStateKey, JSON.stringify({
         sessionBrief,
+        composeTab,
+        focusLayout,
+        compactThread,
         savedDrafts: savedDrafts.slice(0, 10),
         contextBank: contextBank.slice(0, 12),
       }));
@@ -622,6 +686,51 @@ HTML = """<!doctype html>
       updatePromptStats();
       updateDispatchPreview();
       showToast('ok', composed ? 'Session brief folded into system hint.' : 'No brief to apply.');
+    }
+
+    function applyLayoutState(){
+      el('appShell').classList.toggle('focus-chat', focusLayout);
+      el('toggleSidebarBtn').textContent = focusLayout ? 'Show Studio Rail' : 'Focus Layout';
+      el('composerDockNote').textContent = focusLayout
+        ? 'Focus layout hides the left rail so the thread and composer get the full width.'
+        : 'Quick keeps the prompt visible. Media holds image controls. Workbench holds route preview and response shaping.';
+    }
+
+    function applyThreadDensity(){
+      thread.classList.toggle('compact', compactThread);
+      el('toggleThreadDensityBtn').textContent = compactThread ? 'Comfortable Thread' : 'Compact Thread';
+    }
+
+    function setComposeTab(nextTab){
+      const cooked = ['quick', 'media', 'workbench'].includes(nextTab) ? nextTab : 'quick';
+      composeTab = cooked;
+      document.querySelectorAll('[data-compose-tab]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.composeTab === cooked);
+      });
+      document.querySelectorAll('[data-compose-panel]').forEach((panel) => {
+        panel.hidden = panel.dataset.composePanel !== cooked;
+      });
+      persistUiState();
+    }
+
+    function buildResponseDeck(){
+      const box = el('responseDeck');
+      box.innerHTML = '';
+      RESPONSE_DECK.forEach((item) => {
+        const button = document.createElement('button');
+        button.className = 'chip';
+        button.type = 'button';
+        button.textContent = item.label;
+        button.onclick = () => {
+          const current = (el('prompt').value || '').trim();
+          const nextPrompt = [current, item.text].filter(Boolean).join('\\n\\n');
+          el('prompt').value = nextPrompt;
+          updatePromptStats();
+          el('prompt').focus();
+          showToast('ok', `${item.label} response shape added.`);
+        };
+        box.appendChild(button);
+      });
     }
 
     function inferDraftLabel(prompt){
@@ -1751,6 +1860,7 @@ HTML = """<!doctype html>
 
     function buildStarterChips(){
       const box = el('starterChips');
+      box.innerHTML = '';
       STARTERS.forEach(text => {
         const chip = document.createElement('button');
         chip.className = 'chip';
@@ -1798,7 +1908,20 @@ HTML = """<!doctype html>
     el('addContextNoteBtn').onclick = addManualContext;
     el('captureLastReplyBtn').onclick = captureLastAssistantContext;
     el('clearContextBankBtn').onclick = clearContextBank;
+    el('toggleSidebarBtn').onclick = () => {
+      focusLayout = !focusLayout;
+      persistUiState();
+      applyLayoutState();
+    };
+    el('toggleThreadDensityBtn').onclick = () => {
+      compactThread = !compactThread;
+      persistUiState();
+      applyThreadDensity();
+    };
     el('refreshStoreBtn').onclick = () => refreshModelStore(true);
+    document.querySelectorAll('[data-compose-tab]').forEach((button) => {
+      button.onclick = () => setComposeTab(button.dataset.composeTab || 'quick');
+    });
     el('modelSearch').addEventListener('input', renderCatalog);
     el('capabilityFilter').addEventListener('change', renderCatalog);
     el('modelSelect').addEventListener('change', () => {
@@ -1924,7 +2047,11 @@ HTML = """<!doctype html>
     };
 
     buildStarterChips();
+    buildResponseDeck();
     applySessionBriefInputs();
+    applyLayoutState();
+    applyThreadDensity();
+    setComposeTab(composeTab);
     renderSessionBrief();
     renderSavedDrafts();
     renderContextBank();

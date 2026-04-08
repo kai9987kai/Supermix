@@ -171,6 +171,14 @@ def test_index_contains_discovery_ui():
         assert 'id="dispatchPreview"' in html
         assert 'id="modelStoreList"' in html
         assert 'id="refreshStoreBtn"' in html
+        assert 'id="appShell"' in html
+        assert 'id="composeScroll"' in html
+        assert 'id="composeQuickBtn"' in html
+        assert 'id="composeMediaBtn"' in html
+        assert 'id="composeWorkbenchBtn"' in html
+        assert 'id="toggleSidebarBtn"' in html
+        assert 'id="toggleThreadDensityBtn"' in html
+        assert 'id="responseDeck"' in html
 
 
 def test_model_store_endpoints():
