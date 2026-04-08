@@ -23,7 +23,7 @@ def _record(key: str, kind: str, capabilities: tuple[str, ...], score: float | N
     )
 
 
-def test_collective_panel_includes_omni_collective_v2_v3_v4_v5_v6_v7_v8_preview_v40_and_domain_specialists(tmp_path: Path) -> None:
+def test_collective_panel_includes_omni_collective_v2_v3_v4_v5_v6_v7_v8_v8_preview_v40_and_domain_specialists(tmp_path: Path) -> None:
     records = (
         _record("v33_final", "champion_chat", ("chat",), 0.18),
         _record("protein_folding_micro_v1", "protein_folding", ("chat",), None),
@@ -35,6 +35,7 @@ def test_collective_panel_includes_omni_collective_v2_v3_v4_v5_v6_v7_v8_preview_
         _record("omni_collective_v5", "omni_collective_v5", ("chat", "vision"), None),
         _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
         _record("omni_collective_v7", "omni_collective_v7", ("chat", "vision"), 0.1067),
+        _record("omni_collective_v8", "omni_collective_v8", ("chat", "vision"), None),
         _record("omni_collective_v8_preview", "omni_collective_v8", ("chat", "vision"), None),
         _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
         _record("science_vision_micro_v1", "image_recognition", ("chat", "vision"), None),
@@ -56,6 +57,7 @@ def test_collective_panel_includes_omni_collective_v2_v3_v4_v5_v6_v7_v8_preview_
     assert "omni_collective_v5" in keys
     assert "omni_collective_v6" in keys
     assert "omni_collective_v7" in keys
+    assert "omni_collective_v8" in keys
     assert "omni_collective_v8_preview" in keys
     assert "v40_benchmax" in keys
     assert "v38_native_xlite_fp16" not in keys

@@ -35,7 +35,7 @@ HTML = """<!doctype html>
         radial-gradient(circle at 70% 16%, rgba(255,179,102,.12), transparent 22%),
         linear-gradient(160deg,#040b14 0%,#081321 48%,#071019 100%);
     }
-    .shell{display:grid;grid-template-columns:400px 1fr;gap:18px;width:min(1560px,calc(100vw - 24px));height:calc(100vh - 24px);margin:12px auto}
+    .shell{display:grid;grid-template-columns:clamp(320px,23vw,380px) minmax(0,1fr);gap:18px;width:min(1560px,calc(100vw - 24px));height:calc(100vh - 24px);margin:12px auto}
     .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow);backdrop-filter:blur(18px);overflow:hidden}
     .side{padding:18px;display:grid;grid-template-rows:auto auto auto auto 1fr;gap:14px;overflow:auto}
     .hero,.card,.thread-card{border-radius:var(--r-lg);border:1px solid var(--line);background:var(--panel-2)}
@@ -69,18 +69,18 @@ HTML = """<!doctype html>
     .stat .d{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.5}
     .model-note,.status-box{padding:12px 13px;border-radius:var(--r-md);background:rgba(4,10,16,.82);border:1px solid rgba(255,255,255,.05);color:#c6d7ec}
     .status-box{white-space:pre-wrap;min-height:116px;max-height:220px;overflow:auto;font-family:Consolas,"Cascadia Code",monospace;font-size:12px;line-height:1.5}
-    .chat{display:grid;grid-template-rows:auto 1fr auto;min-height:0}
+    .chat{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;min-height:0;min-width:0}
     .chat-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 22px;border-bottom:1px solid var(--line);background:rgba(12,24,38,.94)}
     .chat-head h3{margin:0;font-size:24px;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
     .chat-sub{margin-top:8px;color:var(--muted);font-size:13px;line-height:1.58}
     .live-strip{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:12px 22px;border-bottom:1px solid rgba(255,255,255,.05);background:rgba(8,16,27,.92)}
     .live-strip .note{margin-top:4px}
-    .thread{padding:20px 22px;overflow:auto;display:flex;flex-direction:column;gap:16px;background:
+    .thread{padding:20px 22px;overflow:auto;display:flex;flex-direction:column;gap:16px;min-width:0;background:
       radial-gradient(circle at top right, rgba(112,184,255,.08), transparent 24%),
       linear-gradient(180deg, rgba(7,12,20,.48), rgba(10,18,29,.92))
     }
     .welcome{padding:18px;border-radius:18px;border:1px solid rgba(112,184,255,.15);background:rgba(112,184,255,.06);color:var(--muted);line-height:1.62}
-    .msg{max-width:min(900px,88%);padding:14px 16px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03);box-shadow:0 10px 28px rgba(0,0,0,.16)}
+    .msg{max-width:min(980px,92%);padding:14px 16px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03);box-shadow:0 10px 28px rgba(0,0,0,.16)}
     .msg.user{align-self:flex-end;background:linear-gradient(145deg,rgba(30,82,136,.92),rgba(17,49,84,.95));border-color:rgba(112,184,255,.28)}
     .msg.assistant{align-self:flex-start}
     .msg.pending{opacity:.72;border-style:dashed}
@@ -102,8 +102,8 @@ HTML = """<!doctype html>
     .msg-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
     .mini-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;font:inherit}
     .trace-box{margin-top:12px;padding:12px 13px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(6,12,20,.72);color:#c6d7ec;font-size:12px;line-height:1.55;white-space:pre-wrap}
-    .composer{padding:18px 22px;border-top:1px solid var(--line);background:rgba(9,18,29,.94);display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end}
-    .composer-main{display:grid;gap:10px}
+    .composer{padding:18px 22px;border-top:1px solid var(--line);background:rgba(9,18,29,.94);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:end}
+    .composer-main{display:grid;gap:10px;min-width:0}
     .mode-row{display:grid;grid-template-columns:180px 180px 1fr;gap:10px}
     .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .thread-tools{display:grid;gap:10px}
@@ -146,7 +146,7 @@ HTML = """<!doctype html>
     .thread::-webkit-scrollbar,.side::-webkit-scrollbar,.status-box::-webkit-scrollbar{width:8px}
     .thread::-webkit-scrollbar-thumb,.side::-webkit-scrollbar-thumb,.status-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px}
     @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}}
-    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.live-strip{display:grid}}
+    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.send-col{min-width:0}.live-strip{display:grid}}
   </style>
 </head>
 <body>

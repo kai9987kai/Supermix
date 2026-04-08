@@ -1272,7 +1272,7 @@ class UnifiedModelManager:
         return f"{session_id}::{purpose}::{record_key}"
 
     def _default_text_record(self) -> ModelRecord:
-        for key in ("v40_benchmax", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
+        for key in ("v40_benchmax", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
             if key in self.record_map and self.record_map[key].supports_chat:
                 return self.record_map[key]
         for record in self.records:

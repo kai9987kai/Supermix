@@ -283,6 +283,20 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         preferred_meta=("omni_collective_v7_frontier_meta.json",),
     ),
     ModelSpec(
+        key="omni_collective_v8",
+        label="Omni Collective V8 Frontier",
+        family="fusion",
+        kind="omni_collective_v8",
+        filename_tokens=("supermix_omni_collective_v8_frontier_",),
+        common_row_key="omni_collective_v8",
+        capabilities=("chat", "vision"),
+        recipe_eval_accuracy=0.41835681276088255,
+        note="Finished v8 frontier checkpoint with the larger all-model distillation league, broader multimodal grounding, and longer deliberation path.",
+        benchmark_hint="Latest finished omni frontier checkpoint.",
+        preferred_weights=("omni_collective_v8_frontier.pth",),
+        preferred_meta=("omni_collective_v8_frontier_meta.json",),
+    ),
+    ModelSpec(
         key="omni_collective_v8_preview",
         label="Omni Collective V8 Preview",
         family="fusion",
@@ -727,16 +741,16 @@ def choose_auto_model(
     wants_model_selection = any(token in lowered for token in ("which model", "best model", "select a model", "pick a model"))
 
     if wants_model_selection:
-        for key in ("omni_collective_v6", "v40_benchmax", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
+        for key in ("omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "v40_benchmax", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
             if key in available:
                 return available[key], "Auto picked the fused catalog model because the prompt asks about model choice."
 
     if wants_vision and vision_models:
         if has_uploaded_image and any(token in lowered for token in ("compare", "explain", "teach", "why", "analyze", "analyse")):
-            for key in ("omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "science_vision_micro_v1"):
+            for key in ("omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "science_vision_micro_v1"):
                 if key in available:
                     return available[key], "Auto picked a vision-capable chat model because an uploaded image needs analysis."
-        for key in ("science_vision_micro_v1", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v40_benchmax"):
+        for key in ("science_vision_micro_v1", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v40_benchmax"):
             if key in available:
                 return available[key], "Auto picked the uploaded-image recognition model because the prompt looks visual."
 

@@ -133,6 +133,7 @@ def test_auto_prefers_uploaded_image_specialist() -> None:
 def test_auto_prefers_newer_omni_collective_for_model_choice_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v8", "omni_collective_v8", ("chat", "vision"), None),
         _record("omni_collective_v8_preview", "omni_collective_v8", ("chat", "vision"), None),
         _record("omni_collective_v7", "omni_collective_v7", ("chat", "vision"), 0.1067),
         _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
@@ -145,13 +146,14 @@ def test_auto_prefers_newer_omni_collective_for_model_choice_prompt() -> None:
     ]
     chosen, reason = choose_auto_model(records, "Which model should I use for this mixed coding and image-analysis task?")
     assert chosen is not None
-    assert chosen.key == "omni_collective_v6"
+    assert chosen.key == "omni_collective_v8"
     assert "model" in reason.lower() or "fused" in reason.lower()
 
 
 def test_auto_prefers_v40_for_reasoning_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
+        _record("omni_collective_v8", "omni_collective_v8", ("chat", "vision"), None),
         _record("omni_collective_v8_preview", "omni_collective_v8", ("chat", "vision"), None),
         _record("omni_collective_v7", "omni_collective_v7", ("chat", "vision"), 0.1067),
         _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
@@ -169,6 +171,7 @@ def test_auto_prefers_v40_for_reasoning_prompt() -> None:
 
 def test_auto_does_not_promote_v8_preview_over_default_reasoning_route() -> None:
     records = [
+        _record("omni_collective_v8", "omni_collective_v8", ("chat", "vision"), None),
         _record("omni_collective_v8_preview", "omni_collective_v8", ("chat", "vision"), None),
         _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), None),
         _record("omni_collective_v6", "omni_collective_v6", ("chat", "vision"), None),
@@ -180,6 +183,11 @@ def test_auto_does_not_promote_v8_preview_over_default_reasoning_route() -> None
 
 
 def test_describe_model_artifact_name_identifies_known_and_unknown_artifacts() -> None:
+    finished = describe_model_artifact_name("supermix_omni_collective_v8_frontier_20260408.zip")
+    assert finished["known"] is True
+    assert finished["key"] == "omni_collective_v8"
+    assert "vision" in finished["capabilities"]
+
     known = describe_model_artifact_name("supermix_omni_collective_v8_preview_20260407_001155.zip")
     assert known["known"] is True
     assert known["key"] == "omni_collective_v8_preview"
