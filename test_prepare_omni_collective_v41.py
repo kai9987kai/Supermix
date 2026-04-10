@@ -60,10 +60,20 @@ def test_build_v41_blueprint_keeps_recent_method_references():
     names = {entry["name"] for entry in blueprint["recent_method_references"]}
 
     assert "DeepSeek-V3 Technical Report" in names
+    assert "Better & Faster Large Language Models via Multi-token Prediction" in names
     assert "s1: Simple test-time scaling" in names
     assert "LIMO: Less Is More for Reasoning" in names
     assert "RefineCoder" in names
     assert "Self-Play Fine-Tuning (SPIN)" in names
+    assert "Large Language Models have Intrinsic Self-Correction Ability" in names
+
+
+def test_build_v41_blueprint_adds_promotion_protocol():
+    blueprint = build_v41_blueprint(_sample_summary())
+
+    assert "promotion_protocol" in blueprint
+    assert blueprint["promotion_protocol"]["required_preview_benchmarks"] >= 3
+    assert "must_not_regress" in blueprint["promotion_protocol"]
 
 
 def test_latest_v8_summary_path_prefers_newest_summary():
