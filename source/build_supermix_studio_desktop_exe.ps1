@@ -31,6 +31,7 @@ $BaseModelStageDir = Join-Path $RepoRoot "build\studio_base_model_stage"
 $BundleManifestPath = Join-Path $RepoRoot "output\supermix_studio_bundled_models_manifest.json"
 $BundledModelKeys = @(
   "v40_benchmax",
+  "omni_collective_v41",
   "omni_collective_v8",
   "omni_collective_v7",
   "science_vision_micro_v1",

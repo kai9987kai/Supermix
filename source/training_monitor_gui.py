@@ -3,6 +3,7 @@ import csv
 import json
 import os
 import re
+import statistics
 import subprocess
 import time
 import datetime
@@ -101,6 +102,7 @@ PREF_STEPS_RE = re.compile(r"--preference_steps(?:\s+|=)(\d+)")
 SAVE_EVERY_STEPS_RE = re.compile(r"--save_every_steps(?:\s+|=)(\d+)")
 PS1_FILE_RE = re.compile(r"-File\s+(\"[^\"]+\\.ps1\"|'[^']+\\.ps1'|[^\s]+\\.ps1)", flags=re.IGNORECASE)
 RUN_CORE_RE = re.compile(r"^train_(.+?)_(\d{8}_\d{6})$")
+RUN_TIMESTAMP_RE = re.compile(r"^(.*)_(\d{8}_\d{6})$")
 SUMMARY_FRACTION_RE = re.compile(r"\b([a-z_]+)=(\d+)/(\d+)")
 SUMMARY_COUNT_RE = re.compile(r"\b([a-z_]+)=(\d+)\b")
 
@@ -448,6 +450,9 @@ class RunSnapshot:
     pref_selection_summary: str
     tail_lines: List[str]
     err_tail_lines: List[str]
+    state_file: Optional[Path] = None
+    balance_loss: Optional[float] = None
+    stage_source: str = "log"
 
 
 @dataclass
@@ -508,6 +513,11 @@ class ParsedLog:
     pref_mining_summary: str = "-"
     pref_selection_summary: str = "-"
     tail_lines: List[str] = field(default_factory=list)
+    omni_batch_index: Optional[int] = None
+    omni_total_batches: Optional[int] = None
+    omni_elapsed_seconds: Optional[float] = None
+    omni_eta_seconds: Optional[float] = None
+    omni_avg_balance_loss: Optional[float] = None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -546,6 +556,20 @@ def _read_pid(pid_file: Path) -> Optional[int]:
         return int(raw)
     except Exception:
         return None
+
+
+def _run_base_name(run_name: str) -> str:
+    text = str(run_name or "").strip()
+    m = RUN_TIMESTAMP_RE.match(text)
+    return m.group(1) if m else text
+
+
+def _read_json_file(path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _read_tail_lines(path: Path, max_bytes: int = 2_000_000, max_lines: int = 2400) -> List[str]:
@@ -880,10 +904,15 @@ def _parse_ps1_targets(ps1_path: Path) -> Tuple[Optional[int], Optional[int], Op
 
 
 def _run_core(run_name: str) -> str:
-    m = RUN_CORE_RE.match(run_name)
+    base = _run_base_name(run_name)
+    m = RUN_CORE_RE.match(base)
     if m:
         return m.group(1).strip().lower()
-    return run_name.replace("train_", "", 1).strip().lower()
+    if base.startswith("train_"):
+        return base.replace("train_", "", 1).strip().lower()
+    if base.endswith("_train"):
+        return base[: -len("_train")].strip().lower()
+    return base.strip().lower()
 
 
 def _guess_ps1_from_run_name(run_name: str, root_dir: Path) -> Optional[Path]:
@@ -891,13 +920,18 @@ def _guess_ps1_from_run_name(run_name: str, root_dir: Path) -> Optional[Path]:
     source_dir = root_dir / "source"
     if not source_dir.exists():
         return None
-    candidates = list(source_dir.glob("run_train_qwen_supermix_*.ps1"))
+    candidates = list(source_dir.glob("run_train_*.ps1")) + list(source_dir.glob("run_*.ps1"))
     if not candidates:
         return None
 
     scored: List[Tuple[int, Path]] = []
     for p in candidates:
-        stem_core = p.stem.replace("run_train_qwen_supermix_", "", 1).strip().lower()
+        stem_core = p.stem
+        if stem_core.startswith("run_train_"):
+            stem_core = stem_core.replace("run_train_", "", 1)
+        elif stem_core.startswith("run_"):
+            stem_core = stem_core.replace("run_", "", 1)
+        stem_core = stem_core.strip().lower()
         score = 0
         if stem_core and stem_core in core:
             score = len(stem_core)
@@ -1039,6 +1073,34 @@ def _fmt_rate_per_sec(rate_per_sec: Optional[float]) -> str:
 
 def _derive_stage_monitor_fields(parsed: ParsedLog) -> Tuple[str, Optional[float], str, Optional[float]]:
     stage = str(parsed.stage or "unknown").strip().lower()
+
+    if stage in {"dataset", "building_dataset", "building_dataset_from_resume"}:
+        if parsed.omni_batch_index is not None and parsed.omni_total_batches is not None:
+            return (
+                f"{parsed.omni_batch_index}/{parsed.omni_total_batches} batches",
+                _percent_complete(parsed.omni_batch_index, parsed.omni_total_batches),
+                "-",
+                parsed.omni_eta_seconds,
+            )
+        return ("dataset build", None, "-", parsed.omni_eta_seconds)
+
+    if stage in {"stage1", "stage2"} and parsed.omni_total_batches is not None:
+        current = parsed.omni_batch_index
+        total = parsed.omni_total_batches
+        rate_per_sec = None
+        if current is not None and total is not None and parsed.omni_eta_seconds is not None:
+            remaining = max(0.0, float(total) - float(current))
+            if parsed.omni_eta_seconds > 0:
+                rate_per_sec = remaining / float(parsed.omni_eta_seconds)
+        if rate_per_sec is None and current is not None and parsed.omni_elapsed_seconds not in {None, 0.0}:
+            rate_per_sec = float(current) / max(float(parsed.omni_elapsed_seconds or 0.0), 1.0)
+        label = f"{current}/{total} batches" if current is not None else f"{total} batches"
+        return (
+            label,
+            _percent_complete(current, total),
+            _fmt_rate_per_sec(rate_per_sec),
+            parsed.omni_eta_seconds,
+        )
 
     if stage == "data" and parsed.data_pairs_total is not None:
         current = parsed.data_pairs_current if parsed.data_pairs_current is not None else parsed.data_kept_count
@@ -1462,21 +1524,38 @@ def _compute_progress(
 
 def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> List[RunSnapshot]:
     now = time.time()
-    out_logs = sorted(root_dir.glob("train_*.out.log"))
+    search_dirs = [root_dir]
+    output_dir = root_dir / "output"
+    if output_dir.exists():
+        search_dirs.append(output_dir)
+    out_logs = sorted(
+        {
+            *(path for base in search_dirs for path in base.glob("train_*.out.log")),
+            *(path for base in search_dirs for path in base.glob("*_train_*.out.log")),
+        }
+    )
     snapshots: List[RunSnapshot] = []
     process_entries = _list_process_entries()
 
     for out_log in out_logs:
+        log_dir = out_log.parent
         stem = out_log.name.replace(".out.log", "")
-        err_log = root_dir / f"{stem}.err.log"
+        err_log = log_dir / f"{stem}.err.log"
         if not err_log.exists():
             err_log = None
-        pid_file = root_dir / f"{stem}.pid"
-        if not pid_file.exists():
-            pid_file = None
+        base_stem = _run_base_name(stem)
+        pid_candidates = [
+            log_dir / f"{stem}.pid",
+            log_dir / f"{base_stem}.worker.pid",
+            log_dir / f"{base_stem}.pid",
+        ]
+        pid_file = next((path for path in pid_candidates if path.exists()), None)
         pid = _read_pid(pid_file) if pid_file is not None else None
         pid_alive = _is_pid_alive(pid) if pid is not None else False
         pid_source = "pid_file" if pid_alive and pid is not None else ""
+        state_file = log_dir / f"{base_stem}_state.json"
+        if not state_file.exists():
+            state_file = None
 
         command_line = _query_process_cmdline(pid) if (pid_alive and pid is not None) else None
         command_line = command_line or ""
@@ -1504,10 +1583,48 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
             launch_hint = process_launch_hint
 
         parsed = _parse_log(out_log)
+        state_payload = _read_json_file(state_file) if state_file is not None else {}
+        if state_payload:
+            state_status = str(state_payload.get("status") or "").strip().lower()
+            state_stage = str(state_payload.get("stage") or state_status or parsed.stage).strip().lower()
+            parsed.stage = state_stage or parsed.stage
+            try:
+                parsed.omni_batch_index = int(state_payload.get("batch_index")) if state_payload.get("batch_index") is not None else parsed.omni_batch_index
+            except Exception:
+                pass
+            try:
+                parsed.omni_total_batches = int(state_payload.get("total_batches")) if state_payload.get("total_batches") is not None else parsed.omni_total_batches
+            except Exception:
+                pass
+            try:
+                parsed.omni_elapsed_seconds = float(state_payload.get("elapsed_seconds")) if state_payload.get("elapsed_seconds") is not None else parsed.omni_elapsed_seconds
+            except Exception:
+                pass
+            try:
+                parsed.omni_eta_seconds = float(state_payload.get("eta_seconds")) if state_payload.get("eta_seconds") is not None else parsed.omni_eta_seconds
+            except Exception:
+                pass
+            try:
+                parsed.omni_avg_balance_loss = float(state_payload.get("avg_balance_loss")) if state_payload.get("avg_balance_loss") is not None else parsed.omni_avg_balance_loss
+            except Exception:
+                pass
+            try:
+                parsed.loss = float(state_payload.get("avg_train_loss")) if state_payload.get("avg_train_loss") is not None else parsed.loss
+            except Exception:
+                pass
+            try:
+                parsed.lr = float(state_payload.get("lr")) if state_payload.get("lr") is not None else parsed.lr
+            except Exception:
+                pass
 
         out_stat = out_log.stat()
         out_mtime = out_stat.st_mtime
         out_size = out_stat.st_size
+        if state_file is not None:
+            try:
+                out_mtime = max(out_mtime, float(state_file.stat().st_mtime))
+            except Exception:
+                pass
         stale_mins = max(0.0, (now - out_mtime) / 60.0)
 
         err_size = 0
@@ -1535,6 +1652,11 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
         stage_progress_label, stage_progress_percent, stage_rate_label, stage_eta_seconds = _derive_stage_monitor_fields(
             parsed
         )
+        stage_source = "state" if state_payload else "log"
+        if parsed.stage in {"stage1", "stage2"} and parsed.omni_batch_index is not None:
+            progress_units = float(parsed.omni_batch_index)
+            total_units = float(parsed.omni_total_batches) if parsed.omni_total_batches is not None else total_units
+            progress_percent = _percent_complete(parsed.omni_batch_index, parsed.omni_total_batches)
 
         cpu_percent = None
         ram_gb = None
@@ -1634,6 +1756,9 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
                 pref_selection_summary=parsed.pref_selection_summary,
                 tail_lines=parsed.tail_lines,
                 err_tail_lines=err_tail_lines,
+                state_file=state_file,
+                balance_loss=parsed.omni_avg_balance_loss,
+                stage_source=stage_source,
             )
         )
 
@@ -1859,6 +1984,21 @@ def _fmt_eta(seconds: Optional[float]) -> str:
     return f"{dur} ({time_str})"
 
 
+def _fmt_age_minutes(minutes: Optional[float]) -> str:
+    if minutes is None:
+        return "-"
+    mins = max(0.0, float(minutes))
+    if mins < 0.7:
+        return "just now"
+    if mins < 60.0:
+        return f"{mins:.1f}m"
+    hours = mins / 60.0
+    if hours < 24.0:
+        return f"{hours:.1f}h"
+    days = hours / 24.0
+    return f"{days:.1f}d"
+
+
 def _summarize_err_tail(err_lines: Sequence[str]) -> Tuple[str, str]:
     if not err_lines:
         return "ok", "-"
@@ -1934,12 +2074,17 @@ def _stage_rank(stage: str) -> int:
     return {
         "unknown": 0,
         "data": 1,
+        "dataset": 1,
+        "building_dataset": 1,
+        "building_dataset_from_resume": 1,
         "distill": 2,
         "sft_setup": 3,
         "sft_filter": 4,
         "sft": 5,
+        "stage1": 5,
         "preference_mining": 6,
         "preference": 7,
+        "stage2": 7,
         "eval": 8,
         "done": 9,
     }.get(str(stage or "").strip().lower(), 0)
@@ -1952,6 +2097,9 @@ def _clamp_fraction(value: Optional[float]) -> Optional[float]:
 
 
 def _phase_weight_plan(snap: RunSnapshot) -> List[Tuple[str, float]]:
+    if snap.stage in {"dataset", "building_dataset", "building_dataset_from_resume", "stage1", "stage2"}:
+        return [("dataset", 10.0), ("stage1", 45.0), ("stage2", 45.0)]
+
     phases: List[Tuple[str, float]] = []
 
     if snap.data_summary != "-" or snap.stage in {"data", "distill", "sft_setup", "sft_filter", "sft", "preference_mining", "preference", "eval", "done"}:
@@ -1997,6 +2145,11 @@ def _phase_completion(snap: RunSnapshot, phase: str) -> Optional[float]:
             None if snap.stage_progress_percent is None or snap.stage != "data" else snap.stage_progress_percent / 100.0
         )
 
+    if phase == "dataset":
+        if snap.stage in {"dataset", "building_dataset", "building_dataset_from_resume"}:
+            return 0.5
+        return 1.0 if current_rank > phase_rank else 0.0
+
     if phase == "distill":
         return _clamp_fraction(
             None if snap.stage_progress_percent is None or snap.stage != "distill" else snap.stage_progress_percent / 100.0
@@ -2014,6 +2167,11 @@ def _phase_completion(snap: RunSnapshot, phase: str) -> Optional[float]:
             return _clamp_fraction(float(snap.sft_step) / float(snap.sft_target_steps))
         return 1.0 if current_rank > phase_rank else 0.0
 
+    if phase == "stage1":
+        return _clamp_fraction(
+            None if snap.stage_progress_percent is None or snap.stage != "stage1" else snap.stage_progress_percent / 100.0
+        )
+
     if phase == "preference_mining":
         return _clamp_fraction(
             None
@@ -2025,6 +2183,11 @@ def _phase_completion(snap: RunSnapshot, phase: str) -> Optional[float]:
         if snap.pref_target_steps is not None and snap.pref_target_steps > 0:
             return _clamp_fraction(float(snap.pref_step) / float(snap.pref_target_steps))
         return 1.0 if current_rank > phase_rank else 0.0
+
+    if phase == "stage2":
+        return _clamp_fraction(
+            None if snap.stage_progress_percent is None or snap.stage != "stage2" else snap.stage_progress_percent / 100.0
+        )
 
     return None
 
@@ -2120,6 +2283,140 @@ def _parse_rate_per_second(rate_label: str) -> Optional[float]:
         return float(match.group(1))
     except Exception:
         return None
+
+
+def _history_recent_values(
+    history: Sequence[Tuple[float, float]],
+    window_seconds: float = 7200.0,
+) -> List[float]:
+    if not history:
+        return []
+    latest_ts = float(history[-1][0])
+    min_ts = latest_ts - float(window_seconds)
+    return [float(value) for ts, value in history if float(ts) >= min_ts]
+
+
+def _history_ratio(
+    history: Sequence[Tuple[float, float]],
+    window_seconds: float = 7200.0,
+    recent_points: int = 6,
+) -> Optional[float]:
+    values = _history_recent_values(history, window_seconds=window_seconds)
+    if len(values) < max(6, recent_points + 3):
+        return None
+    recent = values[-recent_points:]
+    baseline = values[:-recent_points]
+    if len(baseline) < 3:
+        return None
+    try:
+        baseline_median = float(statistics.median(baseline))
+        recent_median = float(statistics.median(recent))
+    except Exception:
+        return None
+    if baseline_median <= 0.0:
+        return None
+    return recent_median / baseline_median
+
+
+def _failure_lens(snap: RunSnapshot) -> str:
+    corpus = " ".join(
+        [snap.err_summary, snap.health_summary, *(snap.err_tail_lines or []), *(snap.tail_lines[-10:] if snap.tail_lines else [])]
+    ).lower()
+    if not corpus.strip():
+        return "Failure Lens: no dominant failure pattern"
+    if any(token in corpus for token in ["no space left on device", "pytorchstreamwriter", "unexpected pos", "permission denied", "access is denied", "disk full"]):
+        return "Failure Lens: storage or checkpoint-write risk"
+    if any(token in corpus for token in ["out of memory", "cuda oom", "cublas", "device-side assert", "cudnn", "driver"]):
+        return "Failure Lens: accelerator memory or runtime failure"
+    if any(token in corpus for token in ["keyerror", "attributeerror", "typeerror", "valueerror", "jsondecodeerror", "state_dict", "scheduler"]):
+        return "Failure Lens: schema, resume, or trainer-state mismatch"
+    if any(token in corpus for token in ["keyboardinterrupt", "terminated", "killed", "shutdown", "power", "interrupted"]):
+        return "Failure Lens: external interruption or host shutdown risk"
+    if snap.status == "stalled":
+        return "Failure Lens: live process stalled without decisive error; inspect throughput and stale tails"
+    return "Failure Lens: no dominant failure pattern"
+
+
+def _build_run_stability_lab(
+    snap: RunSnapshot,
+    loss_history: Sequence[Tuple[float, float]],
+    rate_history: Sequence[Tuple[float, float]],
+    cpu_history: Sequence[Tuple[float, float]],
+    stale_history: Optional[Sequence[Tuple[float, float]]] = None,
+) -> str:
+    notes: List[str] = []
+    loss_ratio = _history_ratio(loss_history, window_seconds=7200.0, recent_points=6)
+    if loss_ratio is not None:
+        if loss_ratio >= 1.08:
+            notes.append(f"loss drift +{(loss_ratio - 1.0) * 100.0:.0f}% vs recent baseline")
+        elif loss_ratio <= 0.96:
+            notes.append("loss still improving")
+        else:
+            notes.append("loss trend stable")
+
+    rate_ratio = _history_ratio(rate_history, window_seconds=7200.0, recent_points=5)
+    if rate_ratio is not None:
+        if rate_ratio <= 0.70:
+            notes.append(f"throughput down to {rate_ratio * 100.0:.0f}% of baseline")
+        elif rate_ratio >= 1.15:
+            notes.append("throughput above recent baseline")
+
+    if snap.balance_loss is not None:
+        if snap.balance_loss >= 0.25:
+            notes.append(f"routing balance pressure {snap.balance_loss:.3f}")
+        elif snap.balance_loss <= 0.12:
+            notes.append(f"routing balance healthy {snap.balance_loss:.3f}")
+        else:
+            notes.append(f"routing balance watch {snap.balance_loss:.3f}")
+
+    if snap.status == "running" and snap.stale_minutes >= 6.0:
+        notes.append(f"log heartbeat delayed {snap.stale_minutes:.1f}m")
+    elif stale_history:
+        stale_ratio = _history_ratio(stale_history, window_seconds=3600.0, recent_points=5)
+        if stale_ratio is not None and stale_ratio >= 1.5 and snap.status == "running":
+            notes.append("log heartbeat slowing")
+
+    cpu_ratio = _history_ratio(cpu_history, window_seconds=7200.0, recent_points=5)
+    device = _runtime_device_value(snap)
+    if cpu_ratio is not None and device in {"cuda", "dml", "npu"} and cpu_ratio >= 1.20 and (rate_ratio is not None and rate_ratio <= 0.80):
+        notes.append("host-side bottleneck pressure")
+
+    if snap.stage_source == "state":
+        notes.append("structured state telemetry active")
+
+    if not notes:
+        return "Stability Lab: no strong instability signal"
+    return "Stability Lab: " + " | ".join(notes[:4])
+
+
+def _summarize_fleet_research_radar(
+    snapshots: Sequence[RunSnapshot],
+    loss_histories: Dict[str, List[Tuple[float, float]]],
+    rate_histories: Dict[str, List[Tuple[float, float]]],
+) -> str:
+    if not snapshots:
+        return "Research Radar: -"
+    loss_drift = 0
+    rate_drift = 0
+    balance_alert = 0
+    failure_buckets: Dict[str, int] = {}
+    for snap in snapshots:
+        ratio = _history_ratio(loss_histories.get(snap.run_name, []), window_seconds=7200.0, recent_points=6)
+        if ratio is not None and ratio >= 1.08:
+            loss_drift += 1
+        rate_ratio = _history_ratio(rate_histories.get(snap.run_name, []), window_seconds=7200.0, recent_points=5)
+        if rate_ratio is not None and rate_ratio <= 0.70:
+            rate_drift += 1
+        if snap.balance_loss is not None and snap.balance_loss >= 0.25:
+            balance_alert += 1
+        lens = _failure_lens(snap).replace("Failure Lens: ", "", 1)
+        failure_buckets[lens] = failure_buckets.get(lens, 0) + 1
+
+    top_failure = max(failure_buckets.items(), key=lambda item: item[1])[0] if failure_buckets else "no dominant failure pattern"
+    return (
+        "Research Radar: "
+        f"{loss_drift} loss-drift | {rate_drift} throughput-drift | {balance_alert} balance-alert | dominant failure: {top_failure}"
+    )
 
 
 def _build_runtime_headline(snap: RunSnapshot) -> str:
@@ -2269,6 +2566,12 @@ def _build_run_watch_summary(snap: RunSnapshot) -> str:
 
     if snap.status == "running" and snap.stage_eta_seconds is not None and snap.stage_eta_seconds >= 6.0 * 3600.0:
         notes.append(f"{snap.stage} still has a long stage ETA ({_fmt_eta(snap.stage_eta_seconds)})")
+
+    if snap.balance_loss is not None:
+        if snap.balance_loss >= 0.25:
+            notes.append(f"routing balance is elevated at {snap.balance_loss:.3f}")
+        elif snap.balance_loss <= 0.12 and snap.stage in {"stage1", "stage2"}:
+            notes.append(f"routing balance is healthy at {snap.balance_loss:.3f}")
 
     if not notes:
         if snap.status == "finished" or snap.stage == "done":
@@ -2601,9 +2904,12 @@ class TrainingMonitorApp:
         self.selected_ckpt_eta_var = tk.StringVar(value="Next Ckpt: -")
         self.selected_rate_var = tk.StringVar(value="Rate: -")
         self.selected_eta_confidence_var = tk.StringVar(value="ETA Confidence: -")
+        self.selected_updated_var = tk.StringVar(value="Updated: -")
         self.selected_focus_var = tk.StringVar(value="Focus: -")
         self.selected_watch_var = tk.StringVar(value="Watch: -")
         self.selected_runtime_var = tk.StringVar(value="Runtime: -")
+        self.selected_stability_var = tk.StringVar(value="Stability Lab: -")
+        self.selected_failure_var = tk.StringVar(value="Failure Lens: -")
         self.selected_recovery_var = tk.StringVar(value="Recovery: -")
         self.selected_rescue_var = tk.StringVar(value="Rescue Plan: -")
         self.selected_compare_var = tk.StringVar(value="Compare: -")
@@ -2616,6 +2922,7 @@ class TrainingMonitorApp:
         self.fleet_spotlight_var = tk.StringVar(value="Spotlight: -")
         self.fleet_tempo_var = tk.StringVar(value="Tempo Board: -")
         self.fleet_checkpoint_var = tk.StringVar(value="Checkpoint Posture: -")
+        self.fleet_research_var = tk.StringVar(value="Research Radar: -")
         self.research_summary_var = tk.StringVar(value="Research: -")
         self.research_best_var = tk.StringVar(value="Best: -")
         self.research_latest_var = tk.StringVar(value="Latest: -")
@@ -2782,7 +3089,8 @@ class TrainingMonitorApp:
         ttk.Label(summary, textvariable=self.selected_eta_var).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Label(summary, textvariable=self.selected_ckpt_eta_var).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Label(summary, textvariable=self.selected_rate_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Label(summary, textvariable=self.selected_eta_confidence_var).pack(side=tk.LEFT)
+        ttk.Label(summary, textvariable=self.selected_eta_confidence_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(summary, textvariable=self.selected_updated_var).pack(side=tk.LEFT)
 
         fleet = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         fleet.pack(fill=tk.X)
@@ -2796,12 +3104,15 @@ class TrainingMonitorApp:
         ttk.Label(fleet_notes, textvariable=self.selected_focus_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w")
         ttk.Label(fleet_notes, textvariable=self.selected_watch_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.selected_runtime_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
+        ttk.Label(fleet_notes, textvariable=self.selected_stability_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
+        ttk.Label(fleet_notes, textvariable=self.selected_failure_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.selected_recovery_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.selected_rescue_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.selected_compare_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.fleet_spotlight_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(6, 0))
         ttk.Label(fleet_notes, textvariable=self.fleet_tempo_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.fleet_checkpoint_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
+        ttk.Label(fleet_notes, textvariable=self.fleet_research_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.fleet_stage_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(6, 0))
         ttk.Label(fleet_notes, textvariable=self.fleet_backend_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.fleet_issue_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
@@ -2919,6 +3230,7 @@ class TrainingMonitorApp:
             "run",
             "status",
             "stage",
+            "telemetry",
             "device",
             "sft",
             "pref",
@@ -2942,6 +3254,7 @@ class TrainingMonitorApp:
             ("run", 260),
             ("status", 90),
             ("stage", 130),
+            ("telemetry", 140),
             ("device", 90),
             ("sft", 80),
             ("pref", 80),
@@ -2988,6 +3301,7 @@ class TrainingMonitorApp:
         self.tree.tag_configure("stopped", background="#4a3e14", foreground="#d4d4d4")
         self.tree.tag_configure("err_error", foreground="#f14c4c")
         self.tree.tag_configure("err_warn", foreground="#cca700")
+        self.tree.tag_configure("telemetry_state", foreground="#8fb7ff")
         self.research_tree.tag_configure("keep", background="#0e4020", foreground="#d4d4d4")
         self.research_tree.tag_configure("discard", background="#4a3e14", foreground="#d4d4d4")
         self.research_tree.tag_configure("crash", background="#5b1b15", foreground="#d4d4d4")
@@ -3538,8 +3852,19 @@ class TrainingMonitorApp:
             "runtime_summary": snap.runtime_summary,
             "runtime_headline": _build_runtime_headline(snap),
             "watch_summary": _build_run_watch_summary(snap),
+            "stability_lab": _build_run_stability_lab(
+                snap,
+                self.loss_history.get(snap.run_name, []),
+                self.rate_history.get(snap.run_name, []),
+                self.cpu_history.get(snap.run_name, []),
+                self.stale_history.get(snap.run_name, []),
+            ),
+            "failure_lens": _failure_lens(snap),
             "recovery_outlook": _build_recovery_outlook(snap),
             "rescue_plan": _build_run_rescue_plan(snap),
+            "state_file": str(snap.state_file) if snap.state_file is not None else "",
+            "balance_loss": snap.balance_loss,
+            "stage_source": snap.stage_source,
             "adapter_summary": snap.adapter_summary,
             "source_balance_summary": snap.source_balance_summary,
             "objective_summary": snap.objective_summary,
@@ -3587,6 +3912,7 @@ class TrainingMonitorApp:
             self.fleet_spotlight_var.set(_summarize_fleet_spotlight(all_snapshots))
             self.fleet_tempo_var.set("Tempo Board: -")
             self.fleet_checkpoint_var.set("Checkpoint Posture: -")
+            self.fleet_research_var.set("Research Radar: -")
             self.fleet_stage_var.set("Stage Mix: -")
             self.fleet_issue_var.set("Issue Radar: -")
             self.fleet_backend_var.set("Backend Mix: -")
@@ -3620,6 +3946,9 @@ class TrainingMonitorApp:
         self.fleet_spotlight_var.set(_summarize_fleet_spotlight(all_snapshots))
         self.fleet_tempo_var.set(_summarize_fleet_tempo(all_snapshots))
         self.fleet_checkpoint_var.set(_summarize_fleet_checkpoint_posture(all_snapshots))
+        self.fleet_research_var.set(
+            _summarize_fleet_research_radar(all_snapshots, self.loss_history, self.rate_history)
+        )
         self.fleet_stage_var.set(_summarize_stage_mix(all_snapshots))
         self.fleet_backend_var.set(_summarize_backend_mix(all_snapshots))
         self.fleet_issue_var.set(_summarize_issue_runs(all_snapshots))
@@ -3851,6 +4180,8 @@ class TrainingMonitorApp:
     def _eta_confidence_for_snapshot(self, snap: RunSnapshot) -> str:
         if snap.eta_seconds is None:
             return "-"
+        if snap.status == "stalled" or snap.stale_minutes >= 6.0:
+            return "low"
         history = self.progress_history.get(snap.run_name, [])
         if len(history) < 4:
             return "low"
@@ -3872,10 +4203,18 @@ class TrainingMonitorApp:
         var = sum((r - mean_rate) ** 2 for r in rates) / float(len(rates))
         cv = (var ** 0.5) / mean_rate
         if cv < 0.15:
-            return "high"
-        if cv < 0.45:
-            return "medium"
-        return "low"
+            confidence = "high"
+        elif cv < 0.45:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
+        if snap.stale_minutes >= 3.0:
+            if confidence == "high":
+                confidence = "medium"
+            elif confidence == "medium":
+                confidence = "low"
+        return confidence
 
     def _apply_filters(self, snapshots: Sequence[RunSnapshot]) -> List[RunSnapshot]:
         out: List[RunSnapshot] = []
@@ -3932,6 +4271,9 @@ class TrainingMonitorApp:
             return snap.status
         if col == "stage":
             return snap.stage
+        if col == "telemetry":
+            balance = -1.0 if snap.balance_loss is None else snap.balance_loss
+            return (1 if snap.stage_source == "state" else 0, balance)
         if col == "device":
             return _runtime_device_value(snap)
         if col == "sft":
@@ -3978,7 +4320,7 @@ class TrainingMonitorApp:
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_col = col
-            self.sort_reverse = True if col in {"pin", "updated", "prog", "rate", "loss", "sft", "pref", "eta_conf", "cpu_ram"} else False
+            self.sort_reverse = True if col in {"pin", "updated", "prog", "rate", "loss", "sft", "pref", "eta_conf", "cpu_ram", "telemetry"} else False
         self.refresh()
 
     def _apply_eta_and_rate(self, snapshots: Sequence[RunSnapshot]) -> None:
@@ -4117,6 +4459,14 @@ class TrainingMonitorApp:
             [
                 _build_run_watch_summary(snap),
                 _build_runtime_headline(snap),
+                _build_run_stability_lab(
+                    snap,
+                    self.loss_history.get(snap.run_name, []),
+                    self.rate_history.get(snap.run_name, []),
+                    self.cpu_history.get(snap.run_name, []),
+                    self.stale_history.get(snap.run_name, []),
+                ),
+                _failure_lens(snap),
                 _build_recovery_outlook(snap),
                 f"Focus: {_build_run_recommendation(snap)}",
             ]
@@ -4178,7 +4528,10 @@ class TrainingMonitorApp:
             rate_txt = self._display_rate_text(snap)
             err_txt = {"error": "ERROR", "warn": "WARN", "ok": "OK"}.get(snap.err_signal, "-")
             pid_txt = "-" if snap.pid is None else str(snap.pid)
-            updated = _fmt_ts(snap.out_last_write_ts)
+            updated = f"{_fmt_age_minutes(snap.stale_minutes)} | {_fmt_ts(snap.out_last_write_ts)}"
+            telemetry_txt = "state" if snap.stage_source == "state" else "log"
+            if snap.balance_loss is not None:
+                telemetry_txt = f"{telemetry_txt} | bal={snap.balance_loss:.3f}"
 
             sft_txt = str(snap.sft_step)
             if snap.sft_target_steps is not None and snap.sft_target_steps > 0:
@@ -4193,6 +4546,8 @@ class TrainingMonitorApp:
                 row_tags.append("err_error")
             elif snap.err_signal == "warn":
                 row_tags.append("err_warn")
+            if snap.stage_source == "state":
+                row_tags.append("telemetry_state")
                 
             cpu_ram_txt = "-"
             if snap.cpu_percent is not None and snap.ram_gb is not None:
@@ -4207,6 +4562,7 @@ class TrainingMonitorApp:
                     snap.run_name,
                     snap.status,
                     snap.stage,
+                    telemetry_txt,
                     device_txt,
                     sft_txt,
                     pref_txt,
@@ -4240,9 +4596,12 @@ class TrainingMonitorApp:
             self.selected_ckpt_eta_var.set("Next Ckpt: -")
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_updated_var.set("Updated: -")
             self.selected_focus_var.set("Focus: -")
             self.selected_watch_var.set("Watch: -")
             self.selected_runtime_var.set("Runtime: -")
+            self.selected_stability_var.set("Stability Lab: -")
+            self.selected_failure_var.set("Failure Lens: -")
             self.selected_recovery_var.set("Recovery: -")
             self.selected_rescue_var.set("Rescue Plan: -")
             self.selected_compare_var.set("Compare: -")
@@ -4288,9 +4647,12 @@ class TrainingMonitorApp:
             self.selected_ckpt_eta_var.set("Next Ckpt: -")
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_updated_var.set("Updated: -")
             self.selected_focus_var.set("Focus: -")
             self.selected_watch_var.set("Watch: -")
             self.selected_runtime_var.set("Runtime: -")
+            self.selected_stability_var.set("Stability Lab: -")
+            self.selected_failure_var.set("Failure Lens: -")
             self.selected_recovery_var.set("Recovery: -")
             self.selected_rescue_var.set("Rescue Plan: -")
             self.selected_compare_var.set("Compare: -")
@@ -4304,9 +4666,12 @@ class TrainingMonitorApp:
             self.selected_ckpt_eta_var.set("Next Ckpt: -")
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_updated_var.set("Updated: -")
             self.selected_focus_var.set("Focus: -")
             self.selected_watch_var.set("Watch: -")
             self.selected_runtime_var.set("Runtime: -")
+            self.selected_stability_var.set("Stability Lab: -")
+            self.selected_failure_var.set("Failure Lens: -")
             self.selected_recovery_var.set("Recovery: -")
             self.selected_rescue_var.set("Rescue Plan: -")
             self.selected_compare_var.set("Compare: -")
@@ -4344,12 +4709,23 @@ class TrainingMonitorApp:
         self.selected_eta_confidence_var.set(
             f"ETA Confidence: {'-' if eta_conf == '-' else eta_conf.upper()}"
         )
+        self.selected_updated_var.set(f"Updated: {_fmt_age_minutes(snap.stale_minutes)} ago")
         recommendation = _build_run_recommendation(snap)
         self.selected_focus_var.set(f"Focus: {recommendation}")
         watch_summary = _build_run_watch_summary(snap)
         self.selected_watch_var.set(watch_summary)
         runtime_headline = _build_runtime_headline(snap)
         self.selected_runtime_var.set(runtime_headline)
+        stability_lab = _build_run_stability_lab(
+            snap,
+            self.loss_history.get(snap.run_name, []),
+            self.rate_history.get(snap.run_name, []),
+            self.cpu_history.get(snap.run_name, []),
+            self.stale_history.get(snap.run_name, []),
+        )
+        self.selected_stability_var.set(stability_lab)
+        failure_lens = _failure_lens(snap)
+        self.selected_failure_var.set(failure_lens)
         recovery_outlook = _build_recovery_outlook(snap)
         self.selected_recovery_var.set(recovery_outlook)
         rescue_plan = _build_run_rescue_plan(snap)
@@ -4370,10 +4746,15 @@ class TrainingMonitorApp:
             f"run: {snap.run_name}",
             f"pinned: {'yes' if self._is_pinned_run(snap.run_name) else 'no'}",
             f"status: {snap.status}",
+            f"updated_age: {_fmt_age_minutes(snap.stale_minutes)} ago",
+            f"out_last: {out_last}",
+            f"err_last: {err_last}",
             f"health: {snap.health_summary}",
             f"focus: {recommendation}",
             f"watch: {watch_summary.replace('Watch: ', '', 1)}",
             f"runtime: {runtime_headline.replace('Runtime: ', '', 1)}",
+            f"stability_lab: {stability_lab.replace('Stability Lab: ', '', 1)}",
+            f"failure_lens: {failure_lens.replace('Failure Lens: ', '', 1)}",
             f"recovery: {recovery_outlook.replace('Recovery: ', '', 1)}",
             f"rescue_plan: {rescue_plan.replace('Rescue Plan: ', '', 1)}",
             f"compare: {compare_summary.replace('Compare: ', '', 1)}",
@@ -4404,6 +4785,9 @@ class TrainingMonitorApp:
             f"next_checkpoint_eta: {_fmt_eta(snap.checkpoint_eta_seconds)}",
             f"step_rate_per_hour: {snap.step_rate_per_hour if snap.step_rate_per_hour is not None else '-'}",
             f"stage_rate: {snap.stage_rate_label}",
+            f"stage_source: {snap.stage_source}",
+            f"state_file: {snap.state_file if snap.state_file is not None else '-'}",
+            f"balance_loss: {snap.balance_loss if snap.balance_loss is not None else '-'}",
             f"runtime_summary: {snap.runtime_summary}",
             f"adapter_summary: {snap.adapter_summary}",
             f"source_balance_summary: {snap.source_balance_summary}",
@@ -4419,9 +4803,12 @@ class TrainingMonitorApp:
             f"stale_minutes: {snap.stale_minutes:.2f}",
             f"err_signal: {snap.err_signal}",
             f"err_summary: {snap.err_summary}",
+            f"balance_loss: {snap.balance_loss if snap.balance_loss is not None else '-'}",
+            f"stage_source: {snap.stage_source}",
             f"out_log: {snap.out_log}",
             f"err_log: {snap.err_log if snap.err_log is not None else '-'}",
             f"pid_file: {snap.pid_file if snap.pid_file is not None else '-'}",
+            f"state_file: {snap.state_file if snap.state_file is not None else '-'}",
             f"launch_hint: {launch_hint}",
             f"launch_command: {launch_command}",
             f"command_line: {command_line}",

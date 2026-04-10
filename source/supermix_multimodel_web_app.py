@@ -86,6 +86,8 @@ HTML = """<!doctype html>
     .thread.compact .msg{padding:11px 13px;border-radius:18px}
     .thread.compact .body{font-size:14px;line-height:1.54}
     .thread.compact .msg-top{margin-bottom:8px}
+    .thread.hide-meta .msg-meta,.thread.hide-meta .route,.thread.hide-meta .trace-box{display:none}
+    .msg.match-active{border-color:rgba(255,179,102,.45);box-shadow:0 0 0 1px rgba(255,179,102,.35),0 10px 28px rgba(0,0,0,.18)}
     .welcome{padding:18px;border-radius:18px;border:1px solid rgba(112,184,255,.15);background:rgba(112,184,255,.06);color:var(--muted);line-height:1.62}
     .msg{max-width:min(980px,92%);padding:14px 16px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03);box-shadow:0 10px 28px rgba(0,0,0,.16)}
     .msg.user{align-self:flex-end;background:linear-gradient(145deg,rgba(30,82,136,.92),rgba(17,49,84,.95));border-color:rgba(112,184,255,.28)}
@@ -119,7 +121,14 @@ HTML = """<!doctype html>
     .compose-panel{display:grid;gap:10px}
     .compose-panel[hidden]{display:none}
     .workbench-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:12px;align-items:start}
+    .workbench-grid.triad{grid-template-columns:repeat(3,minmax(0,1fr))}
     .response-deck{display:flex;flex-wrap:wrap;gap:8px}
+    .control-grid{display:grid;gap:10px}
+    .control-grid .field{margin-bottom:0}
+    .contract-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .contract-grid .field{margin-bottom:0}
+    .refine-deck{display:flex;flex-wrap:wrap;gap:8px}
+    .contract-note,.outcome-note{white-space:pre-wrap}
     .mode-row{display:grid;grid-template-columns:180px 180px 1fr;gap:10px}
     .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .thread-tools{display:grid;gap:10px}
@@ -157,6 +166,12 @@ HTML = """<!doctype html>
     .note{font-size:12px;color:var(--muted);line-height:1.45}
     .send-col{display:grid;grid-template-rows:auto auto 1fr;gap:10px;min-width:170px;align-items:stretch}
     .send-col .primary{justify-content:center;min-height:54px}
+    .composer.compact .compose-scroll{max-height:min(22vh,210px)}
+    .composer.compact .compose-panel[data-compose-panel="media"],
+    .composer.compact .compose-panel[data-compose-panel="workbench"]{display:none !important}
+    .composer.compact .compose-panel[data-compose-panel="quick"] .chip-row,
+    .composer.compact .compose-panel[data-compose-panel="quick"] .focus-row{display:none}
+    .composer.compact textarea#prompt{min-height:64px}
     .send-support{display:grid;gap:8px;align-content:start}
     .toast-rack{position:fixed;right:16px;bottom:16px;display:grid;gap:10px;z-index:20}
     .toast{padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(7,15,24,.94);box-shadow:0 18px 42px rgba(0,0,0,.28);max-width:380px}
@@ -164,8 +179,8 @@ HTML = """<!doctype html>
     .thread::-webkit-scrollbar,.side::-webkit-scrollbar,.status-box::-webkit-scrollbar,.compose-scroll::-webkit-scrollbar,.draft-list::-webkit-scrollbar,.context-list::-webkit-scrollbar,.bookmark-list::-webkit-scrollbar{width:8px}
     .thread::-webkit-scrollbar-thumb,.side::-webkit-scrollbar-thumb,.status-box::-webkit-scrollbar-thumb,.compose-scroll::-webkit-scrollbar-thumb,.draft-list::-webkit-scrollbar-thumb,.context-list::-webkit-scrollbar-thumb,.bookmark-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px}
     @media (max-height:900px){.compose-scroll{max-height:min(34vh,300px)}}
-    @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}.workbench-grid{grid-template-columns:1fr}.compose-toolbar{display:grid}}
-    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row,.workbench-grid{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.send-col{min-width:0}.live-strip{display:grid}.compose-toolbar{display:grid}}
+    @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}.workbench-grid,.workbench-grid.triad,.contract-grid{grid-template-columns:1fr}.compose-toolbar{display:grid}}
+    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row,.workbench-grid,.workbench-grid.triad,.contract-grid{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.send-col{min-width:0}.live-strip{display:grid}.compose-toolbar{display:grid}}
   </style>
 </head>
 <body>
@@ -265,7 +280,18 @@ HTML = """<!doctype html>
           <label>Agent Mode</label>
           <select id="agentMode">
             <option value="off">Off</option>
+            <option value="loop">Loop Agent</option>
             <option value="collective">Collective Panel</option>
+            <option value="collective_loop">Collective + Loop</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Loop Budget</label>
+          <select id="loopBudget">
+            <option value="3">3 autonomous steps</option>
+            <option value="4" selected>4 autonomous steps</option>
+            <option value="6">6 autonomous steps</option>
+            <option value="8">8 autonomous steps</option>
           </select>
         </div>
         <div class="field">
@@ -307,7 +333,7 @@ HTML = """<!doctype html>
             <option value="anime">Anime</option>
           </select>
         </div>
-        <div class="note">Collective Panel mode consults every chat-capable local model before the final reply. Memory Learning persists session facts and strong prior exchanges, and Web Search gives the models a callable lookup tool for current information.</div>
+        <div class="note">Loop Agent keeps planner, worker, and reviewer passes running until the task looks complete or the loop budget is spent. Collective Panel consults every chat-capable local model before synthesis, and Collective + Loop uses those consultations inside each autonomous cycle. Memory Learning persists session facts and strong prior exchanges, and Web Search gives the models a callable lookup tool for current information.</div>
       </section>
 
       <section class="card">
@@ -389,6 +415,13 @@ HTML = """<!doctype html>
             <button class="ghost" id="copyThreadBtn">Copy Full Thread</button>
             <button class="ghost" id="downloadThreadBtn">Download JSON</button>
           </div>
+          <div class="subgrid">
+            <button class="ghost" id="toggleAutoScrollBtn">Auto-scroll On</button>
+            <button class="ghost" id="toggleMetaBtn">Hide Meta</button>
+            <button class="ghost" id="jumpMatchBtn">Next Match</button>
+            <button class="ghost" id="clearThreadFilterBtn">Clear Filter</button>
+          </div>
+          <div class="note" id="threadMatchNote">Matches: -</div>
           <div class="note">Filter dims non-matching messages. Copy and download actions use the live session transcript you see in the thread.</div>
         </div>
       </section>
@@ -445,7 +478,7 @@ HTML = """<!doctype html>
         </div>
       </section>
 
-      <footer class="composer">
+      <footer class="composer" id="composer">
         <div class="composer-main">
           <div class="compose-toolbar">
             <div class="deck-tabs">
@@ -456,6 +489,7 @@ HTML = """<!doctype html>
             <div class="action-row">
               <button class="ghost" id="toggleSidebarBtn">Focus Layout</button>
               <button class="ghost" id="toggleThreadDensityBtn">Compact Thread</button>
+              <button class="ghost" id="toggleComposerBtn">Compact Composer</button>
             </div>
           </div>
           <div class="compose-scroll" id="composeScroll">
@@ -490,6 +524,76 @@ HTML = """<!doctype html>
                   <strong>Response Deck</strong>
                   <div class="response-deck" id="responseDeck"></div>
                   <div class="note" id="responseDeckNote">Add a response shape or output contract without rewriting the whole prompt.</div>
+                </div>
+              </div>
+              <div class="workbench-grid triad">
+                <div class="dispatch-box">
+                  <strong>Outcome Board</strong>
+                  <div class="control-grid">
+                    <div class="field">
+                      <label>Deliverable</label>
+                      <input id="deliverableTarget" placeholder="What artifact should this chat produce?">
+                    </div>
+                    <div class="field">
+                      <label>Success Checks</label>
+                      <textarea id="successChecks" placeholder="What must be true for the answer to count as done?"></textarea>
+                    </div>
+                    <div class="field">
+                      <label>Risks Or Blockers</label>
+                      <textarea id="riskBox" placeholder="Uncertainties, blockers, sensitive assumptions, or traps to watch."></textarea>
+                    </div>
+                    <div class="action-row">
+                      <button class="ghost" id="applyOutcomeBtn">Fold Into Hint</button>
+                      <button class="ghost" id="clearOutcomeBtn">Clear Outcome</button>
+                    </div>
+                    <div class="note outcome-note" id="outcomeBoardNote">Turn the chat into a task-shaped workspace instead of a pure linear thread.</div>
+                  </div>
+                </div>
+                <div class="dispatch-box">
+                  <strong>Confidence Contract</strong>
+                  <div class="contract-grid">
+                    <div class="field">
+                      <label>Confidence Mode</label>
+                      <select id="confidenceMode">
+                        <option value="standard">Standard</option>
+                        <option value="calibrated">Calibrated answer</option>
+                        <option value="uncertainty_first">Uncertainty first</option>
+                        <option value="risk_controlled">Refuse if weak</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Evidence Mode</label>
+                      <select id="evidenceMode">
+                        <option value="balanced">Balanced</option>
+                        <option value="verify_first">Verify first</option>
+                        <option value="ledger">Assumption ledger</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Clarify First</label>
+                      <select id="clarifyMode">
+                        <option value="off">Off</option>
+                        <option value="on">On</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Surface Assumptions</label>
+                      <select id="assumptionMode">
+                        <option value="off">Off</option>
+                        <option value="on">On</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="note contract-note" id="confidenceContractNote" style="margin-top:10px">Make the assistant state confidence, uncertainty, and assumptions more deliberately when the task needs it.</div>
+                </div>
+                <div class="dispatch-box">
+                  <strong>Refinement Studio</strong>
+                  <div class="refine-deck" id="refinementDeck"></div>
+                  <div class="action-row" style="margin-top:10px">
+                    <button class="ghost" id="refineLastReplyBtn">Refine Last Reply</button>
+                    <button class="ghost" id="challengeLastReplyBtn">Challenge Last Reply</button>
+                  </div>
+                  <div class="note" id="refinementNote">Use self-critique and revision passes to tighten the latest answer before you send a follow-up.</div>
                 </div>
               </div>
               <div class="composer-meta">
@@ -535,6 +639,8 @@ HTML = """<!doctype html>
       {key:'compare', label:'Compare', text:'Structure the answer as a comparison table or clear tradeoff breakdown before recommending one option.'},
       {key:'json', label:'JSON', text:'Return the result as strict JSON with stable field names and no prose outside the JSON block.'},
       {key:'deep', label:'Deep Dive', text:'Take extra time, show the reasoning path explicitly, and include the strongest caveats or failure modes.'},
+      {key:'ledger', label:'Evidence Ledger', text:'Structure the answer with separate sections for verified facts, assumptions, risks, and the next checks.'},
+      {key:'repair', label:'Critique + Repair', text:'First identify the weakest parts of the answer, then provide a corrected improved version.'},
     ];
     const FOCUS_PACKS = [
       {key:'grounded', label:'Grounded', style:'analyst', hint:'Use only claims you can support from the prompt, chat context, or available tools. Flag uncertainty explicitly.'},
@@ -543,8 +649,17 @@ HTML = """<!doctype html>
       {key:'compare', label:'Compare', style:'analyst', hint:'Structure the answer as a compact comparison with tradeoffs, risks, and the strongest recommendation.'},
       {key:'creative', label:'Creative', style:'creative', hint:'Keep the answer imaginative but coherent, with vivid detail and a clear final shape.'}
     ];
-    const uiStateKey = 'supermix-studio-ui-state-v4';
+    const REFINEMENT_PRESETS = [
+      {key:'tighten', label:'Tighten', note:'Compress the answer while keeping the important substance.'},
+      {key:'challenge', label:'Challenge', note:'Stress-test weak assumptions before trusting the result.'},
+      {key:'humanize', label:'Humanize', note:'Improve communication quality, flow, and readability.'},
+      {key:'planify', label:'Planify', note:'Convert the answer into a concrete execution plan.'},
+      {key:'code_audit', label:'Code Audit', note:'Review the answer like a senior engineer and repair gaps.'},
+    ];
+    const uiStateKey = 'supermix-studio-ui-state-v5';
     const briefMarker = '[Session Brief]';
+    const outcomeMarker = '[Outcome Board]';
+    const contractMarker = '[Confidence Contract]';
 
     let catalog = [];
     let modelStoreRows = [];
@@ -560,7 +675,14 @@ HTML = """<!doctype html>
     let composeTab = 'quick';
     let focusLayout = false;
     let compactThread = false;
+    let composerCompact = false;
+    let autoScrollEnabled = true;
+    let hideThreadMeta = false;
+    let threadMatches = [];
+    let threadMatchIndex = 0;
     let sessionBrief = {objective:'', constraints:'', done:''};
+    let outcomeBoard = {deliverable:'', checks:'', risks:''};
+    let confidenceContract = {confidence_mode:'standard', evidence_mode:'balanced', clarify_first:'off', surface_assumptions:'off'};
     let savedDrafts = [];
     let contextBank = [];
     let threadBookmarks = [];
@@ -579,11 +701,16 @@ HTML = """<!doctype html>
 
     const bootState = readUiState();
     sessionBrief = Object.assign({}, sessionBrief, bootState.sessionBrief || {});
+    outcomeBoard = Object.assign({}, outcomeBoard, bootState.outcomeBoard || {});
+    confidenceContract = Object.assign({}, confidenceContract, bootState.confidenceContract || {});
     savedDrafts = Array.isArray(bootState.savedDrafts) ? bootState.savedDrafts.slice(0, 10) : [];
     contextBank = Array.isArray(bootState.contextBank) ? bootState.contextBank.slice(0, 12) : [];
     composeTab = typeof bootState.composeTab === 'string' ? bootState.composeTab : 'quick';
     focusLayout = Boolean(bootState.focusLayout);
     compactThread = Boolean(bootState.compactThread);
+    composerCompact = Boolean(bootState.composerCompact);
+    autoScrollEnabled = bootState.autoScrollEnabled !== false;
+    hideThreadMeta = Boolean(bootState.hideThreadMeta);
 
     function escapeHtml(value){
       return String(value || '')
@@ -595,9 +722,14 @@ HTML = """<!doctype html>
     function persistUiState(){
       localStorage.setItem(uiStateKey, JSON.stringify({
         sessionBrief,
+        outcomeBoard,
+        confidenceContract,
         composeTab,
         focusLayout,
         compactThread,
+        composerCompact,
+        autoScrollEnabled,
+        hideThreadMeta,
         savedDrafts: savedDrafts.slice(0, 10),
         contextBank: contextBank.slice(0, 12),
       }));
@@ -629,6 +761,36 @@ HTML = """<!doctype html>
       el('sessionDone').value = sessionBrief.done || '';
     }
 
+    function currentOutcomeBoard(){
+      return {
+        deliverable: (el('deliverableTarget')?.value || '').trim(),
+        checks: (el('successChecks')?.value || '').trim(),
+        risks: (el('riskBox')?.value || '').trim(),
+      };
+    }
+
+    function applyOutcomeBoardInputs(){
+      el('deliverableTarget').value = outcomeBoard.deliverable || '';
+      el('successChecks').value = outcomeBoard.checks || '';
+      el('riskBox').value = outcomeBoard.risks || '';
+    }
+
+    function currentConfidenceContract(){
+      return {
+        confidence_mode: (el('confidenceMode')?.value || 'standard').trim(),
+        evidence_mode: (el('evidenceMode')?.value || 'balanced').trim(),
+        clarify_first: (el('clarifyMode')?.value || 'off').trim(),
+        surface_assumptions: (el('assumptionMode')?.value || 'off').trim(),
+      };
+    }
+
+    function applyConfidenceContractInputs(){
+      el('confidenceMode').value = confidenceContract.confidence_mode || 'standard';
+      el('evidenceMode').value = confidenceContract.evidence_mode || 'balanced';
+      el('clarifyMode').value = confidenceContract.clarify_first || 'off';
+      el('assumptionMode').value = confidenceContract.surface_assumptions || 'off';
+    }
+
     function buildSessionBriefText(source){
       const brief = source || currentSessionBrief();
       const lines = [];
@@ -638,16 +800,61 @@ HTML = """<!doctype html>
       return lines.join('\\n');
     }
 
-    function stripManagedBriefBlock(value){
-      const text = String(value || '');
-      const markerIndex = text.indexOf(briefMarker);
-      return markerIndex === -1 ? text.trim() : text.slice(0, markerIndex).trim();
+    function buildOutcomeBoardText(source){
+      const board = source || currentOutcomeBoard();
+      const lines = [];
+      if(board.deliverable) lines.push('Deliverable: ' + board.deliverable);
+      if(board.checks) lines.push('Success Checks: ' + board.checks.replace(/\\s*\\n+\\s*/g, ' | '));
+      if(board.risks) lines.push('Risks: ' + board.risks.replace(/\\s*\\n+\\s*/g, ' | '));
+      return lines.join('\\n');
+    }
+
+    function buildConfidenceContractText(source){
+      const contract = source || currentConfidenceContract();
+      const lines = [];
+      if(contract.confidence_mode === 'calibrated'){
+        lines.push('Calibrate the answer explicitly: separate what is strong from what is uncertain.');
+      }else if(contract.confidence_mode === 'uncertainty_first'){
+        lines.push('Lead with uncertainty when it materially changes the decision, then give the best supported answer.');
+      }else if(contract.confidence_mode === 'risk_controlled'){
+        lines.push('If confidence is too weak, refuse to guess and ask for clarification or more evidence.');
+      }
+      if(contract.evidence_mode === 'verify_first'){
+        lines.push('Prefer verification before strong claims. Mark anything not directly supported as tentative.');
+      }else if(contract.evidence_mode === 'ledger'){
+        lines.push('Use an assumption ledger: verified facts, assumptions, risks, and next checks.');
+      }
+      if(contract.clarify_first === 'on'){
+        lines.push('If the request is materially ambiguous, ask a short clarifying question before committing to an answer.');
+      }
+      if(contract.surface_assumptions === 'on'){
+        lines.push('Expose the key assumptions behind the answer instead of hiding them.');
+      }
+      return lines.join('\\n');
+    }
+
+    function stripManagedBlocks(value){
+      let text = String(value || '');
+      [briefMarker, outcomeMarker, contractMarker].forEach((marker) => {
+        const markerIndex = text.indexOf(marker);
+        if(markerIndex !== -1){
+          text = text.slice(0, markerIndex);
+        }
+      });
+      return text.trim();
     }
 
     function composeSystemHint(){
-      const base = stripManagedBriefBlock(el('systemHint').value || '');
+      const base = stripManagedBlocks(el('systemHint').value || '');
       const brief = buildSessionBriefText();
-      return [base, brief ? `${briefMarker}\\n${brief}` : ''].filter(Boolean).join('\\n\\n');
+      const outcome = buildOutcomeBoardText();
+      const contract = buildConfidenceContractText();
+      return [
+        base,
+        brief ? `${briefMarker}\\n${brief}` : '',
+        outcome ? `${outcomeMarker}\\n${outcome}` : '',
+        contract ? `${contractMarker}\\n${contract}` : '',
+      ].filter(Boolean).join('\\n\\n');
     }
 
     function syncSessionBrief(){
@@ -659,11 +866,39 @@ HTML = """<!doctype html>
       updateDispatchPreview();
     }
 
+    function syncOutcomeBoard(){
+      outcomeBoard = currentOutcomeBoard();
+      persistUiState();
+      renderOutcomeBoard();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function syncConfidenceContract(){
+      confidenceContract = currentConfidenceContract();
+      persistUiState();
+      renderConfidenceContract();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
     function clearSessionBrief(){
       sessionBrief = {objective:'', constraints:'', done:''};
       applySessionBriefInputs();
       persistUiState();
       renderSessionBrief();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function clearOutcomeBoard(){
+      outcomeBoard = {deliverable:'', checks:'', risks:''};
+      applyOutcomeBoardInputs();
+      persistUiState();
+      renderOutcomeBoard();
       updatePromptStats();
       updateLiveState();
       updateDispatchPreview();
@@ -680,6 +915,27 @@ HTML = """<!doctype html>
         : 'Keep a compact working brief here. It can be folded into the next prompt without rewriting it every time.';
     }
 
+    function renderOutcomeBoard(){
+      const board = currentOutcomeBoard();
+      const parts = [];
+      if(board.deliverable) parts.push(`Deliverable: ${board.deliverable}`);
+      if(board.checks) parts.push(`Checks: ${board.checks.replace(/\\s*\\n+\\s*/g, ' | ')}`);
+      if(board.risks) parts.push(`Risks: ${board.risks.replace(/\\s*\\n+\\s*/g, ' | ')}`);
+      el('outcomeBoardNote').textContent = parts.length
+        ? parts.join('\\n')
+        : 'Turn the chat into a task-shaped workspace instead of a pure linear thread.';
+    }
+
+    function renderConfidenceContract(){
+      const contract = currentConfidenceContract();
+      const lines = [];
+      lines.push(`Confidence: ${contract.confidence_mode.replaceAll('_', ' ')}`);
+      lines.push(`Evidence: ${contract.evidence_mode.replaceAll('_', ' ')}`);
+      if(contract.clarify_first === 'on') lines.push('Clarify before committing when ambiguity matters.');
+      if(contract.surface_assumptions === 'on') lines.push('Assumptions will be surfaced instead of hidden.');
+      el('confidenceContractNote').textContent = lines.join('\\n');
+    }
+
     function applyBriefToHint(){
       const composed = composeSystemHint();
       el('systemHint').value = composed;
@@ -694,6 +950,9 @@ HTML = """<!doctype html>
       el('composerDockNote').textContent = focusLayout
         ? 'Focus layout hides the left rail so the thread and composer get the full width.'
         : 'Quick keeps the prompt visible. Media holds image controls. Workbench holds route preview and response shaping.';
+      applyThreadMetaState();
+      applyComposerCompactState();
+      applyAutoScrollState();
     }
 
     function applyThreadDensity(){
@@ -702,13 +961,15 @@ HTML = """<!doctype html>
     }
 
     function setComposeTab(nextTab){
-      const cooked = ['quick', 'media', 'workbench'].includes(nextTab) ? nextTab : 'quick';
-      composeTab = cooked;
+      const allowed = ['quick', 'media', 'workbench'];
+      const cooked = allowed.includes(nextTab) ? nextTab : 'quick';
+      const finalTab = composerCompact ? 'quick' : cooked;
+      composeTab = finalTab;
       document.querySelectorAll('[data-compose-tab]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.composeTab === cooked);
+        button.classList.toggle('active', button.dataset.composeTab === finalTab);
       });
       document.querySelectorAll('[data-compose-panel]').forEach((panel) => {
-        panel.hidden = panel.dataset.composePanel !== cooked;
+        panel.hidden = panel.dataset.composePanel !== finalTab;
       });
       persistUiState();
     }
@@ -728,6 +989,58 @@ HTML = """<!doctype html>
           updatePromptStats();
           el('prompt').focus();
           showToast('ok', `${item.label} response shape added.`);
+        };
+        box.appendChild(button);
+      });
+    }
+
+    function buildRefinementPrompt(sourceText, presetKey){
+      const clean = String(sourceText || '').trim();
+      if(!clean) return '';
+      if(presetKey === 'challenge'){
+        return `Critique the answer below. Identify the weakest assumptions, missing risks, or wrong turns. Then provide a corrected stronger version.\n\n[Answer]\n${clean}`;
+      }
+      if(presetKey === 'humanize'){
+        return `Rewrite the answer below so it communicates better to a human reader: cleaner flow, clearer headings, less jargon, and better transitions. Preserve the substance.\n\n[Answer]\n${clean}`;
+      }
+      if(presetKey === 'planify'){
+        return `Turn the answer below into an execution plan with milestones, decision points, checks, and the immediate next action.\n\n[Answer]\n${clean}`;
+      }
+      if(presetKey === 'code_audit'){
+        return `Review the answer below like a senior engineer. Find implementation gaps, risky assumptions, missing edge cases, and weak tradeoffs. Then provide an improved version.\n\n[Answer]\n${clean}`;
+      }
+      return `Revise the answer below. Make it shorter, clearer, and more information-dense without losing important substance. Return only the improved version.\n\n[Answer]\n${clean}`;
+    }
+
+    function latestAssistantReply(){
+      return [...transcript].reverse().find((item) => item.role === 'assistant' && item.response) || null;
+    }
+
+    function queueRefinementPrompt(sourceText, presetKey, sourceLabel){
+      const prompt = buildRefinementPrompt(sourceText, presetKey);
+      if(!prompt){
+        showToast('err', 'There is no assistant reply to refine yet.');
+        return;
+      }
+      el('prompt').value = prompt;
+      setComposeTab('quick');
+      updatePromptStats();
+      el('prompt').focus();
+      const preset = REFINEMENT_PRESETS.find((item) => item.key === presetKey);
+      showToast('ok', `${preset?.label || 'Refinement'} prompt prepared${sourceLabel ? ` from ${sourceLabel}` : ''}.`);
+    }
+
+    function buildRefinementDeck(){
+      const box = el('refinementDeck');
+      box.innerHTML = '';
+      REFINEMENT_PRESETS.forEach((preset) => {
+        const button = document.createElement('button');
+        button.className = 'chip';
+        button.type = 'button';
+        button.textContent = preset.label;
+        button.onclick = () => {
+          const last = latestAssistantReply();
+          queueRefinementPrompt(last?.response || '', preset.key, 'latest reply');
         };
         box.appendChild(button);
       });
@@ -848,7 +1161,7 @@ HTML = """<!doctype html>
         hintBtn.className = 'mini-btn';
         hintBtn.textContent = 'To Hint';
         hintBtn.onclick = () => {
-          const base = stripManagedBriefBlock(el('systemHint').value || '');
+          const base = stripManagedBlocks(el('systemHint').value || '');
           el('systemHint').value = [base, entry.text].filter(Boolean).join('\\n\\n');
           updatePromptStats();
           updateDispatchPreview();
@@ -1046,20 +1359,35 @@ HTML = """<!doctype html>
       };
     }
 
+    function describeAgentMode(mode){
+      const value = String(mode || 'off');
+      if(value === 'loop' || value === 'loop_agent') return 'loop agent';
+      if(value === 'collective') return 'collective panel';
+      if(value === 'collective_loop' || value === 'collective_loop_agent') return 'collective + loop';
+      return 'single reply';
+    }
+
     function updateDispatchPreview(){
       const record = findRecord(el('modelSelect').value || selectedModelKey) || findRecord(selectedModelKey) || findRecord('auto');
       const prompt = (el('prompt').value || '').trim();
       const lines = [];
       lines.push(`Route: ${record?.key === 'auto' ? 'Auto chooser' : (record?.label || record?.key || 'Auto')}`);
-      lines.push(`Mode: ${el('actionMode').value} | Agent: ${el('agentMode').value} | Style: ${el('styleMode').value}`);
+      lines.push(`Mode: ${el('actionMode').value} | Agent: ${describeAgentMode(el('agentMode').value)} | Style: ${el('styleMode').value}`);
+      if(el('agentMode').value === 'loop' || el('agentMode').value === 'collective_loop'){
+        lines.push(`Loop budget: ${el('loopBudget').value} autonomous step(s)`);
+      }
       lines.push(`Payload: ${textWordCount(prompt)} words${currentUploadedImagePath ? ' | image attached' : ''}${activeFocusKey ? ` | focus ${activeFocusKey}` : ''}`);
       const brief = buildSessionBriefText();
       if(brief) lines.push(`Brief: ${brief.replace(/\\n+/g, ' | ')}`);
+      const outcome = buildOutcomeBoardText();
+      if(outcome) lines.push(`Outcome: ${outcome.replace(/\\n+/g, ' | ')}`);
+      const contract = buildConfidenceContractText();
+      if(contract) lines.push(`Trust contract: ${contract.replace(/\\n+/g, ' | ')}`);
       if(contextBank.length){
         const preview = contextBank.slice(0, 3).map((item) => item.label || inferDraftLabel(item.text)).join(', ');
         lines.push(`Context bank: ${contextBank.length} saved${preview ? ` | ${preview}` : ''}`);
       }
-      const hint = stripManagedBriefBlock(el('systemHint').value || '');
+      const hint = stripManagedBlocks(el('systemHint').value || '');
       if(hint) lines.push(`Hint: ${summarizeText(hint, 170)}`);
       el('dispatchPreview').innerHTML = `<strong>Dispatch Preview</strong>${escapeHtml(lines.join('\\n')).replaceAll('\\n', '<br>')}`;
     }
@@ -1408,12 +1736,18 @@ HTML = """<!doctype html>
       const words = text.trim() ? text.trim().split(/\\s+/).length : 0;
       const chars = text.length;
       const brief = buildSessionBriefText();
+      const outcome = buildOutcomeBoardText();
+      const contract = currentConfidenceContract();
       const bits = [
         `${words} words`,
         `${chars} chars`,
         currentUploadedImagePath ? 'image attached' : 'no image',
         activeFocusKey ? `focus: ${activeFocusKey}` : 'focus: standard',
         brief ? 'brief active' : 'brief off',
+        outcome ? 'outcome board on' : 'outcome board off',
+        contract.confidence_mode !== 'standard' || contract.evidence_mode !== 'balanced' || contract.clarify_first === 'on' || contract.surface_assumptions === 'on'
+          ? 'trust contract on'
+          : 'trust contract off',
         contextBank.length ? `context ${contextBank.length}` : 'context off'
       ];
       el('promptStats').innerHTML = bits.map((bit) => `<div class="composer-stat">${escapeHtml(bit)}</div>`).join('');
@@ -1424,10 +1758,16 @@ HTML = """<!doctype html>
       const chips = [];
       chips.push(selectedModelKey === 'auto' ? 'Auto route' : (findRecord(selectedModelKey)?.label || selectedModelKey));
       chips.push('action ' + el('actionMode').value);
-      chips.push(el('agentMode').value === 'collective' ? 'collective panel' : 'single reply');
+      chips.push(describeAgentMode(el('agentMode').value));
+      if(el('agentMode').value === 'loop' || el('agentMode').value === 'collective_loop') chips.push(`loop x${el('loopBudget').value}`);
       chips.push(el('memoryMode').value === 'on' ? 'memory on' : 'memory off');
       chips.push(el('webSearchMode').value === 'on' ? 'web tool on' : 'web tool off');
       if(buildSessionBriefText()) chips.push('brief armed');
+      if(buildOutcomeBoardText()) chips.push('outcome board armed');
+      const contract = currentConfidenceContract();
+      if(contract.confidence_mode !== 'standard') chips.push(contract.confidence_mode.replaceAll('_', ' '));
+      if(contract.evidence_mode !== 'balanced') chips.push(contract.evidence_mode.replaceAll('_', ' '));
+      if(contract.clarify_first === 'on') chips.push('clarify first');
       if(contextBank.length) chips.push(`context ${contextBank.length}`);
       if(currentUploadedImagePath) chips.push('image attached');
       el('liveStateChips').innerHTML = chips.map((bit, idx) => `<div class="meta-pill ${idx === 0 ? 'accent' : ''}">${escapeHtml(bit)}</div>`).join('');
@@ -1437,10 +1777,73 @@ HTML = """<!doctype html>
 
     function applyThreadFilter(){
       const query = (el('threadFilter').value || '').trim().toLowerCase();
+      threadMatches = [];
+      threadMatchIndex = 0;
       thread.querySelectorAll('.msg').forEach((node) => {
         const text = (node.dataset.search || '').toLowerCase();
-        node.classList.toggle('dim', Boolean(query) && !text.includes(query));
+        const hit = Boolean(query) && text.includes(query);
+        node.classList.toggle('dim', Boolean(query) && !hit);
+        node.classList.toggle('match-active', false);
+        if(hit){
+          threadMatches.push(node);
+        }
       });
+      updateThreadMatchNote(query);
+    }
+
+    function updateThreadMatchNote(query){
+      const hasQuery = Boolean(query && query.trim());
+      el('threadMatchNote').textContent = hasQuery ? `Matches: ${threadMatches.length}` : 'Matches: -';
+    }
+
+    function jumpToNextMatch(){
+      if(!threadMatches.length){
+        showToast('err', 'No matches in this thread filter.');
+        return;
+      }
+      thread.querySelectorAll('.match-active').forEach((node) => node.classList.remove('match-active'));
+      const index = threadMatchIndex % threadMatches.length;
+      const node = threadMatches[index];
+      node.classList.add('match-active');
+      node.scrollIntoView({behavior:'smooth', block:'center'});
+      threadMatchIndex = (index + 1) % threadMatches.length;
+    }
+
+    function applyThreadMetaState(){
+      thread.classList.toggle('hide-meta', hideThreadMeta);
+      el('toggleMetaBtn').textContent = hideThreadMeta ? 'Show Meta' : 'Hide Meta';
+    }
+
+    function applyAutoScrollState(){
+      el('toggleAutoScrollBtn').textContent = autoScrollEnabled ? 'Auto-scroll On' : 'Auto-scroll Off';
+    }
+
+    function applyComposerCompactState(){
+      const composer = el('composer');
+      composer.classList.toggle('compact', composerCompact);
+      if(composerCompact && composeTab !== 'quick'){
+        setComposeTab('quick');
+      }
+      el('toggleComposerBtn').textContent = composerCompact ? 'Full Composer' : 'Compact Composer';
+    }
+
+    function isNearBottom(){
+      const remaining = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      return remaining < 60;
+    }
+
+    function syncAutoScrollFromThread(){
+      if(isNearBottom()){
+        if(!autoScrollEnabled){
+          autoScrollEnabled = true;
+          applyAutoScrollState();
+          persistUiState();
+        }
+      }else if(autoScrollEnabled){
+        autoScrollEnabled = false;
+        applyAutoScrollState();
+        persistUiState();
+      }
     }
 
     function transcriptAsText(){
@@ -1467,7 +1870,10 @@ HTML = """<!doctype html>
       }, 0);
     }
 
-    function jumpToLatest(){
+    function jumpToLatest(force){
+      if(!force && !autoScrollEnabled){
+        return;
+      }
       thread.scrollTop = thread.scrollHeight;
     }
 
@@ -1604,6 +2010,9 @@ HTML = """<!doctype html>
       }
       if(kind === 'assistant' && payload.response){
         actions.innerHTML += `<button class="mini-btn reuse-msg-btn" data-reuse-text="${escapeHtml(payload.response || '')}">Reuse In Prompt</button>`;
+        actions.innerHTML += `<button class="mini-btn refine-msg-btn" data-refine-mode="tighten">Tighten</button>`;
+        actions.innerHTML += `<button class="mini-btn refine-msg-btn" data-refine-mode="challenge">Challenge</button>`;
+        actions.innerHTML += `<button class="mini-btn refine-msg-btn" data-refine-mode="humanize">Humanize</button>`;
         actions.innerHTML += `<button class="mini-btn compare-a-btn">Pin A</button>`;
         actions.innerHTML += `<button class="mini-btn compare-b-btn">Pin B</button>`;
       }
@@ -1621,6 +2030,10 @@ HTML = """<!doctype html>
         if((payload.agent_trace.consulted_models || []).length){
           blocks.push('Consulted Models\\n' + payload.agent_trace.consulted_models.join(', '));
         }
+        if((payload.agent_trace.skipped_models || []).length){
+          const skippedBits = payload.agent_trace.skipped_models.map(item => `- ${(item.model_label || item.model_key || 'model')}: ${item.error || 'unavailable'}`);
+          blocks.push('Skipped Models\\n' + skippedBits.join('\\n'));
+        }
         if((payload.agent_trace.tool_events || []).length){
           const searchBits = payload.agent_trace.tool_events.map(event => {
             if(event.name === 'open_cmd'){
@@ -1630,6 +2043,24 @@ HTML = """<!doctype html>
             return `- ${event.query}${domains ? ' -> ' + domains : ''}`;
           });
           blocks.push('Tool Activity\\n' + searchBits.join('\\n'));
+        }
+        if((payload.agent_trace.loop_steps || []).length){
+          const loopBits = payload.agent_trace.loop_steps.map((step) => {
+            const parts = [`Step ${step.step || '?'}`];
+            if(step.goal) parts.push(`goal: ${step.goal}`);
+            if(step.worker_excerpt) parts.push(`worker: ${step.worker_excerpt}`);
+            if(step.review_note) parts.push(`review: ${step.review_note}`);
+            if(step.next_step) parts.push(`next: ${step.next_step}`);
+            return '- ' + parts.join(' | ');
+          });
+          const head = [
+            `mode ${describeAgentMode(payload.agent_trace.agent_mode)}`,
+            payload.agent_trace.loop_controller_model ? `controller ${payload.agent_trace.loop_controller_model}` : '',
+            payload.agent_trace.loop_budget ? `budget ${payload.agent_trace.loop_budget}` : '',
+            payload.agent_trace.loop_completed === true ? 'complete' : 'still open',
+          ].filter(Boolean).join(' | ');
+          const reason = payload.agent_trace.loop_completion_reason ? `\\n${payload.agent_trace.loop_completion_reason}` : '';
+          blocks.push('Loop Agent\\n' + head + reason + '\\n' + loopBits.join('\\n'));
         }
         if(blocks.length){
           const trace = document.createElement('div');
@@ -1652,7 +2083,7 @@ HTML = """<!doctype html>
         card.dataset.comparePayload = JSON.stringify(snapshotAssistantReply(payload));
       }
       thread.appendChild(card);
-      jumpToLatest();
+      jumpToLatest(false);
       transcript.push(buildTranscriptEntry(kind, payload));
       summarizeTranscript();
       applyThreadFilter();
@@ -1783,6 +2214,7 @@ HTML = """<!doctype html>
         action_mode: el('actionMode').value,
         settings: {
           agent_mode: el('agentMode').value,
+          loop_max_steps: Number(el('loopBudget').value || 4),
           memory_enabled: el('memoryMode').value === 'on',
           web_search_enabled: el('webSearchMode').value === 'on',
           uploaded_image_path: currentUploadedImagePath,
@@ -1918,6 +2350,11 @@ HTML = """<!doctype html>
       persistUiState();
       applyThreadDensity();
     };
+    el('toggleComposerBtn').onclick = () => {
+      composerCompact = !composerCompact;
+      persistUiState();
+      applyComposerCompactState();
+    };
     el('refreshStoreBtn').onclick = () => refreshModelStore(true);
     document.querySelectorAll('[data-compose-tab]').forEach((button) => {
       button.onclick = () => setComposeTab(button.dataset.composeTab || 'quick');
@@ -1931,6 +2368,7 @@ HTML = """<!doctype html>
       updateDiscoveryNote(filteredCatalogRecords());
     });
     el('agentMode').addEventListener('change', () => { refreshUploadPanel(); updateLiveState(); });
+    el('loopBudget').addEventListener('change', () => { updateLiveState(); updatePromptStats(); });
     el('actionMode').addEventListener('change', () => { refreshUploadPanel(); updateLiveState(); updatePromptStats(); });
     el('memoryMode').addEventListener('change', updateLiveState);
     el('webSearchMode').addEventListener('change', updateLiveState);
@@ -1939,7 +2377,33 @@ HTML = """<!doctype html>
     el('sessionObjective').addEventListener('input', syncSessionBrief);
     el('sessionConstraints').addEventListener('input', syncSessionBrief);
     el('sessionDone').addEventListener('input', syncSessionBrief);
+    el('deliverableTarget').addEventListener('input', syncOutcomeBoard);
+    el('successChecks').addEventListener('input', syncOutcomeBoard);
+    el('riskBox').addEventListener('input', syncOutcomeBoard);
+    el('confidenceMode').addEventListener('change', syncConfidenceContract);
+    el('evidenceMode').addEventListener('change', syncConfidenceContract);
+    el('clarifyMode').addEventListener('change', syncConfidenceContract);
+    el('assumptionMode').addEventListener('change', syncConfidenceContract);
     el('threadFilter').addEventListener('input', applyThreadFilter);
+    el('clearThreadFilterBtn').onclick = () => {
+      el('threadFilter').value = '';
+      applyThreadFilter();
+    };
+    el('jumpMatchBtn').onclick = jumpToNextMatch;
+    el('toggleAutoScrollBtn').onclick = () => {
+      autoScrollEnabled = !autoScrollEnabled;
+      applyAutoScrollState();
+      persistUiState();
+      if(autoScrollEnabled){
+        jumpToLatest(true);
+      }
+    };
+    el('toggleMetaBtn').onclick = () => {
+      hideThreadMeta = !hideThreadMeta;
+      applyThreadMetaState();
+      persistUiState();
+    };
+    thread.addEventListener('scroll', syncAutoScrollFromThread);
     thread.addEventListener('click', (event) => {
       const button = event.target.closest('.save-image-btn');
       if(button){
@@ -1956,6 +2420,12 @@ HTML = """<!doctype html>
         el('prompt').value = reuseButton.dataset.reuseText || '';
         el('prompt').focus();
         updatePromptStats();
+        return;
+      }
+      const refineButton = event.target.closest('.refine-msg-btn');
+      if(refineButton){
+        const card = refineButton.closest('.msg');
+        queueRefinementPrompt(card?.dataset.messageText || '', refineButton.dataset.refineMode || 'tighten', card?.dataset.messageLabel || 'reply');
         return;
       }
       const pinContextButton = event.target.closest('.pin-context-btn');
@@ -1997,9 +2467,28 @@ HTML = """<!doctype html>
     });
     el('prompt').addEventListener('input', updatePromptStats);
     el('applyBriefBtn').onclick = applyBriefToHint;
+    el('applyOutcomeBtn').onclick = () => {
+      const composed = composeSystemHint();
+      el('systemHint').value = composed;
+      updatePromptStats();
+      updateDispatchPreview();
+      showToast('ok', composed ? 'Outcome board folded into system hint.' : 'No outcome board to apply.');
+    };
+    el('clearOutcomeBtn').onclick = () => {
+      clearOutcomeBoard();
+      showToast('ok', 'Outcome board cleared.');
+    };
     el('clearBriefBtn').onclick = () => {
       clearSessionBrief();
       showToast('ok', 'Session brief cleared.');
+    };
+    el('refineLastReplyBtn').onclick = () => {
+      const last = latestAssistantReply();
+      queueRefinementPrompt(last?.response || '', 'tighten', 'latest reply');
+    };
+    el('challengeLastReplyBtn').onclick = () => {
+      const last = latestAssistantReply();
+      queueRefinementPrompt(last?.response || '', 'challenge', 'latest reply');
     };
     el('saveDraftBtn').onclick = saveCurrentDraft;
     el('insertLatestDraftBtn').onclick = () => {
@@ -2034,7 +2523,7 @@ HTML = """<!doctype html>
       downloadTranscriptJson();
       showToast('ok', 'Thread JSON downloaded.');
     };
-    el('jumpBottomBtn').onclick = jumpToLatest;
+    el('jumpBottomBtn').onclick = () => jumpToLatest(true);
     el('swapCompareBtn').onclick = () => {
       const temp = compareSlots.a;
       compareSlots.a = compareSlots.b;
@@ -2048,11 +2537,17 @@ HTML = """<!doctype html>
 
     buildStarterChips();
     buildResponseDeck();
+    buildRefinementDeck();
     applySessionBriefInputs();
+    applyOutcomeBoardInputs();
+    applyConfidenceContractInputs();
     applyLayoutState();
     applyThreadDensity();
+    applyThreadFilter();
     setComposeTab(composeTab);
     renderSessionBrief();
+    renderOutcomeBoard();
+    renderConfidenceContract();
     renderSavedDrafts();
     renderContextBank();
     renderThreadBookmarks();

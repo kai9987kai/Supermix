@@ -18,6 +18,7 @@ class ArtifactSpec:
     family: str
     filename_tokens: Sequence[str]
     common_row_key: Optional[str]
+    virtual: bool = False
     note: str = ""
     recipe_eval_accuracy: Optional[float] = None
     score_source: str = "common"
@@ -272,6 +273,30 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
         specialist_metric_label="omni val",
     ),
     ArtifactSpec(
+        key="omni_collective_v8",
+        label="omni_collective_v8",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v8_frontier_20260408",),
+        common_row_key="omni_collective_v8",
+        score_source="specialist_only",
+        note="Final omni v8 frontier with all-model distillation, broader multimodal grounding, denser conversation data, and longer deliberation.",
+        specialist_summary_path="output/supermix_omni_collective_v8_frontier_20260408/omni_collective_v8_frontier_summary.json",
+        specialist_metric_key="stage2.best_score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
+        key="omni_collective_v41",
+        label="omni_collective_v41",
+        family="fusion",
+        filename_tokens=("supermix_omni_collective_v41_frontier_",),
+        common_row_key="omni_collective_v41",
+        score_source="specialist_only",
+        note="Frontier omni v41 continuation with hidden planning, communication-polish, uncertainty, and code-repair upgrades.",
+        specialist_summary_path="output/supermix_omni_collective_v41_frontier_20260410_015540/omni_collective_v41_frontier_summary.json",
+        specialist_metric_key="stage2.best_score",
+        specialist_metric_label="omni val",
+    ),
+    ArtifactSpec(
         key="v40_benchmax",
         label="v40_benchmax",
         family="fusion",
@@ -321,12 +346,26 @@ ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
     ),
 )
 
+VIRTUAL_ARTIFACT_SPECS: Sequence[ArtifactSpec] = (
+    ArtifactSpec(
+        key="auto_collective_loop",
+        label="auto_collective_loop_s5",
+        family="router",
+        filename_tokens=(),
+        common_row_key="auto_collective_loop",
+        virtual=True,
+        score_source="runtime",
+        note="Prompt-aware auto router benchmarked on a reduced 5-per-benchmark sampled suite with collective loop mode enabled, a two-step loop budget, and a benchmark-focused consultant subset.",
+    ),
+)
+
 
 FAMILY_COLORS: Dict[str, str] = {
     "qwen": "#d97706",
     "champion": "#2563eb",
     "native_image": "#15803d",
     "wrapper": "#6b7280",
+    "router": "#475569",
     "vision": "#7c3aed",
     "gan": "#b91c1c",
     "fusion": "#db2777",
@@ -358,6 +397,7 @@ FAMILY_DESCRIPTIONS: Dict[str, str] = {
     "champion": "Champion-family text model",
     "native_image": "Native image-capable checkpoint",
     "wrapper": "Wrapper or alias artifact",
+    "router": "Prompt-routed multimodel runtime benchmark",
     "vision": "Vision specialist artifact",
     "gan": "GAN image-generation specialist",
     "fusion": "Omni fused multimodal model",
@@ -517,6 +557,31 @@ def build_rows(models_dir: Path, common_summary_path: Path, repo_root: Path) -> 
         if common_row and isinstance(common_row.get("benchmarks"), dict):
             row["per_benchmark"] = common_row["benchmarks"]
         rows.append(row)
+    for spec in VIRTUAL_ARTIFACT_SPECS:
+        common_row = common_rows.get(spec.common_row_key) if spec.common_row_key else None
+        if common_row is None:
+            continue
+        common_score = _safe_float(common_row.get("overall_exact"))
+        recipe_score = _safe_float(spec.recipe_eval_accuracy)
+        specialist_score, specialist_label = _load_specialist_metric(repo_root, spec)
+        row = {
+            "model_key": spec.key,
+            "label": spec.label,
+            "family": spec.family,
+            "zip_path": "",
+            "zip_name": "",
+            "zip_size_bytes": 0,
+            "common_benchmark_model": spec.common_row_key,
+            "common_overall_exact": common_score,
+            "recipe_eval_accuracy": recipe_score,
+            "specialist_metric_value": specialist_score,
+            "specialist_metric_label": specialist_label,
+            "score_source": spec.score_source,
+            "note": spec.note,
+        }
+        if isinstance(common_row.get("benchmarks"), dict):
+            row["per_benchmark"] = common_row["benchmarks"]
+        rows.append(row)
     rows.sort(
         key=lambda item: (
             _score_for_sort(_safe_float(item.get("common_overall_exact")), _safe_float(item.get("recipe_eval_accuracy"))),
@@ -628,8 +693,8 @@ def render_svg(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
         '</style>',
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="#ffffff" />',
         f'<text class="title" x="{left_pad}" y="36">Local Model Benchmark Graph</text>',
-        f'<text class="subtitle" x="{left_pad}" y="60">Built from local zips in {_svg_escape(str(models_dir))}. Common-benchmark scores come from the saved expanded sweep. v39 is recipe-eval only.</text>',
-        f'<text class="small" x="{left_pad}" y="82">Duplicate downloads and alternate packaging were collapsed so each distinct local model family appears once.</text>',
+        f'<text class="subtitle" x="{left_pad}" y="60">Built from local zips in {_svg_escape(str(models_dir))} plus any saved virtual runtime rows. Common-benchmark scores come from the saved expanded sweep. v39 is recipe-eval only.</text>',
+        f'<text class="small" x="{left_pad}" y="82">Duplicate downloads and alternate packaging were collapsed so each distinct local model family appears once, and runtime-only rows are shown without zip files.</text>',
     ]
 
     for tick in ticks:
@@ -680,6 +745,7 @@ def render_svg(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
             "common": "common",
             "common_alias": "common alias",
             "recipe_eval_only": "recipe only",
+            "runtime": "runtime",
         }.get(score_source, score_source)
         lines.append(
             f'<text class="small" x="{left_pad + plot_width + 12}" y="{y + 4}">{_svg_escape(source_note)}</text>'
@@ -764,7 +830,7 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
     c.setFont("Helvetica-Bold", 18)
     c.drawString(left_pad, page_height - 32, "Local Model Benchmark Graph")
     after_subtitle_y = draw_wrapped(
-        f"Built from local zips in {models_dir}. Common-benchmark scores come from the saved expanded sweep plus local add-on runs for newly benchmarked models.",
+        f"Built from local zips in {models_dir} plus any saved virtual runtime rows. Common-benchmark scores come from the saved expanded sweep plus local add-on runs for newly benchmarked models.",
         left_pad,
         page_height - 50,
         plot_width + right_pad - 10,
@@ -773,7 +839,7 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
         colors.HexColor("#374151"),
     )
     draw_wrapped(
-        "Duplicate downloads and alternate packaging were collapsed so each distinct local model family appears once.",
+        "Duplicate downloads and alternate packaging were collapsed so each distinct local model family appears once, and runtime-only rows are shown without zip files.",
         left_pad,
         after_subtitle_y - 2,
         plot_width + right_pad - 10,
@@ -855,6 +921,7 @@ def render_pdf(path: Path, rows: Sequence[Dict[str, object]], models_dir: Path, 
             "common": "common",
             "common_alias": "common alias",
             "recipe_eval_only": "recipe only",
+            "runtime": "runtime",
         }.get(score_source, score_source)
         c.setFillColor(colors.HexColor("#4b5563"))
         c.setFont("Helvetica", 8)
@@ -998,6 +1065,7 @@ def main() -> int:
             "Rows marked common_alias map a final artifact to the chosen or equivalent scored checkpoint.",
             "recipe_eval_accuracy is retained when available so the graph can still show the local recipe holdout marker alongside a later common score.",
             "Specialist-only models that still lack a common score expose their local validation metric in specialist_metric_value and render as N/A in the common benchmark matrix.",
+            "Runtime-only rows can also appear without a backing zip file when the saved common-benchmark summary includes benchmarked router or agent configurations.",
         ],
     }
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

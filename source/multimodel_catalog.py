@@ -297,6 +297,19 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         preferred_meta=("omni_collective_v8_frontier_meta.json",),
     ),
     ModelSpec(
+        key="omni_collective_v41",
+        label="Omni Collective V41 Frontier",
+        family="fusion",
+        kind="omni_collective_v41",
+        filename_tokens=("supermix_omni_collective_v41_frontier_",),
+        common_row_key="omni_collective_v41",
+        capabilities=("chat", "vision"),
+        note="V41 frontier checkpoint with hidden planning, reflection passes, communication polish, and stronger coding-repair supervision.",
+        benchmark_hint="Latest omni frontier checkpoint with v41 planning and communication upgrades.",
+        preferred_weights=("omni_collective_v41_frontier.pth",),
+        preferred_meta=("omni_collective_v41_frontier_meta.json",),
+    ),
+    ModelSpec(
         key="omni_collective_v8_preview",
         label="Omni Collective V8 Preview",
         family="fusion",
@@ -714,7 +727,8 @@ def choose_auto_model(
 
     if not prompt_text:
         return (
-            available.get("v40_benchmax")
+            available.get("omni_collective_v41")
+            or available.get("v40_benchmax")
             or available.get("omni_collective_v6")
             or available.get("omni_collective_v5")
             or available.get("omni_collective_v4")
@@ -741,16 +755,16 @@ def choose_auto_model(
     wants_model_selection = any(token in lowered for token in ("which model", "best model", "select a model", "pick a model"))
 
     if wants_model_selection:
-        for key in ("omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "v40_benchmax", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
+        for key in ("omni_collective_v41", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "v40_benchmax", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
             if key in available:
                 return available[key], "Auto picked the fused catalog model because the prompt asks about model choice."
 
     if wants_vision and vision_models:
         if has_uploaded_image and any(token in lowered for token in ("compare", "explain", "teach", "why", "analyze", "analyse")):
-            for key in ("omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "science_vision_micro_v1"):
+            for key in ("omni_collective_v41", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "science_vision_micro_v1"):
                 if key in available:
                     return available[key], "Auto picked a vision-capable chat model because an uploaded image needs analysis."
-        for key in ("science_vision_micro_v1", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v40_benchmax"):
+        for key in ("science_vision_micro_v1", "omni_collective_v41", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v40_benchmax"):
             if key in available:
                 return available[key], "Auto picked the uploaded-image recognition model because the prompt looks visual."
 
@@ -773,17 +787,17 @@ def choose_auto_model(
                 return available[key], "Auto picked the math specialist because the prompt looks like an equation or symbolic math task."
 
     if wants_protein:
-        for key in ("protein_folding_micro_v1", "v40_benchmax", "omni_collective_v6", "v33_final"):
+        for key in ("protein_folding_micro_v1", "omni_collective_v41", "v40_benchmax", "omni_collective_v6", "v33_final"):
             if key in available:
                 return available[key], "Auto picked the protein-folding specialist because the prompt looks like protein structure or folding analysis."
 
     if wants_materials:
-        for key in ("mattergen_micro_v1", "v40_benchmax", "omni_collective_v6", "v33_final"):
+        for key in ("mattergen_micro_v1", "omni_collective_v41", "v40_benchmax", "omni_collective_v6", "v33_final"):
             if key in available:
                 return available[key], "Auto picked the materials-generation specialist because the prompt looks like crystal or property-conditioned materials design."
 
     if wants_3d:
-        for key in ("three_d_generation_micro_v1", "omni_collective_v6", "omni_collective_v5", "v40_benchmax", "v33_final"):
+        for key in ("three_d_generation_micro_v1", "omni_collective_v41", "omni_collective_v6", "omni_collective_v5", "v40_benchmax", "v33_final"):
             if key in available:
                 return available[key], "Auto picked the 3D-generation specialist because the prompt looks like OpenSCAD, CAD, or small 3D model generation."
 
@@ -796,16 +810,16 @@ def choose_auto_model(
         return available["v39_final"], "Auto picked the newest experimental reasoning checkpoint."
 
     if CODE_PROMPT_RE.search(prompt_text) or ANALYTIC_PROMPT_RE.search(prompt_text):
-        for key in ("v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "qwen_v28"):
+        for key in ("omni_collective_v41", "v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "qwen_v28"):
             if key in available:
                 return available[key], "Auto picked the strongest benchmarked reasoning/coding text model."
 
     if CREATIVE_PROMPT_RE.search(prompt_text):
-        for key in ("qwen_v28", "omni_collective_v6", "omni_collective_v5", "v40_benchmax", "omni_collective_v4", "omni_collective_v3", "v33_final", "v31_final"):
+        for key in ("omni_collective_v41", "qwen_v28", "omni_collective_v6", "omni_collective_v5", "v40_benchmax", "omni_collective_v4", "omni_collective_v3", "v33_final", "v31_final"):
             if key in available:
                 return available[key], "Auto picked a more open-ended text model for a creative prompt."
 
-    for key in ("v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "v31_final", "qwen_v28"):
+    for key in ("omni_collective_v41", "v40_benchmax", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "v31_final", "qwen_v28"):
         if key in available:
             return available[key], "Auto picked the default strongest local text model."
     return (text_models[0] if text_models else (image_models[0] if image_models else None), "Auto fell back to the first available local model.")

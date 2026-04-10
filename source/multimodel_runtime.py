@@ -60,6 +60,7 @@ from omni_collective_v5_model import OmniCollectiveEngineV5
 from omni_collective_v6_model import OmniCollectiveEngineV6
 from omni_collective_v7_model import OmniCollectiveEngineV7
 from omni_collective_v8_model import OmniCollectiveEngineV8
+from omni_collective_v41_model import OmniCollectiveEngineV41
 from run import safe_load_state_dict
 
 
@@ -105,6 +106,31 @@ def _trim_text(text: str, limit: int = 320) -> str:
     return cooked[:limit]
 
 
+def _extract_labeled_section(text: str, label: str) -> str:
+    cooked = str(text or "")
+    if not cooked.strip():
+        return ""
+    pattern = re.compile(
+        rf"(?ims)^\s*{re.escape(label)}\s*:\s*(.*?)\s*(?=^\s*[A-Z_ ]+\s*:|\Z)"
+    )
+    match = pattern.search(cooked)
+    if match:
+        return " ".join(match.group(1).strip().split())
+    return ""
+
+
+def _parse_yes_no_section(text: str, label: str) -> Optional[bool]:
+    section = _extract_labeled_section(text, label)
+    if not section:
+        return None
+    lowered = section.strip().lower()
+    if lowered.startswith(("yes", "true", "done", "complete")):
+        return True
+    if lowered.startswith(("no", "false", "not", "continue", "incomplete")):
+        return False
+    return None
+
+
 def _safe_upload_name(filename: str) -> str:
     cooked = re.sub(r"[^A-Za-z0-9._-]+", "-", str(filename or "").strip()).strip(".-")
     return cooked[:96] or "upload.png"
@@ -112,10 +138,23 @@ def _safe_upload_name(filename: str) -> str:
 
 DEFAULT_MODEL_STORE_REPO_ID = "Kai9987kai/supermix-model-zoo"
 MODEL_STORE_CACHE_TTL_SECONDS = 300.0
+LOOP_AGENT_DEFAULT_MAX_STEPS = 4
+LOOP_AGENT_HARD_MAX_STEPS = 8
 
 
 def _hf_dataset_file_url(repo_id: str, filename: str) -> str:
     return f"https://huggingface.co/datasets/{repo_id}/resolve/main/{quote(filename)}?download=true"
+
+
+def _missing_zip_members(archive: zipfile.ZipFile, target: Path) -> List[str]:
+    missing: List[str] = []
+    for member in archive.infolist():
+        if member.is_dir():
+            continue
+        candidate = target / member.filename
+        if not candidate.exists():
+            missing.append(member.filename)
+    return missing
 
 
 def _extract_zip_once(zip_path: Path, extraction_root: Path) -> Path:
@@ -152,6 +191,15 @@ def _extract_zip_once(zip_path: Path, extraction_root: Path) -> Path:
     target.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
         archive.extractall(target)
+        missing = _missing_zip_members(archive, target)
+        if missing:
+            for member in missing:
+                archive.extract(member, target)
+            missing = _missing_zip_members(archive, target)
+        if missing:
+            raise FileNotFoundError(
+                f"Extraction of {zip_path.name} is incomplete; missing {len(missing)} file(s), including {missing[:3]}"
+            )
     marker.write_text(json.dumps(expected_meta, indent=2), encoding="utf-8")
     return target
 
@@ -992,6 +1040,49 @@ class OmniCollectiveV8Backend(BaseBackend):
         )
 
 
+class OmniCollectiveV41Backend(BaseBackend):
+    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
+        super().__init__(record, extracted_dir, generated_dir)
+        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
+        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
+        if weights_path is None or meta_path is None:
+            raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
+        self.weights_path = weights_path.resolve()
+        self.meta_path = meta_path.resolve()
+        self.engine = OmniCollectiveEngineV41(weights_path=self.weights_path, meta_path=self.meta_path)
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "omni_collective_v41",
+            "record": self.record.to_dict(),
+            "weights_path": str(self.weights_path),
+            "meta_path": str(self.meta_path),
+            "runtime": {
+                "device": str(self.engine.device),
+                "image_size": int(self.engine.image_size),
+                "vocab_size": len(self.engine.vocab),
+                "response_count": len(self.engine.responses),
+                "deliberation_passes": int(self.engine.deliberation_passes),
+                "minimum_passes": int(self.engine.minimum_passes),
+                "grounding_threshold": float(self.engine.grounding_threshold),
+            },
+        }
+
+    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
+        image_path = str(settings.get("uploaded_image_path") or "").strip()
+        effective_prompt = _compose_text_prompt(prompt, settings)
+        response = self.engine.answer(effective_prompt, image_path=image_path or None)
+        return ChatResult(
+            kind="text",
+            model_key=self.record.key,
+            model_label=self.record.label,
+            route_reason=str(settings.get("route_reason") or ""),
+            response=response,
+            timing={},
+            prompt_used=effective_prompt,
+        )
+
+
 class UnifiedModelManager:
     def __init__(
         self,
@@ -1002,6 +1093,7 @@ class UnifiedModelManager:
         models_dir: Path = DEFAULT_MODELS_DIR,
         common_summary_path: Path = DEFAULT_COMMON_SUMMARY,
         model_store_repo_id: str = DEFAULT_MODEL_STORE_REPO_ID,
+        backend_cache_size: int = 1,
     ) -> None:
         configure_torch_runtime(
             torch_num_threads=0,
@@ -1026,8 +1118,11 @@ class UnifiedModelManager:
         self.device_info = device_info
         self.selected_model_key = "auto"
         self.last_route_reason = ""
+        self._backend_cache_size = max(1, int(backend_cache_size))
         self._backend: Optional[BaseBackend] = None
         self._backend_key = ""
+        self._backend_cache: Dict[str, BaseBackend] = {}
+        self._backend_lru: List[str] = []
         self._lock = threading.RLock()
         self._model_store_manifest_cache: Optional[Dict[str, Any]] = None
         self._model_store_manifest_ts = 0.0
@@ -1070,6 +1165,8 @@ class UnifiedModelManager:
             return OmniCollectiveV7Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "omni_collective_v8":
             return OmniCollectiveV8Backend(record, extracted_dir, self.generated_dir)
+        if record.kind == "omni_collective_v41":
+            return OmniCollectiveV41Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "qwen_adapter":
             return QwenBackend(record, extracted_dir, self.generated_dir)
         raise RuntimeError(f"Unsupported model kind: {record.kind}")
@@ -1077,13 +1174,41 @@ class UnifiedModelManager:
     def ensure_backend(self, model_key: str) -> Tuple[ModelRecord, BaseBackend]:
         with self._lock:
             record = self.record_map[model_key]
-            if self._backend is not None and self._backend_key == model_key:
+            if self._backend_cache_size <= 1:
+                if self._backend is not None and self._backend_key == model_key:
+                    return record, self._backend
+                if self._backend is not None:
+                    self._backend.unload()
+                self._backend = self._build_backend(record)
+                self._backend_key = model_key
                 return record, self._backend
-            if self._backend is not None:
-                self._backend.unload()
-            self._backend = self._build_backend(record)
+
+            cached = self._backend_cache.get(model_key)
+            if cached is not None:
+                if model_key in self._backend_lru:
+                    self._backend_lru.remove(model_key)
+                self._backend_lru.append(model_key)
+                self._backend = cached
+                self._backend_key = model_key
+                return record, cached
+
+            backend = self._build_backend(record)
+            self._backend_cache[model_key] = backend
+            if model_key in self._backend_lru:
+                self._backend_lru.remove(model_key)
+            self._backend_lru.append(model_key)
+            while len(self._backend_lru) > self._backend_cache_size:
+                evict_key = self._backend_lru.pop(0)
+                evicted = self._backend_cache.pop(evict_key, None)
+                if evicted is not None:
+                    evicted.unload()
+                if self._backend_key == evict_key:
+                    self._backend = None
+                    self._backend_key = ""
+
+            self._backend = backend
             self._backend_key = model_key
-            return record, self._backend
+            return record, backend
 
     def _refresh_records_locked(self) -> None:
         refreshed = discover_model_records(
@@ -1092,6 +1217,14 @@ class UnifiedModelManager:
         )
         self.records = list(refreshed)
         self.record_map = {record.key: record for record in self.records}
+        valid_keys = set(self.record_map)
+        for key in list(self._backend_cache):
+            if key not in valid_keys:
+                backend = self._backend_cache.pop(key, None)
+                if backend is not None:
+                    backend.unload()
+                if key in self._backend_lru:
+                    self._backend_lru.remove(key)
         if self.selected_model_key != "auto" and self.selected_model_key not in self.record_map:
             self.selected_model_key = "auto"
         if self._backend_key and self._backend_key not in self.record_map:
@@ -1272,7 +1405,7 @@ class UnifiedModelManager:
         return f"{session_id}::{purpose}::{record_key}"
 
     def _default_text_record(self) -> ModelRecord:
-        for key in ("v40_benchmax", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
+        for key in ("omni_collective_v41", "v40_benchmax", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
             if key in self.record_map and self.record_map[key].supports_chat:
                 return self.record_map[key]
         for record in self.records:
@@ -1280,8 +1413,43 @@ class UnifiedModelManager:
                 return record
         raise RuntimeError("No text-capable local models were discovered.")
 
-    def _collective_consultants(self) -> List[ModelRecord]:
-        return [record for record in self.records if record.supports_chat]
+    def _collective_consultants(
+        self,
+        settings: Optional[Dict[str, Any]] = None,
+        chosen_record: Optional[ModelRecord] = None,
+    ) -> List[ModelRecord]:
+        consultants = [record for record in self.records if record.supports_chat]
+        if not consultants:
+            return []
+
+        settings = dict(settings or {})
+        raw_keys = settings.get("collective_consultant_keys")
+        preferred_keys: List[str] = []
+        if isinstance(raw_keys, str):
+            preferred_keys = [part.strip() for part in raw_keys.split(",") if part.strip()]
+        elif isinstance(raw_keys, (list, tuple)):
+            preferred_keys = [str(part).strip() for part in raw_keys if str(part).strip()]
+
+        ranked: List[ModelRecord] = []
+        seen: set[str] = set()
+
+        def add_record(record: Optional[ModelRecord]) -> None:
+            if record is None or not record.supports_chat or record.key in seen:
+                return
+            ranked.append(record)
+            seen.add(record.key)
+
+        if bool(settings.get("collective_include_chosen", True)):
+            add_record(chosen_record)
+        for key in preferred_keys:
+            add_record(self.record_map.get(key))
+        for record in consultants:
+            add_record(record)
+
+        limit = int(settings.get("collective_consultant_limit") or 0)
+        if limit > 0:
+            ranked = ranked[:limit]
+        return ranked
 
     def _prepare_memory_bundle(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> Dict[str, Any]:
         if settings.get("memory_enabled", True) is False:
@@ -1424,6 +1592,282 @@ class UnifiedModelManager:
             f"Original request:\n{prompt}"
         )
 
+    def _normalized_agent_mode(self, raw_mode: Any) -> str:
+        cooked = str(raw_mode or "off").strip().lower()
+        aliases = {
+            "collective_all": "collective",
+            "panel": "collective",
+            "loop_agent": "loop",
+            "collective_loop_agent": "collective_loop",
+        }
+        normalized = aliases.get(cooked, cooked)
+        if normalized in {"off", "collective", "loop", "collective_loop"}:
+            return normalized
+        return "off"
+
+    def _format_loop_history(self, steps: Sequence[Dict[str, str]]) -> str:
+        if not steps:
+            return "No prior loop work yet."
+        lines: List[str] = []
+        for row in steps:
+            lines.append(f"Step {row.get('step')}:")
+            if row.get("goal"):
+                lines.append(f"Goal: {row['goal']}")
+            if row.get("worker_excerpt"):
+                lines.append(f"Worker: {row['worker_excerpt']}")
+            if row.get("review_note"):
+                lines.append(f"Reviewer: {row['review_note']}")
+            if row.get("next_step"):
+                lines.append(f"Next: {row['next_step']}")
+        return "\n".join(lines[-20:])
+
+    def _build_loop_planner_prompt(self, prompt: str, history: str, step_index: int, max_steps: int) -> str:
+        return (
+            "You are the planner sub-agent inside a loop agent.\n"
+            "Break the user's task into the single highest-value next action.\n"
+            "Respond using exactly these headings:\n"
+            "DONE: yes or no\n"
+            "STEP_GOAL: one concise sentence\n"
+            "SUCCESS_SIGNAL: how to know the task is complete\n"
+            "WORKING_NOTES: short reasoning\n\n"
+            f"Original task:\n{prompt}\n\n"
+            f"Loop step: {step_index} of {max_steps}\n\n"
+            f"Work log:\n{history}"
+        )
+
+    def _build_loop_worker_prompt(
+        self,
+        prompt: str,
+        *,
+        history: str,
+        step_goal: str,
+        step_index: int,
+        max_steps: int,
+    ) -> str:
+        return (
+            "You are the worker sub-agent inside a loop agent.\n"
+            "Execute the next best action for the task. Prefer doing the work over talking about the work.\n"
+            "Respond using exactly these headings:\n"
+            "DONE: yes or no\n"
+            "OUTPUT: the actual deliverable or best current progress\n"
+            "NEXT_FOCUS: what should happen next if not done\n\n"
+            f"Original task:\n{prompt}\n\n"
+            f"Loop step: {step_index} of {max_steps}\n"
+            f"Current goal:\n{step_goal}\n\n"
+            f"Work log:\n{history}"
+        )
+
+    def _build_loop_review_prompt(
+        self,
+        prompt: str,
+        *,
+        history: str,
+        latest_output: str,
+        success_signal: str,
+        step_index: int,
+        max_steps: int,
+    ) -> str:
+        return (
+            "You are the reviewer sub-agent inside a loop agent.\n"
+            "Judge whether the user's task is complete enough to stop.\n"
+            "Respond using exactly these headings:\n"
+            "COMPLETE: yes or no\n"
+            "FINAL_RESPONSE: the reply that should be shown to the user right now\n"
+            "REASON: why you marked it complete or incomplete\n"
+            "NEXT_STEP: the next action if it is not complete\n\n"
+            f"Original task:\n{prompt}\n\n"
+            f"Loop step: {step_index} of {max_steps}\n"
+            f"Success signal:\n{success_signal or 'Task is complete when the user request has been fully addressed.'}\n\n"
+            f"Work log:\n{history}\n\n"
+            f"Latest worker output:\n{latest_output}"
+        )
+
+    def _run_loop_agent_text(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        chosen_record: ModelRecord,
+        settings: Dict[str, Any],
+        route_reason: str,
+        action_mode: str,
+        memory_bundle: Dict[str, Any],
+        collective_mode: bool,
+    ) -> ChatResult:
+        controller_record = chosen_record if chosen_record.supports_chat else self._default_text_record()
+        max_steps = int(settings.get("loop_max_steps") or settings.get("loop_budget") or LOOP_AGENT_DEFAULT_MAX_STEPS)
+        max_steps = max(2, min(LOOP_AGENT_HARD_MAX_STEPS, max_steps))
+        tool_cache = {
+            _trim_text(event.query, limit=220).lower(): event
+            for event in self._seed_auto_tool_events(prompt, settings)
+        }
+        tool_event_rows: List[Dict[str, Any]] = [event.to_dict() for event in list(tool_cache.values())]
+        consult_rows: List[Dict[str, str]] = []
+        consulted_labels: List[str] = []
+        skipped_models: List[Dict[str, str]] = []
+        loop_steps: List[Dict[str, str]] = []
+        final_response = ""
+        completion_reason = ""
+        completed = False
+
+        for step_index in range(1, max_steps + 1):
+            history = self._format_loop_history(loop_steps)
+            planner_result, planner_events = self._run_text_model(
+                controller_record,
+                session_id=self._session_scope(session_id, controller_record.key, f"loop-plan-{step_index}"),
+                prompt=self._build_loop_planner_prompt(prompt, history, step_index, max_steps),
+                settings={
+                    **settings,
+                    "memory_context": memory_bundle.get("context_block") or "",
+                },
+                route_reason=f"{route_reason} Loop agent planner step {step_index} via {controller_record.label}.",
+                tool_cache=tool_cache,
+                allow_tool_calls=True,
+            )
+            tool_event_rows.extend(event.to_dict() for event in planner_events)
+            step_goal = (
+                _extract_labeled_section(planner_result.response, "STEP_GOAL")
+                or _extract_labeled_section(planner_result.response, "WORKING_NOTES")
+                or _trim_text(planner_result.response, limit=220)
+                or "Advance the task toward a complete solution."
+            )
+            success_signal = _extract_labeled_section(planner_result.response, "SUCCESS_SIGNAL")
+
+            if collective_mode:
+                worker_result = self._run_agent_text(
+                    session_id=self._session_scope(session_id, controller_record.key, f"loop-work-{step_index}"),
+                    prompt=self._build_loop_worker_prompt(
+                        prompt,
+                        history=history,
+                        step_goal=step_goal,
+                        step_index=step_index,
+                        max_steps=max_steps,
+                    ),
+                    chosen_record=chosen_record,
+                    settings=settings,
+                    route_reason=f"{route_reason} Loop agent worker step {step_index} used the collective panel.",
+                    action_mode=action_mode,
+                    memory_bundle=memory_bundle,
+                )
+                consult_rows.extend(list((worker_result.agent_trace or {}).get("consultation_rows") or []))
+                consulted_labels.extend(list((worker_result.agent_trace or {}).get("consulted_models") or []))
+                skipped_models.extend(list((worker_result.agent_trace or {}).get("skipped_models") or []))
+                tool_event_rows.extend(list((worker_result.agent_trace or {}).get("tool_events") or []))
+            else:
+                worker_result, worker_events = self._run_text_model(
+                    controller_record,
+                    session_id=self._session_scope(session_id, controller_record.key, f"loop-work-{step_index}"),
+                    prompt=self._build_loop_worker_prompt(
+                        prompt,
+                        history=history,
+                        step_goal=step_goal,
+                        step_index=step_index,
+                        max_steps=max_steps,
+                    ),
+                    settings={
+                        **settings,
+                        "memory_context": memory_bundle.get("context_block") or "",
+                    },
+                    route_reason=f"{route_reason} Loop agent worker step {step_index} via {controller_record.label}.",
+                    tool_cache=tool_cache,
+                    allow_tool_calls=True,
+                )
+                tool_event_rows.extend(event.to_dict() for event in worker_events)
+
+            worker_output = (
+                _extract_labeled_section(worker_result.response, "OUTPUT")
+                or _extract_labeled_section(worker_result.response, "FINAL_RESPONSE")
+                or _trim_text(worker_result.response, limit=1800)
+            )
+            reviewer_result, reviewer_events = self._run_text_model(
+                controller_record,
+                session_id=self._session_scope(session_id, controller_record.key, f"loop-review-{step_index}"),
+                prompt=self._build_loop_review_prompt(
+                    prompt,
+                    history=history,
+                    latest_output=worker_output,
+                    success_signal=success_signal,
+                    step_index=step_index,
+                    max_steps=max_steps,
+                ),
+                settings={
+                    **settings,
+                    "memory_context": memory_bundle.get("context_block") or "",
+                },
+                route_reason=f"{route_reason} Loop agent reviewer step {step_index} via {controller_record.label}.",
+                tool_cache=tool_cache,
+                allow_tool_calls=True,
+            )
+            tool_event_rows.extend(event.to_dict() for event in reviewer_events)
+
+            review_complete = _parse_yes_no_section(reviewer_result.response, "COMPLETE")
+            if review_complete is None:
+                review_complete = _parse_yes_no_section(reviewer_result.response, "DONE")
+            review_reason = (
+                _extract_labeled_section(reviewer_result.response, "REASON")
+                or _extract_labeled_section(reviewer_result.response, "MISSING")
+            )
+            next_step = (
+                _extract_labeled_section(reviewer_result.response, "NEXT_STEP")
+                or _extract_labeled_section(worker_result.response, "NEXT_FOCUS")
+                or step_goal
+            )
+            final_candidate = (
+                _extract_labeled_section(reviewer_result.response, "FINAL_RESPONSE")
+                or worker_output
+                or _trim_text(reviewer_result.response, limit=1800)
+            )
+            loop_steps.append(
+                {
+                    "step": str(step_index),
+                    "goal": step_goal,
+                    "worker_excerpt": _trim_text(worker_output, limit=320),
+                    "review_note": _trim_text(review_reason or "", limit=220),
+                    "next_step": _trim_text(next_step, limit=220),
+                }
+            )
+            final_response = final_candidate
+            completion_reason = review_reason or success_signal or f"Loop agent finished step {step_index}."
+
+            if review_complete is True:
+                completed = True
+                break
+
+        if not completed and final_response:
+            final_response = (
+                f"{final_response}\n\nLoop agent note: the loop budget ended before it confidently marked the task complete."
+            )
+            completion_reason = completion_reason or "Loop budget reached before completion."
+
+        deduped_consulted = list(dict.fromkeys(label for label in consulted_labels if label))
+        result = ChatResult(
+            kind="text",
+            model_key=controller_record.key,
+            model_label=controller_record.label,
+            route_reason=(
+                f"{route_reason} Loop agent ran {len(loop_steps)} autonomous step(s)"
+                + (" with collective worker consultations." if collective_mode else f" on {controller_record.label}.")
+            ),
+            response=final_response or "Loop agent did not produce a final answer.",
+            timing={"loop_steps": len(loop_steps), "loop_max_steps": max_steps},
+            prompt_used=prompt,
+        )
+        result.agent_trace = {
+            "agent_mode": "collective_loop_agent" if collective_mode else "loop_agent",
+            "memory_notes": list(memory_bundle.get("memory_notes") or []),
+            "consulted_models": deduped_consulted,
+            "consultation_rows": consult_rows,
+            "skipped_models": skipped_models,
+            "tool_events": tool_event_rows,
+            "loop_steps": loop_steps,
+            "loop_completed": completed,
+            "loop_completion_reason": completion_reason,
+            "loop_budget": max_steps,
+            "loop_controller_model": controller_record.label,
+            "loop_worker_mode": "collective" if collective_mode else "single_model",
+        }
+        return result
+
     def _run_agent_text(
         self,
         *,
@@ -1438,18 +1882,29 @@ class UnifiedModelManager:
         tool_events = self._seed_auto_tool_events(prompt, settings)
         tool_cache = {_trim_text(event.query, limit=220).lower(): event for event in tool_events}
         consult_rows: List[Dict[str, str]] = []
-        for consultant in self._collective_consultants():
+        skipped_rows: List[Dict[str, str]] = []
+        for consultant in self._collective_consultants(settings=settings, chosen_record=chosen_record):
             consult_settings = dict(settings)
             consult_settings["memory_context"] = memory_bundle.get("context_block") or ""
-            consult_result, new_tools = self._run_text_model(
-                consultant,
-                session_id=self._session_scope(session_id, consultant.key, "consult"),
-                prompt=self._build_consult_prompt(prompt, action_mode=action_mode),
-                settings=consult_settings,
-                route_reason=f"{route_reason} Agent consultation via {consultant.label}.",
-                tool_cache=tool_cache,
-                allow_tool_calls=True,
-            )
+            try:
+                consult_result, new_tools = self._run_text_model(
+                    consultant,
+                    session_id=self._session_scope(session_id, consultant.key, "consult"),
+                    prompt=self._build_consult_prompt(prompt, action_mode=action_mode),
+                    settings=consult_settings,
+                    route_reason=f"{route_reason} Agent consultation via {consultant.label}.",
+                    tool_cache=tool_cache,
+                    allow_tool_calls=True,
+                )
+            except Exception as exc:
+                skipped_rows.append(
+                    {
+                        "model_key": consultant.key,
+                        "model_label": consultant.label,
+                        "error": _trim_text(str(exc), limit=220),
+                    }
+                )
+                continue
             tool_events.extend(new_tools)
             consult_rows.append(
                 {
@@ -1482,6 +1937,7 @@ class UnifiedModelManager:
             "memory_notes": list(memory_bundle.get("memory_notes") or []),
             "consulted_models": [row["model_label"] for row in consult_rows],
             "consultation_rows": consult_rows,
+            "skipped_models": skipped_rows,
             "tool_events": [event.to_dict() for event in list(tool_cache.values())],
         }
         return synthesis_result
@@ -1501,18 +1957,29 @@ class UnifiedModelManager:
         tool_events = self._seed_auto_tool_events(prompt, settings)
         tool_cache = {_trim_text(event.query, limit=220).lower(): event for event in tool_events}
         consult_rows: List[Dict[str, str]] = []
-        for consultant in self._collective_consultants():
+        skipped_rows: List[Dict[str, str]] = []
+        for consultant in self._collective_consultants(settings=settings, chosen_record=chosen_record):
             consult_settings = dict(settings)
             consult_settings["memory_context"] = memory_bundle.get("context_block") or ""
-            consult_result, new_tools = self._run_text_model(
-                consultant,
-                session_id=self._session_scope(session_id, consultant.key, "consult-image"),
-                prompt=self._build_consult_prompt(prompt, action_mode="image"),
-                settings=consult_settings,
-                route_reason=f"{route_reason} Agent image consultation via {consultant.label}.",
-                tool_cache=tool_cache,
-                allow_tool_calls=True,
-            )
+            try:
+                consult_result, new_tools = self._run_text_model(
+                    consultant,
+                    session_id=self._session_scope(session_id, consultant.key, "consult-image"),
+                    prompt=self._build_consult_prompt(prompt, action_mode="image"),
+                    settings=consult_settings,
+                    route_reason=f"{route_reason} Agent image consultation via {consultant.label}.",
+                    tool_cache=tool_cache,
+                    allow_tool_calls=True,
+                )
+            except Exception as exc:
+                skipped_rows.append(
+                    {
+                        "model_key": consultant.key,
+                        "model_label": consultant.label,
+                        "error": _trim_text(str(exc), limit=220),
+                    }
+                )
+                continue
             tool_events.extend(new_tools)
             consult_rows.append(
                 {
@@ -1552,6 +2019,7 @@ class UnifiedModelManager:
             "memory_notes": list(memory_bundle.get("memory_notes") or []),
             "consulted_models": [row["model_label"] for row in consult_rows],
             "consultation_rows": consult_rows,
+            "skipped_models": skipped_rows,
             "tool_events": [event.to_dict() for event in list(tool_cache.values())],
             "planner_model": planner.label,
         }
@@ -1739,9 +2207,30 @@ class UnifiedModelManager:
             settings.setdefault("cmd_open_enabled", True)
             settings.setdefault("web_search_budget", 3)
             settings.setdefault("web_search_results", 5)
+            settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
             memory_bundle = self._prepare_memory_bundle(session_id, prompt, settings)
+            agent_mode = self._normalized_agent_mode(settings.get("agent_mode"))
+            collective_enabled = agent_mode in {"collective", "collective_loop"}
+            loop_enabled = agent_mode in {"loop", "collective_loop"}
+            if loop_enabled and resolved_action == "image":
+                loop_enabled = False
+                route_reason = (
+                    f"{route_reason} Loop agent currently supports text and vision replies; "
+                    "image generation stayed on the normal one-pass path."
+                )
 
-            if str(settings.get("agent_mode") or "off").strip().lower() in {"collective", "collective_all", "panel"}:
+            if loop_enabled:
+                result = self._run_loop_agent_text(
+                    session_id=session_id,
+                    prompt=prompt,
+                    chosen_record=chosen_record,
+                    settings=settings,
+                    route_reason=route_reason,
+                    action_mode=resolved_action,
+                    memory_bundle=memory_bundle,
+                    collective_mode=collective_enabled,
+                )
+            elif collective_enabled:
                 if resolved_action == "image":
                     result = self._run_agent_image(
                         session_id=session_id,
