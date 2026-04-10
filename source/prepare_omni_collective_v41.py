@@ -19,6 +19,12 @@ RECENT_METHOD_REFERENCES: List[Dict[str, str]] = [
         "why": "Add a compact next-span prediction loss so the model learns denser future-planning structure without a large parameter jump.",
     },
     {
+        "name": "Better & Faster Large Language Models via Multi-token Prediction",
+        "url": "https://arxiv.org/abs/2404.19737",
+        "applied_as": "multi_token_prediction_training_recipe",
+        "why": "Use extra future-token heads during training to improve coding and algorithmic reasoning sample efficiency.",
+    },
+    {
         "name": "s1: Simple test-time scaling",
         "url": "https://arxiv.org/abs/2501.19393",
         "applied_as": "reasoning_budget_curriculum",
@@ -37,6 +43,12 @@ RECENT_METHOD_REFERENCES: List[Dict[str, str]] = [
         "why": "Use critique-plus-repair traces for bug fixing, test repair, and patch refinement instead of one-shot code answers.",
     },
     {
+        "name": "Reflexion: Language Agents with Verbal Reinforcement Learning",
+        "url": "https://arxiv.org/abs/2303.11366",
+        "applied_as": "verbal_reflection_and_repair_memory",
+        "why": "Store concise failure reflections for debugging and coding tasks instead of only training on final answers.",
+    },
+    {
         "name": "Self-Play Fine-Tuning (SPIN)",
         "url": "https://arxiv.org/abs/2401.01335",
         "applied_as": "iterative_self_play_preference_loop",
@@ -48,18 +60,39 @@ RECENT_METHOD_REFERENCES: List[Dict[str, str]] = [
         "applied_as": "communication_polish_phase",
         "why": "Teach v41 to critique and rewrite its own drafts into clearer human-facing answers.",
     },
+    {
+        "name": "Large Language Models have Intrinsic Self-Correction Ability",
+        "url": "https://arxiv.org/abs/2406.15673",
+        "applied_as": "fair_prompt_zero_temp_self_correction",
+        "why": "Use a dedicated self-correction pass with fair prompts and deterministic decoding to reduce hallucinations and repair weak drafts.",
+    },
+    {
+        "name": "RLAIF vs. RLHF: Scaling Reinforcement Learning from Human Feedback with AI Feedback",
+        "url": "https://arxiv.org/abs/2309.00267",
+        "applied_as": "ai_feedback_preference_labels",
+        "why": "Use strong local teachers as AI preference labelers for communication, helpfulness, and harmlessness style comparisons.",
+    },
 ]
 
 
 def latest_v8_summary_path(repo_root: Path = REPO_ROOT) -> Path:
     candidates = sorted(
         repo_root.glob("output/supermix_omni_collective_v8_frontier_*/omni_collective_v8_frontier_summary.json"),
-        key=lambda item: item.stat().st_mtime,
+        key=lambda item: (item.parent.name, item.stat().st_mtime),
         reverse=True,
     )
     if not candidates:
         raise FileNotFoundError("No omni_collective_v8 frontier summary found under output/.")
     return candidates[0].resolve()
+
+
+def latest_common_benchmark_summary_path(repo_root: Path = REPO_ROOT) -> Optional[Path]:
+    candidates = sorted(
+        repo_root.glob("output/benchmark_all_models_common_plus_summary_*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0].resolve() if candidates else None
 
 
 def _round_to_million(value: int) -> int:
@@ -88,6 +121,44 @@ def _recommended_parameter_target(current_parameter_count: int) -> int:
     return _round_to_million(cooked)
 
 
+def _extract_frontier_scores(repo_root: Path) -> Dict[str, Any]:
+    benchmark_path = latest_common_benchmark_summary_path(repo_root)
+    if benchmark_path is None:
+        return {
+            "benchmark_summary_path": None,
+            "best_overall": None,
+            "best_fusion": None,
+        }
+    payload = load_summary(benchmark_path)
+    rows = list(payload.get("summary_rows") or [])
+    if not rows:
+        return {
+            "benchmark_summary_path": str(benchmark_path),
+            "best_overall": None,
+            "best_fusion": None,
+        }
+    best_overall = max(rows, key=lambda item: float(item.get("overall_exact") or 0.0))
+    fusion_rows = [row for row in rows if str(row.get("family") or "") == "fusion"]
+    best_fusion = max(fusion_rows, key=lambda item: float(item.get("overall_exact") or 0.0)) if fusion_rows else None
+    return {
+        "benchmark_summary_path": str(benchmark_path),
+        "best_overall": {
+            "model": str(best_overall.get("model") or ""),
+            "family": str(best_overall.get("family") or ""),
+            "overall_exact": _safe_float(best_overall.get("overall_exact") or 0.0),
+        },
+        "best_fusion": (
+            {
+                "model": str(best_fusion.get("model") or ""),
+                "family": str(best_fusion.get("family") or ""),
+                "overall_exact": _safe_float(best_fusion.get("overall_exact") or 0.0),
+            }
+            if best_fusion is not None
+            else None
+        ),
+    }
+
+
 def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = None) -> Dict[str, Any]:
     parameter_count = int(summary.get("parameter_count") or 0)
     stage1_rows = int(summary.get("dataset_summary", {}).get("stage1_rows") or 0)
@@ -99,6 +170,7 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
     vision_accuracy = stage2_metrics.get("vision_accuracy", 0.0)
     domain_accuracy = stage2_metrics.get("domain_accuracy", 0.0)
     teacher_keys = list(summary.get("dataset_summary", {}).get("teacher_league", {}).get("teacher_keys", []))
+    frontier_scores = _extract_frontier_scores(REPO_ROOT)
 
     target_parameter_count = _recommended_parameter_target(parameter_count)
     current_text_hidden = 272
@@ -173,6 +245,7 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
                 "note": "Save prompts where v8, v40, and qwen disagree, then build compare-and-justify rows instead of taking only the winner.",
             },
         },
+        "current_frontier": frontier_scores,
         "architecture": {
             "parameter_count_target": target_parameter_count,
             "current_parameter_count": parameter_count,
@@ -207,9 +280,17 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
                 "Disagreement harvest replay: convert teacher disagreement into compare-and-justify rows instead of only winner-take-all distillation.",
                 "Two-pass communication finish: solve first, then learn a short rewrite pass that preserves facts while improving tone and clarity.",
                 "Creativity rescue pairs: train on correct-but-flat vs vivid-and-still-grounded answer pairs so creativity does not come from hallucination.",
+                "Reflection memory shards: keep tiny verbal post-mortems for failed code, reasoning, and route decisions, then train on improved retries.",
+                "Reasoning-budget labels: supervise when the model should think short, medium, or long instead of only increasing deliberation globally.",
             ],
         },
         "data_program": [
+            {
+                "name": "latent_plan_bootstrap",
+                "target_rows": 1800,
+                "source_style": "plan-first then answer rows with hidden plan targets",
+                "goal": "Teach v41 to infer structure and route choice before generating the final answer.",
+            },
             {
                 "name": "high_density_reasoning_core",
                 "target_rows": 3200,
@@ -221,6 +302,12 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
                 "target_rows": 2800,
                 "source_style": "traceback, failing-test, patch, and critique->repair examples",
                 "goal": "Improve coding, debugging, and repository-grounded problem solving.",
+            },
+            {
+                "name": "reflection_memory_rows",
+                "target_rows": 1500,
+                "source_style": "bad attempt, short reflection, repaired answer",
+                "goal": "Turn failures into compact reusable repair knowledge instead of only supervising the winning answer.",
             },
             {
                 "name": "human_communication_polish",
@@ -253,6 +340,12 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
                 "goal": "Make Auto and collective mode smarter because the base model reasons about routing explicitly.",
             },
             {
+                "name": "reasoning_budget_curriculum",
+                "target_rows": 1400,
+                "source_style": "same task solved under short, medium, and deep reasoning budgets",
+                "goal": "Teach the model when extra deliberation is worthwhile instead of overthinking every prompt.",
+            },
+            {
                 "name": "specialist_dense_topups",
                 "target_rows": 1600,
                 "source_style": "materials, protein, 3D, native image, and science vision deltas",
@@ -278,12 +371,17 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
             {
                 "stage": "stage3_code_refine",
                 "recipe": "Run critique->repair loops on code, tests, and debugging prompts and keep only verifiably improved completions.",
-                "inspiration": "RefineCoder and code self-reflection",
+                "inspiration": "RefineCoder, Reflexion, and code self-reflection",
             },
             {
                 "stage": "stage4_communication_polish",
-                "recipe": "Short final polish phase on human communication, grounded uncertainty, and compare/explain prompts.",
-                "inspiration": "Self-Refine",
+                "recipe": "Short final polish phase on human communication, grounded uncertainty, and compare/explain prompts using self-refine and AI feedback labels.",
+                "inspiration": "Self-Refine + RLAIF",
+            },
+            {
+                "stage": "stage5_self_correction_finish",
+                "recipe": "Run deterministic self-correction on weak drafts with fair prompts and keep only improved final answers.",
+                "inspiration": "Intrinsic Self-Correction",
             },
         ],
         "runtime_recommendations": {
@@ -307,13 +405,27 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
             "must_beat": ["omni_collective_v8_preview", "omni_collective_v7"],
             "stretch_goal": "challenge_v40_benchmax_on_benchmark_reasoning_without losing multimodal utility",
         },
+        "promotion_protocol": {
+            "required_preview_benchmarks": 3,
+            "preview_selection_rule": "Promote only the best preview checkpoint by weighted score across benchmark exact, coding repair, communication, and grounded uncertainty packs.",
+            "must_not_regress": [
+                "stage2 vision_accuracy vs v8 by more than 0.02",
+                "stage2 domain_accuracy vs v8 by more than 0.02",
+            ],
+            "must_beat_frontier_if_available": frontier_scores.get("best_fusion"),
+            "human_style_gate": {
+                "required": True,
+                "description": "v41 must beat v8 on the communication-polish eval pack before promotion, even if the raw benchmark score is close.",
+            },
+        },
         "recent_method_references": RECENT_METHOD_REFERENCES,
         "implementation_checklist": [
             "Freeze the latest v8 summary, benchmark outputs, and hard-failure prompts as v41 design inputs.",
-            "Create new dataset builders for disagreement mining, route-then-answer rows, and communication polish pairs.",
+            "Create new dataset builders for disagreement mining, route-then-answer rows, communication polish pairs, latent-plan rows, and code-repair rows.",
             "Add latent plan slots, multi-token prediction auxiliary loss, and uncertainty-anchor head to the v41 model.",
             "Reuse the improved v8 checkpoint/resume path from the start so long v41 runs survive reboots and disk pressure.",
             "Benchmark preview checkpoints during stage2 rather than waiting until the end of the full run.",
+            "Run the new communication, coding-repair, and grounded-uncertainty eval packs before any promotion decision.",
         ],
     }
 
