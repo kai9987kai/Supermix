@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = $PSScriptRoot
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 if (-not $Version) {

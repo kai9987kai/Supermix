@@ -14,196 +14,57 @@ from device_utils import configure_torch_runtime, resolve_device
 
 
 HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>Champion AI • Premium Chat</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<title>Champion Chat Web</title>
 <style>
-:root {
-    --bg: #050810;
-    --glass: rgba(18, 28, 48, 0.6);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --text: #e5edf7;
-    --text-dim: #9fb1d1;
-    --accent: #3b82f6;
-    --accent-glow: rgba(59, 130, 246, 0.4);
-    --user-bg: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
-    --bot-bg: rgba(255, 255, 255, 0.05);
-}
-body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, var(--bg) 70%);
-    min-height: 100vh;
-}
-.wrap {
-    max-width: 1200px;
-    margin: 40px auto;
-    padding: 20px;
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 20px;
-}
-.card {
-    background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--glass-border);
-    border-radius: 20px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-.side { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-.chat { display: flex; flex-direction: column; height: 85vh; }
-.row { display: flex; flex-direction: column; gap: 8px; }
-.row label {
-    font-size: 0.7rem;
-    color: var(--text-dim);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-}
-input, select, textarea {
-    background: rgba(0, 0, 0, 0.2);
-    color: var(--text);
-    border: 1px solid var(--glass-border);
-    border-radius: 12px;
-    padding: 12px;
-    font-size: 0.9rem;
-    transition: all 0.2s ease;
-}
-input:focus, select:focus, textarea:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-glow);
-}
-button {
-    background: var(--accent);
-    color: white;
-    border: 0;
-    border-radius: 12px;
-    padding: 12px 16px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px var(--accent-glow);
-}
-button.alt { background: rgba(255, 255, 255, 0.05); }
-button.alt:hover { background: rgba(255, 255, 255, 0.1); }
-.status {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 12px;
-    min-height: 80px;
-    white-space: pre-wrap;
-    font-family: monospace;
-}
-.head {
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--glass-border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.head h2 { margin: 0; font-size: 1.25rem; }
-.msgs {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--glass-border) transparent;
-}
-.msg {
-    max-width: 80%;
-    padding: 14px 18px;
-    border-radius: 18px;
-    line-height: 1.5;
-    font-size: 0.95rem;
-    position: relative;
-    animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.msg.user {
-    align-self: flex-end;
-    background: var(--user-bg);
-    color: white;
-    border-bottom-right-radius: 4px;
-    box-shadow: 0 4px 15px rgba(29, 78, 216, 0.3);
-}
-.msg.bot {
-    align-self: flex-start;
-    background: var(--bot-bg);
-    border: 1px solid var(--glass-border);
-    border-bottom-left-radius: 4px;
-}
-.who { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; margin-bottom: 6px; opacity: 0.8; letter-spacing: 0.05em; }
-.tim { margin-top: 10px; font-size: 0.7rem; color: var(--text-dim); opacity: 0.7; }
-.comp {
-    padding: 20px 24px;
-    border-top: 1px solid var(--glass-border);
-    display: flex;
-    gap: 12px;
-}
-textarea { flex: 1; min-height: 50px; }
-@media (max-width: 900px){ .wrap { grid-template-columns: 1fr; } .chat { height: 70vh; } }
+body{margin:0;background:#0b1220;color:#e5edf7;font-family:Segoe UI,Arial,sans-serif}
+.wrap{max-width:1100px;margin:20px auto;padding:14px;display:grid;grid-template-columns:340px 1fr;gap:14px}
+.card{background:#121c30;border:1px solid #24324e;border-radius:14px;box-shadow:0 10px 24px rgba(0,0,0,.25)}
+.side{padding:14px}.chat{display:grid;grid-template-rows:auto 1fr auto;min-height:78vh}
+.row{margin-bottom:10px}.row label{display:block;font-size:.75rem;color:#9fb1d1;margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em}
+input,select,textarea{width:100%;background:#0b1220;color:#e5edf7;border:1px solid #2a3a58;border-radius:10px;padding:10px}
+button{background:#1d4ed8;color:white;border:0;border-radius:10px;padding:10px 12px;font-weight:600;cursor:pointer}
+button.alt{background:#263449}.btns{display:flex;gap:8px;flex-wrap:wrap}
+.status{white-space:pre-wrap;background:#0b1220;border:1px solid #2a3a58;border-radius:10px;padding:10px;min-height:100px;color:#b7c6df;font-size:.85rem}
+.head{padding:12px 14px;border-bottom:1px solid #24324e;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.head small{color:#9fb1d1}
+.msgs{padding:12px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.msg{border:1px solid #24324e;border-radius:12px;padding:10px;background:#0b1220;max-width:85%;white-space:pre-wrap;line-height:1.35}
+.msg.user{align-self:flex-end;background:#10203d;border-color:#244d90}.msg.bot{align-self:flex-start}
+.msg .who{font-size:.72rem;color:#9fb1d1;margin-bottom:4px;text-transform:uppercase}.tim{margin-top:6px;color:#9fb1d1;font-size:.75rem}
+.comp{padding:12px;border-top:1px solid #24324e;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+textarea{min-height:68px;max-height:180px;resize:vertical}
+@media (max-width: 900px){.wrap{grid-template-columns:1fr}.chat{min-height:70vh}}
 </style></head><body>
 <div class='wrap'>
   <div class='card side'>
-    <div style="display: flex; align-items: center; gap: 10px;">
-        <div style="width: 12px; height: 12px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px var(--accent);"></div>
-        <h3 style='margin:0'>Champion AI</h3>
-    </div>
-    <p style='color:var(--text-dim);font-size:0.85rem;margin:0'>Premium retrieval interface with Gated Experts.</p>
-    <div class='row'><label>Weights</label><input id='weights' placeholder="Path to .pth"></div>
-    <div class='row'><label>Metadata</label><input id='meta' placeholder="Path to .json"></div>
-    <div class='row'><label>Personality</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div>
-    <div class='row'><label>Creativity (Temp)</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
-    <div class='btns' style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-        <button id='loadBtn' style="grid-column: span 2">Load Model</button>
-        <button class='alt' id='statusBtn'>Status</button>
-        <button class='alt' id='clearBtn'>Reset</button>
-    </div>
-    <div class='status' id='statusBox'>Ready...</div>
+    <h3 style='margin:0 0 6px'>Champion Chat Web</h3>
+    <div style='color:#9fb1d1;font-size:.9rem;margin-bottom:12px'>Load model/meta files, then chat in the browser.</div>
+    <div class='row'><label>Weights (.pth)</label><input id='weights'></div>
+    <div class='row'><label>Metadata (.json)</label><input id='meta'></div>
+    <div class='row'><label>Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div>
+    <div class='row'><label>Response Temp</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
+    <div class='row'><label>Show Top Candidates</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div>
+    <div class='btns'><button id='loadBtn'>Load Model</button><button class='alt' id='statusBtn'>Refresh</button><button class='alt' id='clearBtn'>Clear Session</button></div>
+    <div class='status' id='statusBox'>Loading status...</div>
   </div>
   <div class='card chat'>
-    <div class='head'>
-        <div><h2>Chat Session</h2><small id='metaLine' style="color:var(--text-dim)">Initializing...</small></div>
-        <div id='session' style="font-size:0.7rem; color:var(--text-dim); background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 6px;"></div>
-    </div>
+    <div class='head'><div><div style='font-weight:700'>Web Chat</div><small id='metaLine'>No model loaded</small></div><small id='session'></small></div>
     <div class='msgs' id='msgs'></div>
-    <div class='comp'>
-        <textarea id='prompt' placeholder='Ask something...'></textarea>
-        <button id='sendBtn' style="height: 50px; width: 60px;">
-            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
-        </button>
-    </div>
+    <div class='comp'><textarea id='prompt' placeholder='Type message, Enter to send (Shift+Enter newline)'></textarea><button id='sendBtn'>Send</button></div>
   </div>
 </div>
 <script>
 const el=(id)=>document.getElementById(id), msgs=el('msgs');
-let sid=localStorage.getItem('champion-web-sid'); if(!sid){{sid=(crypto.randomUUID?crypto.randomUUID():String(Date.now())); localStorage.setItem('champion-web-sid',sid);}} el('session').textContent='ID: '+sid.slice(0,8);
-function add(kind,text,timing,top){{const d=document.createElement('div'); d.className='msg '+kind; d.innerHTML=`<div class='who'>${{kind==='user'?'You':'Champion AI'}}</div>`; const b=document.createElement('div'); b.textContent=text; d.appendChild(b); if(timing){{const t=document.createElement('div'); t.className='tim'; t.textContent=`${{timing.total}}ms • ${{timing.infer}}ms latency`; d.appendChild(t);}} if(top&&top.length){{const x=document.createElement('div'); x.className='tim'; x.style.borderTop="1px solid var(--glass-border)"; x.style.marginTop="8px"; x.style.paddingTop="8px"; x.innerHTML='<span style="font-weight:600">Candidates:</span><br>'+top.map((c,i)=>`${{i+1}}. ${{c.text.slice(0,80)}}...`).join('<br>'); d.appendChild(x);}} msgs.appendChild(d); msgs.scrollTo({{top: msgs.scrollHeight, behavior: 'smooth'}}); }}
+let sid=localStorage.getItem('champion-web-sid'); if(!sid){{sid=(crypto.randomUUID?crypto.randomUUID():String(Date.now())); localStorage.setItem('champion-web-sid',sid);}} el('session').textContent='session '+sid.slice(0,8);
+function add(kind,text,timing,top){{const d=document.createElement('div'); d.className='msg '+kind; d.innerHTML=`<div class='who'>${{kind==='user'?'You':'Bot'}}</div>`; const b=document.createElement('div'); b.textContent=text; d.appendChild(b); if(timing){{const t=document.createElement('div'); t.className='tim'; t.textContent=`Timing: infer=${{timing.infer}} ms, rank=${{timing.rank_pick}} ms, total=${{timing.total}} ms`; d.appendChild(t);}} if(top&&top.length){{const x=document.createElement('div'); x.className='tim'; x.innerHTML='Top candidates:<br>'+top.map((c,i)=>`${{i+1}}. (${{c.score.toFixed(3)}}) ${{c.text.slice(0,160)}}`).join('<br>'); d.appendChild(x);}} msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight; }}
 async function jget(path){{const r=await fetch(path); const d=await r.json(); if(!r.ok||d.ok===false) throw new Error(d.error||`HTTP ${{r.status}}`); return d;}}
 async function jpost(path,p){{const r=await fetch(path,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(p||{{}})}}); const d=await r.json(); if(!r.ok||d.ok===false) throw new Error(d.error||`HTTP ${{r.status}}`); return d;}}
-async function refresh(){{try{{const d=await jget('/api/status'); el('statusBox').textContent=d.status.loaded?'Model active. Ready to chat.':'No model active.'; el('metaLine').textContent=d.status.loaded?`${{d.status.model_size}} architecture • ${{d.status.feature_mode}}`:'Choose model files and click Load'; if(!el('weights').value&&d.status.weights) el('weights').value=d.status.weights; if(!el('meta').value&&d.status.meta) el('meta').value=d.status.meta; }}catch(e){{el('statusBox').textContent='Status error: '+e.message;}}}}
-async function loadModel(){{el('statusBox').textContent='Warming up system...'; try{{const d=await jpost('/api/load',{{weights:el('weights').value.trim(),meta:el('meta').value.trim()}}); el('statusBox').textContent='Model strategy loaded successfully.'; refresh();}}catch(e){{el('statusBox').textContent='Error: '+e.message;}}}}
-async function send(){{const text=el('prompt').value.trim(); if(!text) return; add('user',text); el('prompt').value=''; try{{const d=await jpost('/api/chat',{{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:0}}); add('bot',d.response,d.timing_ms,d.top_candidates);}}catch(e){{add('bot','Encountered an issue: '+e.message);}}}}
-async function clearSess(){{try{{await jpost('/api/clear',{{session_id:sid}}); msgs.innerHTML=''; add('bot','New session started.');}}catch(e){{add('bot','Error: '+e.message);}}}}
-el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; el('prompt').addEventListener('keydown',e=>{{if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();send();}}}}); refresh(); 
+async function refresh(){{try{{const d=await jget('/api/status'); el('statusBox').textContent=JSON.stringify(d.status,null,2); el('metaLine').textContent=d.status.loaded?`${{d.status.model_size}} | ${{d.status.feature_mode}} | labels=${{d.status.available_labels}}`:'No model loaded'; if(!el('weights').value&&d.status.weights) el('weights').value=d.status.weights; if(!el('meta').value&&d.status.meta) el('meta').value=d.status.meta; }}catch(e){{el('statusBox').textContent='Status error: '+e.message;}}}}
+async function loadModel(){{el('statusBox').textContent='Loading model...'; try{{const d=await jpost('/api/load',{{weights:el('weights').value.trim(),meta:el('meta').value.trim()}}); el('statusBox').textContent='Loaded.\n'+JSON.stringify(d,null,2); refresh();}}catch(e){{el('statusBox').textContent='Load error: '+e.message;}}}}
+async function send(){{const text=el('prompt').value.trim(); if(!text) return; add('user',text); el('prompt').value=''; try{{const d=await jpost('/api/chat',{{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value)}}); add('bot',d.response,d.timing_ms,d.top_candidates);}}catch(e){{add('bot','Error: '+e.message);}}}}
+async function clearSess(){{try{{await jpost('/api/clear',{{session_id:sid}}); msgs.innerHTML=''; add('bot','Session cleared.');}}catch(e){{add('bot','Clear error: '+e.message);}}}}
+el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; el('prompt').addEventListener('keydown',e=>{{if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();send();}}}}); refresh();
 </script></body></html>"""
-
 
 
 class Engine:
@@ -259,22 +120,23 @@ class Engine:
             raise FileNotFoundError(f"Metadata not found: {meta_path}")
 
         meta = chat_app.load_metadata(meta_path)
-        feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
-        if feature_mode not in {"legacy", "context_v2", "context_v3", "context_v4", "context_mix_v1", "context_mix_v2_mm"}:
-            feature_mode = "legacy"
+        raw_feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
+        feature_mode = chat_app.resolve_feature_mode(raw_feature_mode, smarter_auto=True)
 
         sd = chat_app.safe_load_state_dict(weights)
         inferred = chat_app.detect_model_size_from_state_dict(sd)
-        resolved_model_size = self.defaults.get("model_size", "auto")
-        if resolved_model_size == "auto":
-            resolved_model_size = inferred
+        resolved_model_size, _ = chat_app.resolve_runtime_model_size(
+            str(self.defaults.get("model_size", "auto")),
+            str(meta.get("model_size", "")),
+            inferred,
+        )
 
-        expansion_dim = chat_app._resolve_expansion_dim(None, meta, "expansion_dim", 1024 if resolved_model_size in {"xxlarge","xxxlarge","ultralarge","megalarge"} else (768 if resolved_model_size == "xlarge" else 512), inferred, {"large","xlarge","xxlarge","xxxlarge","ultralarge","megalarge"}, chat_app.detect_large_head_expansion_dim, sd)
-        extra_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "extra_expansion_dim", max(2048 if resolved_model_size in {"xxlarge","xxxlarge","ultralarge","megalarge"} else 1024, expansion_dim * 2), inferred, {"xlarge","xxlarge","xxxlarge","ultralarge","megalarge"}, chat_app.detect_xlarge_aux_expansion_dim, sd)
-        third_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "third_expansion_dim", max(3072, extra_expansion_dim + expansion_dim), inferred, {"xxlarge","xxxlarge","ultralarge","megalarge"}, chat_app.detect_xxlarge_third_expansion_dim, sd)
-        fourth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fourth_expansion_dim", max(4096, third_expansion_dim + expansion_dim), inferred, {"xxxlarge","ultralarge","megalarge"}, chat_app.detect_xxxlarge_fourth_expansion_dim, sd)
-        fifth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fifth_expansion_dim", max(6144, fourth_expansion_dim + expansion_dim), inferred, {"ultralarge","megalarge"}, chat_app.detect_ultralarge_fifth_expansion_dim, sd)
-        sixth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "sixth_expansion_dim", max(8192, fifth_expansion_dim + expansion_dim), inferred, {"megalarge"}, chat_app.detect_megalarge_sixth_expansion_dim, sd)
+        expansion_dim = chat_app._resolve_expansion_dim(None, meta, "expansion_dim", chat_app._default_expansion_dim_for_model_size(resolved_model_size), inferred, chat_app.EXPANSION_DIM_MODEL_SIZES, chat_app.detect_large_head_expansion_dim, sd)
+        extra_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "extra_expansion_dim", chat_app._default_extra_expansion_dim_for_model_size(resolved_model_size, expansion_dim), inferred, chat_app.EXTRA_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_xlarge_aux_expansion_dim, sd)
+        third_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "third_expansion_dim", max(3072, extra_expansion_dim + expansion_dim), inferred, chat_app.THIRD_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_xxlarge_third_expansion_dim, sd)
+        fourth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fourth_expansion_dim", max(4096, third_expansion_dim + expansion_dim), inferred, chat_app.FOURTH_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_xxxlarge_fourth_expansion_dim, sd)
+        fifth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "fifth_expansion_dim", max(6144, fourth_expansion_dim + expansion_dim), inferred, chat_app.FIFTH_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_ultralarge_fifth_expansion_dim, sd)
+        sixth_expansion_dim = chat_app._resolve_expansion_dim(None, meta, "sixth_expansion_dim", max(8192, fifth_expansion_dim + expansion_dim), inferred, chat_app.SIXTH_EXPANSION_DIM_MODEL_SIZES, chat_app.detect_megalarge_sixth_expansion_dim, sd)
         adapter_dropout = float(meta.get("adapter_dropout", 0.1))
 
         model = chat_app.build_model(
@@ -494,7 +356,7 @@ def main() -> None:
     ap.add_argument('--torch_interop_threads', type=int, default=0)
     ap.add_argument('--matmul_precision', choices=['highest', 'high', 'medium'], default='high')
     ap.add_argument('--disable_tf32', action='store_true')
-    ap.add_argument('--model_size', choices=['auto','base','large','xlarge','xxlarge','xxxlarge','ultralarge','megalarge'], default='auto')
+    ap.add_argument('--model_size', choices=['auto', *chat_app.VALID_RUNTIME_MODEL_SIZES], default='auto')
     ap.add_argument('--max_turns', type=int, default=2)
     ap.add_argument('--top_labels', type=int, default=3)
     ap.add_argument('--pool_mode', choices=['all','topk'], default='all')
