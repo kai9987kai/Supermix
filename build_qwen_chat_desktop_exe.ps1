@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = $PSScriptRoot
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 if (-not $SkipDependencyInstall) {
@@ -18,8 +18,13 @@ $AdapterDir = python -c "from pathlib import Path; import sys; sys.path.insert(0
 if (-not $AdapterDir) {
   throw 'Failed to resolve latest adapter directory.'
 }
+$BaseModelDir = python -c "from pathlib import Path; import sys; sys.path.insert(0, 'source'); import qwen_chat_desktop_app as app; adapter_dir = app.find_latest_adapter_dir(Path('.').resolve()); print(app.resolve_base_model_path(adapter_dir, ''))"
+if (-not $BaseModelDir) {
+  throw 'Failed to resolve local base model directory.'
+}
 $ArtifactDir = Split-Path -Parent $AdapterDir
 $BundleDir = Join-Path $RepoRoot "build\desktop_bundle_stage"
+$BaseModelBundleDir = Join-Path $RepoRoot "build\desktop_base_model_stage"
 
 $IconPath = Join-Path $RepoRoot "assets\supermix_qwen_icon.ico"
 if (-not (Test-Path $IconPath)) {
@@ -29,8 +34,12 @@ if (-not (Test-Path $IconPath)) {
 if (Test-Path $BundleDir) {
   Remove-Item -Recurse -Force $BundleDir
 }
+if (Test-Path $BaseModelBundleDir) {
+  Remove-Item -Recurse -Force $BaseModelBundleDir
+}
 New-Item -ItemType Directory -Path $BundleDir -Force | Out-Null
 Copy-Item -Recurse -Force $AdapterDir (Join-Path $BundleDir "adapter")
+python "source\materialize_model_dir.py" $BaseModelDir $BaseModelBundleDir | Out-Host
 foreach ($FileName in @("benchmark_results.json", "benchmark_comparison.png", "latest_adapter_checkpoint.txt")) {
   $SourcePath = Join-Path $ArtifactDir $FileName
   if (Test-Path $SourcePath) {
@@ -40,6 +49,7 @@ foreach ($FileName in @("benchmark_results.json", "benchmark_comparison.png", "l
 $BundleManifest = @{
   artifact_name = Split-Path $ArtifactDir -Leaf
   adapter_relative_path = "adapter"
+  base_model_relative_path = "..\bundled_base_model"
   created_at_utc = (Get-Date).ToUniversalTime().ToString("o")
 }
 $BundleManifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $BundleDir "release_manifest.json")
@@ -60,11 +70,13 @@ try {
     "--add-data", "source\\qwen_chat_web_app.py;source",
     "--add-data", "assets;assets",
     "--add-data", "$BundleDir;bundled_latest_artifact",
+    "--add-data", "$BaseModelBundleDir;bundled_base_model",
     "source\\qwen_chat_desktop_app.py"
   )
 
   Write-Host "Building $Name with adapter: $AdapterDir"
   Write-Host "Bundled artifact metadata from: $ArtifactDir"
+  Write-Host "Bundled base model from: $BaseModelDir"
   python @PyInstallerArgs
   if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed."
@@ -76,5 +88,8 @@ try {
 finally {
   if (Test-Path $BundleDir) {
     Remove-Item -Recurse -Force $BundleDir
+  }
+  if (Test-Path $BaseModelBundleDir) {
+    Remove-Item -Recurse -Force $BaseModelBundleDir
   }
 }

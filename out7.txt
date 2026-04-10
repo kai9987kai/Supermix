@@ -1,0 +1,27 @@
+Starting smoke test for Holographic State Space Expert (v28)...
+Using device: cpu
+Set layers.4.mamba.out_proj.weight to random normal to allow gradient backwards flow
+Set layers.8.out_proj.weight to random normal to allow gradient backwards flow
+Set layers.10.alpha to 1.0
+Set layers.10.out_proj.weight to random normal to allow gradient backwards flow
+Dummy input shape: torch.Size([2, 4, 128])
+Running forward pass (train mode)...
+Output shape: torch.Size([2, 4, 10])
+Running global backward pass...
+Loss value: 2.686300754547119
+Checking gradients...
+  holographic_memory: OK
+  holo_proj.weight: OK
+  topology_router.weight: OK
+  ssm_experts.0.A_log: OK
+  ssm_experts.0.B: OK
+  ssm_experts.0.C: OK
+  ssm_experts.0.dt_proj.weight: CRITICAL: NO GRADIENT!
+  out_proj.weight: OK
+Traceback (most recent call last):
+  File "<string>", line 10, in <module>
+    test_holographic_s4_expert.smoke_test_holographic_ssm()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\test_holographic_s4_expert.py", line 69, in smoke_test_holographic_ssm
+    raise AssertionError(f"Missing gradients in: {failed}")
+AssertionError: Missing gradients in: ['ssm_experts.0.dt_proj.weight']
