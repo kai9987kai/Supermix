@@ -23,6 +23,27 @@ def _record(key: str, kind: str, capabilities: tuple[str, ...], score: float | N
     )
 
 
+class _FakeBackend:
+    def __init__(self, record: ModelRecord) -> None:
+        self.record = record
+
+    def chat(self, session_id: str, prompt: str, settings: dict) -> ChatResult:
+        return ChatResult(
+            kind="text",
+            model_key=self.record.key,
+            model_label=self.record.label,
+            route_reason=str(settings.get("route_reason") or ""),
+            response=f"reply via {self.record.key}",
+            prompt_used=prompt,
+        )
+
+    def clear(self, session_id: str) -> None:
+        return None
+
+    def unload(self) -> None:
+        return None
+
+
 def test_collective_panel_includes_omni_collective_v2_v3_v4_v5_v6_v7_v8_v8_preview_v40_and_domain_specialists(tmp_path: Path) -> None:
     records = (
         _record("v33_final", "champion_chat", ("chat",), 0.18),
@@ -83,6 +104,23 @@ def test_default_text_record_prefers_v40_benchmax(tmp_path: Path) -> None:
     assert chosen.key == "v40_benchmax"
 
 
+def test_default_text_record_keeps_stable_v46_preference_even_when_v48_exists(tmp_path: Path) -> None:
+    records = (
+        _record("omni_collective_v48", "omni_collective_v48", ("chat", "vision"), 0.7557),
+        _record("omni_collective_v47", "omni_collective_v47", ("chat", "vision"), 0.7110),
+        _record("omni_collective_v46", "omni_collective_v46", ("chat", "vision"), 0.7477),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), 0.24),
+        _record("omni_collective_v41", "omni_collective_v41", ("chat", "vision"), 0.17),
+    )
+    manager = UnifiedModelManager(
+        records=records,
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+    )
+    chosen = manager._default_text_record()
+    assert chosen.key == "omni_collective_v46"
+
+
 def test_collective_consultants_can_follow_configured_keys_and_keep_chosen_first(tmp_path: Path) -> None:
     records = (
         _record("omni_collective_v41", "omni_collective_v41", ("chat", "vision"), 0.17),
@@ -112,6 +150,43 @@ def test_collective_consultants_can_follow_configured_keys_and_keep_chosen_first
         "v40_benchmax",
         "qwen_v28",
     ]
+
+
+def test_handle_prompt_falls_back_when_requested_backend_cannot_initialize(tmp_path: Path, monkeypatch) -> None:
+    records = (
+        _record("omni_collective_v48", "omni_collective_v48", ("chat", "vision"), 0.7557),
+        _record("omni_collective_v47", "omni_collective_v47", ("chat", "vision"), 0.7110),
+        _record("omni_collective_v46", "omni_collective_v46", ("chat", "vision"), 0.7477),
+    )
+    manager = UnifiedModelManager(
+        records=records,
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+    )
+
+    def fake_build_backend(record: ModelRecord):
+        if record.key == "omni_collective_v48":
+            raise RuntimeError("broken weights")
+        return _FakeBackend(record)
+
+    monkeypatch.setattr(manager, "_build_backend", fake_build_backend)
+
+    payload = manager.handle_prompt(
+        session_id="fallback-session",
+        prompt="Explain the result.",
+        model_key="omni_collective_v48",
+        action_mode="text",
+        settings={
+            "agent_mode": "off",
+            "memory_enabled": False,
+            "web_search_enabled": False,
+            "cmd_open_enabled": False,
+        },
+    )
+
+    assert payload["ok"] is True
+    assert payload["model_key"] == "omni_collective_v47"
+    assert "fell back" in payload["route_reason"].lower()
 
 
 def test_model_store_catalog_marks_installed_and_selectable_records(tmp_path: Path) -> None:

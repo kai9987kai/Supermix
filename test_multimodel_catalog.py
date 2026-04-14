@@ -61,6 +61,43 @@ def test_auto_prefers_best_reasoning_model_for_code_prompt() -> None:
     assert chosen.key == "v33_final"
 
 
+def test_auto_prefers_latest_stable_model_for_latest_prompt() -> None:
+    records = [
+        _record("omni_collective_v48", "omni_collective_v48", ("chat", "vision"), 0.7557),
+        _record("omni_collective_v47", "omni_collective_v47", ("chat", "vision"), 0.7110),
+        _record("omni_collective_v46", "omni_collective_v46", ("chat", "vision"), 0.71),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), 0.60),
+    ]
+    chosen, reason = choose_auto_model(records, "Use the latest local frontier model for this task.")
+    assert chosen is not None
+    assert chosen.key == "omni_collective_v47"
+    assert "latest" in reason.lower()
+
+
+def test_auto_prefers_v46_for_general_reasoning_when_v48_is_present() -> None:
+    records = [
+        _record("omni_collective_v48", "omni_collective_v48", ("chat", "vision"), 0.7557),
+        _record("omni_collective_v47", "omni_collective_v47", ("chat", "vision"), 0.7110),
+        _record("omni_collective_v46", "omni_collective_v46", ("chat", "vision"), 0.7477),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), 0.60),
+    ]
+    chosen, reason = choose_auto_model(records, "Analyze this algorithm tradeoff and suggest the best architecture.")
+    assert chosen is not None
+    assert chosen.key == "omni_collective_v46"
+    assert "reasoning" in reason.lower() or "coding" in reason.lower()
+
+
+def test_auto_prefers_v40_for_benchmark_reasoning_even_when_v48_exists() -> None:
+    records = [
+        _record("omni_collective_v48", "omni_collective_v48", ("chat", "vision"), 0.7557),
+        _record("v40_benchmax", "omni_collective_v5", ("chat", "vision"), 0.60),
+    ]
+    chosen, reason = choose_auto_model(records, "Analyze this benchmark tradeoff and recommend the best local reasoning model.")
+    assert chosen is not None
+    assert chosen.key == "v40_benchmax"
+    assert "benchmark" in reason.lower()
+
+
 def test_auto_prefers_math_specialist_for_equation_prompt() -> None:
     records = [
         _record("v33_final", "champion_chat", ("chat",), 0.18),
