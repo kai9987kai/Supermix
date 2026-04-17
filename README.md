@@ -1,6 +1,6 @@
-# Supermix_29
+# Supermix
 
-Supermix_29 is the active monorepo for the current Supermix desktop app, the Omni Collective training line, specialist model experiments, benchmark tooling, and local-first packaging flow.
+Supermix is the active monorepo for the current Supermix desktop app, the Omni Collective training line, specialist model experiments, benchmark tooling, and local-first packaging flow.
 
 This repo is intentionally a mixed workspace. It contains source code, training scripts, build helpers, generated manifests, research outputs, and packaging metadata for a local-first multimodel app.
 
