@@ -1,0 +1,334 @@
+{
+  "family": "v40_benchmax",
+  "experiment_family": "v40_benchmax",
+  "objective": "Beat the current best common benchmark leader with a controlled, additive experiment line.",
+  "artifact_root": "output/v40_benchmax",
+  "baselines": [
+    "v33_final",
+    "v39_final"
+  ],
+  "baseline_leaders": [
+    "v33_final"
+  ],
+  "nearest_comparator": "v39_final",
+  "ablation_axes": {
+    "data_family": [
+      "v33_style",
+      "v39_style"
+    ],
+    "recipe_family": [
+      "v33_style",
+      "v39_style"
+    ]
+  },
+  "ablation_matrix": [
+    {
+      "ablation_id": "v40_v33data_v33recipe",
+      "id": "v40_v33data_v33recipe",
+      "data_family": "v33_style",
+      "data_recipe": "v33_style",
+      "recipe_family": "v33_style",
+      "head_recipe": "v33_style",
+      "data_source": "v33-style benchmark-mix and repair data",
+      "recipe_source": "v33-style head/recipe and conservative training schedule",
+      "status": "planned"
+    },
+    {
+      "ablation_id": "v40_v33data_v39recipe",
+      "id": "v40_v33data_v39recipe",
+      "data_family": "v33_style",
+      "data_recipe": "v33_style",
+      "recipe_family": "v39_style",
+      "head_recipe": "v39_style",
+      "data_source": "v33-style benchmark-mix and repair data",
+      "recipe_source": "v39-style reasoning-biased head/recipe",
+      "status": "planned"
+    },
+    {
+      "ablation_id": "v40_v39data_v33recipe",
+      "id": "v40_v39data_v33recipe",
+      "data_family": "v39_style",
+      "data_recipe": "v39_style",
+      "recipe_family": "v33_style",
+      "head_recipe": "v33_style",
+      "data_source": "v39-style reasoning benchmix and hard-example replay",
+      "recipe_source": "v33-style head/recipe and conservative training schedule",
+      "status": "planned"
+    },
+    {
+      "ablation_id": "v40_v39data_v39recipe",
+      "id": "v40_v39data_v39recipe",
+      "data_family": "v39_style",
+      "data_recipe": "v39_style",
+      "recipe_family": "v39_style",
+      "head_recipe": "v39_style",
+      "data_source": "v39-style reasoning benchmix and hard-example replay",
+      "recipe_source": "v39-style reasoning-biased head/recipe",
+      "status": "planned"
+    }
+  ],
+  "artifact_layout": {
+    "root": "output/v40_benchmax",
+    "ablation": "output/v40_benchmax/ablation",
+    "hard_examples": "output/v40_benchmax/hard_examples",
+    "distillation": "output/v40_benchmax/distillation",
+    "research_pack": "output/v40_benchmax/research_pack",
+    "soup": "output/v40_benchmax/soup",
+    "reports": "output/v40_benchmax/reports",
+    "runbooks": "source"
+  },
+  "data_recipes": {
+    "v33": {
+      "sample_size": 2304,
+      "paper_rows": true,
+      "prompt_sources": [
+        "conversation_data.supermix_plus_v27_500k.jsonl",
+        "conversation_data.delta_anchor_mix_2026_03_26.jsonl",
+        "conversation_data.delta_official_refresh_2026_03_26.jsonl",
+        "conversation_data.coding_knowledge_2026_02_19.jsonl",
+        "conversation_data.hybrid_v6_live_knowledge.jsonl",
+        "conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+        "conversation_data.quality_anchor_v2.jsonl",
+        "conversation_data.mega_creative_100k.jsonl",
+        "conversation_data.mega_creative_250k_v2.jsonl",
+        "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+        "conversation_data.science_essentials_smoke.jsonl",
+        "conversation_data.science_novel_examples_smoke.jsonl",
+        "conversation_data.world_events_2026_02_19.jsonl"
+      ],
+      "protein_pack_count": 120
+    },
+    "v39": {
+      "sample_size": 2304,
+      "counts": {
+        "arc_count": 1600,
+        "boolq_count": 3600,
+        "gsm8k_count": 3200,
+        "hellaswag_count": 5200,
+        "mmlu_count": 6400,
+        "piqa_count": 5200
+      },
+      "support_prompt_sources": [
+        "conversation_data.coding_knowledge_2026_02_19.jsonl",
+        "conversation_data.hybrid_v6_live_knowledge.jsonl",
+        "conversation_data.quality_anchor_v2.jsonl",
+        "conversation_data.delta_official_refresh_2026_03_26.jsonl",
+        "conversation_data.science_essentials_smoke.jsonl",
+        "conversation_data.science_novel_examples_smoke.jsonl",
+        "conversation_data.world_events_2026_02_19.jsonl"
+      ],
+      "support_sample_size": 384,
+      "protein_pack_count": 120
+    }
+  },
+  "head_recipes": {
+    "v33_style": {
+      "base_embed_dim": 88,
+      "text_hidden": 176,
+      "image_channels": 36,
+      "word_buckets": 12288,
+      "word_embed_dim": 72,
+      "deep_text_channels": 192,
+      "deep_image_channels": 64,
+      "fusion_hidden": 512,
+      "memory_slots": 12,
+      "depth_steps": 4,
+      "expert_count": 4,
+      "expert_hidden": 896,
+      "context_top_k": 2,
+      "expert_top_k": 1,
+      "deliberation_passes": 3,
+      "balance_weight": 0.03,
+      "stage1_loss_weights": {
+        "intent": 0.58,
+        "response": 1.0,
+        "domain": 0.72,
+        "vision": 0.7
+      },
+      "stage2_loss_weights": {
+        "intent": 0.5,
+        "response": 1.0,
+        "domain": 0.68,
+        "vision": 0.82
+      }
+    },
+    "v39_style": {
+      "base_embed_dim": 96,
+      "text_hidden": 184,
+      "image_channels": 40,
+      "word_buckets": 16384,
+      "word_embed_dim": 84,
+      "deep_text_channels": 224,
+      "deep_image_channels": 76,
+      "fusion_hidden": 640,
+      "memory_slots": 14,
+      "depth_steps": 6,
+      "expert_count": 5,
+      "expert_hidden": 1024,
+      "context_top_k": 3,
+      "expert_top_k": 2,
+      "deliberation_passes": 4,
+      "balance_weight": 0.035,
+      "stage1_loss_weights": {
+        "intent": 0.6,
+        "response": 1.0,
+        "domain": 0.74,
+        "vision": 0.72
+      },
+      "stage2_loss_weights": {
+        "intent": 0.52,
+        "response": 1.0,
+        "domain": 0.7,
+        "vision": 1.08
+      }
+    }
+  },
+  "hard_example_policy": {
+    "leader_models": [
+      "v33_final",
+      "v39_final"
+    ],
+    "max_examples_per_bucket": 48,
+    "max_examples_total": 256,
+    "min_exact": 1.0,
+    "min_token_f1": 0.45,
+    "min_char_similarity": 0.55
+  },
+  "soup_policy": {
+    "strategy": "compatibility_average",
+    "dry_run_default": true,
+    "require_exact_key_match": true,
+    "require_shape_match": true,
+    "require_dtype_match": false
+  },
+  "soup": {
+    "strategy": "compatibility_average",
+    "dry_run_default": true,
+    "require_exact_key_match": true,
+    "require_shape_match": true,
+    "require_dtype_match": false
+  },
+  "promotion_gate": {
+    "min_overall_gain_vs_v33_final": 0.0,
+    "min_overall_gain_vs_v39_final": 0.0,
+    "max_benchmark_regression": 0.01,
+    "require_non_negative_worst_benchmark_delta": false
+  },
+  "report": {
+    "promotion_threshold": 0.005,
+    "max_allowed_drop": 0.02,
+    "leader_baseline": "v33_final",
+    "comparison_baseline": "v39_final"
+  },
+  "distillation": {
+    "default_model_key": "auto",
+    "teacher_model_keys": [
+      "auto",
+      "omni_collective_v5",
+      "omni_collective_v4"
+    ],
+    "default_action_mode": "auto",
+    "default_agent_mode": "collective",
+    "resume_by_prompt_hash": true,
+    "allow_web_search": true,
+    "allow_cmd_open": true,
+    "store_rationale_if_available": true,
+    "consensus_selection": "majority_then_primary",
+    "min_consensus_votes": 2
+  },
+  "research_pack": {
+    "enable_curriculum_stages": true,
+    "enable_repair_replay": true,
+    "enable_verifier_replay": true,
+    "enable_consensus_teacher_rows": true,
+    "frontier_hardness_threshold": 1.15,
+    "bridge_hardness_threshold": 0.7,
+    "max_rows_total": 768,
+    "max_rows_per_variant": 256
+  },
+  "research_influences": [
+    {
+      "title": "Making Small Language Models Efficient Reasoners: Intervention, Supervision, Reinforcement",
+      "url": "https://arxiv.org/abs/2505.07961",
+      "idea": "reasoning-budget control and stop-point supervision for smaller models"
+    },
+    {
+      "title": "Distilling LLM Agent into Small Models with Retrieval and Code Tools",
+      "url": "https://arxiv.org/abs/2505.17612",
+      "idea": "teacher-generated tool-using supervision with compact student transfer"
+    },
+    {
+      "title": "ProgCo: Program Helps Self-Correction of Large Language Models",
+      "url": "https://arxiv.org/abs/2501.01264",
+      "idea": "programmatic verification and refinement"
+    },
+    {
+      "title": "PAG: Multi-Turn Reinforced LLM Self-Correction with Policy as Generative Verifier",
+      "url": "https://arxiv.org/abs/2506.10406",
+      "idea": "selective revision with internal verifier behavior"
+    },
+    {
+      "title": "Self-Play Fine-Tuning Converts Weak Language Models to Strong Language Models",
+      "url": "https://arxiv.org/abs/2401.01335",
+      "idea": "self-generated teacher-repair data"
+    },
+    {
+      "title": "OpenELM: An Efficient Language Model Family with Open Training and Evaluation",
+      "url": "https://arxiv.org/abs/2404.14619",
+      "idea": "checkpoint averaging and late-stage model soup"
+    },
+    {
+      "title": "Large Language Models have Intrinsic Self-Correction",
+      "url": "https://arxiv.org/abs/2406.15673",
+      "idea": "zero-temperature self-check with fair prompts"
+    },
+    {
+      "title": "Self-Correcting Large Language Models: Generation vs Multiple Choice",
+      "url": "https://arxiv.org/abs/2511.09381",
+      "idea": "task-aware correction policy"
+    },
+    {
+      "title": "Multi-Agent Verification: Scaling Test-Time Compute with Multiple Verifiers",
+      "url": "https://arxiv.org/abs/2502.20379",
+      "idea": "multiple verifier votes and agreement-aware selection at test time"
+    },
+    {
+      "title": "Solve-Detect-Verify: Inference-Time Scaling with Flexible Generative Verifier",
+      "url": "https://arxiv.org/abs/2505.11966",
+      "idea": "fast/slow verification budget allocation and targeted verifier feedback"
+    },
+    {
+      "title": "T1: Tool-integrated Self-verification for Test-time Compute Scaling in Small Language Models",
+      "url": "https://arxiv.org/abs/2504.04718",
+      "idea": "tool-aware self-verification for memorization-heavy benchmark errors"
+    },
+    {
+      "title": "Learning to Solve and Verify: A Self-Play Framework for Code and Test Generation",
+      "url": "https://arxiv.org/abs/2502.14948",
+      "idea": "solver-verifier self-play and verifier replay for code-heavy examples"
+    }
+  ],
+  "novel_features": [
+    "hard-example taxonomy with provenance",
+    "benchmark promotion gate with nearest-comparator deltas",
+    "strict checkpoint soup compatibility checks and dry-run mode",
+    "resume-safe collective-teacher distillation hook",
+    "explicit 2x2 data-vs-recipe ablation matrix",
+    "reasoning-budget control flags for shorter or longer verifier passes",
+    "teacher-repair replay rows that preserve both failed draft and corrected answer",
+    "failure-cluster curriculum that can oversample benchmark miss families",
+    "multi-teacher consensus distillation with agreement metadata",
+    "verifier-replay training rows synthesized from benchmark misses",
+    "budget-aware fast/slow verifier prompts for benchmark-focused refinement"
+  ],
+  "innovation_flags": {
+    "reasoning_budget_control": true,
+    "teacher_repair_replay": true,
+    "failure_cluster_curriculum": true,
+    "consensus_teacher_sampling": true,
+    "soup_promotion_candidate": true,
+    "multi_agent_verification": true,
+    "solver_verifier_replay": true,
+    "budget_aware_verifier_prompts": true
+  }
+}

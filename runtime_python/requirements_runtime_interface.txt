@@ -1,0 +1,7 @@
+torch
+flask
+pywebview
+
+# Optional Windows GPU backend
+# torch-directml
+

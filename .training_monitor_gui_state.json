@@ -1,0 +1,17 @@
+{
+  "root_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27",
+  "refresh_seconds": "5",
+  "stale_minutes": "20",
+  "filter_status": "all",
+  "filter_backend": "all",
+  "only_active": false,
+  "only_issues": false,
+  "only_pinned": false,
+  "search": "",
+  "auto_refresh": true,
+  "trend_metric": "ram",
+  "trend_window": "10m",
+  "sort_col": "run",
+  "sort_reverse": false,
+  "pinned_runs": []
+}

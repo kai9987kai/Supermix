@@ -1,0 +1,841 @@
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.append(os.path.join(os.getcwd(), "source"))
+
+from training_monitor_gui import (
+    RunSnapshot,
+    collect_run_snapshots,
+    _build_run_recommendation,
+    _build_recovery_outlook,
+    _build_run_rescue_plan,
+    _build_run_stability_lab,
+    _build_run_watch_summary,
+    _build_runtime_headline,
+    _build_selected_vs_fleet_summary,
+    _failure_lens,
+    _build_health_summary,
+    _build_launch_command,
+    _compute_display_progress_percent,
+    _derive_stage_monitor_fields,
+    _history_window_seconds,
+    _load_research_failure_insight,
+    _load_research_results,
+    _parse_log,
+    _phase_breakdown_rows,
+    _resolve_canvas_size,
+    _runtime_device_value,
+    _summarize_backend_mix,
+    _summarize_fleet_checkpoint_posture,
+    _summarize_fleet_tempo,
+    _summarize_fleet_spotlight,
+    _summarize_fleet_watchlist,
+    _summarize_fleet_research_radar,
+    _summarize_research_results,
+    _summarize_issue_runs,
+    _summarize_stage_mix,
+    _summarize_windows_accelerators,
+)
+
+
+def _make_snapshot(**overrides):
+    now = time.time()
+    payload = {
+        "run_name": "train_sample_20260305_010101",
+        "out_log": Path("train_sample.out.log"),
+        "err_log": None,
+        "pid_file": None,
+        "pid": None,
+        "pid_source": "pid_file",
+        "pid_alive": False,
+        "status": "running",
+        "stage": "data",
+        "sft_step": 0,
+        "pref_step": 0,
+        "pref_pairs": 0,
+        "loss": None,
+        "lr": None,
+        "rdrop": None,
+        "wpo_std": None,
+        "beta": None,
+        "margin": None,
+        "pref_objective": "-",
+        "pref_reference_pairs": None,
+        "checkpoint_count": 0,
+        "last_checkpoint_stage": "-",
+        "last_checkpoint_step": 0,
+        "save_every_steps": 20,
+        "sft_target_steps": 470,
+        "pref_target_steps": 130,
+        "has_distill_stage": True,
+        "has_pref_mining_stage": True,
+        "progress_units": 0.0,
+        "total_units": 600.0,
+        "progress_percent": 0.0,
+        "eta_seconds": None,
+        "checkpoint_eta_seconds": None,
+        "step_rate_per_hour": None,
+        "stage_progress_label": "21000/42000 pairs",
+        "stage_progress_percent": 50.0,
+        "stage_rate_label": "900.00/s",
+        "stage_eta_seconds": 12.0,
+        "cpu_percent": None,
+        "ram_gb": None,
+        "out_size": 100,
+        "out_last_write_ts": now,
+        "stale_minutes": 0.0,
+        "err_size": 0,
+        "err_last_write_ts": None,
+        "err_signal": "ok",
+        "err_summary": "-",
+        "launch_hint": "",
+        "command_line": "",
+        "launch_command": "",
+        "health_summary": "healthy",
+        "runtime_summary": "device=cuda model_dtype=torch.bfloat16 gradient_checkpointing=True",
+        "adapter_summary": "lora_plus_ratio=16.00 base_group=84 fast_group=42 | neftune_sft=5.000 neftune_pref=0.000",
+        "source_balance_summary": "quality_anchor:0.91, reasoning:1.22",
+        "objective_summary": "beta=1.9000->3.6000 margin=0.0000->0.0000 ipo_target=0.2632->0.1389 label_smoothing=0.000 xpo_clip=0.000 hardness_gamma=1.150 wpo_alpha=0.350 robust_alpha=0.300 robust_eta=0.080 anchor_weight=0.0000",
+        "data_summary": "pairs=21000/42000 raw=37572 kept=24041 rate=900.00/s",
+        "eval_summary": "threshold=1.05 kept=194/500 dropped_quality=50 dropped_synthetic=256",
+        "sft_filter_summary": "-",
+        "distill_config_summary": "target=5880 ratio=0.140 max_seconds=12000.0 best_of=3 min_gain=0.180",
+        "distill_summary": "visited=120/650 generated=42 rate=14.00/s",
+        "pref_mining_summary": "accepted=512/3000 visited=900/48082 rate=6.75/s",
+        "pref_selection_summary": "-",
+        "tail_lines": [],
+        "err_tail_lines": [],
+    }
+    payload.update(overrides)
+    return RunSnapshot(**payload)
+
+
+def smoke_test_training_monitor_parsing():
+    sample_lines = [
+        "[train] runtime config: device=cuda model_dtype=torch.bfloat16 gradient_checkpointing=True",
+        "[train] matched LoRA config to init adapter: r=32 alpha=64 dropout=0.0300 use_dora=True use_rslora=True targets=q_proj,k_proj,v_proj,o_proj",
+        "[train] NEFTune config: sft_noise_alpha=5.000 preference_noise_alpha=0.000",
+        "[sft] source balance factors: conversation_data.quality_anchor_v2.jsonl:0.91, conversation_data.mega_reasoning_creative_v25_75582.jsonl:1.22",
+        "[train] LoRA+ optimizer groups: ratio=16.00 base_group=84 fast_group=42",
+        "[train] step=17 loss=4.5678 lr=9.5e-06 rdrop=0.0421",
+        "[data] progress: pairs=42000/42000 raw=75145 kept=48082 rate=1021.34/s",
+        "[data] quality filter: raw=75145 kept=48082 empty=338 placeholder=5183 filtered=15531 deduped=6011 source_cap=0 synthetic_cap=0 prompt_cap=6082 cap_relax=0",
+        "[data] synthetic_kept=3084/42000",
+        "[data] train=47888 eval=194 (raw_eval=500)",
+        "[distill] config: target=5880 ratio=0.140 max_seconds=12000.0 best_of=3 min_gain=0.180 density_bias=0.200",
+        "[distill] progress: visited=120/650 generated=42 rate=14.00/s",
+        "[sft] quality filter: threshold=0.90 kept=41928 dropped_quality=53 dropped_short=0 dropped_synthetic=812 exempt_sources=3",
+        "[pref] building preference pairs (mode=ipo)...",
+        "[pref] objective schedule: beta=1.9000->3.6000 margin=0.0000->0.0000 ipo_target=0.2632->0.1389 label_smoothing=0.000 xpo_clip=0.000 hardness_gamma=1.150 wpo_alpha=0.350 robust_alpha=0.300 robust_eta=0.080 self_play_budget=4 self_play_curriculum=easy_to_hard self_play_max_new_tokens=40 anchor_weight=0.0000",
+        "[pref] mining config: mode=auto generation=on target_pairs=3000 candidates=48082 max_attempts=60000 self_play_budget=4 self_play_curriculum=easy_to_hard self_play_max_new_tokens=40 selection=capacity_aware keep_ratio=0.620 max_seconds=4500.0",
+        "[pref] mining progress: visited=900/48082 accepted=512 rate=6.75/s",
+        "[pref] pair selection: strategy=capacity_aware keep=1860/3000 keep_ratio=0.620 gap=0.312->0.401 sim=0.441->0.382 conv=0.220->0.348 reason=0.410->0.622 creative=0.180->0.264 density=0.330->0.517 selected_score_mean=1.1180",
+        "[pref] mining complete: pairs=1860 mined=3000 visited=9000 generation_failures=3 brevity_filtered=7 stop_reject_variants=42 self_play_prompts=4 self_play_candidates=7 self_play_failures=0 elapsed=245.2s",
+        "[pref] pairs=1860",
+        "[pref] reference margins cached for 1860 pairs",
+        "[pref] step=7 loss=1.2345 lr=1.4e-05 beta=1.9 margin=0.18 wpo_std=0.2184",
+        "[eval] quality filter: threshold=1.05 kept=194 dropped_quality=50 dropped_synthetic=256",
+        "[checkpoint] saved stage=preference step=20",
+    ]
+
+    with tempfile.TemporaryDirectory() as td:
+        out_log = Path(td) / "train_sample.out.log"
+        out_log.write_text("\n".join(sample_lines), encoding="utf-8")
+        parsed = _parse_log(out_log)
+
+    assert parsed.stage == "eval"
+    assert parsed.pref_step == 7
+    assert parsed.pref_pairs == 1860
+    assert abs(float(parsed.rdrop or 0.0) - 0.0421) < 1e-9
+    assert abs(float(parsed.wpo_std or 0.0) - 0.2184) < 1e-9
+    assert parsed.pref_objective == "ipo"
+    assert parsed.pref_reference_pairs == 1860
+    assert parsed.last_checkpoint_stage == "preference"
+    assert parsed.last_checkpoint_step == 20
+    assert "gradient_checkpointing=True" in parsed.runtime_summary
+    assert "neftune_sft=5.000" in parsed.adapter_summary
+    assert "lora_plus_ratio=16.00" in parsed.adapter_summary
+    assert "quality_anchor_v2.jsonl:0.91" in parsed.source_balance_summary
+    assert "ipo_target=0.2632->0.1389" in parsed.objective_summary
+    assert "robust_alpha=0.300" in parsed.objective_summary
+    assert parsed.data_pairs_current == 42000
+    assert parsed.data_pairs_total == 42000
+    assert "synthetic=3084/42000" in parsed.data_summary
+    assert parsed.eval_pairs_count == 194
+    assert parsed.raw_eval_pairs_count == 500
+    assert "kept=194/500" in parsed.eval_summary
+    assert "best_of=3" in parsed.distill_config_summary
+    assert "min_gain=0.180" in parsed.distill_config_summary
+    assert "density_bias=0.200" in parsed.distill_config_summary
+    assert parsed.distill_generated == 42
+    assert parsed.distill_total == 650
+    assert "threshold=0.90" in parsed.sft_filter_summary
+    assert "dropped_synthetic=812" in parsed.sft_filter_summary
+    assert parsed.pref_mining_target_pairs == 3000
+    assert parsed.pref_mining_candidates == 48082
+    assert parsed.pref_mining_accepted == 1860
+    assert parsed.pref_mining_generation_failures == 3
+    assert parsed.pref_mining_self_play_budget == 4
+    assert parsed.pref_mining_self_play_curriculum == "easy_to_hard"
+    assert parsed.pref_mining_self_play_max_new_tokens == 40
+    assert parsed.pref_mining_self_play_prompts == 4
+    assert parsed.pref_mining_self_play_candidates == 7
+    assert "brevity_filtered=7" in parsed.pref_mining_summary
+    assert "self_play_prompts=4" in parsed.pref_mining_summary
+    assert "strategy=capacity_aware keep=1860/3000" in parsed.pref_selection_summary
+    assert "density=0.330->0.517" in parsed.pref_selection_summary
+
+    parsed.stage = "data"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "42000/42000 pairs"
+    assert pct == 100.0
+    assert rate == "1021.34/s"
+    assert eta == 0.0
+
+    parsed.stage = "preference_mining"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "1860/3000 acc"
+    assert pct is not None and 18.0 < pct < 19.0
+    assert rate == "6.75/s"
+    assert eta is not None and eta > 0
+
+    parsed.stage = "preference"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "1860"
+    assert pct is None
+    assert rate == "-"
+    assert eta is None
+
+    parsed.stage = "sft_setup"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "setup"
+    assert pct is None
+    assert rate == "-"
+    assert eta is None
+
+    parsed.stage = "sft_filter"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "quality filter"
+    assert pct is None
+    assert rate == "-"
+    assert eta is None
+
+    parsed.stage = "eval"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "194/500 eval"
+    assert pct is not None and 38.0 < pct < 39.0
+    assert rate == "-"
+    assert eta is None
+
+    data_snap = _make_snapshot()
+    data_pct = _compute_display_progress_percent(data_snap)
+    assert data_pct is not None and 4.9 < data_pct < 5.1
+
+    sft_snap = _make_snapshot(
+        stage="sft",
+        sft_step=100,
+        progress_units=100.0,
+        progress_percent=(100.0 / 600.0) * 100.0,
+        stage_progress_label="-",
+        stage_progress_percent=None,
+        stage_rate_label="-",
+        stage_eta_seconds=None,
+    )
+    sft_pct = _compute_display_progress_percent(sft_snap)
+    assert sft_pct is not None and sft_pct > sft_snap.progress_percent
+    assert 35.0 < sft_pct < 36.0
+
+    launch_cmd = _build_launch_command(
+        root_dir=Path.cwd(),
+        launch_hint=str(Path.cwd() / "source" / "run_train_qwen_supermix_v25_selective_pref.ps1"),
+        command_line="",
+    )
+    assert "powershell -ExecutionPolicy Bypass -File" in launch_cmd
+    assert "source" in launch_cmd
+
+    health = _build_health_summary(
+        status="stopped",
+        stage="sft",
+        pid_file=Path("train_sample.pid"),
+        pid_source="pid_file",
+        pid_alive=False,
+        err_signal="warn",
+        err_summary="warning: gradient checkpointing disabled",
+        stale_minutes=48.5,
+    )
+    assert "stopped before completion" in health
+    assert "pid file is stale" in health
+    assert "gradient checkpointing disabled" in health
+
+    print("Training monitor parser smoke test PASSED")
+
+
+def test_canvas_size_resolution():
+    assert _resolve_canvas_size(1, 1, 620, 110) == (620, 110)
+    assert _resolve_canvas_size(480, 72, 620, 110) == (480, 72)
+    assert _resolve_canvas_size("bad", None, 620, 110) == (620, 110)
+
+
+def test_history_windows():
+    assert _history_window_seconds("10m") == 600.0
+    assert _history_window_seconds("60m") == 3600.0
+    assert _history_window_seconds("6h") == 21600.0
+    assert _history_window_seconds("unknown") == 3600.0
+
+
+def test_monitor_focus_and_issue_summaries():
+    errored = _make_snapshot(run_name="run_error", stage="sft", err_signal="error", err_summary="cuda oom")
+    stalled = _make_snapshot(run_name="run_stalled", status="stalled", stage="preference_mining", stale_minutes=42.0)
+    finished = _make_snapshot(run_name="run_done", status="finished", stage="done")
+
+    assert "teacher generation rate" in _build_run_recommendation(_make_snapshot(stage="distill"))
+    assert "archive the logs" in _build_run_recommendation(finished)
+
+    stage_summary = _summarize_stage_mix([errored, stalled, finished])
+    assert stage_summary.startswith("Stage Mix:")
+    assert "sft 1" in stage_summary
+    assert "preference_mining 1" in stage_summary
+    assert "done 1" in stage_summary
+
+    issue_summary = _summarize_issue_runs([finished, stalled, errored])
+    assert issue_summary.startswith("Issue Radar:")
+    assert "run_error [running/sft error]" in issue_summary
+    assert "run_stalled [stalled/preference_mining]" in issue_summary
+
+    fleet_watch = _summarize_fleet_watchlist([finished, stalled, errored], limit=2)
+    assert fleet_watch.startswith("Fleet Watch:")
+    assert "run_error" in fleet_watch
+    assert "run_stalled" in fleet_watch
+
+
+def test_omni_state_sidecar_is_discovered_and_applied():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        output_dir = root / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out_log = output_dir / "omni_collective_v41_train_20260409_120000.out.log"
+        out_log.write_text('{"event":"stage_start","stage":"stage2"}\n', encoding="utf-8")
+        (output_dir / "omni_collective_v41_train.worker.pid").write_text(str(os.getpid()), encoding="utf-8")
+        state_payload = {
+            "status": "stage_running",
+            "stage": "stage2",
+            "batch_index": 3892,
+            "total_batches": 7545,
+            "avg_train_loss": 10.7124,
+            "lr": 5.39e-05,
+            "eta_seconds": 21631.297,
+            "elapsed_seconds": 23046.539,
+            "avg_balance_loss": 0.174046,
+        }
+        (output_dir / "omni_collective_v41_train_state.json").write_text(
+            json.dumps(state_payload),
+            encoding="utf-8",
+        )
+
+        rows = collect_run_snapshots(root, stale_minutes_threshold=20.0)
+
+    snap = next(row for row in rows if row.run_name == "omni_collective_v41_train_20260409_120000")
+    assert snap.pid_alive is True
+    assert snap.stage == "stage2"
+    assert snap.stage_source == "state"
+    assert snap.state_file is not None and snap.state_file.name == "omni_collective_v41_train_state.json"
+    assert snap.stage_progress_label == "3892/7545 batches"
+    assert snap.stage_progress_percent is not None and 51.0 < snap.stage_progress_percent < 52.0
+    assert snap.stage_eta_seconds is not None and snap.stage_eta_seconds > 20000
+    assert snap.balance_loss is not None and abs(snap.balance_loss - 0.174046) < 1e-9
+    display_pct = _compute_display_progress_percent(snap)
+    assert display_pct is not None and 75.0 < display_pct < 80.0
+
+
+def test_stability_lab_failure_lens_and_research_radar():
+    snap = _make_snapshot(
+        run_name="omni_collective_v41_train_20260409_120000",
+        stage="stage2",
+        status="running",
+        err_signal="warn",
+        err_summary="PytorchStreamWriter failed writing file",
+        tail_lines=["trace ok"],
+        err_tail_lines=["OSError: [Errno 28] No space left on device"],
+        balance_loss=0.281,
+        stage_source="state",
+    )
+    now = time.time()
+    loss_history = [(now - 900 + i * 60, value) for i, value in enumerate([8.0, 8.1, 8.0, 8.2, 8.1, 9.0, 9.2, 9.4, 9.5])]
+    rate_history = [(now - 900 + i * 60, value) for i, value in enumerate([120.0, 122.0, 121.0, 119.0, 118.0, 84.0, 80.0, 79.0, 78.0])]
+    cpu_history = [(now - 900 + i * 60, value) for i, value in enumerate([40.0, 42.0, 43.0, 44.0, 45.0, 68.0, 72.0, 74.0, 76.0])]
+
+    lab = _build_run_stability_lab(snap, loss_history, rate_history, cpu_history)
+    assert lab.startswith("Stability Lab:")
+    assert "loss drift" in lab
+    assert "throughput down" in lab
+    assert "routing balance pressure" in lab
+
+    lens = _failure_lens(snap)
+    assert lens == "Failure Lens: storage or checkpoint-write risk"
+
+    radar = _summarize_fleet_research_radar([snap], {snap.run_name: loss_history}, {snap.run_name: rate_history})
+    assert radar.startswith("Research Radar:")
+    assert "1 loss-drift" in radar
+    assert "1 throughput-drift" in radar
+    assert "1 balance-alert" in radar
+
+
+def test_run_watch_summary_and_runtime_headline():
+    snap = _make_snapshot(
+        stage="data",
+        status="running",
+        cpu_percent=92.0,
+        ram_gb=3.2,
+        stale_minutes=0.4,
+        checkpoint_eta_seconds=4.0 * 3600.0,
+        runtime_summary="device=cpu model_dtype=torch.float32 gradient_checkpointing=False",
+        data_summary="pairs=100/200 raw=400 kept=120 synthetic=80/200 rate=0.40/s",
+    )
+
+    watch = _build_run_watch_summary(snap)
+    assert watch.startswith("Watch:")
+    assert "CPU-bound backend" in watch
+    assert "keeping 30%" in watch
+    assert "synthetic share is elevated at 40%" in watch
+
+    runtime = _build_runtime_headline(snap)
+    assert runtime.startswith("Runtime: cpu")
+    assert "CPU 92%" in runtime
+    assert "RAM 3.2G" in runtime
+    assert "stale 0.4m" in runtime
+
+
+def test_recovery_outlook_uses_checkpoint_and_error_context():
+    crashed = _make_snapshot(
+        status="stopped",
+        stage="stage2",
+        pid_alive=False,
+        checkpoint_count=4,
+        last_checkpoint_stage="stage2",
+        last_checkpoint_step=420,
+        save_every_steps=20,
+        err_signal="error",
+        err_summary="disk full",
+    )
+    recovery = _build_recovery_outlook(crashed)
+    assert recovery.startswith("Recovery:")
+    assert "resume from stage2 step 420" in recovery
+    assert "checkpoint cadence 20 steps" in recovery
+    assert "fix the ERR failure" in recovery
+
+    live = _make_snapshot(
+        status="running",
+        stage="sft",
+        pid_alive=True,
+        checkpoint_count=2,
+        last_checkpoint_stage="sft",
+        last_checkpoint_step=80,
+    )
+    live_recovery = _build_recovery_outlook(live)
+    assert "live run" in live_recovery
+    assert "latest durable save is sft step 80" in live_recovery
+
+
+def test_run_rescue_plan_surfaces_resume_and_launch_guidance():
+    snap = _make_snapshot(
+        status="stopped",
+        stage="stage2",
+        pid_alive=False,
+        pid_file=Path("train_sample.pid"),
+        checkpoint_count=3,
+        last_checkpoint_stage="stage2",
+        last_checkpoint_step=512,
+        err_signal="error",
+        err_summary="disk full",
+        launch_command="powershell -File source\\run_train_omni_collective_v8_local.ps1",
+    )
+    rescue = _build_run_rescue_plan(snap)
+    assert rescue.startswith("Rescue Plan:")
+    assert "review ERR tail first" in rescue
+    assert "clear stale pid marker" in rescue
+    assert "resume from stage2 step 512" in rescue
+    assert "relaunch with the saved launch command" in rescue
+
+
+def test_backend_mix_summary():
+    cpu_snap = _make_snapshot(run_name="cpu_run", runtime_summary="device=cpu model_dtype=torch.float32")
+    dml_snap = _make_snapshot(run_name="dml_run", runtime_summary="device=privateuseone:0 model_dtype=torch.float16")
+    cuda_snap = _make_snapshot(run_name="cuda_run", runtime_summary="resolved=cuda device=cuda model_dtype=torch.bfloat16")
+
+    summary = _summarize_backend_mix([cpu_snap, dml_snap, cuda_snap])
+    assert summary.startswith("Backend Mix:")
+    assert "cpu 1" in summary
+    assert "dml 1" in summary
+    assert "cuda 1" in summary
+
+
+def test_fleet_checkpoint_posture_summary():
+    safeguarded = _make_snapshot(
+        run_name="run_safe",
+        status="running",
+        checkpoint_count=2,
+        last_checkpoint_stage="sft",
+        last_checkpoint_step=40,
+        pid_alive=True,
+    )
+    fragile = _make_snapshot(run_name="run_fragile", status="running", checkpoint_count=0, pid_alive=True)
+    resumable = _make_snapshot(
+        run_name="run_resume",
+        status="stopped",
+        checkpoint_count=1,
+        last_checkpoint_stage="preference",
+        last_checkpoint_step=12,
+        pid_alive=False,
+    )
+    cold = _make_snapshot(run_name="run_cold", status="stopped", checkpoint_count=0, pid_alive=False)
+    summary = _summarize_fleet_checkpoint_posture([safeguarded, fragile, resumable, cold])
+    assert summary.startswith("Checkpoint Posture:")
+    assert "safeguarded 1" in summary
+    assert "fragile active 1" in summary
+    assert "resumable down 1" in summary
+    assert "cold restart 1" in summary
+
+
+def test_fleet_tempo_summary():
+    fastest = _make_snapshot(
+        run_name="run_fast",
+        status="running",
+        step_rate_per_hour=140.0,
+        checkpoint_eta_seconds=900.0,
+        stale_minutes=0.2,
+        cpu_percent=88.0,
+    )
+    steady = _make_snapshot(
+        run_name="run_steady",
+        status="running",
+        step_rate_per_hour=90.0,
+        checkpoint_eta_seconds=1800.0,
+        stale_minutes=0.5,
+        cpu_percent=42.0,
+    )
+    tempo = _summarize_fleet_tempo([fastest, steady])
+    assert tempo.startswith("Tempo Board:")
+    assert "fastest trainer run_fast 140.0 steps/h" in tempo
+    assert "next checkpoint run_fast 15m" in tempo
+    assert "freshest log run_fast 0.2m stale" in tempo
+    assert "highest host CPU run_fast 88%" in tempo
+
+
+def test_fleet_spotlight_summary():
+    running = _make_snapshot(
+        run_name="run_fast",
+        status="running",
+        stage="sft",
+        progress_percent=40.0,
+        eta_seconds=1800.0,
+        out_last_write_ts=time.time(),
+    )
+    stalled = _make_snapshot(
+        run_name="run_stalled",
+        status="stalled",
+        stage="distill",
+        stale_minutes=35.0,
+        eta_seconds=7200.0,
+        progress_percent=20.0,
+        out_last_write_ts=time.time() - 60.0,
+    )
+    spotlight = _summarize_fleet_spotlight([running, stalled])
+    assert spotlight.startswith("Spotlight:")
+    assert "lead progress run_fast" in spotlight
+    assert "fastest ETA run_fast 30m" in spotlight
+    assert "top attention run_stalled stalled" in spotlight
+
+
+def test_selected_vs_fleet_summary():
+    selected = _make_snapshot(
+        run_name="run_selected",
+        stage="sft",
+        status="running",
+        sft_step=240,
+        sft_target_steps=400,
+        eta_seconds=1800.0,
+        step_rate_per_hour=120.0,
+        runtime_summary="device=cpu model_dtype=torch.float32",
+    )
+    peer = _make_snapshot(
+        run_name="run_peer",
+        stage="sft",
+        status="running",
+        sft_step=120,
+        sft_target_steps=400,
+        eta_seconds=3600.0,
+        step_rate_per_hour=60.0,
+        runtime_summary="device=cpu model_dtype=torch.float32",
+    )
+    other = _make_snapshot(
+        run_name="run_other",
+        stage="preference",
+        status="running",
+        pref_step=10,
+        pref_target_steps=100,
+        eta_seconds=7200.0,
+        step_rate_per_hour=40.0,
+        runtime_summary="resolved=cuda device=cuda model_dtype=torch.bfloat16",
+    )
+
+    summary = _build_selected_vs_fleet_summary(selected, [selected, peer, other])
+    assert summary.startswith("Compare:")
+    assert "progress" in summary
+    assert "ETA faster than fleet median" in summary
+    assert "throughput" in summary
+
+
+def test_phase_breakdown_rows():
+    snap = _make_snapshot(
+        stage="sft",
+        sft_step=100,
+        sft_target_steps=400,
+        pref_target_steps=120,
+        pref_step=0,
+        pref_pairs=0,
+        stage_progress_percent=None,
+    )
+    rows = _phase_breakdown_rows(snap)
+    by_phase = {name: (weight, completion, current) for name, weight, completion, current in rows}
+
+    assert by_phase["data"] == (10.0, 1.0, False)
+    assert by_phase["distill"] == (10.0, 1.0, False)
+    assert by_phase["sft_setup"] == (5.0, 1.0, False)
+    assert by_phase["sft"] == (50.0, 0.25, True)
+    assert by_phase["preference_mining"] == (10.0, 0.0, False)
+    assert by_phase["preference"] == (15.0, 0.0, False)
+
+
+def test_eval_filter_fallback_parse():
+    sample_lines = [
+        "[data] train=47888 eval=128 (raw_eval=500)",
+        "[eval] quality filter fallback: kept=128 after ranking top non-synthetic pairs (threshold=1.05, dropped_quality=30, dropped_synthetic=342)",
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        out_log = Path(td) / "train_eval_fallback.out.log"
+        out_log.write_text("\n".join(sample_lines), encoding="utf-8")
+        parsed = _parse_log(out_log)
+
+    assert parsed.eval_pairs_count == 128
+    assert parsed.raw_eval_pairs_count == 500
+    assert "fallback threshold=1.05" in parsed.eval_summary
+    parsed.stage = "eval"
+    label, pct, rate, eta = _derive_stage_monitor_fields(parsed)
+    assert label == "128/500 eval"
+    assert pct is not None and 25.0 < pct < 26.0
+    assert rate == "-"
+    assert eta is None
+
+
+def test_research_results_summary():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        research_dir = root / "research"
+        research_dir.mkdir(parents=True, exist_ok=True)
+        (research_dir / "results.tsv").write_text(
+            "\n".join(
+                [
+                    "timestamp\tcommit\trun_tag\toutput_dir\tbenchmark_json\ttoken_f1_delta\tchar_similarity_delta\tperplexity_delta\tavg_gen_seconds_delta\tstatus\tdescription",
+                    "2026-03-21T09:25:55.3046231Z\tff94ce5\tpref_stop_iter_20260321\tC:/tmp/out\tC:/tmp/bench.json\t-0.112267\t-0.072091\t34941.764401\t4.471879\tdiscard\tstop-aware preference mining",
+                    "2026-03-21T10:00:00.0000000Z\tff94ce5\tself_play_iter_20260321\tC:/tmp/out2\tC:/tmp/bench2.json\t-0.090000\t-0.050000\t12000.0\t2.250000\tkeep\tbudgeted self-play mining",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        results = _load_research_results(root)
+        summary, best_line, latest_line = _summarize_research_results(results)
+
+    assert len(results) == 2
+    assert results[0].run_tag == "self_play_iter_20260321"
+    assert "keep 1" in summary
+    assert "discard 1" in summary
+    assert "self_play_iter_20260321" in best_line
+    assert "budgeted self-play mining" in latest_line
+
+
+def test_research_failure_insight_uses_sample_summary_and_artifact_path():
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td)
+        sample_path = run_dir / "sample_comparison.jsonl"
+        sample_path.write_text("", encoding="utf-8")
+        benchmark_path = run_dir / "benchmark_results.json"
+        benchmark_path.write_text(
+            __import__("json").dumps(
+                {
+                    "artifacts": {
+                        "sample_comparison_jsonl": str(sample_path),
+                    },
+                    "sample_summary": {
+                        "worst_regression": {
+                            "sample_index": 3,
+                            "source": "conversation_data.coding_knowledge_2026_02_19.jsonl",
+                            "delta_token_f1": -0.5123,
+                            "delta_char_similarity": -0.2214,
+                            "delta_gen_seconds": 4.75,
+                            "user_preview": "Explain binary search in one sentence.",
+                            "reference_preview": "Binary search halves the sorted interval each step.",
+                            "tuned_prediction_preview": "Binary search is useful in many situations and can help a lot.",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        insight = _load_research_failure_insight(benchmark_path)
+
+    assert "#3" in insight.summary_line
+    assert "dF1 -0.512" in insight.summary_line
+    assert "Prompt: Explain binary search in one sentence." == insight.prompt_line
+    assert "Binary search is useful in many situations" in insight.prediction_line
+    assert str(sample_path) == insight.sample_comparison_jsonl
+
+
+def test_research_failure_insight_falls_back_to_sample_comparison_jsonl():
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td)
+        sample_path = run_dir / "sample_comparison.jsonl"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    __import__("json").dumps(
+                        {
+                            "sample_index": 1,
+                            "source": "math",
+                            "delta_token_f1": -0.75,
+                            "delta_char_similarity": -0.60,
+                            "delta_gen_seconds": 2.50,
+                            "user": "Answer only: 2 + 2?",
+                            "reference": "4",
+                            "tuned_prediction": "4. The answer is four.",
+                        }
+                    )
+                ]
+            ),
+            encoding="utf-8",
+        )
+        benchmark_path = run_dir / "benchmark_results.json"
+        benchmark_path.write_text(
+            __import__("json").dumps(
+                {
+                    "artifacts": {
+                        "sample_comparison_jsonl": str(sample_path),
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        insight = _load_research_failure_insight(benchmark_path)
+
+    assert "#1 math" in insight.summary_line
+    assert "Prompt: Answer only: 2 + 2?" == insight.prompt_line
+    assert "Tuned: 4. The answer is four." in insight.prediction_line
+    assert "| Ref: 4" in insight.prediction_line
+
+
+def test_research_failure_insight_reports_missing_sample_trace():
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td)
+        benchmark_path = run_dir / "benchmark_results.json"
+        benchmark_path.write_text("{}", encoding="utf-8")
+
+        insight = _load_research_failure_insight(benchmark_path)
+
+    assert insight.summary_line == "Top regression: unavailable for this run"
+    assert "rerun the benchmark with detailed traces" in insight.prompt_line
+
+
+def test_sft_filter_fallback_parse():
+    sample_lines = [
+        "[sft] quality filter fallback: kept=8 too small; using unfiltered set=9",
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        out_log = Path(td) / "train_sft_fallback.out.log"
+        out_log.write_text("\n".join(sample_lines), encoding="utf-8")
+        parsed = _parse_log(out_log)
+
+    assert parsed.sft_filter_summary == "fallback kept=8 using_unfiltered=9"
+
+
+def test_runtime_device_value_prefers_resolved_backend():
+    snap = _make_snapshot(
+        runtime_summary=(
+            "requested=auto resolved=cpu device=cpu model_dtype=torch.float32 "
+            "gradient_checkpointing=False torch_threads=8 interop_threads=4"
+        )
+    )
+    assert _runtime_device_value(snap) == "cpu"
+
+    dml_snap = _make_snapshot(runtime_summary="device=privateuseone:0 model_dtype=torch.float16")
+    assert _runtime_device_value(dml_snap) == "dml"
+
+
+def test_summarize_windows_accelerators_rolls_up_gpu_and_npu_rows():
+    payload = {
+        "adapters": [
+            {"Name": "Qualcomm Adreno X1-45 GPU", "DriverVersion": "31.0.105.0"},
+        ],
+        "memory": [
+            {
+                "Name": "luid_0x00000000_0x000105F3_phys_0",
+                "DedicatedUsage": 0,
+                "SharedUsage": 536870912,
+                "TotalCommitted": 2147483648,
+            }
+        ],
+        "engines": [
+            {"Name": "pid_1_luid_0x0_phys_0_eng_0_engtype_3D", "UtilizationPercentage": 17},
+            {"Name": "pid_2_luid_0x0_phys_0_eng_4_engtype_Compute", "UtilizationPercentage": 62},
+            {"Name": "pid_3_luid_0x0_phys_0_eng_5_engtype_VideoDecode", "UtilizationPercentage": 9},
+        ],
+        "npu": [
+            {
+                "Name": "Snapdragon X Plus Hexagon NPU",
+                "Manufacturer": "Qualcomm Technologies, Inc.",
+                "Status": "OK",
+            }
+        ],
+    }
+
+    summary = _summarize_windows_accelerators(payload)
+
+    assert summary["gpus"]
+    assert summary["gpus"][0]["name"] == "Qualcomm Adreno X1-45 GPU"
+    assert abs(float(summary["gpus"][0]["util"]) - 62.0) < 1e-9
+    assert abs(float(summary["gpus"][0]["graphics"]) - 17.0) < 1e-9
+    assert abs(float(summary["gpus"][0]["shared_gb"]) - 0.5) < 1e-9
+    assert summary["npus"][0]["status"] == "OK"
+
+
+if __name__ == "__main__":
+    tests = [
+        smoke_test_training_monitor_parsing,
+        test_canvas_size_resolution,
+        test_history_windows,
+        test_monitor_focus_and_issue_summaries,
+        test_run_watch_summary_and_runtime_headline,
+        test_recovery_outlook_uses_checkpoint_and_error_context,
+        test_run_rescue_plan_surfaces_resume_and_launch_guidance,
+        test_phase_breakdown_rows,
+        test_backend_mix_summary,
+        test_fleet_checkpoint_posture_summary,
+        test_fleet_tempo_summary,
+        test_fleet_spotlight_summary,
+        test_selected_vs_fleet_summary,
+        test_eval_filter_fallback_parse,
+        test_research_results_summary,
+        test_research_failure_insight_uses_sample_summary_and_artifact_path,
+        test_research_failure_insight_falls_back_to_sample_comparison_jsonl,
+        test_research_failure_insight_reports_missing_sample_trace,
+        test_sft_filter_fallback_parse,
+        test_runtime_device_value_prefers_resolved_backend,
+        test_summarize_windows_accelerators_rolls_up_gpu_and_npu_rows,
+    ]
+    for test in tests:
+        print(f"Running {test.__name__}...")
+        test()

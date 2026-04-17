@@ -1,0 +1,174 @@
+{
+  "labels": [
+    "hollow_box",
+    "rounded_plate_holes",
+    "phone_stand",
+    "cylinder_center_hole",
+    "radial_spokes",
+    "countersunk_hole",
+    "mirrored_feature",
+    "decorative_star",
+    "boolean_ops",
+    "editable_models",
+    "pyramid",
+    "triangular_prism",
+    "tetrahedron",
+    "grid_plane"
+  ],
+  "display_names": {
+    "hollow_box": "hollow box",
+    "rounded_plate_holes": "rounded plate with four mounting holes",
+    "phone_stand": "parametric phone stand",
+    "cylinder_center_hole": "cylinder with a centered hole",
+    "radial_spokes": "radial spokes around a circle",
+    "countersunk_hole": "countersunk screw hole",
+    "mirrored_feature": "mirrored feature on both sides of a part",
+    "decorative_star": "gear-like decorative star",
+    "boolean_ops": "OpenSCAD boolean operations",
+    "editable_models": "editable parametric OpenSCAD models",
+    "pyramid": "square pyramid",
+    "triangular_prism": "triangular prism",
+    "tetrahedron": "tetrahedron",
+    "grid_plane": "flat grid plane"
+  },
+  "vocab": {
+    "<pad>": 0,
+    "<unk>": 1,
+    " ": 2,
+    "(": 3,
+    ")": 4,
+    ",": 5,
+    "-": 6,
+    ".": 7,
+    "2": 8,
+    "3": 9,
+    ":": 10,
+    "?": 11,
+    "a": 12,
+    "b": 13,
+    "c": 14,
+    "d": 15,
+    "e": 16,
+    "f": 17,
+    "g": 18,
+    "h": 19,
+    "i": 20,
+    "k": 21,
+    "l": 22,
+    "m": 23,
+    "n": 24,
+    "o": 25,
+    "p": 26,
+    "q": 27,
+    "r": 28,
+    "s": 29,
+    "t": 30,
+    "u": 31,
+    "v": 32,
+    "w": 33,
+    "x": 34,
+    "y": 35
+  },
+  "max_len": 224,
+  "max_words": 28,
+  "word_buckets": 512,
+  "char_embed_dim": 28,
+  "conv_channels": 56,
+  "word_embed_dim": 20,
+  "hidden_dim": 112,
+  "answer_bank": {
+    "hollow_box": {
+      "code": "module hollow_box(size=[40,30,20], wall=2){difference(){cube(size);translate([wall,wall,wall])cube([size[0]-2*wall,size[1]-2*wall,size[2]-2*wall]);}} hollow_box();",
+      "explain_then_code": "Use `difference()` to subtract an inner cube from the outer shell so the wall thickness stays parametric.\n\nmodule hollow_box(size=[40,30,20], wall=2){difference(){cube(size);translate([wall,wall,wall])cube([size[0]-2*wall,size[1]-2*wall,size[2]-2*wall]);}} hollow_box();",
+      "concise_answer": "module hollow_box(size=[40,30,20], wall=2){difference(){cube(size);translate([wall,wall,wall])cube([size[0]-2*wall,size[1]-2*wall,size[2]-2*wall]);}} hollow_box();"
+    },
+    "rounded_plate_holes": {
+      "code": "module rounded_plate(size=[70,40], r=6, h=4, hole_r=2, inset=8){difference(){linear_extrude(height=h)hull(){for(x=[-size[0]/2+r,size[0]/2-r], y=[-size[1]/2+r,size[1]/2-r])translate([x,y])circle(r=r,$fn=48);}for(x=[-size[0]/2+inset,size[0]/2-inset], y=[-size[1]/2+inset,size[1]/2-inset])translate([x,y,-1])cylinder(h=h+2,r=hole_r,$fn=36);}} rounded_plate();",
+      "explain_then_code": "A simple way is to hull four corner circles into a rounded rectangle, then subtract four cylinders for the holes.\n\nmodule rounded_plate(size=[70,40], r=6, h=4, hole_r=2, inset=8){difference(){linear_extrude(height=h)hull(){for(x=[-size[0]/2+r,size[0]/2-r], y=[-size[1]/2+r,size[1]/2-r])translate([x,y])circle(r=r,$fn=48);}for(x=[-size[0]/2+inset,size[0]/2-inset], y=[-size[1]/2+inset,size[1]/2-inset])translate([x,y,-1])cylinder(h=h+2,r=hole_r,$fn=36);}} rounded_plate();",
+      "concise_answer": "Hull four corner circles into a rounded plate, then subtract four cylinders at the mounting coordinates with `difference()`."
+    },
+    "phone_stand": {
+      "code": "angle=68; thickness=4; width=80; height=55; module phone_stand(){linear_extrude(height=thickness)polygon([[0,0],[width,0],[width*0.60,height],[18,height]]);} rotate([90-angle,0,0]) phone_stand();",
+      "explain_then_code": "Keep the footprint and support angle as parameters so you can tune the geometry without rewriting the polygon.\n\nangle=68; thickness=4; width=80; height=55; module phone_stand(){linear_extrude(height=thickness)polygon([[0,0],[width,0],[width*0.60,height],[18,height]]);} rotate([90-angle,0,0]) phone_stand();",
+      "concise_answer": "angle=68; thickness=4; width=80; height=55; module phone_stand(){linear_extrude(height=thickness)polygon([[0,0],[width,0],[width*0.60,height],[18,height]]);} rotate([90-angle,0,0]) phone_stand();"
+    },
+    "cylinder_center_hole": {
+      "code": "difference(){cylinder(h=20, r=12, $fn=64); translate([0,0,-1]) cylinder(h=22, r=4, $fn=48);}",
+      "explain_then_code": "Start with the outer cylinder and subtract a slightly taller inner cylinder so the hole cleanly passes through.\n\ndifference(){cylinder(h=20, r=12, $fn=64); translate([0,0,-1]) cylinder(h=22, r=4, $fn=48);}",
+      "concise_answer": "difference(){cylinder(h=20, r=12, $fn=64); translate([0,0,-1]) cylinder(h=22, r=4, $fn=48);}"
+    },
+    "radial_spokes": {
+      "code": "radius=24; spoke_len=18; spoke_w=4; for(angle=[0:30:330]) rotate([0,0,angle]) translate([radius,0,0]) cube([spoke_len,spoke_w,4], center=true);",
+      "explain_then_code": "Use a `for()` loop over angles, then rotate and translate the spoke geometry into place.\n\nradius=24; spoke_len=18; spoke_w=4; for(angle=[0:30:330]) rotate([0,0,angle]) translate([radius,0,0]) cube([spoke_len,spoke_w,4], center=true);",
+      "concise_answer": "Loop over angles with `for(angle=[0:30:330]) rotate([0,0,angle]) translate([radius,0,0]) ...` to place each spoke evenly."
+    },
+    "countersunk_hole": {
+      "code": "module countersunk_hole(depth=8, shaft_r=1.7, head_r=3.6, head_h=2){cylinder(h=depth, r=shaft_r, $fn=36); cylinder(h=head_h, r1=head_r, r2=shaft_r, $fn=36);} countersunk_hole();",
+      "explain_then_code": "Model the shaft as a straight cylinder and the countersink as a tapered cone frustum.\n\nmodule countersunk_hole(depth=8, shaft_r=1.7, head_r=3.6, head_h=2){cylinder(h=depth, r=shaft_r, $fn=36); cylinder(h=head_h, r1=head_r, r2=shaft_r, $fn=36);} countersunk_hole();",
+      "concise_answer": "module countersunk_hole(depth=8, shaft_r=1.7, head_r=3.6, head_h=2){cylinder(h=depth, r=shaft_r, $fn=36); cylinder(h=head_h, r1=head_r, r2=shaft_r, $fn=36);} countersunk_hole();"
+    },
+    "mirrored_feature": {
+      "code": "module feature(){translate([18,0,0]) cylinder(h=8, r=3, $fn=32);} union(){feature(); mirror([1,0,0]) feature();}",
+      "explain_then_code": "Wrap the feature in a module, place it once, and call it again through `mirror()` across the symmetry plane.\n\nmodule feature(){translate([18,0,0]) cylinder(h=8, r=3, $fn=32);} union(){feature(); mirror([1,0,0]) feature();}",
+      "concise_answer": "Wrap the feature in a module and call it twice, once normally and once with `mirror([1,0,0])` or the axis that matches your symmetry plane."
+    },
+    "decorative_star": {
+      "code": "points=[for(i=[0:11]) let(r=(i%2==0)?24:12,a=i*30) [r*cos(a), r*sin(a)]]; linear_extrude(height=4) polygon(points);",
+      "explain_then_code": "Alternate outer and inner radii in a polar point list, then extrude the 2D polygon into a thin solid.\n\npoints=[for(i=[0:11]) let(r=(i%2==0)?24:12,a=i*30) [r*cos(a), r*sin(a)]]; linear_extrude(height=4) polygon(points);",
+      "concise_answer": "points=[for(i=[0:11]) let(r=(i%2==0)?24:12,a=i*30) [r*cos(a), r*sin(a)]]; linear_extrude(height=4) polygon(points);"
+    },
+    "boolean_ops": {
+      "code": "`union()` combines solids, `difference()` subtracts later solids from the first, and `intersection()` keeps only the overlapping volume shared by the solids.",
+      "explain_then_code": "`union()` combines shapes into one solid, `difference()` cuts later shapes out of the first one, and `intersection()` keeps only the overlap.",
+      "concise_answer": "`union()` combines, `difference()` subtracts, and `intersection()` keeps only the shared overlap."
+    },
+    "editable_models": {
+      "code": "Use small reusable modules, expose the key dimensions as parameters, and separate primitive generation from transforms so edits stay local and predictable.",
+      "explain_then_code": "The safest pattern is to isolate geometry in small modules, push dimensions into parameters, and keep transforms outside the primitive definitions so later edits do not cascade unpredictably.",
+      "concise_answer": "Use small modules, parameters for the main dimensions, and separate transforms from primitive generation."
+    },
+    "pyramid": {
+      "code": "polyhedron(points=[[-15,-15,0],[15,-15,0],[15,15,0],[-15,15,0],[0,0,24]], faces=[[0,1,2,3],[0,1,4],[1,2,4],[2,3,4],[3,0,4]]);",
+      "explain_then_code": "A square pyramid is easiest as a `polyhedron()` with four base corners and one apex.\n\npolyhedron(points=[[-15,-15,0],[15,-15,0],[15,15,0],[-15,15,0],[0,0,24]], faces=[[0,1,2,3],[0,1,4],[1,2,4],[2,3,4],[3,0,4]]);",
+      "concise_answer": "polyhedron(points=[[-15,-15,0],[15,-15,0],[15,15,0],[-15,15,0],[0,0,24]], faces=[[0,1,2,3],[0,1,4],[1,2,4],[2,3,4],[3,0,4]]);"
+    },
+    "triangular_prism": {
+      "code": "polyhedron(points=[[-16,-10,0],[16,-10,0],[0,12,0],[-16,-10,24],[16,-10,24],[0,12,24]], faces=[[0,1,2],[3,5,4],[0,3,4,1],[1,4,5,2],[2,5,3,0]]);",
+      "explain_then_code": "Define one triangle at z=0, copy it upward, then connect the matching edges to form the prism walls.\n\npolyhedron(points=[[-16,-10,0],[16,-10,0],[0,12,0],[-16,-10,24],[16,-10,24],[0,12,24]], faces=[[0,1,2],[3,5,4],[0,3,4,1],[1,4,5,2],[2,5,3,0]]);",
+      "concise_answer": "polyhedron(points=[[-16,-10,0],[16,-10,0],[0,12,0],[-16,-10,24],[16,-10,24],[0,12,24]], faces=[[0,1,2],[3,5,4],[0,3,4,1],[1,4,5,2],[2,5,3,0]]);"
+    },
+    "tetrahedron": {
+      "code": "polyhedron(points=[[14,14,14],[-14,-14,14],[-14,14,-14],[14,-14,-14]], faces=[[0,1,2],[0,3,1],[0,2,3],[1,3,2]]);",
+      "explain_then_code": "A tetrahedron only needs four non-coplanar points and four triangular faces.\n\npolyhedron(points=[[14,14,14],[-14,-14,14],[-14,14,-14],[14,-14,-14]], faces=[[0,1,2],[0,3,1],[0,2,3],[1,3,2]]);",
+      "concise_answer": "polyhedron(points=[[14,14,14],[-14,-14,14],[-14,14,-14],[14,-14,-14]], faces=[[0,1,2],[0,3,1],[0,2,3],[1,3,2]]);"
+    },
+    "grid_plane": {
+      "code": "for(x=[-20:10:20]) translate([x,0,0]) cube([1,50,1], center=true); for(y=[-20:10:20]) translate([0,y,0]) cube([50,1,1], center=true);",
+      "explain_then_code": "A quick printable grid plane is just two perpendicular line families laid out with loops.\n\nfor(x=[-20:10:20]) translate([x,0,0]) cube([1,50,1], center=true); for(y=[-20:10:20]) translate([0,y,0]) cube([50,1,1], center=true);",
+      "concise_answer": "for(x=[-20:10:20]) translate([x,0,0]) cube([1,50,1], center=true); for(y=[-20:10:20]) translate([0,y,0]) cube([50,1,1], center=true);"
+    }
+  },
+  "train_accuracy": 1.0,
+  "val_accuracy": 1.0,
+  "parameter_count": 35886,
+  "epochs": 28,
+  "learning_rate": 0.0009,
+  "batch_size": 24,
+  "seed": 47,
+  "concept_distribution": {
+    "boolean_ops": 10,
+    "countersunk_hole": 10,
+    "cylinder_center_hole": 10,
+    "decorative_star": 10,
+    "editable_models": 10,
+    "grid_plane": 11,
+    "hollow_box": 10,
+    "mirrored_feature": 10,
+    "phone_stand": 10,
+    "pyramid": 11,
+    "radial_spokes": 10,
+    "rounded_plate_holes": 10,
+    "tetrahedron": 11,
+    "triangular_prism": 11
+  }
+}

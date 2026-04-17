@@ -1,0 +1,97 @@
+{
+  "created_at": "2026-02-24T02:11:53",
+  "repo_root": "C:\\Users\\kai99\\Desktop\\test",
+  "bundles": [
+    {
+      "name": "champion_databases_chat_runtime_bundle.zip",
+      "bytes": 41223665,
+      "sha256": "5564b81742ff188733da38fb24100a04bcb68f2a81cb27ef61708713a2428626"
+    },
+    {
+      "name": "champion_datasets_current_pipeline_bundle.zip",
+      "bytes": 76543999,
+      "sha256": "994999a12bc61584409d73283059e499f0d2db067c2f77c053d0d6c582b68a26"
+    },
+    {
+      "name": "champion_github_pages_static_chat_supermix_v27_500k_bundle.zip",
+      "bytes": 35530,
+      "sha256": "9a392c35aeea6d16437c7a9ec9c4dca2ace8d735e8881aafa19d256927ca160b"
+    },
+    {
+      "name": "champion_runtime_interface_supermix_v27_500k_bundle.zip",
+      "bytes": 14673375,
+      "sha256": "f6950d8b19f9e8a89b45324fff8d556b802e92da869160776eade3ba853ec9e8"
+    },
+    {
+      "name": "champion_source_train_build_bundle.zip",
+      "bytes": 192074,
+      "sha256": "5e336bb7e8b4a259b9d19e1f3bcb699621f6099c595029d35c7d8aff89d77eb9"
+    }
+  ],
+  "datasets_bundle_files": [
+    "conversation_data.bible_kjv_public_domain_smoke.jsonl",
+    "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+    "conversation_data.book_extracts_smoke_v3.jsonl",
+    "conversation_data.coding_knowledge_2026_02_19.jsonl",
+    "conversation_data.dictionary_wordnet_meanings_smoke.jsonl",
+    "conversation_data.english_math_smoke_v3.jsonl",
+    "conversation_data.finnegans_wake_study_noninfringing_smoke.jsonl",
+    "conversation_data.hybrid_v6_live_knowledge.jsonl",
+    "conversation_data.mega_creative_100k.jsonl",
+    "conversation_data.mega_creative_250k_v2.jsonl",
+    "conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+    "conversation_data.science_essentials_smoke.jsonl",
+    "conversation_data.science_novel_examples_smoke.jsonl",
+    "conversation_data.supermix_plus_v27_500k.jsonl",
+    "conversation_data.world_events_2026_02_19.jsonl"
+  ],
+  "databases_bundle_files": [
+    "chat_memory.db",
+    "chat_memory.db-shm",
+    "chat_memory.db-wal",
+    "chat_memory_main.db",
+    "chat_memory_main.db-shm",
+    "chat_memory_main.db-wal",
+    "chat_memory_smoke.db",
+    "llm_chat.db",
+    "llm_chat.db-shm",
+    "llm_chat.db-wal",
+    "llm_chat_omega_v10.db-shm",
+    "llm_chat_omega_v10.db-wal",
+    "llm_chat_omega_v12.db-shm",
+    "llm_chat_omega_v12.db-wal",
+    "llm_chat_omega_v8.db-shm",
+    "llm_chat_omega_v8.db-wal",
+    "llm_chat_v5.db-shm",
+    "llm_chat_v5.db-wal",
+    "llm_chat_v6.db-shm",
+    "llm_chat_v6.db-wal"
+  ],
+  "orphan_sidecars": [
+    "llm_chat_omega_v10.db-shm",
+    "llm_chat_omega_v10.db-wal",
+    "llm_chat_omega_v12.db-shm",
+    "llm_chat_omega_v12.db-wal",
+    "llm_chat_omega_v8.db-shm",
+    "llm_chat_omega_v8.db-wal",
+    "llm_chat_v5.db-shm",
+    "llm_chat_v5.db-wal",
+    "llm_chat_v6.db-shm",
+    "llm_chat_v6.db-wal"
+  ],
+  "github_upload_recommendation": {
+    "repo_safe_under_95mb": [
+      "champion_databases_chat_runtime_bundle.zip",
+      "champion_datasets_current_pipeline_bundle.zip",
+      "champion_github_pages_static_chat_supermix_v27_500k_bundle.zip",
+      "champion_runtime_interface_supermix_v27_500k_bundle.zip",
+      "champion_source_train_build_bundle.zip"
+    ],
+    "use_github_releases_or_lfs": []
+  },
+  "notes": [
+    "GitHub repo single-file hard limit is ~100 MB; keep margin (<=95 MB recommended).",
+    "Use GitHub Releases assets or Git LFS for oversized archives/models/datasets.",
+    "GitHub Pages static bundle does not execute the PyTorch .pth model; use runtime Python bundle for the real model web interface."
+  ]
+}

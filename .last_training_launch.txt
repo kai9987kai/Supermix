@@ -1,0 +1,8 @@
+﻿RESUME_WARM_START_DIR=artifacts\qwen_supermix_enhanced_v26_full
+UPDATED_AT_UTC=2026-03-29T17:54:10.1333664Z
+OUTPUT_DIR=artifacts\qwen_supermix_enhanced_v29_full_20260320_190817
+LAUNCHER=source\run_train_qwen_supermix_v26_full.ps1
+ERR_LOG=train_qwen_supermix_enhanced_v29_full_20260320_190817.err.log
+BASE_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+DEVICE=auto
+OUT_LOG=train_qwen_supermix_enhanced_v29_full_20260320_190817.out.log

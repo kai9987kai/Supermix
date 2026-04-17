@@ -1,0 +1,5 @@
+Champion GitHub Pages Static Chat Bundle
+Created: 2026-02-24T02:06:28
+
+This bundle is for static hosting (e.g., GitHub Pages).
+It does not run the PyTorch .pth model in-browser; it uses browser metadata retrieval.

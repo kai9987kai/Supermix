@@ -1,0 +1,12 @@
+torch
+flask==2.2.5
+Pillow
+accelerate
+diffusers
+transformers
+safetensors
+sympy
+
+# Optional Windows GPU backend
+# torch-directml
+

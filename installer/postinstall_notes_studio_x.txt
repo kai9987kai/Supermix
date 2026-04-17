@@ -1,0 +1,35 @@
+=====================================================================
+ Supermix Studio X - V48 Frontier Edition
+ Post-Install Notes
+=====================================================================
+
+Thank you for installing Supermix Studio X.
+
+---------------------------------------------------------------------
+ What's New in V48 Frontier Edition
+---------------------------------------------------------------------
+- Omni Collective V48 Frontier with H-MoE routing and Adaptive GoT
+- Refreshed Studio X shell with the V48 benchmark tab wired in
+- Latest bundled frontier set staged into the installer package
+- Updated benchmark graph comparing V40, V41, V42, V47, and V48
+
+---------------------------------------------------------------------
+ First Launch
+---------------------------------------------------------------------
+1. Launch SupermixStudioX from the Start menu or Desktop icon.
+2. The application opens in your default web browser.
+3. Open the "Bench" tab to review the bundled V48 benchmark results.
+
+---------------------------------------------------------------------
+ Configuration
+---------------------------------------------------------------------
+Models are stored in:
+  %LOCALAPPDATA%\supermix_studio\models\
+
+To add or update models, copy supported model artifacts there and restart.
+
+---------------------------------------------------------------------
+ Questions / Issues
+---------------------------------------------------------------------
+GitHub: https://github.com/supermix-ai
+=====================================================================

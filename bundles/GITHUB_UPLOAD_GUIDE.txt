@@ -1,0 +1,20 @@
+Champion GitHub Upload Guide
+Created: 2026-02-24T02:11:53
+
+Repo upload (normal git) recommended:
+- champion_databases_chat_runtime_bundle.zip
+- champion_datasets_current_pipeline_bundle.zip
+- champion_github_pages_static_chat_supermix_v27_500k_bundle.zip
+- champion_runtime_interface_supermix_v27_500k_bundle.zip
+- champion_source_train_build_bundle.zip
+
+GitHub Releases or Git LFS recommended (too large for normal git upload):
+- (none)
+
+Same real model + Python web interface bundle:
+- champion_runtime_interface_supermix_v27_500k_bundle.zip
+
+Static GitHub Pages bundle (metadata retrieval only):
+- champion_github_pages_static_chat_supermix_v27_500k_bundle.zip
+
+See champion_github_upload_manifest.json for checksums and full file lists.
