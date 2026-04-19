@@ -25,3 +25,12 @@ output/*
 !output/supermix_studio_bundled_models_manifest.json
 !output/v48_benchmark_comparison.png
 !output/v48_benchmark_results.json
+
+*.pth
+*.pt
+*.jsonl
+*.db
+run_state_*/
+artifacts/
+runtime_python/
+datasets/
