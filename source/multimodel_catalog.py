@@ -73,7 +73,7 @@ CREATIVE_PROMPT_RE = re.compile(
 EXPERIMENTAL_PROMPT_RE = re.compile(r"\b(experimental|prototype|v39)\b", re.IGNORECASE)
 LATEST_PROMPT_RE = re.compile(r"\b(latest|newest|v48|h-moe|agot)\b", re.IGNORECASE)
 BENCHMARK_PROMPT_RE = re.compile(
-    r"\b(benchmark|benchmarks|exact score|eval|evaluation|mmlu|gsm8k|hellaswag|arc[- ]?challenge|boolq|piqa)\b",
+    r"\b(benchmark|benchmarks|exact score|eval|evaluation|mmlu|gsm8k|hellaswag|arc[- ]?challenge|boolq|piqa|bbh|big[- ]bench hard|openbookqa|openbook|winogrande|commonsenseqa|commonsense[- ]?qa)\b",
     re.IGNORECASE,
 )
 GAN_IMAGE_PROMPT_RE = re.compile(r"\b(dcgan|gan|mnist|digit grid|digit sheet|cifar|retro sample|unconditional image)\b", re.IGNORECASE)
@@ -651,10 +651,14 @@ def _safe_float(value: object) -> Optional[float]:
         return None
 
 
+def _load_json(path: Path) -> Dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
 def _load_common_rows(summary_path: Path) -> Dict[str, Dict[str, object]]:
     if not summary_path.exists():
         return {}
-    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload = _load_json(summary_path)
     rows = payload.get("summary_rows")
     if not isinstance(rows, list):
         return {}
@@ -725,18 +729,72 @@ def _discover_artifacts(models_dir: Path) -> Dict[str, Path]:
     return found
 
 
+def _v46_champion_payload() -> Dict[str, object]:
+    manifest_path = Path(__file__).resolve().parents[1] / "output" / "omni_collective_v46_champion.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        return _load_json(manifest_path)
+    except Exception:
+        return {}
+
+
+def _v46_champion_artifact(payload: Optional[Dict[str, object]] = None) -> Optional[Path]:
+    payload = payload if payload is not None else _v46_champion_payload()
+    if not payload:
+        return None
+    for key in ("desktop_zip_path", "zip_path"):
+        value = str(payload.get(key) or "").strip()
+        if not value:
+            continue
+        candidate = Path(value)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _v46_champion_common_row(payload: Dict[str, object]) -> Dict[str, object]:
+    summary_path = Path(str(payload.get("benchmark_summary_path") or "").strip())
+    if summary_path.exists():
+        return _load_common_rows(summary_path).get("omni_collective_v46", {})
+    score = _safe_float(payload.get("common_benchmark_score"))
+    if score is None:
+        return {}
+    per_benchmark: Dict[str, float] = {}
+    for key, benchmark in (
+        ("bbh_benchmark_score", "bbh"),
+        ("commonsenseqa_benchmark_score", "commonsenseqa"),
+        ("openbookqa_benchmark_score", "openbookqa"),
+        ("winogrande_benchmark_score", "winogrande"),
+    ):
+        value = _safe_float(payload.get(key))
+        if value is not None:
+            per_benchmark[benchmark] = value
+    return {"model": "omni_collective_v46", "overall_exact": score, "benchmarks": per_benchmark}
+
+
 def discover_model_records(
     models_dir: Path = DEFAULT_MODELS_DIR,
     common_summary_path: Path = DEFAULT_COMMON_SUMMARY,
 ) -> List[ModelRecord]:
     common_rows = _load_common_rows(common_summary_path)
     artifacts = _discover_artifacts(models_dir)
+    champion_payload = _v46_champion_payload()
+    champion_v46 = _v46_champion_artifact(champion_payload)
+    if champion_v46 is not None:
+        artifacts["omni_collective_v46"] = champion_v46
     records: List[ModelRecord] = []
     for spec in MODEL_SPECS:
         path = artifacts.get(spec.key)
         if path is None:
             continue
         common_row = common_rows.get(spec.common_row_key) if spec.common_row_key else None
+        score_source_override = ""
+        if spec.key == "omni_collective_v46" and champion_payload:
+            champion_row = _v46_champion_common_row(champion_payload)
+            if champion_row:
+                common_row = champion_row
+                score_source_override = "champion_manifest"
         common_score = _safe_float(common_row.get("overall_exact")) if common_row else None
         per_benchmark = {}
         if common_row and isinstance(common_row.get("benchmarks"), dict):
@@ -747,7 +805,9 @@ def discover_model_records(
             }
         score_source = spec.kind
         if common_score is not None:
-            score_source = "common_alias" if spec.common_row_key and spec.common_row_key != spec.key else "common"
+            score_source = score_source_override or (
+                "common_alias" if spec.common_row_key and spec.common_row_key != spec.key else "common"
+            )
         elif spec.recipe_eval_accuracy is not None:
             score_source = "recipe_eval_only"
 

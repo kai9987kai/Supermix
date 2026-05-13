@@ -9,7 +9,6 @@ import time
 import datetime
 import threading
 import winsound
-import psutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -19,6 +18,11 @@ from tkinter import ttk
 
 if os.name == "nt":
     import ctypes
+
+try:
+    import psutil
+except Exception:  # pragma: no cover - psutil is optional for lightweight status parsing
+    psutil = None  # type: ignore[assignment]
 
 
 TRAIN_STEP_RE = re.compile(
@@ -1556,16 +1560,15 @@ def _compute_progress(
 
 def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> List[RunSnapshot]:
     now = time.time()
-    search_dirs = [root_dir]
     output_dir = root_dir / "output"
+    out_log_set = {
+        *(path for path in root_dir.glob("train_*.out.log")),
+        *(path for path in root_dir.glob("*_train_*.out.log")),
+        *(path for path in root_dir.glob("omni_collective_v*.out.log")),
+    }
     if output_dir.exists():
-        search_dirs.append(output_dir)
-    out_logs = sorted(
-        {
-            *(path for base in search_dirs for path in base.glob("train_*.out.log")),
-            *(path for base in search_dirs for path in base.glob("*_train_*.out.log")),
-        }
-    )
+        out_log_set.update(path for path in output_dir.rglob("*.out.log") if path.is_file())
+    out_logs = sorted(out_log_set)
     snapshots: List[RunSnapshot] = []
     process_entries = _list_process_entries()
 
@@ -1587,7 +1590,14 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
         pid_source = "pid_file" if pid_alive and pid is not None else ""
         state_file = log_dir / f"{base_stem}_state.json"
         if not state_file.exists():
-            state_file = None
+            state_candidates = [
+                log_dir / f"{base_stem}_train_state.json",
+                log_dir / "omni_collective_v46_train_state.json",
+                log_dir / "omni_collective_train_state.json",
+            ]
+            state_file = next((path for path in state_candidates if path.exists()), None)
+            if state_file is None:
+                state_file = next(iter(sorted(log_dir.glob("*_train_state.json"))), None)
 
         command_line = _query_process_cmdline(pid) if (pid_alive and pid is not None) else None
         command_line = command_line or ""
@@ -1699,7 +1709,7 @@ def collect_run_snapshots(root_dir: Path, stale_minutes_threshold: float) -> Lis
             if stale_mins >= float(stale_minutes_threshold):
                 status = "stalled"
             try:
-                if pid is not None:
+                if pid is not None and psutil is not None:
                     p = psutil.Process(pid)
                     cpu_percent = p.cpu_percent(interval=None)
                     ram_gb = p.memory_info().rss / (1024 ** 3)
@@ -2280,6 +2290,51 @@ def _build_run_recommendation(snap: RunSnapshot) -> str:
     if snap.stage == "eval":
         return "Review eval filtering and benchmark readiness before using this adapter."
     return "Select a run and inspect the latest tails for the next concrete action."
+
+
+def _build_active_run_strip(snap: RunSnapshot, eta_confidence: str = "-") -> str:
+    display_progress = _compute_display_progress_percent(snap)
+    progress = "-" if display_progress is None else f"{display_progress:.1f}%"
+    eta = snap.eta_seconds if snap.eta_seconds is not None else snap.stage_eta_seconds
+    eta_text = _fmt_eta(eta)
+    conf = str(eta_confidence or "-").upper()
+    work = snap.stage_progress_label if snap.stage_progress_label and snap.stage_progress_label != "-" else "-"
+    rate = snap.stage_rate_label if snap.stage_rate_label and snap.stage_rate_label != "-" else "-"
+    loss = "-" if snap.loss is None else f"{snap.loss:.4f}"
+    lr = "-" if snap.lr is None else f"{snap.lr:.3g}"
+    telemetry = "state" if snap.stage_source == "state" else "log"
+    if snap.balance_loss is not None:
+        telemetry = f"{telemetry}, balance={snap.balance_loss:.3f}"
+    return (
+        f"Active Run: {snap.run_name} | {snap.status}/{snap.stage} | {progress} | "
+        f"ETA {eta_text} | confidence {conf} | work {work} | rate {rate} | "
+        f"loss {loss} | lr {lr} | telemetry {telemetry} | updated {_fmt_age_minutes(snap.stale_minutes)} ago | "
+        f"health {snap.health_summary}"
+    )
+
+
+def _build_fleet_live_strip(snapshots: Sequence[RunSnapshot]) -> str:
+    active = [snap for snap in snapshots if snap.status in {"running", "stalled"}]
+    if not active:
+        finished = sum(1 for snap in snapshots if snap.status == "finished")
+        return f"Live Fleet: no active runs | finished {finished} | total {len(snapshots)}"
+    running = sum(1 for snap in active if snap.status == "running")
+    stalled = sum(1 for snap in active if snap.status == "stalled")
+    state_backed = sum(1 for snap in active if snap.stage_source == "state")
+    issues = sum(1 for snap in active if snap.err_signal != "ok" or snap.status == "stalled")
+    newest = max(active, key=lambda snap: snap.out_last_write_ts)
+    etas = [snap.eta_seconds if snap.eta_seconds is not None else snap.stage_eta_seconds for snap in active]
+    etas = [float(eta) for eta in etas if eta is not None]
+    best_eta = min(etas) if etas else None
+    stage_mix: Dict[str, int] = {}
+    for snap in active:
+        stage_mix[snap.stage] = stage_mix.get(snap.stage, 0) + 1
+    stage_text = ", ".join(f"{stage}:{count}" for stage, count in sorted(stage_mix.items()))
+    return (
+        f"Live Fleet: {len(active)} active ({running} running, {stalled} stalled) | "
+        f"state telemetry {state_backed}/{len(active)} | issues {issues} | best ETA {_fmt_eta(best_eta)} | "
+        f"freshest {newest.run_name} updated {_fmt_age_minutes(newest.stale_minutes)} ago | stages {stage_text or '-'}"
+    )
 
 
 def _summary_fractions(text: str) -> Dict[str, Tuple[int, int]]:
@@ -2940,6 +2995,7 @@ class TrainingMonitorApp:
         self.selected_rate_var = tk.StringVar(value="Rate: -")
         self.selected_eta_confidence_var = tk.StringVar(value="ETA Confidence: -")
         self.selected_updated_var = tk.StringVar(value="Updated: -")
+        self.selected_active_strip_var = tk.StringVar(value="Active Run: -")
         self.selected_focus_var = tk.StringVar(value="Focus: -")
         self.selected_watch_var = tk.StringVar(value="Watch: -")
         self.selected_runtime_var = tk.StringVar(value="Runtime: -")
@@ -2954,6 +3010,7 @@ class TrainingMonitorApp:
         self.v46_ccot_var = tk.StringVar(value="V46 C-CoT: -")
         self.fleet_progress_var = tk.StringVar(value="Fleet Progress: -")
         self.fleet_eta_var = tk.StringVar(value="Fleet ETA: -")
+        self.fleet_live_strip_var = tk.StringVar(value="Live Fleet: -")
         self.fleet_stage_var = tk.StringVar(value="Stage Mix: -")
         self.fleet_issue_var = tk.StringVar(value="Issue Radar: -")
         self.fleet_backend_var = tk.StringVar(value="Backend Mix: -")
@@ -3114,6 +3171,7 @@ class TrainingMonitorApp:
         ttk.Button(filter_row, text="Open ERR Log", command=self._open_selected_err_log).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(filter_row, text="Open Run Dir", command=self._open_selected_run_dir).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(filter_row, text="Copy CMD/Launch", command=self._copy_selected_command).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(filter_row, text="Copy ETA", command=self._copy_selected_eta).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(filter_row, text="Copy Watch", command=self._copy_selected_watch).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(filter_row, text="Copy Rescue", command=self._copy_selected_rescue).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(filter_row, text="Copy Details", command=self._copy_detail_to_clipboard).pack(side=tk.LEFT, padx=(0, 8))
@@ -3132,6 +3190,10 @@ class TrainingMonitorApp:
         ttk.Label(summary, textvariable=self.selected_eta_confidence_var).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Label(summary, textvariable=self.selected_updated_var).pack(side=tk.LEFT)
 
+        live_strip = ttk.Frame(self.root, padding=(10, 0, 10, 8))
+        live_strip.pack(fill=tk.X)
+        ttk.Label(live_strip, textvariable=self.selected_active_strip_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w")
+
         fleet = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         fleet.pack(fill=tk.X)
         self.fleet_progress_bar = ttk.Progressbar(fleet, mode="determinate", maximum=100, length=420)
@@ -3141,6 +3203,7 @@ class TrainingMonitorApp:
 
         fleet_notes = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         fleet_notes.pack(fill=tk.X)
+        ttk.Label(fleet_notes, textvariable=self.fleet_live_strip_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w")
         ttk.Label(fleet_notes, textvariable=self.selected_focus_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w")
         ttk.Label(fleet_notes, textvariable=self.selected_watch_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
         ttk.Label(fleet_notes, textvariable=self.selected_runtime_var, justify=tk.LEFT, wraplength=1480).pack(anchor="w", pady=(4, 0))
@@ -3899,6 +3962,10 @@ class TrainingMonitorApp:
             "launch_command": snap.launch_command,
             "runtime_summary": snap.runtime_summary,
             "runtime_headline": _build_runtime_headline(snap),
+            "active_run_strip": _build_active_run_strip(
+                snap,
+                eta_confidence=self._eta_confidence_for_snapshot(snap),
+            ),
             "watch_summary": _build_run_watch_summary(snap),
             "stability_lab": _build_run_stability_lab(
                 snap,
@@ -4486,6 +4553,142 @@ class TrainingMonitorApp:
                     remaining_steps = max(0, next_ckpt - snap.sft_step)
                 snap.checkpoint_eta_seconds = float(remaining_steps / rate_per_sec)
 
+    def _refresh_snapshot_table(self) -> None:
+        all_snapshots = collect_run_snapshots(self.root_dir, stale_minutes_threshold=self.stale_minutes)
+        self.fleet_live_strip_var.set(_build_fleet_live_strip(all_snapshots))
+        self._update_research_board(_load_research_results(self.root_dir))
+        self._apply_eta_and_rate(all_snapshots)
+        filtered = self._apply_filters(all_snapshots)
+        snapshots = sorted(
+            filtered,
+            key=lambda s: self._sort_key(s, self.sort_col),
+            reverse=bool(self.sort_reverse),
+        )
+        self.current_snapshots = {s.run_name: s for s in snapshots}
+
+        selected_name = self._selected_run_name()
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+
+        for snap in snapshots:
+            loss_txt = "-" if snap.loss is None else f"{snap.loss:.4f}"
+            lr_txt = "-" if snap.lr is None else f"{snap.lr:.3g}"
+            display_progress = self._display_progress_percent(snap)
+            prog_txt = "-" if display_progress is None else f"{display_progress:.1f}%"
+            eta_txt = _fmt_eta(self._display_eta_seconds(snap))
+            eta_conf_txt = self._eta_confidence_for_snapshot(snap)
+            if eta_conf_txt != "-":
+                eta_conf_txt = eta_conf_txt.upper()
+            ckpt_eta_txt = _fmt_eta(snap.checkpoint_eta_seconds)
+            rate_txt = self._display_rate_text(snap)
+            err_txt = {"error": "ERROR", "warn": "WARN", "ok": "OK"}.get(snap.err_signal, "-")
+            pid_txt = "-" if snap.pid is None else str(snap.pid)
+            updated = f"{_fmt_age_minutes(snap.stale_minutes)} | {_fmt_ts(snap.out_last_write_ts)}"
+            telemetry_txt = "state" if snap.stage_source == "state" else "log"
+            if snap.balance_loss is not None:
+                telemetry_txt = f"{telemetry_txt} | bal={snap.balance_loss:.3f}"
+
+            sft_txt = str(snap.sft_step)
+            if snap.sft_target_steps is not None and snap.sft_target_steps > 0:
+                sft_txt = f"{snap.sft_step}/{snap.sft_target_steps}"
+            pref_txt = str(snap.pref_step)
+            if snap.pref_target_steps is not None and snap.pref_target_steps > 0:
+                pref_txt = f"{snap.pref_step}/{snap.pref_target_steps}"
+            device_txt = _runtime_device_value(snap)
+
+            row_tags = [snap.status]
+            if snap.err_signal == "error":
+                row_tags.append("err_error")
+            elif snap.err_signal == "warn":
+                row_tags.append("err_warn")
+            if snap.stage_source == "state":
+                row_tags.append("telemetry_state")
+
+            cpu_ram_txt = "-"
+            if snap.cpu_percent is not None and snap.ram_gb is not None:
+                cpu_ram_txt = f"{snap.cpu_percent:.0f}% | {snap.ram_gb:.1f}G"
+
+            self.tree.insert(
+                "",
+                tk.END,
+                iid=snap.run_name,
+                values=(
+                    "*" if self._is_pinned_run(snap.run_name) else "",
+                    snap.run_name,
+                    snap.status,
+                    snap.stage,
+                    telemetry_txt,
+                    device_txt,
+                    sft_txt,
+                    pref_txt,
+                    self._display_work_text(snap),
+                    loss_txt,
+                    lr_txt,
+                    prog_txt,
+                    eta_txt,
+                    eta_conf_txt,
+                    ckpt_eta_txt,
+                    rate_txt,
+                    err_txt,
+                    f"{snap.stale_minutes:.1f}",
+                    updated,
+                    pid_txt,
+                    cpu_ram_txt,
+                ),
+                tags=tuple(row_tags),
+            )
+
+        if selected_name and selected_name in self.current_snapshots:
+            self.tree.selection_set(selected_name)
+            self.on_select()
+        elif snapshots:
+            self.tree.selection_set(snapshots[0].run_name)
+            self.on_select()
+        else:
+            self.progress_bar["value"] = 0.0
+            self.selected_progress_var.set("Progress: -")
+            self.selected_eta_var.set("ETA: -")
+            self.selected_ckpt_eta_var.set("Next Ckpt: -")
+            self.selected_rate_var.set("Rate: -")
+            self.selected_eta_confidence_var.set("ETA Confidence: -")
+            self.selected_updated_var.set("Updated: -")
+            self.selected_active_strip_var.set("Active Run: -")
+            self.selected_focus_var.set("Focus: -")
+            self.selected_watch_var.set("Watch: -")
+            self.selected_runtime_var.set("Runtime: -")
+            self.selected_stability_var.set("Stability Lab: -")
+            self.selected_failure_var.set("Failure Lens: -")
+            self.selected_recovery_var.set("Recovery: -")
+            self.selected_rescue_var.set("Rescue Plan: -")
+            self.selected_compare_var.set("Compare: -")
+            self._draw_phase_breakdown(None)
+
+        self._update_fleet_summary(all_snapshots)
+        self._check_and_alert(all_snapshots)
+
+        running_count = sum(1 for s in all_snapshots if s.status == "running")
+        stalled_count = sum(1 for s in all_snapshots if s.status == "stalled")
+        finished_count = sum(1 for s in all_snapshots if s.status == "finished")
+        error_count = sum(1 for s in all_snapshots if s.err_signal == "error")
+        warn_count = sum(1 for s in all_snapshots if s.err_signal == "warn")
+        issue_count = sum(1 for s in all_snapshots if self._is_issue_snapshot(s))
+        best_eta = None
+        for snap in all_snapshots:
+            eta_val = self._display_eta_seconds(snap)
+            if eta_val is None:
+                continue
+            if best_eta is None or eta_val < best_eta:
+                best_eta = eta_val
+
+        self.status_var.set(
+            f"Visible: {len(snapshots)} / Total: {len(all_snapshots)} | Running: {running_count} "
+            f"Stalled: {stalled_count} Finished: {finished_count} | Issues: {issue_count} "
+            f"(Err {error_count}/Warn {warn_count}) | Best ETA: {_fmt_eta(best_eta)} "
+            f"| Last refresh: {_fmt_ts(time.time())} | Root: {self.root_dir}"
+        )
+        self._draw_selected_trend(self._selected_run_name())
+        self._draw_phase_breakdown(self._selected_snapshot())
+
     def refresh(self) -> None:
         root_text = self.root_entry.get().strip()
         stale_text = self.stale_entry.get().strip()
@@ -4499,6 +4702,28 @@ class TrainingMonitorApp:
             pass
         try:
             self.refresh_seconds = max(1.0, float(refresh_text))
+        except Exception:
+            pass
+        self._refresh_snapshot_table()
+
+    def _copy_selected_eta(self) -> None:
+        snap = self._selected_snapshot()
+        if snap is None:
+            return
+        eta_conf = self._eta_confidence_for_snapshot(snap)
+        payload = "\n".join(
+            [
+                _build_active_run_strip(snap, eta_confidence=eta_conf),
+                f"Stage ETA: {_fmt_eta(snap.stage_eta_seconds)}",
+                f"State file: {snap.state_file if snap.state_file is not None else '-'}",
+                f"OUT log: {snap.out_log}",
+                f"ERR log: {snap.err_log if snap.err_log is not None else '-'}",
+            ]
+        ).strip()
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(payload)
+            self.status_var.set(f"Copied ETA snapshot for {snap.run_name}")
         except Exception:
             pass
 
@@ -4550,6 +4775,7 @@ class TrainingMonitorApp:
             self.status_var.set(f"Copied rescue plan for {snap.run_name}")
         except Exception:
             pass
+        return
 
         all_snapshots = collect_run_snapshots(self.root_dir, stale_minutes_threshold=self.stale_minutes)
         self._update_research_board(_load_research_results(self.root_dir))
@@ -4648,6 +4874,7 @@ class TrainingMonitorApp:
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
             self.selected_updated_var.set("Updated: -")
+            self.selected_active_strip_var.set("Active Run: -")
             self.selected_focus_var.set("Focus: -")
             self.selected_watch_var.set("Watch: -")
             self.selected_runtime_var.set("Runtime: -")
@@ -4699,6 +4926,7 @@ class TrainingMonitorApp:
             self.selected_rate_var.set("Rate: -")
             self.selected_eta_confidence_var.set("ETA Confidence: -")
             self.selected_updated_var.set("Updated: -")
+            self.selected_active_strip_var.set("Active Run: -")
             self.selected_focus_var.set("Focus: -")
             self.selected_watch_var.set("Watch: -")
             self.selected_runtime_var.set("Runtime: -")
@@ -4768,6 +4996,7 @@ class TrainingMonitorApp:
         self.selected_eta_confidence_var.set(
             f"ETA Confidence: {'-' if eta_conf == '-' else eta_conf.upper()}"
         )
+        self.selected_active_strip_var.set(_build_active_run_strip(snap, eta_confidence=eta_conf))
         self.selected_updated_var.set(f"Updated: {_fmt_age_minutes(snap.stale_minutes)} ago")
         recommendation = _build_run_recommendation(snap)
         self.selected_focus_var.set(f"Focus: {recommendation}")
@@ -4822,6 +5051,7 @@ class TrainingMonitorApp:
             f"out_last: {out_last}",
             f"err_last: {err_last}",
             f"health: {snap.health_summary}",
+            f"active_strip: {_build_active_run_strip(snap, eta_confidence=eta_conf)}",
             f"focus: {recommendation}",
             f"watch: {watch_summary.replace('Watch: ', '', 1)}",
             f"runtime: {runtime_headline.replace('Runtime: ', '', 1)}",

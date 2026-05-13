@@ -29,15 +29,99 @@ def build_app(unified_manager: UnifiedModelManager) -> Flask:
 def _bench_graph_b64() -> str:
     """Return base64-encoded PNG of the benchmark graph, or empty string."""
     candidates = [
+        Path(__file__).parent.parent / "output" / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.png",
+        Path("output") / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.png",
+        Path.home() / "Desktop" / "benchmark_graph_v46_common_v5_20suite.png",
         Path(__file__).parent.parent / "output" / "v48_benchmark_comparison.png",
         Path("output") / "v48_benchmark_comparison.png",
         Path(__file__).parent.parent / "output" / "v47_benchmark_comparison.png",
         Path("output") / "v47_benchmark_comparison.png",
     ]
+    output_roots = [Path(__file__).parent.parent / "output", Path("output")]
+    for root in output_roots:
+        if root.exists():
+            candidates.extend(
+                sorted(
+                    root.glob("benchmark_local_all_models_multibench*.png"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+            )
+    seen = set()
     for p in candidates:
-        if p.exists():
+        try:
+            key = p.resolve()
+        except Exception:
+            key = p
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.exists() and p.suffix.lower() == ".png":
             return base64.b64encode(p.read_bytes()).decode()
     return ""
+
+
+def _latest_benchmark_json_path() -> Optional[Path]:
+    candidates = [
+        Path(__file__).parent.parent / "output" / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.json",
+        Path("output") / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.json",
+        Path(__file__).parent.parent / "output" / "v48_benchmark_results.json",
+        Path("output") / "v48_benchmark_results.json",
+        Path(__file__).parent.parent / "output" / "v47_benchmark_results.json",
+        Path("output") / "v47_benchmark_results.json",
+    ]
+    output_roots = [Path(__file__).parent.parent / "output", Path("output")]
+    for root in output_roots:
+        if root.exists():
+            candidates.extend(
+                sorted(
+                    root.glob("benchmark_local_all_models_multibench*.json"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+            )
+    seen = set()
+    for p in candidates:
+        try:
+            key = p.resolve()
+        except Exception:
+            key = p
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.exists() and p.suffix.lower() == ".json":
+            return p
+    return None
+
+
+def _benchmark_rows_for_ui(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_rows = data.get("rows") or data.get("models") or []
+    models: List[Dict[str, Any]] = []
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        mean = row.get("common_overall_exact")
+        if mean is None:
+            mean = row.get("mean")
+        if mean is None:
+            mean = row.get("recipe_eval_accuracy")
+        per_bench = row.get("per_benchmark")
+        if mean is None and isinstance(per_bench, dict) and per_bench:
+            vals = [float(v) for v in per_bench.values() if isinstance(v, (int, float))]
+            if vals:
+                mean = sum(vals) / len(vals)
+        if mean is None:
+            continue
+        models.append(
+            {
+                "key": row.get("model_key") or row.get("key") or row.get("label") or "model",
+                "label": row.get("label") or row.get("model_key") or row.get("key") or "model",
+                "mean": float(mean),
+                "benchmark_count": len(per_bench) if isinstance(per_bench, dict) else None,
+                "freshness": row.get("benchmark_freshness") or row.get("score_source") or "",
+            }
+        )
+    return models
 
 # ─── HTML / CSS / JS ─────────────────────────────────────────────────────────
 _BENCH_B64 = _bench_graph_b64()
@@ -47,7 +131,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Supermix Studio X - v48 Frontier</title>
+  <title>Supermix Studio X - V46 20-Suite Champion</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -153,6 +237,9 @@ HTML_TEMPLATE = r"""<!doctype html>
     .model-pill.v48 { background:rgba(244,114,182,0.12);
                       border-color:rgba(244,114,182,0.35); color:#f9a8d4;
                       box-shadow:0 0 15px rgba(244,114,182,0.12); }
+    .model-pill.v46 { background:rgba(52,211,153,0.13);
+                      border-color:rgba(52,211,153,0.45); color:#86efac;
+                      box-shadow:0 0 20px rgba(52,211,153,0.13); }
 
     /* ── Thread ─────────────────────────────────────────────────────── */
     .thread { padding:40px 14%; overflow-y:auto; display:flex;
@@ -186,6 +273,33 @@ HTML_TEMPLATE = r"""<!doctype html>
                         border-color:rgba(14,165,233,0.3); border-bottom-right-radius:8px; }
     .msg.asst .bubble { border-bottom-left-radius:8px; }
     .bubble:hover { transform: translateY(-1px); }
+    .mini-copy { margin-left:8px; padding:4px 8px; border-radius:999px;
+                 border:1px solid var(--border); color:var(--muted);
+                 background:rgba(255,255,255,.04); font-size:10px;
+                 font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+    .mini-copy:hover { color:var(--text); border-color:rgba(56,189,248,.35);
+                       background:rgba(56,189,248,.08); }
+
+    .champion-card { padding:24px 28px; border-radius:28px;
+                     border:1px solid rgba(52,211,153,.28);
+                     background:
+                       linear-gradient(135deg,rgba(52,211,153,.12),rgba(14,165,233,.08)),
+                       rgba(2,8,16,.72);
+                     box-shadow:var(--shadow-card); backdrop-filter:var(--glass); }
+    .champion-head { display:flex; align-items:center; justify-content:space-between;
+                     gap:16px; margin-bottom:18px; }
+    .champion-title { font-family:'Outfit',sans-serif; font-size:20px;
+                      font-weight:800; letter-spacing:-.02em; }
+    .champion-badge { padding:6px 10px; border-radius:999px;
+                      background:rgba(52,211,153,.12);
+                      border:1px solid rgba(52,211,153,.35);
+                      color:#86efac; font-size:10px; font-weight:900;
+                      text-transform:uppercase; letter-spacing:.12em; white-space:nowrap; }
+    .signal-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .signal { border:1px solid var(--border); border-radius:18px;
+              background:rgba(0,0,0,.24); padding:14px 16px; }
+    .signal strong { display:block; color:var(--text); font-size:18px; margin-bottom:4px; }
+    .signal small { color:var(--muted); font-size:11px; line-height:1.35; }
 
     /* Typing indicator */
     .typing-dots { display:flex; gap:6px; padding:20px 24px; }
@@ -219,6 +333,13 @@ HTML_TEMPLATE = r"""<!doctype html>
     /* ── Composer ───────────────────────────────────────────────────── */
     .compose-wrap { padding:0 14% 32px; flex-shrink: 0; z-index: 20;
                     background:linear-gradient(transparent,rgba(2,6,16,.9) 50%); }
+    .quickbar { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; }
+    .quick-chip { padding:9px 13px; border-radius:999px;
+                  border:1px solid var(--border); background:rgba(15,23,42,.72);
+                  color:var(--muted); font-size:12px; font-weight:800;
+                  backdrop-filter:var(--glass); transition:.2s; }
+    .quick-chip:hover { color:var(--text); border-color:rgba(56,189,248,.35);
+                        background:rgba(56,189,248,.1); transform:translateY(-1px); }
     .compose-box { background:var(--surface-hi); border:1px solid var(--border);
                    border-radius:26px; padding:8px; backdrop-filter: var(--glass);
                    box-shadow:0 48px 112px rgba(0,0,0,.7);
@@ -278,6 +399,11 @@ HTML_TEMPLATE = r"""<!doctype html>
     .panel-section h4 { font-family:'Outfit',sans-serif; font-size:11px;
                         text-transform:uppercase; letter-spacing:.18em;
                         color:var(--muted); margin:0 0 20px; font-weight:900; }
+    .model-snapshot { margin-top:14px; padding:16px; border-radius:18px;
+                      border:1px solid rgba(52,211,153,.24);
+                      background:rgba(52,211,153,.07); font-size:12px;
+                      color:var(--muted); line-height:1.55; }
+    .model-snapshot strong { color:var(--text); font-size:13px; }
 
     /* select / input inputs */
     select, .cfg-input { width:100%; background:rgba(0,0,0,.4); border:1px solid var(--border);
@@ -334,6 +460,23 @@ HTML_TEMPLATE = r"""<!doctype html>
     .toast.ok   { border-color:rgba(52,211,153,.5); color:var(--green); }
     .toast.err  { border-color:rgba(251,113,133,.5); color:var(--rose); }
     @keyframes toastIn { from{opacity:0;transform:translateY(16px) scale(0.95)} to{opacity:1;transform:none} }
+
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns:64px 1fr; }
+      .panel { position:fixed; right:0; top:0; bottom:0; width:min(390px,92vw); z-index:80; }
+      .thread, .compose-wrap { padding-left:7%; padding-right:7%; }
+    }
+    @media (max-width: 760px) {
+      .shell { grid-template-columns:1fr; }
+      .rail { display:none; }
+      .panel { display:none; }
+      .wk-header { padding:0 18px; }
+      .thread { padding:24px 18px; gap:22px; }
+      .compose-wrap { padding:0 18px 18px; }
+      .msg { max-width:100%; }
+      .signal-grid { grid-template-columns:1fr; }
+      .champion-head { align-items:flex-start; flex-direction:column; }
+    }
   </style>
 </head>
 <body>
@@ -375,22 +518,26 @@ HTML_TEMPLATE = r"""<!doctype html>
     <header class="wk-header">
       <div style="display:flex;align-items:center;gap:16px">
         <div class="wk-title">Supermix Studio X</div>
-        <div class="model-pill v48" id="activePill">v48 Frontier</div>
+        <div class="model-pill v46" id="activePill">V46 Champion</div>
         <div class="model-pill" id="modePill" style="display:none">Standard</div>
       </div>
       <div class="wk-actions" id="wkActions"></div>
     </header>
 
     <div class="thread" id="thread">
-      <div class="msg asst">
-        <div class="msg-meta">
-          <div class="msg-avatar">SX</div>
-          <span>Supermix Studio X</span>
+      <div class="champion-card">
+        <div class="champion-head">
+          <div>
+            <div class="champion-title">Omni Collective V46 Champion is loaded.</div>
+            <div style="color:var(--muted);font-size:13px;margin-top:4px">The promoted 20-suite model is selected by default for normal chat, reasoning, and benchmark-backed testing.</div>
+          </div>
+          <div class="champion-badge">active frontier</div>
         </div>
-        <div class="bubble"><strong>v48 Frontier is online.</strong>
-Powered by Adaptive Graph-of-Thoughts, Hierarchical Mixture-of-Experts routing, and frontier-tuned multimodal reasoning.
-
-Select an operational mode in the right panel to begin.</div>
+        <div class="signal-grid">
+          <div class="signal"><strong>1.000</strong><small>20-suite exact benchmark score</small></div>
+          <div class="signal"><strong>97 / 97</strong><small>latest local benchmark items passed</small></div>
+          <div class="signal"><strong>Guarded</strong><small>normal-chat drift repair enabled</small></div>
+        </div>
       </div>
     </div>
 
@@ -402,8 +549,14 @@ Select an operational mode in the right panel to begin.</div>
     </div>
 
     <div class="compose-wrap">
+      <div class="quickbar" id="quickbar">
+        <button class="quick-chip" data-prompt="Hello. Reply like a normal helpful chat model.">Normal hello</button>
+        <button class="quick-chip" data-prompt="What model is active, and what benchmark score is it using?">Model status</button>
+        <button class="quick-chip" data-prompt="Give a concise step-by-step answer: if a train leaves at 3pm and takes 2 hours 35 minutes, when does it arrive?">Reasoning test</button>
+        <button class="quick-chip" data-prompt="Explain the benchmark graph in plain English.">Benchmark summary</button>
+      </div>
       <div class="compose-box">
-        <textarea id="prompt" rows="1" placeholder="Type a message to Studio X..."></textarea>
+        <textarea id="prompt" rows="1" placeholder="Message Omni V46 Champion..."></textarea>
         <div class="compose-bar">
           <div class="compose-tools">
             <button class="ic-btn" title="Attach image" id="imgBtn">
@@ -442,9 +595,10 @@ Select an operational mode in the right panel to begin.</div>
       <div class="panel-section">
         <h4>Active Model</h4>
         <select id="modelSelect"></select>
+        <div class="model-snapshot" id="modelSnapshot">Loading champion manifest...</div>
       </div>
       <div class="panel-section">
-        <h4>v48 Frontier Series</h4>
+        <h4>V46 Champion System</h4>
         <div style="display:flex;flex-direction:column;gap:12px">
           <div style="display:flex;align-items:center;gap:12px;font-size:13px">
             <div style="width:10px;height:10px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)"></div>
@@ -494,7 +648,7 @@ Select an operational mode in the right panel to begin.</div>
           </div>
           <div class="mode-card" data-mode="collective">
             <div class="mc-title"><div class="mc-dot col"></div>Collective Synthesis</div>
-            <div class="mc-desc">Ensemble reasoning. V48 consults sub-experts before delivering a unified response.</div>
+            <div class="mc-desc">Ensemble reasoning. V46 consults sub-experts before delivering a unified response.</div>
           </div>
           <div class="mode-card" data-mode="loop">
             <div class="mc-title"><div class="mc-dot loop"></div>Autonomous Frontier</div>
@@ -511,7 +665,7 @@ Select an operational mode in the right panel to begin.</div>
     <!-- BENCH tab -->
     <div class="panel-body" id="ptab-bench" style="display:none">
       <div class="panel-section">
-        <h4>V48 Comparative Benchmarks</h4>
+        <h4>V46 20-Suite Benchmarks</h4>
         <div class="bench-wrap" id="benchWrap">
           <img id="benchImg" src="" alt="Benchmark comparison" style="display:none">
           <div class="bench-note" id="benchNote">Initializing frontier telemetry...</div>
@@ -520,7 +674,7 @@ Select an operational mode in the right panel to begin.</div>
       </div>
     </div>
 
-    <div class="panel-footer" id="panelStatus">system: active  |  accelerator: auto  |  v: 48.0.0</div>
+    <div class="panel-footer" id="panelStatus">system: active  |  accelerator: auto  |  v: 46.20</div>
   </aside>
 </div>
 
@@ -541,6 +695,7 @@ Select an operational mode in the right panel to begin.</div>
   let currentUpload = null;
   let currentUpUrl  = '';
   let loopStep = 0;
+  let catalogByKey = {};
 
   async function api(path, body=null) {
     const opts = body
@@ -638,7 +793,22 @@ Select an operational mode in the right panel to begin.</div>
     const av = document.createElement('div');
     av.className = 'msg-avatar';
     av.textContent = role==='user' ? 'U' : 'SX';
-    meta.append(av, document.createTextNode(role==='user' ? 'Frontier User' : 'Studio X - V48'));
+    meta.append(av, document.createTextNode(role==='user' ? 'You' : 'Omni V46 Champion'));
+    if (role !== 'user') {
+      const copy = document.createElement('button');
+      copy.className = 'mini-copy';
+      copy.type = 'button';
+      copy.textContent = 'Copy';
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(String(text || ''));
+          toast('ok', 'Copied response');
+        } catch (_) {
+          toast('err', 'Copy failed');
+        }
+      };
+      meta.appendChild(copy);
+    }
     row.appendChild(meta);
 
     const bub = document.createElement('div');
@@ -692,7 +862,7 @@ Select an operational mode in the right panel to begin.</div>
       const hdr = document.createElement('div');
       hdr.className = 'trace-hdr';
       hdr.style.color = 'var(--teal)';
-      hdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10,0,1,0,22,12,10.011,10.011,0,0,0,12,2Zm1,15H11V11h2Zm0-8H11V7h2Z"/></svg> V48 Reasoning Telemetry`;
+      hdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10,0,1,0,22,12,10.011,10.011,0,0,0,12,2Zm1,15H11V11h2Zm0-8H11V7h2Z"/></svg> V46 Reasoning Telemetry`;
       wrapper.appendChild(hdr);
       const body = document.createElement('div');
       body.className = 'trace-body';
@@ -756,7 +926,7 @@ Select an operational mode in the right panel to begin.</div>
     const av = document.createElement('div');
     av.className = 'msg-avatar';
     av.textContent = 'SX';
-    meta.append(av, document.createTextNode('Studio X Synthesis...'));
+    meta.append(av, document.createTextNode('V46 synthesis...'));
     row.appendChild(meta);
     const dots = document.createElement('div');
     dots.className = 'typing-dots bubble';
@@ -779,6 +949,13 @@ Select an operational mode in the right panel to begin.</div>
   });
   textarea.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el('sendBtn').click(); }
+  });
+  qsa('.quick-chip').forEach(btn => {
+    btn.onclick = () => {
+      textarea.value = btn.dataset.prompt || btn.textContent.trim();
+      textarea.dispatchEvent(new Event('input'));
+      textarea.focus();
+    };
   });
 
   // ── Image upload ─────────────────────────────────────────────────────
@@ -878,7 +1055,7 @@ Select an operational mode in the right panel to begin.</div>
       await api('/api/clear', { session_id: sessionId });
       el('thread').innerHTML = '';
       el('loopSteps').innerHTML = '';
-      addMsg('assistant', 'Inference memory cleared. Ready for next frontier case.');
+      addMsg('assistant', 'Session memory cleared. Omni V46 is ready for the next message.');
       toast('ok', 'System memory purged');
     } catch(e) { toast('err', e.message); }
   };
@@ -888,14 +1065,25 @@ Select an operational mode in the right panel to begin.</div>
     try {
       const data = await api('/api/catalog');
       const sel  = el('modelSelect');
+      sel.innerHTML = '';
+      catalogByKey = {};
+      let preferred = null;
+      let auto = null;
       (data.models || []).forEach(m => {
+        catalogByKey[m.key] = m;
         const opt = document.createElement('option');
         opt.value = m.key;
-        opt.textContent = m.key === 'auto' ? '⌘ Auto Router'
-          : `${m.label}${m.recipe_eval_accuracy ? ' — ' + (m.recipe_eval_accuracy*100).toFixed(1) + '%' : ''}`;
-        if (m.key === 'auto') opt.selected = true;
+        const score = m.common_overall_exact != null ? m.common_overall_exact : m.recipe_eval_accuracy;
+        const scoreText = score != null ? ` - ${(Number(score) * 100).toFixed(1)}%` : '';
+        opt.textContent = m.key === 'auto' ? 'Auto Router' : `${m.label}${scoreText}`;
+        if (m.key === 'omni_collective_v46') preferred = opt;
+        if (m.key === 'auto') auto = opt;
         sel.appendChild(opt);
       });
+      if (preferred) preferred.selected = true;
+      else if (auto) auto.selected = true;
+      sel.onchange = () => updateStatus();
+      updateStatus();
     } catch(e) { console.warn('Catalog failure', e); }
   }
 
@@ -903,13 +1091,25 @@ Select an operational mode in the right panel to begin.</div>
     try {
       const s = await api('/api/status');
       const st = s.status || {};
+      const sel = el('modelSelect');
+      const selected = catalogByKey[sel.value] || {};
+      const selectedLabel = selected.label || (sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '');
+      const label = st.active_model_label || selectedLabel || 'Auto Router';
+      const score = selected.common_overall_exact != null ? selected.common_overall_exact : selected.recipe_eval_accuracy;
+      const scoreText = score != null ? `${(Number(score) * 100).toFixed(1)}%` : 'pending';
       el('panelStatus').textContent =
-        `model: ${st.active_model_label || '—'}\ndevice: ${st.device || '—'}\nmode: ${agentMode}`;
-      const label = st.active_model_label || '';
-      el('activePill').textContent = label || 'Auto';
+        `model: ${label || '-'}\ndevice: ${st.device || '-'}\nbenchmark: ${scoreText}\nmode: ${agentMode}`;
+      el('activePill').textContent = String(label).toLowerCase().includes('v46') ? 'V46 Champion' : (label || 'Auto');
       const lowered = label.toLowerCase();
-      const pillClass = lowered.includes('v48') ? ' v48' : (lowered.includes('v47') ? ' v47' : '');
+      const pillClass = lowered.includes('v46') ? ' v46' : (lowered.includes('v48') ? ' v48' : (lowered.includes('v47') ? ' v47' : ''));
       el('activePill').className = 'model-pill' + pillClass;
+      const snap = el('modelSnapshot');
+      if (snap) {
+        const benchCount = selected.per_benchmark ? Object.keys(selected.per_benchmark).length : selected.benchmark_count;
+        snap.innerHTML = `<strong>${escHtml(label || 'Selected model')}</strong><br>` +
+          `Benchmark: ${escHtml(scoreText)}${benchCount ? ` across ${benchCount} suites` : ''}<br>` +
+          `Source: ${escHtml(selected.selection_policy || selected.score_source || 'runtime catalog')}`;
+      }
     } catch(_) {}
   }
 
@@ -926,36 +1126,37 @@ Select an operational mode in the right panel to begin.</div>
         img.style.display = 'block';
         nota.style.display = 'none';
       } else {
-        nota.textContent = 'Run python source/benchmark_v48.py to generate the graph.';
+        nota.textContent = 'No benchmark graph was found yet.';
       }
 
       if (r.models) {
         scores.innerHTML = '';
         const topMean = Math.max(...r.models.map(m => Number(m.mean) || 0), 0);
         r.models.forEach(m => {
-          const pct = (m.mean * 1).toFixed(1);
+          const raw = Number(m.mean) || 0;
+          const pctNum = raw <= 1.001 ? raw * 100 : raw;
+          const pct = Math.max(0, Math.min(100, pctNum)).toFixed(1);
           const loweredLabel = String(m.label || '').toLowerCase();
-          const isTop = Math.abs((Number(m.mean) || 0) - topMean) < 0.001 || loweredLabel.includes('v48');
+          const isTop = Math.abs((Number(m.mean) || 0) - topMean) < 0.001 || loweredLabel.includes('v46');
           const bar = document.createElement('div');
           bar.style.cssText = 'margin-bottom:10px';
           bar.innerHTML = `<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-            <span style="color:${isTop?'#f9a8d4':'var(--text)'};font-weight:${isTop?700:400}">${escHtml(m.label)}</span>
-            <span style="color:${isTop?'#f9a8d4':'var(--muted)'}">${pct}%</span>
+            <span style="color:${isTop?'#86efac':'var(--text)'};font-weight:${isTop?700:400}">${escHtml(m.label)}</span>
+            <span style="color:${isTop?'#86efac':'var(--muted)'}">${pct}%</span>
           </div>
           <div style="background:rgba(255,255,255,0.06);border-radius:4px;height:4px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:${isTop?'#f472b6':'var(--blue)'};border-radius:4px;transition:.6s"></div>
+            <div style="height:100%;width:${pct}%;background:${isTop?'#34d399':'var(--blue)'};border-radius:4px;transition:.6s"></div>
           </div>`;
           scores.appendChild(bar);
         });
       }
     } catch(e) {
-      el('benchNote').textContent = 'Benchmark data unavailable. Run benchmark_v48.py first.';
+      el('benchNote').textContent = 'Benchmark data unavailable.';
     }
   }
 
   // ── Init ─────────────────────────────────────────────────────────────
   initModels();
-  updateStatus();
 })();
 </script>
 </body>
@@ -1018,22 +1219,26 @@ def api_upload_image():
 def api_benchmark():
     """Serve the benchmark graph (base64) and scores JSON."""
     b64 = _bench_graph_b64()
-    scores_path_candidates = [
-        Path(__file__).parent.parent / "output" / "v48_benchmark_results.json",
-        Path("output") / "v48_benchmark_results.json",
-        Path(__file__).parent.parent / "output" / "v47_benchmark_results.json",
-        Path("output") / "v47_benchmark_results.json",
-    ]
     models = []
-    for p in scores_path_candidates:
-        if p.exists():
-            try:
-                data = json.loads(p.read_text(encoding="utf-8"))
-                models = data.get("models", [])
-            except Exception:
-                pass
-            break
-    return jsonify({"graph_b64": b64, "models": models})
+    source = ""
+    generated_at = ""
+    benchmark_path = _latest_benchmark_json_path()
+    if benchmark_path:
+        try:
+            data = json.loads(benchmark_path.read_text(encoding="utf-8"))
+            models = _benchmark_rows_for_ui(data)
+            source = str(benchmark_path)
+            generated_at = data.get("created_at", "")
+        except Exception:
+            logging.exception("Benchmark JSON load failed")
+    return jsonify(
+        {
+            "graph_b64": b64,
+            "models": models,
+            "source": source,
+            "generated_at": generated_at,
+        }
+    )
 
 @app.route("/uploads/<session_slug>/<filename>")
 def serve_upload(session_slug, filename):
@@ -1045,7 +1250,7 @@ def serve_upload(session_slug, filename):
 
 def main():
     global manager
-    parser = argparse.ArgumentParser(description="Supermix Studio X - v48 Frontier")
+    parser = argparse.ArgumentParser(description="Supermix Studio X - V46 20-Suite Champion")
     parser.add_argument("--port",   type=int, default=5000, help="Port to listen on")
     parser.add_argument("--models", type=str, default=str(DEFAULT_MODELS_DIR),
                         help="Path to local models directory")
