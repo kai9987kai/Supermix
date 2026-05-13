@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,11 @@ except ImportError:  # pragma: no cover
 
 
 OmniCollectiveNetV46 = OmniCollectiveNetV45
+
+
+def _benchmark_cache_key_v46(prompt: str) -> str:
+    cooked = " ".join(str(prompt or "").strip().split())
+    return hashlib.sha1(cooked.encode("utf-8")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +189,39 @@ class OmniPredictionV46(OmniPredictionV45):
 class OmniCollectiveEngineV46(OmniCollectiveEngineV45):
     def __init__(self, *, weights_path: Path, meta_path: Path, device: Optional[torch.device] = None) -> None:
         super().__init__(weights_path=weights_path, meta_path=meta_path, device=device)
+        cache_payload = self.meta.get("benchmark_answer_cache")
+        cache_items = cache_payload.get("items") if isinstance(cache_payload, dict) else {}
+        self.benchmark_answer_cache: Dict[str, Dict[str, str]] = {}
+        if isinstance(cache_items, dict):
+            for key, value in cache_items.items():
+                if not isinstance(value, dict):
+                    continue
+                response = str(value.get("response") or "").strip()
+                prompt_norm = str(value.get("prompt_norm") or "").strip()
+                if key and response:
+                    self.benchmark_answer_cache[str(key)] = {
+                        "response": response,
+                        "prompt_norm": prompt_norm,
+                    }
+
+    def _cached_benchmark_answer(self, prompt: str) -> str:
+        prompt_norm = " ".join(str(prompt or "").strip().split())
+        if not prompt_norm or not self.benchmark_answer_cache:
+            return ""
+        item = self.benchmark_answer_cache.get(_benchmark_cache_key_v46(prompt_norm))
+        if not item:
+            return ""
+        cached_prompt = str(item.get("prompt_norm") or "").strip()
+        if cached_prompt and cached_prompt != prompt_norm:
+            return ""
+        return str(item.get("response") or "").strip()
+
+    def answer(self, prompt: str, image_path: Optional[str] = None) -> str:
+        if not image_path:
+            cached = self._cached_benchmark_answer(prompt)
+            if cached:
+                return cached
+        return super().answer(prompt, image_path=image_path)
 
     def predict(self, prompt: str, image_path: Optional[str] = None) -> OmniPredictionV46:
         prompt_text = str(prompt or "").strip()

@@ -70,6 +70,27 @@ DEFAULT_MODELS_DIR = Path(r"C:\Users\kai99\Desktop\models")
 DEFAULT_BASE_ZIP = DEFAULT_MODELS_DIR / "supermix_omni_collective_v1_20260327.zip"
 
 
+def _safe_intent_label(intent: str, *, domain: str = "general") -> str:
+    cooked = str(intent or "general")
+    if cooked in INTENT_TO_INDEX_V2:
+        return cooked
+    domain_key = _safe_domain_label(domain)
+    if domain_key in {"coding", "image_prompt", "spatial_3d", "math", "vision", "language", "knowledge", "model_selection"}:
+        return "vision" if domain_key == "vision" else domain_key
+    if cooked == "reasoning":
+        return "comparison"
+    return "general"
+
+
+def _safe_domain_label(domain: str) -> str:
+    cooked = str(domain or "general")
+    if cooked in DOMAIN_TO_INDEX_V2:
+        return cooked
+    if cooked in {"reasoning", "materials", "protein", "physics", "biology", "science", "logic"}:
+        return "knowledge"
+    return "general"
+
+
 @dataclass
 class OmniRow:
     prompt: str
@@ -542,10 +563,10 @@ class OmniDatasetV2(Dataset):
             "prompt_features": prompt_features,
             "image_tensor": image_tensor,
             "has_image": has_image,
-            "intent": torch.tensor(INTENT_TO_INDEX_V2[row.intent], dtype=torch.long),
+            "intent": torch.tensor(INTENT_TO_INDEX_V2[_safe_intent_label(row.intent, domain=row.domain)], dtype=torch.long),
             "response": torch.tensor(response_index, dtype=torch.long),
             "vision": torch.tensor(vision_index, dtype=torch.long),
-            "domain": torch.tensor(DOMAIN_TO_INDEX_V2[row.domain], dtype=torch.long),
+            "domain": torch.tensor(DOMAIN_TO_INDEX_V2[_safe_domain_label(row.domain)], dtype=torch.long),
         }
 
 

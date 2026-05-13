@@ -431,7 +431,7 @@ def build_v41_blueprint(summary: Dict[str, Any], summary_path: Optional[Path] = 
 
 
 def load_summary(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def main() -> None:

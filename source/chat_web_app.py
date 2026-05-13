@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import uuid
+from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -64,6 +65,69 @@ async function loadModel(){{el('statusBox').textContent='Loading model...'; try{
 async function send(){{const text=el('prompt').value.trim(); if(!text) return; add('user',text); el('prompt').value=''; try{{const d=await jpost('/api/chat',{{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value)}}); add('bot',d.response,d.timing_ms,d.top_candidates);}}catch(e){{add('bot','Error: '+e.message);}}}}
 async function clearSess(){{try{{await jpost('/api/clear',{{session_id:sid}}); msgs.innerHTML=''; add('bot','Session cleared.');}}catch(e){{add('bot','Clear error: '+e.message);}}}}
 el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; el('prompt').addEventListener('keydown',e=>{{if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();send();}}}}); refresh();
+</script></body></html>"""
+
+
+HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Champion Chat Web</title>
+<style>
+:root{--bg:#eef1f3;--panel:#fbfcfd;--ink:#172026;--muted:#63717d;--line:#cfd8df;--accent:#087f5b;--accent2:#1d4b6d;--user:#dcefff;--bot:#fff;--shadow:0 18px 50px rgba(23,32,38,.12)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#eef1f3 0%,#dfe7ea 52%,#f7f8f2 100%);color:var(--ink);font-family:Aptos,Segoe UI,sans-serif}
+.wrap{width:min(1240px,100%);margin:0 auto;padding:22px;display:grid;grid-template-columns:330px minmax(0,1fr);gap:16px}.panel,.chat{background:rgba(251,252,253,.94);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:8px}
+.panel{padding:16px;display:flex;flex-direction:column;gap:14px}.chat{height:calc(100vh - 44px);min-height:680px;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+.brand{display:flex;align-items:center;gap:10px}.mark{width:34px;height:34px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:inset 0 0 0 1px rgba(255,255,255,.28)}
+h1{font-size:1.05rem;margin:0}.sub{color:var(--muted);font-size:.84rem;line-height:1.4}.row{display:grid;gap:6px}.row label{font-size:.72rem;font-weight:800;color:#40505c;text-transform:uppercase;letter-spacing:.08em}
+input,select,textarea{width:100%;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:7px;padding:10px 11px;font:inherit}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(8,127,91,.16)}
+.split,.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}button{border:0;border-radius:7px;padding:10px 12px;font:inherit;font-weight:800;cursor:pointer;background:var(--accent);color:#fff}button:hover{filter:brightness(.94)}button:disabled{opacity:.55;cursor:not-allowed}
+button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status{white-space:pre-wrap;background:#f6f8f9;border:1px solid var(--line);border-radius:7px;padding:11px;min-height:112px;color:#40505c;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}
+.head{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center;background:#fff}.head-title{font-weight:900}.head small{color:var(--muted)}
+.pillrow{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);background:#f6f8f9;border-radius:999px;padding:5px 9px;color:#40505c;font-size:.76rem}
+.msgs{padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,#f8fafb,#eef3f5)}.msg{position:relative;border:1px solid var(--line);border-radius:8px;padding:12px 13px;max-width:min(78%,820px);white-space:pre-wrap;line-height:1.45;background:var(--bot);box-shadow:0 6px 18px rgba(23,32,38,.06)}
+.msg.user{align-self:flex-end;background:var(--user);border-color:#a8d2f2}.msg.bot{align-self:flex-start}.msg.pending{color:var(--muted);font-style:italic}.who{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:6px;color:#4b5b65;font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em}
+.copy{padding:4px 7px;border-radius:6px;background:#eef3f5;color:#31414c;border:1px solid var(--line);font-size:.72rem}.tim{margin-top:8px;color:#63717d;font-size:.76rem}details{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;color:#63717d;font-size:.76rem}summary{cursor:pointer;font-weight:800;color:#40505c}
+.comp{padding:13px 16px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end;background:#fff}textarea{min-height:54px;max-height:190px;resize:none;line-height:1.42}.hint{grid-column:1/-1;color:var(--muted);font-size:.76rem}
+.quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}.quick button{background:#f6f8f9;color:#31414c;border:1px solid var(--line);font-weight:700;padding:7px 9px;font-size:.78rem}
+@media (max-width:900px){.wrap{grid-template-columns:1fr;padding:10px}.chat{height:72vh;min-height:560px}.msg{max-width:94%}.split,.btns{grid-template-columns:1fr}}
+</style></head><body>
+<div class='wrap'>
+  <aside class='panel'>
+    <div class='brand'><div class='mark'></div><div><h1>Champion Chat</h1><div class='sub'>Local model console</div></div></div>
+    <div class='row'><label for='weights'>Weights (.pth)</label><input id='weights' value='' spellcheck='false'></div>
+    <div class='row'><label for='meta'>Metadata (.json)</label><input id='meta' value='' spellcheck='false'></div>
+    <div class='split'><div class='row'><label for='style'>Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div><div class='row'><label for='showTop'>Candidates</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div></div>
+    <div class='row'><label for='rt'>Response temperature</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
+    <div class='btns'><button id='loadBtn'>Load</button><button class='alt' id='statusBtn'>Refresh</button><button class='alt' id='clearBtn'>Clear</button><button class='alt' id='newSessionBtn'>New ID</button></div>
+    <div class='status' id='statusBox'>Loading status...</div>
+  </aside>
+  <main class='chat'>
+    <header class='head'><div><div class='head-title'>Web Chat</div><small id='metaLine'>No model loaded</small></div><div class='pillrow'><span class='pill' id='session'></span><span class='pill' id='runtimePill'>idle</span></div></header>
+    <section class='msgs' id='msgs' aria-live='polite'></section>
+    <section class='comp'><textarea id='prompt' placeholder='Type a message. Enter sends, Shift+Enter adds a line.'></textarea><button id='sendBtn'>Send</button><div class='hint'>Drafts and the local transcript are kept in this browser session.</div><div class='quick'><button type='button' data-fill='Summarize the latest benchmark result and explain the weakest benchmark.'>Benchmark readout</button><button type='button' data-fill='Give a concise debugging checklist for this model response.'>Debug checklist</button><button type='button' data-fill='Answer as a concise analyst and include uncertainty when needed.'>Analyst mode</button></div></section>
+  </main>
+</div>
+<script>
+const el=(id)=>document.getElementById(id);
+const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop')};
+let sid=localStorage.getItem('champion-web-sid');if(!sid){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);}
+const draftKey='champion-web-draft-v2';const transcriptKey=()=>('champion-web-transcript-v2-'+sid);let transcript=[];let sending=false;
+function setSessionLabel(){els.session.textContent='session '+sid.slice(0,8);}
+function loadTranscript(){try{transcript=JSON.parse(localStorage.getItem(transcriptKey())||'[]');}catch(_){transcript=[];}}
+function saveTranscript(){localStorage.setItem(transcriptKey(),JSON.stringify(transcript.slice(-80)));}
+function autoSizePrompt(){els.prompt.style.height='auto';els.prompt.style.height=Math.min(els.prompt.scrollHeight,190)+'px';}
+function setBusy(active,label){sending=active;els.sendBtn.disabled=active;els.loadBtn.disabled=active;els.runtimePill.textContent=label||(active?'working':'idle');}
+function timingText(t){if(!t)return'';return `${t.total??'?'} ms total - ${t.infer??'?'} ms infer - ${t.rank_pick??'?'} ms rank`;}
+function add(kind,text,timing,top,persist=true){const card=document.createElement('article');card.className='msg '+kind;const who=document.createElement('div');who.className='who';const label=document.createElement('span');label.textContent=kind==='user'?'You':'Champion';who.appendChild(label);if(kind==='bot'&&text){const copy=document.createElement('button');copy.className='copy';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';setTimeout(()=>{copy.textContent='Copy';},1200);}catch(_){copy.textContent='Failed';}};who.appendChild(copy);}const body=document.createElement('div');body.textContent=text;card.appendChild(who);card.appendChild(body);const tt=timingText(timing);if(tt){const node=document.createElement('div');node.className='tim';node.textContent=tt;card.appendChild(node);}if(Array.isArray(top)&&top.length){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`Top candidates (${top.length})`;details.appendChild(summary);top.forEach((candidate,index)=>{const row=document.createElement('div');const score=Number(candidate.score);const scoreText=Number.isFinite(score)?score.toFixed(3):'n/a';row.textContent=`${index+1}. (${scoreText}) ${String(candidate.text||'').slice(0,220)}`;details.appendChild(row);});card.appendChild(details);}els.msgs.appendChild(card);els.msgs.scrollTo({top:els.msgs.scrollHeight,behavior:'smooth'});if(persist){transcript.push({kind,text,timing,top,ts:Date.now()});saveTranscript();}return card;}
+async function jget(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
+async function jpost(path,payload){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
+function renderStatus(status){const lines=[status.loaded?'Model loaded':'No model loaded','Device: '+(status.device||'unknown'),'Size: '+(status.model_size||'unknown'),'Features: '+(status.feature_mode||'unknown'),'Labels: '+(status.available_labels??'unknown'),'Sessions: '+(status.sessions??0)];els.statusBox.textContent=lines.join('\\n');els.metaLine.textContent=status.loaded?`${status.model_size} - ${status.feature_mode} - ${status.available_labels} labels`:'Choose model files and load them';els.runtimePill.textContent=status.loaded?'ready':'idle';if(!els.weights.value&&status.weights)els.weights.value=status.weights;if(!els.meta.value&&status.meta)els.meta.value=status.meta;}
+async function refresh(){try{const data=await jget('/api/status');renderStatus(data.status);}catch(err){els.statusBox.textContent='Status error: '+err.message;els.runtimePill.textContent='status error';}}
+async function loadModel(){setBusy(true,'loading');els.statusBox.textContent='Loading model...';try{const data=await jpost('/api/load',{weights:els.weights.value.trim(),meta:els.meta.value.trim()});renderStatus(data);}catch(err){els.statusBox.textContent='Load error: '+err.message;els.runtimePill.textContent='load failed';}finally{setBusy(false,els.runtimePill.textContent==='load failed'?'load failed':'ready');}}
+async function send(){const text=els.prompt.value.trim();if(!text||sending)return;add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates);els.runtimePill.textContent=data.style_mode?'style '+data.style_mode:'ready';}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
+async function clearSess(){try{await jpost('/api/clear',{session_id:sid});}catch(_){}transcript=[];localStorage.removeItem(transcriptKey());els.msgs.innerHTML='';add('bot','Session cleared.',null,null,false);}
+function newSession(){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);transcript=[];setSessionLabel();els.msgs.innerHTML='';add('bot','New session started.',null,null,false);}
+els.loadBtn.onclick=loadModel;els.statusBtn.onclick=refresh;els.clearBtn.onclick=clearSess;els.newSessionBtn.onclick=newSession;els.sendBtn.onclick=send;els.prompt.value=localStorage.getItem(draftKey)||'';els.prompt.addEventListener('input',()=>{localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();});els.prompt.addEventListener('keydown',(event)=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send();}});
+document.querySelectorAll('[data-fill]').forEach((button)=>{button.addEventListener('click',()=>{els.prompt.value=button.dataset.fill||'';localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();els.prompt.focus();});});
+setSessionLabel();loadTranscript();if(transcript.length){transcript.forEach((item)=>add(item.kind,item.text,item.timing,item.top,false));}else{add('bot','Session ready. Load a model to begin.',null,null,false);}autoSizePrompt();refresh();
 </script></body></html>"""
 
 
@@ -297,8 +361,14 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
 
     @app.get('/')
     def index():
-        html = HTML.replace("<input id='weights'></div>", f"<input id='weights' value='{default_weights}'></div>")
-        html = html.replace("<input id='meta'></div>", f"<input id='meta' value='{default_meta}'></div>")
+        html = HTML.replace(
+            "<input id='weights' value='' spellcheck='false'>",
+            f"<input id='weights' value='{escape(default_weights, quote=True)}' spellcheck='false'>",
+        )
+        html = html.replace(
+            "<input id='meta' value='' spellcheck='false'>",
+            f"<input id='meta' value='{escape(default_meta, quote=True)}' spellcheck='false'>",
+        )
         return html
 
     @app.get('/api/status')

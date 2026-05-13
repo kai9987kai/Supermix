@@ -111,6 +111,115 @@ def _trim_text(text: str, limit: int = 320) -> str:
     return cooked[:limit]
 
 
+_CHAT_DRIFT_MARKERS = (
+    "choose omni collective",
+    "common benchmark score",
+    "latest fused multimodal frontier checkpoint",
+    "request matches its strongest local use case",
+    "use v40_benchmax",
+)
+
+
+def _looks_like_model_selection_prompt(prompt: str) -> bool:
+    lowered = str(prompt or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "which model",
+            "route to",
+            "should handle",
+        )
+    )
+
+
+def _looks_like_active_model_prompt(prompt: str) -> bool:
+    lowered = str(prompt or "").lower()
+    return any(marker in lowered for marker in ("what model", "active model", "model version"))
+
+
+def _looks_like_benchmark_prompt(prompt: str) -> bool:
+    lowered = str(prompt or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "final answer",
+            "gsm8k",
+            "mmlu",
+            "arc_challenge",
+            "hellaswag",
+            "boolq",
+            "piqa",
+            "benchmark",
+        )
+    )
+
+
+def _v46_response_is_obvious_chat_drift(prompt: str, response: str) -> bool:
+    lowered_prompt = str(prompt or "").lower()
+    lowered_response = str(response or "").lower()
+    if not lowered_response.strip():
+        return True
+    greeting_prompt = any(token in lowered_prompt for token in ("hello", "hi ", "hey", "greetings"))
+    if greeting_prompt and not any(
+        token in lowered_response
+        for token in ("hello", "hi", "greetings", "active local model", "how can i help")
+    ):
+        return not _looks_like_benchmark_prompt(lowered_prompt)
+    if "<thought>" in lowered_response or "finalizing synthesis" in lowered_response:
+        return not _looks_like_benchmark_prompt(lowered_prompt)
+    if re.search(r"\bthe answer is\s+-?\d+(?:\.\d+)?\b", lowered_response):
+        return not _looks_like_benchmark_prompt(lowered_prompt)
+    if "short-lived access tokens" in lowered_response and not any(
+        token in lowered_prompt for token in ("auth", "login", "oauth", "security", "token", "jwt")
+    ):
+        return not _looks_like_benchmark_prompt(lowered_prompt)
+    if lowered_response.startswith("recommended approach:") and not any(
+        token in lowered_prompt for token in ("approach", "recommend", "how should", "security", "token", "auth")
+    ):
+        return not _looks_like_benchmark_prompt(lowered_prompt)
+    if "choose omni collective" in lowered_response:
+        return not _looks_like_model_selection_prompt(lowered_prompt)
+    if "common benchmark score" in lowered_response:
+        return not ("benchmark score" in lowered_prompt or _looks_like_model_selection_prompt(lowered_prompt))
+    if any(marker in lowered_response for marker in _CHAT_DRIFT_MARKERS):
+        return not _looks_like_model_selection_prompt(lowered_prompt)
+    if "final answer:" in lowered_response and not _looks_like_benchmark_prompt(lowered_prompt):
+        return True
+    if lowered_response.strip() in {"yes", "no", "final answer: yes", "final answer: no"}:
+        return not _looks_like_benchmark_prompt(lowered_prompt)
+    return False
+
+
+def _v46_chat_guard_response(prompt: str, response: str, record: ModelRecord) -> Tuple[str, bool]:
+    if not _v46_response_is_obvious_chat_drift(prompt, response):
+        return response, False
+
+    lowered = str(prompt or "").lower()
+    model_label = record.label or "Omni Collective V46"
+    if any(token in lowered for token in ("hello", "hi ", "hey", "greetings")):
+        return f"Hello. The active local model is {model_label}, running through the Supermix chat interface.", True
+    if _looks_like_active_model_prompt(lowered) or _looks_like_model_selection_prompt(lowered):
+        score = record.common_overall_exact
+        score_text = f" with common benchmark score {score:.4f}" if score is not None else ""
+        return f"The active local model is {model_label}{score_text}.", True
+    if any(token in lowered for token in ("not making sense", "nonsense", "not normal", "off topic", "wrong response")):
+        return (
+            "The chat response drifted into a memorized response-bank entry. "
+            "The correct fix is to add chat-drift repair examples, preserve benchmark replay, "
+            "and retrain from the promoted v46 champion instead of accepting the off-topic answer."
+        ), True
+    if any(token in lowered for token in ("train", "training", "evolution", "evolve", "benchmark higher")):
+        return (
+            "The next improvement pass should train from the promoted v46 champion with two priorities: "
+            "normal-chat drift repair and weak-suite benchmark replay. It should reject off-topic canned answers "
+            "while keeping exact final-answer formatting for benchmarks."
+        ), True
+    return (
+        "I do not have a reliable grounded response for that prompt yet. "
+        "The previous candidate was off-topic, so I am rejecting it rather than returning a memorized answer."
+    ), True
+
+
 def _extract_labeled_section(text: str, label: str) -> str:
     cooked = str(text or "")
     if not cooked.strip():
@@ -223,6 +332,19 @@ def _find_matching_file(root: Path, preferred_names: Tuple[str, ...], suffix: st
             if matches:
                 return sorted(matches)[0]
     matches = sorted(root.rglob(f"*{suffix}"))
+    if suffix.lower() == ".json":
+        meta_matches = [
+            path
+            for path in matches
+            if path.name.lower().endswith("_meta.json") and not path.name.startswith(".")
+        ]
+        if meta_matches:
+            return meta_matches[0]
+        matches = [
+            path
+            for path in matches
+            if not path.name.startswith(".") and "summary" not in path.name.lower()
+        ]
     return matches[0] if matches else None
 
 
@@ -1172,12 +1294,14 @@ class OmniCollectiveV46Backend(BaseBackend):
             "graph_synthesis_applied": pred.graph_synthesis_applied,
             "continuous_latent_active": pred.continuous_latent_active,
         }
+        response, guard_repaired = _v46_chat_guard_response(effective_prompt, pred.response_text, self.record)
+        timing["chat_guard_repaired"] = guard_repaired
         res = ChatResult(
             kind="text",
             model_key=self.record.key,
             model_label=self.record.label,
             route_reason=str(settings.get("route_reason") or ""),
-            response=pred.response_text,
+            response=response,
             timing=timing,
             prompt_used=effective_prompt,
         )
@@ -1186,6 +1310,7 @@ class OmniCollectiveV46Backend(BaseBackend):
             "speculative_accepted": pred.speculative_accepted,
             "adversarial_verified": pred.adversarial_verified,
             "grpo_group_size": pred.grpo_group_size,
+            "raw_response": pred.response_text if guard_repaired else "",
         }
         return res
 
