@@ -394,6 +394,42 @@ Repo changes:
   test-time compute scaling check (1 vs 8 cycles must differ; fixed depth must be
   deterministic in eval mode).
 
+## June 2026: v50 Cognitive Leap Iteration 2 (Deep Supervision + Adaptive Compute)
+
+Additional primary sources reviewed:
+
+1. Deep Improvement Supervision (DIS) — per-cycle supervision for looped/recursive
+   models, up to 18x training-FLOP reduction vs classic stepwise supervision
+   https://arxiv.org/abs/2511.16886
+2. Answer Convergence as a Signal for Early Stopping in Reasoning
+   https://arxiv.org/abs/2506.02536
+3. Tiny Recursive Models on ARC-AGI-1: Inductive Biases, Identity Conditioning,
+   and Test-Time Compute
+   https://arxiv.org/abs/2512.11847
+4. Learning Dynamic Recursive Depths for Adaptive Computation
+   https://arxiv.org/abs/2507.10524
+
+Repo changes to `CognitiveLeapExpertHead` / `ChampionNetCognitiveLeapExpert`:
+
+- Added `deep_supervision_loss(targets)`: per-cycle decodes are cached during
+  training-mode forwards and supervised with progressively increasing weights, so
+  every recursion cycle learns to improve on the previous one instead of only the
+  final halting mixture receiving gradient. This is a practical DIS adaptation for
+  the current classification-head setting, not a full reproduction of the diffusion
+  target schedule.
+- Added cycle conditioning: a learned `cycle_embed` embedding is added to the
+  scratchpad latent each cycle so the weight-tied core knows where it is in the
+  recursion (identity conditioning, which the TRM-on-ARC analysis found
+  load-bearing). Indices clamp at `max_cycles` so deeper test-time unrolls stay valid.
+- Added inference-time convergence early-exit: `forward(..., adaptive_compute=True,
+  exit_tol=...)` stops cycling once the answer latent's movement drops below
+  tolerance or the ACT halting mass is spent, and assigns the leftover halting mass
+  to the exit cycle. Training always unrolls fully; `last_cycles_used` reports the
+  realized depth for observability.
+- Extended `test_cognitive_leap_expert.py`: deep-supervision loss positivity and
+  gradient flow (including `cycle_embed`), early exit under loose tolerance, and a
+  zero-tolerance guard proving early exit can never trigger spuriously.
+
 ## March 2026: Sample-Level Benchmark Traces and Research Board Focus
 
 Repo changes:

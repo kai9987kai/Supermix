@@ -5613,6 +5613,16 @@ class CognitiveLeapExpertHead(nn.Module):
        cycles refine rather than wander (RD-VLA, arXiv:2602.07845).
     5. Hypersphere-normalized latents — each latent update is RMS-normalized
        onto a learned-gain sphere for recursion stability (nGPT-inspired).
+    6. Cycle conditioning — a learned per-cycle embedding tells the
+       weight-tied core where it is in the recursion, which recent TRM
+       analysis found load-bearing (arXiv:2512.11847).
+    7. Deep improvement supervision — per-cycle decodes are cached during
+       training and `deep_supervision_loss(...)` applies progressively
+       weighted per-cycle losses so every cycle learns to improve on the
+       last (DIS, arXiv:2511.16886).
+    8. Convergence early-exit — in eval mode `adaptive_compute=True` stops
+       cycling once the answer latent stops moving or the halting mass is
+       spent, skipping wasted cycles on easy inputs (arXiv:2506.02536).
     """
 
     def __init__(
@@ -5623,6 +5633,7 @@ class CognitiveLeapExpertHead(nn.Module):
         core_dim: int = 256,
         n_cycles: int = 3,
         inner_steps: int = 2,
+        max_cycles: int = 16,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -5632,6 +5643,7 @@ class CognitiveLeapExpertHead(nn.Module):
         self.core_dim = core_dim
         self.n_cycles = n_cycles
         self.inner_steps = inner_steps
+        self.max_cycles = max_cycles
 
         # Base projection (backward-compatible)
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
@@ -5665,6 +5677,9 @@ class CognitiveLeapExpertHead(nn.Module):
         # Hypersphere gains for normalized latents (nGPT-style stability)
         self.latent_gain = nn.Parameter(torch.ones(latent_dim))
 
+        # Cycle conditioning: tells the weight-tied core which cycle it is in
+        self.cycle_embed = nn.Embedding(max_cycles, latent_dim)
+
         # ACT-style halting head over the answer latent
         self.halt_head = nn.Linear(latent_dim, 1)
 
@@ -5677,6 +5692,10 @@ class CognitiveLeapExpertHead(nn.Module):
         # Diagnostics / regularizers tracked for the training loop
         self.register_buffer("last_ponder_cost", torch.tensor(0.0))
         self.register_buffer("last_consistency_loss", torch.tensor(0.0))
+        self.register_buffer("last_cycles_used", torch.tensor(0.0))
+
+        # Per-cycle decode cache for deep improvement supervision (train only)
+        self._cycle_logits = []
 
         self.reset_parameters()
 
@@ -5702,6 +5721,8 @@ class CognitiveLeapExpertHead(nn.Module):
         nn.init.normal_(self.recur_core[-1].weight, std=0.01)
         nn.init.normal_(self.answer_update[-1].weight, std=0.01)
 
+        nn.init.normal_(self.cycle_embed.weight, std=0.02)
+
         # Bias halting toward "continue" early in training so all cycles learn
         nn.init.zeros_(self.halt_head.weight)
         nn.init.constant_(self.halt_head.bias, -1.0)
@@ -5712,7 +5733,37 @@ class CognitiveLeapExpertHead(nn.Module):
         # RMS-normalize onto the unit hypersphere, then apply learned gain
         return F.normalize(z, p=2, dim=-1) * self.latent_gain
 
-    def forward(self, x, reasoning_cycles: Optional[int] = None):
+    def deep_supervision_loss(self, targets):
+        """Deep-improvement-supervision loss over cached per-cycle decodes.
+
+        Practical DIS adaptation (arXiv:2511.16886): every cycle's decode is
+        supervised against the target with progressively increasing weight,
+        so each cycle learns to improve on the previous one rather than only
+        the final mixture receiving signal. Call after a training-mode
+        forward pass; returns a scalar loss.
+        """
+        if not self._cycle_logits:
+            raise RuntimeError(
+                "deep_supervision_loss requires a training-mode forward pass first"
+            )
+        targets_flat = targets.reshape(-1)
+        n = len(self._cycle_logits)
+        weights = torch.arange(
+            1, n + 1, device=targets_flat.device, dtype=self._cycle_logits[0].dtype
+        )
+        weights = weights / weights.sum()
+        loss = torch.zeros((), device=targets_flat.device, dtype=self._cycle_logits[0].dtype)
+        for w, logits in zip(weights, self._cycle_logits):
+            loss = loss + w * F.cross_entropy(logits, targets_flat)
+        return loss
+
+    def forward(
+        self,
+        x,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: bool = False,
+        exit_tol: float = 1e-3,
+    ):
         N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
         shape_prefix = x.shape[:-1]
         x_flat = x.reshape(N, self.in_dim)
@@ -5737,12 +5788,20 @@ class CognitiveLeapExpertHead(nn.Module):
         ponder = torch.zeros(N, 1, device=x_flat.device, dtype=x_flat.dtype)
         consistency = torch.zeros((), device=x_flat.device, dtype=x_flat.dtype)
         prev_z_h = None
+        cycles_used = n_cycles
 
         for t in range(n_cycles):
+            # Cycle conditioning: identity of the current cycle for the
+            # weight-tied core (clamped beyond the trained range)
+            cycle_idx = min(t, self.max_cycles - 1)
+            cycle_vec = self.cycle_embed.weight[cycle_idx].unsqueeze(0)
+            z_l_cond = z_l + cycle_vec
+
             # Inner scratchpad refinement (weight-tied tiny core)
             for _ in range(self.inner_steps):
-                core_in = torch.cat([x_flat, z_l, z_h], dim=-1)
-                z_l = self._sphere_norm(z_l + self.recur_core(core_in))
+                core_in = torch.cat([x_flat, z_l_cond, z_h], dim=-1)
+                z_l_cond = self._sphere_norm(z_l_cond + self.recur_core(core_in))
+            z_l = z_l_cond
             # Outer answer refinement
             z_h = self._sphere_norm(
                 z_h + self.answer_update(torch.cat([z_l, z_h], dim=-1))
@@ -5750,24 +5809,44 @@ class CognitiveLeapExpertHead(nn.Module):
 
             cycle_logits.append(self.decode_head(z_h))
 
+            # Latent-convergence measurement (regularizer + early-exit signal)
+            if prev_z_h is not None:
+                delta = (z_h - prev_z_h).pow(2).mean()
+                consistency = consistency + delta
+            else:
+                delta = None
+            prev_z_h = z_h
+
+            # Convergence early-exit: only at inference, never during training
+            converged = (
+                adaptive_compute
+                and not self.training
+                and delta is not None
+                and (delta.item() < exit_tol or remaining.mean().item() < 0.05)
+            )
+
             # Differentiable ACT halting: probability of stopping at cycle t
             h_t = torch.sigmoid(self.halt_head(z_h))  # (N, 1)
-            if t == n_cycles - 1:
+            if t == n_cycles - 1 or converged:
                 p_t = remaining  # assign all leftover mass to the final cycle
-            else:
-                p_t = remaining * h_t
-                remaining = remaining * (1.0 - h_t)
+                halt_probs.append(p_t)
+                ponder = ponder + p_t * float(t + 1)
+                cycles_used = t + 1
+                break
+            p_t = remaining * h_t
+            remaining = remaining * (1.0 - h_t)
             halt_probs.append(p_t)
             ponder = ponder + p_t * float(t + 1)
 
-            # Latent-convergence regularizer (fixed-point pressure)
-            if prev_z_h is not None:
-                consistency = consistency + (z_h - prev_z_h).pow(2).mean()
-            prev_z_h = z_h
-
+        self.last_cycles_used = torch.tensor(
+            float(cycles_used), device=x_flat.device
+        )
         if self.training:
             self.last_ponder_cost = ponder.mean()
-            self.last_consistency_loss = consistency / max(1, n_cycles - 1)
+            self.last_consistency_loss = consistency / max(1, cycles_used - 1)
+            self._cycle_logits = cycle_logits
+        else:
+            self._cycle_logits = []
 
         # Halting-weighted mixture of per-cycle decodes
         logits_stack = torch.stack(cycle_logits, dim=1)  # (N, T, out_dim)
@@ -5796,6 +5875,7 @@ class ChampionNetCognitiveLeapExpert(nn.Module):
         core_dim: int = 256,
         n_cycles: int = 3,
         inner_steps: int = 2,
+        max_cycles: int = 16,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -5807,18 +5887,33 @@ class ChampionNetCognitiveLeapExpert(nn.Module):
             core_dim=core_dim,
             n_cycles=n_cycles,
             inner_steps=inner_steps,
+            max_cycles=max_cycles,
             dropout=dropout,
         ))
         layers.append(base.layers[11])
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, x, reasoning_cycles: Optional[int] = None):
+    def forward(
+        self,
+        x,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: bool = False,
+        exit_tol: float = 1e-3,
+    ):
         for layer in self.layers:
             if isinstance(layer, CognitiveLeapExpertHead):
-                x = layer(x, reasoning_cycles=reasoning_cycles)
+                x = layer(
+                    x,
+                    reasoning_cycles=reasoning_cycles,
+                    adaptive_compute=adaptive_compute,
+                    exit_tol=exit_tol,
+                )
             else:
                 x = layer(x)
         return x
+
+    def deep_supervision_loss(self, targets):
+        return self.layers[10].deep_supervision_loss(targets)
 
 
 class ChampionNetHierarchicalExpert(nn.Module):
@@ -7109,7 +7204,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
             f"{head_pref}shared_scale", f"{head_pref}alpha",
             f"{head_pref}thought_init.weight", f"{head_pref}answer_init.weight",
-            f"{head_pref}latent_gain",
+            f"{head_pref}latent_gain", f"{head_pref}cycle_embed.weight",
             f"{head_pref}halt_head.weight", f"{head_pref}halt_head.bias",
             f"{head_pref}decode_head.weight",
         }

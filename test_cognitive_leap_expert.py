@@ -47,8 +47,13 @@ def smoke_test_cognitive_leap():
     target = torch.randint(0, 10, (2, 1)).to(device)
     ce_loss = nn.functional.cross_entropy(logits.view(-1, 10), target.view(-1))
 
+    # Deep improvement supervision over the cached per-cycle decodes
+    dis_loss = model.deep_supervision_loss(target)
+    print(f"Deep supervision loss: {dis_loss.item()}")
+    assert dis_loss.item() > 0, "Deep supervision loss should be positive"
+
     # Include the latent-convergence penalty so its path is exercised too
-    total_loss = ce_loss + 0.05 * consistency_loss
+    total_loss = ce_loss + 0.05 * consistency_loss + 0.1 * dis_loss
     print(f"Total Loss value: {total_loss.item()}")
     total_loss.backward()
 
@@ -62,6 +67,7 @@ def smoke_test_cognitive_leap():
         'answer_update.0': False, # Outer answer refinement
         'answer_update.2': False,
         'latent_gain': False,     # Hypersphere normalization gain
+        'cycle_embed': False,     # Cycle identity conditioning
         'halt_head': False,       # ACT-style adaptive halting
         'decode_head': False,     # Per-cycle decoder
         'shared_up': False,       # Base functionality
@@ -100,6 +106,20 @@ def smoke_test_cognitive_leap():
         out_b = model(dummy_input, reasoning_cycles=4)
     assert torch.allclose(out_a, out_b), "Eval mode should be deterministic at fixed depth"
     print("Test-time compute scaling verified.")
+
+    # 4. Convergence early-exit: a loose tolerance must stop cycling early
+    print("Checking adaptive-compute early exit...")
+    head = model.layers[10]
+    with torch.no_grad():
+        out_adaptive = model(dummy_input, reasoning_cycles=8, adaptive_compute=True, exit_tol=10.0)
+    cycles_used = head.last_cycles_used.item()
+    print(f"Cycles used with loose tolerance: {cycles_used} / 8 requested")
+    assert out_adaptive.shape == (2, 1, 10)
+    assert cycles_used < 8, "Loose exit tolerance should stop cycling early"
+    with torch.no_grad():
+        model(dummy_input, reasoning_cycles=8, adaptive_compute=True, exit_tol=0.0)
+    assert head.last_cycles_used.item() == 8, "Zero tolerance should never exit early"
+    print("Adaptive-compute early exit verified.")
 
     # 4. Parameter count
     total = sum(p.numel() for p in model.parameters())
