@@ -28,3 +28,6 @@ Trainable params: 2184750/3039954
 Epoch 01 | train_loss=0.8335 (ce=0.8159, pref=0.5765, pref_w=0.0750) train_acc=0.8142 val_loss=0.6688 val_acc=0.6975 lr=0.000180503
 Epoch 02 | train_loss=0.4746 (ce=0.4525, pref=0.1475, pref_w=0.1500) train_acc=0.9281 val_loss=0.2363 val_acc=0.9325 lr=0.000110005
 Epoch 03 | train_loss=0.4463 (ce=0.4274, pref=0.1263, pref_w=0.1500) train_acc=0.9369 val_loss=0.2162 val_acc=0.9366 lr=3.29197e-05
+Epoch 04 | train_loss=0.4355 (ce=0.4180, pref=0.1170, pref_w=0.1500) train_acc=0.9407 val_loss=0.2124 val_acc=0.9377 lr=0
+Saved fine-tuned weights: champion_model_chat_titan_dreamer_v43_ft.pth
+Saved chat metadata: chat_model_meta_titan_dreamer_v43.json
