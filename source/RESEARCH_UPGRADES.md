@@ -352,6 +352,48 @@ Repo changes:
 - The current implementation uses a small curated budget and reorders those prompts with an `easy_to_hard` curriculum by default. That curriculum choice is an engineering inference from the papers above, not a direct reproduction of any one method.
 - This is meant as a lightweight SPIN / SPACE style adaptation for the existing smoke workflow: keep synthetic opponent data bounded, keep the real chosen answers fixed, and make the preference stage see policy-specific mistakes earlier.
 
+## June 2026: v50 Cognitive Leap Expert (Recursive Latent Reasoning)
+
+Primary sources reviewed:
+
+1. Less is More: Recursive Reasoning with Tiny Networks (TRM)
+   https://arxiv.org/abs/2510.04871
+2. Scaling up Test-Time Compute with Latent Reasoning: A Recurrent Depth Approach
+   https://arxiv.org/abs/2502.05171
+3. Hierarchical Reasoning Model (ACT halting + deep supervision)
+   https://arxiv.org/abs/2506.21734
+4. Tiny Recursive Models on ARC-AGI-1: Inductive Biases, Identity Conditioning, and Test-Time Compute
+   https://arxiv.org/abs/2512.11847
+5. Recurrent-Depth VLA: Implicit Test-Time Compute Scaling via Latent Iterative Reasoning
+   https://arxiv.org/abs/2602.07845
+
+Repo changes:
+
+- Added `CognitiveLeapExpertHead` and `ChampionNetCognitiveLeapExpert` (model size
+  `cognitive_leap_expert`) in `source/model_variants.py`.
+- The head keeps TRM's dual-latent split: a scratchpad latent `z_L` refined by a tiny
+  weight-tied core over inner steps, and an answer latent `z_H` refined once per outer
+  cycle. A single shared core replaces the hypernetwork/tree-search machinery of the
+  v22 cognitive head, cutting head parameters roughly 7x (10.8M -> 1.5M) while adding
+  recursion depth as the new scaling axis.
+- Differentiable ACT-style halting distributes probability mass across cycles and the
+  output is the halting-weighted mixture of per-cycle decodes, so easy inputs stop
+  early. `last_ponder_cost` exposes expected cycles for optional ponder regularization.
+- A latent-convergence regularizer (`last_consistency_loss`) penalizes answer-latent
+  drift between later cycles, pushing the recursion toward a fixed point so extra
+  test-time cycles refine instead of wander.
+- Latents are RMS-normalized onto a learned-gain hypersphere each update
+  (nGPT-inspired) for recursion stability at depths beyond the training depth.
+- `forward(x, reasoning_cycles=N)` scales test-time compute without retraining; the
+  wrapper threads the override through to the head.
+- Integrated with `build_model`, checkpoint-compatible weight loading (older
+  checkpoints load with the new head freshly initialized), and
+  `detect_model_size_from_state_dict`.
+- Added `test_cognitive_leap_expert.py`: forward/backward shape checks, gradient-flow
+  verification for every new component, halting/consistency diagnostics, and a
+  test-time compute scaling check (1 vs 8 cycles must differ; fixed depth must be
+  deterministic in eval mode).
+
 ## March 2026: Sample-Level Benchmark Traces and Research Board Focus
 
 Repo changes:
