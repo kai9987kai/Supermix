@@ -63,6 +63,7 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "frontier_collective_expert",
     "frontier_verifier_expert",
     "test_time_diff_expert",
+    "titan_dreamer_expert",
 )
 EXPANSION_DIM_MODEL_SIZES = frozenset({"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
 EXTRA_EXPANSION_DIM_MODEL_SIZES = frozenset({"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
@@ -6101,6 +6102,10 @@ def build_model(
         return ChampionNetFrontierVerifierExpert(dropout=dropout)
     if model_size == "test_time_diff_expert":
         return ChampionNetTestTimeDiffExpert(dropout=dropout)
+    if model_size == "titan_dreamer_expert":
+        from model_frontier_v43 import ChampionNetTitanDreamerExpert
+
+        return ChampionNetTitanDreamerExpert(dropout=dropout)
 
     raise ValueError(
         f"Unknown model_size={model_size!r}. Use one of {SUPPORTED_MODEL_SIZES}."
@@ -7432,7 +7437,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
-    if model_size == "test_time_diff_expert":
+    if model_size in ("test_time_diff_expert", "titan_dreamer_expert"):
         head_pref = "layers.10."
         target_state = model.state_dict()
         keep_head_keys = {
@@ -7446,7 +7451,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         }
 
         ckpt_size = detect_model_size_from_state_dict(state_dict)
-        if ckpt_size != "test_time_diff_expert":
+        if ckpt_size != model_size:
             candidate_state = {
                 key: value
                 for key, value in state_dict.items()
@@ -7496,6 +7501,8 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "large"
     if "layers.10.diff_q_pos.weight" in state_dict and "layers.10.predictive_prior.weight" in state_dict:
         return "test_time_diff_expert"
+    if "layers.10.titan_w1" in state_dict and "layers.10.recursion_router.weight" in state_dict:
+        return "titan_dreamer_expert"
     if "layers.10.domain_gate.weight" in state_dict or "layers.10.expert_gates.0.weight" in state_dict:
         return "hierarchical_expert"
     if "layers.10.shared_up.weight" in state_dict and "layers.10.gate.weight" in state_dict:

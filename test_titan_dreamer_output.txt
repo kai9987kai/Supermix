@@ -1,0 +1,29 @@
+Starting smoke test for Titan-Dreamer Expert (v43)...
+Using device: cpu
+Set layers.10.shared_scale to 1.0
+Set layers.10.alpha to 1.0
+Set layers.10.beta to 1.0
+Set layers.10.shared_down.weight to random normal so gradients reach shared_up
+Dummy input shape: torch.Size([2, 4, 128])
+Running forward pass (train mode)...
+Output shape: torch.Size([2, 4, 10])
+Running global backward pass...
+Loss value: 2.7627902030944824
+Checking gradients...
+  titan_w1: OK
+  titan_w2: OK
+  mem_q.weight: OK
+  mem_gate.weight: OK
+  mem_out.weight: OK
+  persist_tokens: OK
+  depth_q.weight: OK
+  depth_cells.0.1.weight: OK
+  recursion_router.weight: OK
+  depth_out.weight: OK
+  shared_up.weight: OK
+All gradients verified successfully.
+Variant detection OK: titan_dreamer_expert
+
+Parameter count: 3,039,954 trainable / 3,039,954 total
+
+Smoke test PASSED!

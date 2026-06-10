@@ -2585,6 +2585,56 @@ def _maybe_refine_selected_response(
     return styled
 
 
+def _consensus_mmr_rerank(
+    candidates: Sequence[Dict[str, Any]],
+    ranked: List[int],
+    scores: torch.Tensor,
+    top_n: int = 16,
+    consensus_weight: float = 0.06,
+    mmr_lambda: float = 0.82,
+) -> Tuple[List[int], torch.Tensor]:
+    """Self-consistency + MMR diversity re-rank over the top candidate pool.
+
+    1. Consensus bonus (self-consistency): candidates whose text agrees with
+       other top-ranked candidates get a small boost — answers supported by
+       multiple retrieved examples are more likely correct.
+    2. MMR ordering: greedily orders the pool by relevance minus redundancy so
+       sampled alternates are diverse instead of near-duplicates.
+    Additive and bounded; never changes scores outside the top pool.
+    """
+    if len(ranked) <= 2:
+        return ranked, scores
+    pool = ranked[: min(top_n, len(ranked))]
+    feats = []
+    for i in pool:
+        text = str(candidates[i].get("text", ""))[:600]
+        feats.append(featurize_text(text))
+    mat = torch.stack(feats)
+    mat = mat / mat.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+    sims = mat @ mat.t()
+    pool_size = len(pool)
+    consensus = (sims.sum(dim=1) - 1.0) / max(1, pool_size - 1)
+
+    new_scores = scores.clone()
+    for j, i in enumerate(pool):
+        new_scores[i] = scores[i] + consensus_weight * float(consensus[j].item())
+
+    order: List[int] = []
+    remaining = list(range(pool_size))
+    while remaining:
+        best_j, best_val = remaining[0], -1e9
+        for j in remaining:
+            redundancy = max((float(sims[j][k].item()) for k in order), default=0.0)
+            val = mmr_lambda * float(new_scores[pool[j]].item()) - (1.0 - mmr_lambda) * redundancy
+            if val > best_val:
+                best_val, best_j = val, j
+        order.append(best_j)
+        remaining.remove(best_j)
+
+    reranked = [pool[j] for j in order] + list(ranked[pool_size:])
+    return reranked, new_scores
+
+
 def pick_response(
     candidates: Sequence[Dict[str, Any]],
     query_text: str,
@@ -2603,6 +2653,7 @@ def pick_response(
         recent_assistant_messages=recent_assistant_messages,
         style_mode=style_mode,
     )
+    ranked, scores = _consensus_mmr_rerank(candidates, list(ranked), scores)
     if ambiguity["needs_clarification"] and (ambiguity["conflict"] or not ambiguity["has_anchor"]):
         top_score = float(scores[ranked[0]].item()) if ranked else -1e9
         if top_score < 0.55 or not ambiguity["has_anchor"]:
@@ -2615,7 +2666,7 @@ def pick_response(
         return "I do not know how to answer that yet."
 
     if response_temperature > 0:
-        top_n = min(4, len(filtered))
+        top_n = min(6, len(filtered))
         top_idx = filtered[:top_n]
         top_scores = scores[top_idx]
         probs = torch.softmax(top_scores / max(response_temperature, 1e-6), dim=0)

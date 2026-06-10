@@ -1,0 +1,30 @@
+Examples: 75582
+Device: cpu
+Device preference: cuda,npu,xpu,dml,mps,cpu
+Torch threads: intra=8 interop=4
+Label mode: kmeans_10
+Feature mode: context_v2
+Feature storage dtype: float32
+Label distribution: 0:4400, 1:8430, 2:6741, 3:7526, 4:10984, 5:3838, 6:6877, 7:2621, 8:9041, 9:15124
+Train/val split: 68024/7558
+Validation labels: 0:440, 1:843, 2:674, 3:753, 4:1098, 5:384, 6:688, 7:262, 8:904, 9:1512
+Model size: titan_dreamer_expert
+Expansion dim: 512
+Checkpoint model size: base
+Grad accumulation steps: 1
+Balanced sampler: False
+Preference loss: weight=0.15 beta=2.0
+Preference config: objective=sigmoid group_size=1 group_estimator=pairwise_mean margin=0.2
+Hard negative ratio: 0.6
+Preference warmup epochs: 1.0
+Label smoothing: 0.05
+Adaptive pref weighting: False
+Split mode: stratified
+LR schedule: cosine
+Warmup steps: 510/8504
+EMA: enabled=True decay=0.999000 eval=True
+Early stop: patience=3 min_delta=0.0001
+Trainable params: 2184750/3039954
+Epoch 01 | train_loss=0.8335 (ce=0.8159, pref=0.5765, pref_w=0.0750) train_acc=0.8142 val_loss=0.6688 val_acc=0.6975 lr=0.000180503
+Epoch 02 | train_loss=0.4746 (ce=0.4525, pref=0.1475, pref_w=0.1500) train_acc=0.9281 val_loss=0.2363 val_acc=0.9325 lr=0.000110005
+Epoch 03 | train_loss=0.4463 (ce=0.4274, pref=0.1263, pref_w=0.1500) train_acc=0.9369 val_loss=0.2162 val_acc=0.9366 lr=3.29197e-05
