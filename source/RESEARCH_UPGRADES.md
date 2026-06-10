@@ -430,6 +430,42 @@ Repo changes to `CognitiveLeapExpertHead` / `ChampionNetCognitiveLeapExpert`:
   gradient flow (including `cycle_embed`), early exit under loose tolerance, and a
   zero-tolerance guard proving early exit can never trigger spuriously.
 
+## June 2026: v50 Training Integration + Controlled Benchmark
+
+Repo changes:
+
+- Wired the v50 recursive-head objectives into `source/finetune_chat.py`:
+  - `--dis_weight` adds the deep-improvement-supervision loss over per-cycle decodes.
+  - `--ponder_weight` adds the ACT ponder-cost penalty (encourages early halting).
+  - `--latent_consistency_weight` adds the latent fixed-point regularizer.
+  - All three are gated on head capability checks, so every other model size is
+    unaffected. Verified end-to-end: training a `cognitive_leap_expert` from a fresh
+    base checkpoint through the full pipeline (featurization, EMA, cosine schedule,
+    checkpoint save) with all three objectives active, plus reload via
+    `detect_model_size_from_state_dict`.
+- Added `source/benchmark_cognitive_leap_v50.py`: a controlled experiment comparing
+  the v50 head against the v22 cognitive expert on a chained-modular-arithmetic task
+  (sequential composition — the computation recursion is supposed to buy). Identical
+  data, optimizer, batch size, and step budget for both models. Results land in
+  `output/benchmark_v50_cognitive_leap/benchmark_results.json` and a tracked copy in
+  `artifacts/v50_cognitive_leap_benchmark/`.
+
+First benchmark run (seed 42, 6 epochs, CPU):
+
+| metric | v22 cognitive_expert | v50 cognitive_leap_expert |
+|---|---|---|
+| parameters | 10,785,999 | 1,685,327 (6.4x fewer) |
+| train time | 35.5 s | 24.4 s (1.45x faster) |
+| test accuracy | 0.2313 | 0.2427 (+1.1 pt) |
+| latency (B=256) | 141 ms | 51-68 ms at 1-8 cycles |
+
+- Test-time scaling behaved as designed: accuracy ticked up monotonically with more
+  cycles (0.2420 -> 0.2433 from 1 to 8) and adaptive early-exit matched full-depth
+  accuracy while using 4 of 8 cycles.
+- Honest caveat: at this tiny budget both models are far from task ceiling; the
+  result demonstrates parameter/compute efficiency at equal budget, not a final
+  capability claim. Longer runs on real repo datasets are the next step.
+
 ## March 2026: Sample-Level Benchmark Traces and Research Board Focus
 
 Repo changes:

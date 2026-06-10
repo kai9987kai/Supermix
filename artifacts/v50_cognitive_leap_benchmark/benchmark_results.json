@@ -1,0 +1,46 @@
+{
+  "task": "chained_modular_arithmetic",
+  "epochs": 6,
+  "train_size": 4000,
+  "test_size": 1500,
+  "seed": 42,
+  "models": {
+    "v22_cognitive_expert": {
+      "params": 10785999,
+      "train_seconds": 35.49,
+      "final_loss": 1.7241,
+      "test_accuracy": 0.2313,
+      "latency_ms_b256": 141.04
+    },
+    "v50_cognitive_leap_expert": {
+      "params": 1685327,
+      "train_seconds": 24.42,
+      "final_loss": 2.0139,
+      "test_accuracy": 0.2427,
+      "test_time_scaling": {
+        "1": {
+          "test_accuracy": 0.242,
+          "latency_ms_b256": 51.17
+        },
+        "3": {
+          "test_accuracy": 0.2427,
+          "latency_ms_b256": 56.7
+        },
+        "8": {
+          "test_accuracy": 0.2433,
+          "latency_ms_b256": 67.82
+        }
+      },
+      "adaptive_compute": {
+        "test_accuracy": 0.2427,
+        "latency_ms_b256": 59.0,
+        "cycles_used_of_8": 4.0
+      }
+    }
+  },
+  "summary": {
+    "param_ratio_v22_over_v50": 6.4,
+    "accuracy_delta_v50_minus_v22": 0.0113,
+    "train_speedup_v50": 1.45
+  }
+}

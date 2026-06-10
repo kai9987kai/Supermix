@@ -721,6 +721,33 @@ def main():
         default=0.01,
         help="Weight of the auxiliary load-balancing loss for MoE models.",
     )
+    ap.add_argument(
+        "--dis_weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Weight of deep-improvement-supervision loss for recursive heads "
+            "(cognitive_leap_expert). 0 disables."
+        ),
+    )
+    ap.add_argument(
+        "--ponder_weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Weight of the ACT ponder-cost penalty for recursive heads; "
+            "encourages early halting. 0 disables."
+        ),
+    )
+    ap.add_argument(
+        "--latent_consistency_weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Weight of the latent-convergence regularizer for recursive heads; "
+            "pushes the recursion toward a fixed point. 0 disables."
+        ),
+    )
     args = ap.parse_args()
 
     set_seed(args.seed)
@@ -1106,8 +1133,16 @@ def main():
                 head = model.layers[10]
                 if hasattr(head, "_aux_loss"):
                     aux_loss = head._aux_loss
-                
+
                 loss = ce_loss + (effective_pref_weight * pref_loss) + (args.aux_loss_weight * aux_loss)
+
+                # Recursive-head auxiliary objectives (cognitive_leap_expert)
+                if args.dis_weight > 0 and hasattr(head, "deep_supervision_loss") and getattr(head, "_cycle_logits", None):
+                    loss = loss + args.dis_weight * head.deep_supervision_loss(yb)
+                if args.ponder_weight > 0 and hasattr(head, "last_ponder_cost") and head.last_ponder_cost.requires_grad:
+                    loss = loss + args.ponder_weight * head.last_ponder_cost
+                if args.latent_consistency_weight > 0 and hasattr(head, "last_consistency_loss") and head.last_consistency_loss.requires_grad:
+                    loss = loss + args.latent_consistency_weight * head.last_consistency_loss
                 scaled_loss = loss / float(grad_accum_steps)
                 
             scaler.scale(scaled_loss).backward()
