@@ -1,0 +1,58 @@
+{
+  "config": {
+    "benchmark_type": "autoresearch_smoke",
+    "generated_at_utc": "2026-03-20T23:58:08.423154+00:00",
+    "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "adapter_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\autoresearch\\continue_verify_20260320\\adapter",
+    "eval_source": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\artifacts\\autoresearch\\continue_verify_20260320\\eval_pairs.jsonl",
+    "eval_samples": 8,
+    "seed": 42,
+    "max_length": 448,
+    "max_new_tokens": 112,
+    "max_records": 480,
+    "eval_size": 64,
+    "max_eval_samples": 0
+  },
+  "base": {
+    "eval_samples": 8.0,
+    "eval_loss": 3.61903178691864,
+    "perplexity": 37.30143459561615,
+    "token_f1": 0.11524330317102568,
+    "char_similarity": 0.08754236306264371,
+    "avg_gen_seconds": 15.105487644672394,
+    "avg_prompt_tokens": 46.25,
+    "avg_generated_tokens": 75.5,
+    "total_prompt_tokens": 370.0,
+    "total_generated_tokens": 604.0,
+    "eval_seconds": 133.60720038414001,
+    "generated_tokens_per_sec": 4.520714439516827
+  },
+  "tuned": {
+    "eval_samples": 8.0,
+    "eval_loss": 10.64364892244339,
+    "perplexity": 41925.47525409545,
+    "token_f1": 0.0,
+    "char_similarity": 0.01341895566413628,
+    "avg_gen_seconds": 22.105902671813965,
+    "avg_prompt_tokens": 46.25,
+    "avg_generated_tokens": 112.0,
+    "total_prompt_tokens": 370.0,
+    "total_generated_tokens": 896.0,
+    "eval_seconds": 190.1335723400116,
+    "generated_tokens_per_sec": 4.712476544635176
+  },
+  "delta_tuned_minus_base": {
+    "avg_gen_seconds": 7.000415027141571,
+    "avg_generated_tokens": 36.5,
+    "avg_prompt_tokens": 0.0,
+    "char_similarity": -0.07412340739850742,
+    "eval_loss": 7.02461713552475,
+    "eval_samples": 0.0,
+    "eval_seconds": 56.52637195587158,
+    "generated_tokens_per_sec": 0.19176210511834846,
+    "perplexity": 41888.17381949983,
+    "token_f1": -0.11524330317102568,
+    "total_generated_tokens": 292.0,
+    "total_prompt_tokens": 0.0
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "cache_key": "a2a92d92f00a2982298b36b1c927f743664084861143ceb8bf73ca2ad168f9c9",
+  "cache_version": 1,
+  "raw_eval_count": 10,
+  "train_count": 90,
+  "eval_count": 8,
+  "created_at": 1774048894.2226124,
+  "config": {
+    "data_files": [
+      {
+        "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\datasets\\conversation_data.quality_anchor_v2.jsonl",
+        "size": 15283,
+        "mtime_ns": 1772266932428564200
+      },
+      {
+        "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\datasets\\conversation_data.coding_knowledge_2026_02_19.jsonl",
+        "size": 84680,
+        "mtime_ns": 1772194432871819900
+      },
+      {
+        "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\datasets\\conversation_data.world_events_2026_02_19.jsonl",
+        "size": 48188,
+        "mtime_ns": 1772194432874255500
+      },
+      {
+        "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\datasets\\conversation_data.supermix_plus_v27_500k.jsonl",
+        "size": 194743109,
+        "mtime_ns": 1772194445496428200
+      },
+      {
+        "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\datasets\\conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+        "size": 46579714,
+        "mtime_ns": 1772194427139588200
+      },
+      {
+        "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\datasets\\conversation_data.mega_creative_250k_v2.jsonl",
+        "size": 149920346,
+        "mtime_ns": 1772194440175186000
+      }
+    ],
+    "max_records": 100,
+    "max_source_fraction": 0.52,
+    "max_synthetic_fraction": 0.06,
+    "max_prompt_signature_count": 4,
+    "prompt_signature_cap_exempt_sources": [
+      "conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+      "conversation_data.quality_anchor_v2.jsonl"
+    ],
+    "eval_size": 10,
+    "eval_min_quality_score": 1.05,
+    "eval_drop_synthetic_prompts": true,
+    "seed": 48
+  }
+}
