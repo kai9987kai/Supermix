@@ -96,6 +96,8 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
     <div class='row'><label for='meta'>Metadata (.json)</label><input id='meta' value='' spellcheck='false'></div>
     <div class='split'><div class='row'><label for='style'>Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div><div class='row'><label for='showTop'>Candidates</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div></div>
     <div class='row'><label for='rt'>Response temperature</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
+    <div class='split'><div class='row'><label for='cycles'>Reasoning cycles</label><input id='cycles' type='number' min='1' max='64' step='1' placeholder='auto'></div><div class='row'><label for='adaptive'>Adaptive compute</label><select id='adaptive'><option value='off'>off</option><option value='on'>on</option></select></div></div>
+    <div class='row'><label for='exitTol'>Adaptive exit tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div>
     <div class='btns'><button id='loadBtn'>Load</button><button class='alt' id='statusBtn'>Refresh</button><button class='alt' id='clearBtn'>Clear</button><button class='alt' id='newSessionBtn'>New ID</button></div>
     <div class='status' id='statusBox'>Loading status...</div>
   </aside>
@@ -107,7 +109,7 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
 </div>
 <script>
 const el=(id)=>document.getElementById(id);
-const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop')};
+const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),cycles:el('cycles'),adaptive:el('adaptive'),exitTol:el('exitTol')};
 let sid=localStorage.getItem('champion-web-sid');if(!sid){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);}
 const draftKey='champion-web-draft-v2';const transcriptKey=()=>('champion-web-transcript-v2-'+sid);let transcript=[];let sending=false;
 function setSessionLabel(){els.session.textContent='session '+sid.slice(0,8);}
@@ -116,18 +118,19 @@ function saveTranscript(){localStorage.setItem(transcriptKey(),JSON.stringify(tr
 function autoSizePrompt(){els.prompt.style.height='auto';els.prompt.style.height=Math.min(els.prompt.scrollHeight,190)+'px';}
 function setBusy(active,label){sending=active;els.sendBtn.disabled=active;els.loadBtn.disabled=active;els.runtimePill.textContent=label||(active?'working':'idle');}
 function timingText(t){if(!t)return'';return `${t.total??'?'} ms total - ${t.infer??'?'} ms infer - ${t.rank_pick??'?'} ms rank`;}
-function add(kind,text,timing,top,persist=true){const card=document.createElement('article');card.className='msg '+kind;const who=document.createElement('div');who.className='who';const label=document.createElement('span');label.textContent=kind==='user'?'You':'Champion';who.appendChild(label);if(kind==='bot'&&text){const copy=document.createElement('button');copy.className='copy';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';setTimeout(()=>{copy.textContent='Copy';},1200);}catch(_){copy.textContent='Failed';}};who.appendChild(copy);}const body=document.createElement('div');body.textContent=text;card.appendChild(who);card.appendChild(body);const tt=timingText(timing);if(tt){const node=document.createElement('div');node.className='tim';node.textContent=tt;card.appendChild(node);}if(Array.isArray(top)&&top.length){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`Top candidates (${top.length})`;details.appendChild(summary);top.forEach((candidate,index)=>{const row=document.createElement('div');const score=Number(candidate.score);const scoreText=Number.isFinite(score)?score.toFixed(3):'n/a';row.textContent=`${index+1}. (${scoreText}) ${String(candidate.text||'').slice(0,220)}`;details.appendChild(row);});card.appendChild(details);}els.msgs.appendChild(card);els.msgs.scrollTo({top:els.msgs.scrollHeight,behavior:'smooth'});if(persist){transcript.push({kind,text,timing,top,ts:Date.now()});saveTranscript();}return card;}
+function computeText(c){if(!c)return'';const requested=c.requested_reasoning_cycles??'default';const used=c.cycles_used??'n/a';return `compute: supported=${c.supported} requested=${requested} used=${used} adaptive=${c.adaptive_compute} applied=${c.applied}`;}
+function add(kind,text,timing,top,persist=true,compute=null){const card=document.createElement('article');card.className='msg '+kind;const who=document.createElement('div');who.className='who';const label=document.createElement('span');label.textContent=kind==='user'?'You':'Champion';who.appendChild(label);if(kind==='bot'&&text){const copy=document.createElement('button');copy.className='copy';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';setTimeout(()=>{copy.textContent='Copy';},1200);}catch(_){copy.textContent='Failed';}};who.appendChild(copy);}const body=document.createElement('div');body.textContent=text;card.appendChild(who);card.appendChild(body);const tt=timingText(timing);if(tt){const node=document.createElement('div');node.className='tim';node.textContent=tt;card.appendChild(node);}const ct=computeText(compute);if(ct){const node=document.createElement('div');node.className='tim';node.textContent=ct;card.appendChild(node);}if(Array.isArray(top)&&top.length){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`Top candidates (${top.length})`;details.appendChild(summary);top.forEach((candidate,index)=>{const row=document.createElement('div');const score=Number(candidate.score);const scoreText=Number.isFinite(score)?score.toFixed(3):'n/a';row.textContent=`${index+1}. (${scoreText}) ${String(candidate.text||'').slice(0,220)}`;details.appendChild(row);});card.appendChild(details);}els.msgs.appendChild(card);els.msgs.scrollTo({top:els.msgs.scrollHeight,behavior:'smooth'});if(persist){transcript.push({kind,text,timing,top,compute,ts:Date.now()});saveTranscript();}return card;}
 async function jget(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
 async function jpost(path,payload){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
-function renderStatus(status){const lines=[status.loaded?'Model loaded':'No model loaded','Device: '+(status.device||'unknown'),'Size: '+(status.model_size||'unknown'),'Features: '+(status.feature_mode||'unknown'),'Labels: '+(status.available_labels??'unknown'),'Sessions: '+(status.sessions??0)];els.statusBox.textContent=lines.join('\\n');els.metaLine.textContent=status.loaded?`${status.model_size} - ${status.feature_mode} - ${status.available_labels} labels`:'Choose model files and load them';els.runtimePill.textContent=status.loaded?'ready':'idle';if(!els.weights.value&&status.weights)els.weights.value=status.weights;if(!els.meta.value&&status.meta)els.meta.value=status.meta;}
+function renderStatus(status){const lines=[status.loaded?'Model loaded':'No model loaded','Device: '+(status.device||'unknown'),'Size: '+(status.model_size||'unknown'),'Features: '+(status.feature_mode||'unknown'),'Labels: '+(status.available_labels??'unknown'),'Runtime compute: '+(status.runtime_compute_supported?'supported':'not supported'),'Sessions: '+(status.sessions??0)];els.statusBox.textContent=lines.join('\\n');els.metaLine.textContent=status.loaded?`${status.model_size} - ${status.feature_mode} - ${status.available_labels} labels`:'Choose model files and load them';els.runtimePill.textContent=status.loaded?'ready':'idle';if(!els.weights.value&&status.weights)els.weights.value=status.weights;if(!els.meta.value&&status.meta)els.meta.value=status.meta;}
 async function refresh(){try{const data=await jget('/api/status');renderStatus(data.status);}catch(err){els.statusBox.textContent='Status error: '+err.message;els.runtimePill.textContent='status error';}}
 async function loadModel(){setBusy(true,'loading');els.statusBox.textContent='Loading model...';try{const data=await jpost('/api/load',{weights:els.weights.value.trim(),meta:els.meta.value.trim()});renderStatus(data);}catch(err){els.statusBox.textContent='Load error: '+err.message;els.runtimePill.textContent='load failed';}finally{setBusy(false,els.runtimePill.textContent==='load failed'?'load failed':'ready');}}
-async function send(){const text=els.prompt.value.trim();if(!text||sending)return;add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates);els.runtimePill.textContent=data.style_mode?'style '+data.style_mode:'ready';}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
+async function send(){const text=els.prompt.value.trim();if(!text||sending)return;const cycles=els.cycles.value.trim();add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value),reasoning_cycles:cycles?Number(cycles):null,adaptive_compute:els.adaptive.value==='on',adaptive_exit_tol:Number(els.exitTol.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates,true,data.compute);els.runtimePill.textContent=data.style_mode?'style '+data.style_mode:'ready';}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
 async function clearSess(){try{await jpost('/api/clear',{session_id:sid});}catch(_){}transcript=[];localStorage.removeItem(transcriptKey());els.msgs.innerHTML='';add('bot','Session cleared.',null,null,false);}
 function newSession(){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);transcript=[];setSessionLabel();els.msgs.innerHTML='';add('bot','New session started.',null,null,false);}
 els.loadBtn.onclick=loadModel;els.statusBtn.onclick=refresh;els.clearBtn.onclick=clearSess;els.newSessionBtn.onclick=newSession;els.sendBtn.onclick=send;els.prompt.value=localStorage.getItem(draftKey)||'';els.prompt.addEventListener('input',()=>{localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();});els.prompt.addEventListener('keydown',(event)=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send();}});
 document.querySelectorAll('[data-fill]').forEach((button)=>{button.addEventListener('click',()=>{els.prompt.value=button.dataset.fill||'';localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();els.prompt.focus();});});
-setSessionLabel();loadTranscript();if(transcript.length){transcript.forEach((item)=>add(item.kind,item.text,item.timing,item.top,false));}else{add('bot','Session ready. Load a model to begin.',null,null,false);}autoSizePrompt();refresh();
+setSessionLabel();loadTranscript();if(transcript.length){transcript.forEach((item)=>add(item.kind,item.text,item.timing,item.top,false,item.compute));}else{add('bot','Session ready. Load a model to begin.',null,null,false);}autoSizePrompt();refresh();
 </script></body></html>"""
 
 
@@ -157,6 +160,9 @@ class Engine:
                 "model_size": self.model_size,
                 "available_labels": len(self.available_labels),
                 "device": self.device_info.get("resolved", str(self.device)),
+                "runtime_compute_supported": bool(
+                    self.model is not None and chat_app.model_supports_runtime_compute(self.model)
+                ),
                 "sessions": len(self.sessions),
             }
 
@@ -234,7 +240,17 @@ class Engine:
             self.sessions.pop(session_id, None)
             self.recent.pop(session_id, None)
 
-    def chat(self, session_id: str, user_text: str, style_mode: Optional[str] = None, response_temperature: Optional[float] = None, show_top_responses: int = 0) -> Dict[str, Any]:
+    def chat(
+        self,
+        session_id: str,
+        user_text: str,
+        style_mode: Optional[str] = None,
+        response_temperature: Optional[float] = None,
+        show_top_responses: int = 0,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: Optional[bool] = None,
+        adaptive_exit_tol: Optional[float] = None,
+    ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
         with self.lock:
@@ -254,7 +270,27 @@ class Engine:
         tt = time.perf_counter()
         x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
         with torch.no_grad():
-            logits = model(x)[0, 0]
+            logits_tensor, compute_metrics = chat_app.forward_with_runtime_compute(
+                model,
+                x,
+                reasoning_cycles=(
+                    self.defaults.get("reasoning_cycles")
+                    if reasoning_cycles is None
+                    else reasoning_cycles
+                ),
+                adaptive_compute=(
+                    self.defaults.get("adaptive_compute", False)
+                    if adaptive_compute is None
+                    else adaptive_compute
+                ),
+                exit_tol=(
+                    self.defaults.get("adaptive_exit_tol")
+                    if adaptive_exit_tol is None
+                    else adaptive_exit_tol
+                ),
+                return_diagnostics=True,
+            )
+            logits = logits_tensor[0, 0]
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
@@ -342,16 +378,21 @@ class Engine:
             if len(recent) > 24:
                 del recent[:-24]
 
+        timing_ms = {
+            "infer": round(t_infer * 1000, 1),
+            "rank_pick": round(t_rank * 1000, 1),
+            "total": round((time.perf_counter() - t0) * 1000, 1),
+        }
+        if "cycles_used" in compute_metrics:
+            timing_ms["cycles_used"] = compute_metrics["cycles_used"]
+
         return {
             "ok": True,
             "session_id": session_id,
             "response": resp,
             "style_mode": resolved_style,
-            "timing_ms": {
-                "infer": round(t_infer * 1000, 1),
-                "rank_pick": round(t_rank * 1000, 1),
-                "total": round((time.perf_counter() - t0) * 1000, 1),
-            },
+            "timing_ms": timing_ms,
+            "compute": compute_metrics,
             "top_candidates": top_candidates,
         }
 
@@ -397,6 +438,9 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 style_mode=p.get('style_mode'),
                 response_temperature=p.get('response_temperature'),
                 show_top_responses=int(p.get('show_top_responses') or 0),
+                reasoning_cycles=p.get('reasoning_cycles'),
+                adaptive_compute=p.get('adaptive_compute'),
+                adaptive_exit_tol=p.get('adaptive_exit_tol'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -434,6 +478,9 @@ def main() -> None:
     ap.add_argument('--temperature', type=float, default=0.0)
     ap.add_argument('--style_mode', choices=['auto','balanced','creative','concise','analyst'], default='auto')
     ap.add_argument('--creativity', type=float, default=0.2)
+    ap.add_argument('--reasoning_cycles', type=int, default=None)
+    ap.add_argument('--adaptive_compute', action='store_true')
+    ap.add_argument('--adaptive_exit_tol', type=float, default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL)
     args = ap.parse_args()
 
     configure_torch_runtime(
@@ -452,6 +499,16 @@ def main() -> None:
         'temperature': float(args.temperature),
         'style_mode': str(args.style_mode),
         'creativity': float(args.creativity),
+        'reasoning_cycles': chat_app._coerce_optional_positive_int(
+            args.reasoning_cycles,
+            default=None,
+            max_value=chat_app.MAX_RUNTIME_REASONING_CYCLES,
+        ),
+        'adaptive_compute': bool(args.adaptive_compute),
+        'adaptive_exit_tol': chat_app._coerce_nonnegative_float(
+            args.adaptive_exit_tol,
+            default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+        ),
     })
     if args.autoload:
         try:

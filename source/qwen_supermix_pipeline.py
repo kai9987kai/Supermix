@@ -3046,6 +3046,59 @@ def _apply_sft_coverage_topk_scores(
     return adjusted
 
 
+def _select_sft_coverage_greedy(
+    scored: Sequence[Tuple[float, float, ChatPair, Dict[str, float]]],
+    keep_n: int,
+    budget_mode: str,
+    budget_power: float,
+) -> List[Tuple[float, float, ChatPair, Dict[str, float]]]:
+    keep_n = max(1, min(len(scored), int(keep_n)))
+    remaining = list(scored)
+    selected: List[Tuple[float, float, ChatPair, Dict[str, float]]] = []
+    seen_sources: set = set()
+    seen_groups: set = set()
+    seen_styles: set = set()
+    seen_lengths: set = set()
+    token_mode = str(budget_mode).strip().lower() == "tokens"
+    budget_power = max(0.0, min(1.0, float(budget_power)))
+
+    def _marginal_score(entry: Tuple[float, float, ChatPair, Dict[str, float]]) -> float:
+        _budget_value, score, _pair, metrics = entry
+        source_key = str(metrics.get("source_key", ""))
+        group_key = str(metrics.get("group_key", ""))
+        style_key = str(metrics.get("style_key", ""))
+        length_key = str(metrics.get("length_key", ""))
+        quality_signal = max(0.0, min(1.0, float(metrics.get("quality_signal", 0.0))))
+        coverage_gain = 0.0
+        if source_key and source_key not in seen_sources:
+            coverage_gain += 0.18
+        if group_key and group_key not in seen_groups:
+            coverage_gain += 0.30
+        if style_key and style_key not in seen_styles:
+            coverage_gain += 0.20
+        if length_key and length_key not in seen_lengths:
+            coverage_gain += 0.06
+        marginal = float(score) + coverage_gain * (0.70 + 0.30 * quality_signal)
+        if token_mode:
+            tokens = max(8.0, float(metrics.get("estimated_tokens", 0.0)))
+            marginal = marginal / math.pow(tokens, budget_power)
+        return float(marginal)
+
+    while remaining and len(selected) < keep_n:
+        best_idx = max(
+            range(len(remaining)),
+            key=lambda idx: (_marginal_score(remaining[idx]), remaining[idx][1], -idx),
+        )
+        entry = remaining.pop(best_idx)
+        selected.append(entry)
+        metrics = entry[3]
+        seen_sources.add(str(metrics.get("source_key", "")))
+        seen_groups.add(str(metrics.get("group_key", "")))
+        seen_styles.add(str(metrics.get("style_key", "")))
+        seen_lengths.add(str(metrics.get("length_key", "")))
+    return selected
+
+
 def _is_scoped_sft_selection_pair(
     pair: ChatPair,
     scope: str,
@@ -3182,7 +3235,15 @@ def _select_sft_training_pairs(
         if min_keep > 0:
             keep_n = max(keep_n, min(min_keep, total))
         keep_n = max(1, min(total, keep_n))
-        selected = scored[:keep_n]
+        if mode == "coverage_topk":
+            selected = _select_sft_coverage_greedy(
+                scored,
+                keep_n=keep_n,
+                budget_mode=budget_mode,
+                budget_power=budget_power,
+            )
+        else:
+            selected = scored[:keep_n]
         selected_estimated_tokens = float(
             sum(float(entry[3].get("estimated_tokens", 0.0)) for entry in selected)
         )
@@ -3873,6 +3934,58 @@ def _apply_preference_coverage_scores(
     return adjusted
 
 
+def _select_preference_coverage_greedy(
+    scored: Sequence[Tuple[float, PreferencePair]],
+    keep_n: int,
+) -> List[PreferencePair]:
+    keep_n = max(1, min(len(scored), int(keep_n)))
+    remaining = list(scored)
+    selected: List[PreferencePair] = []
+    seen_signatures: set = set()
+    seen_styles: set = set()
+    seen_hardness: set = set()
+    seen_lengths: set = set()
+
+    def _length_key(pair: PreferencePair) -> str:
+        return _word_count_bucket(
+            max(
+                _word_token_count(_fast_cleanup_response_text(pair.chosen)),
+                _word_token_count(_fast_cleanup_response_text(pair.rejected)),
+            )
+        )
+
+    def _marginal_score(entry: Tuple[float, PreferencePair]) -> float:
+        score, pair = entry
+        signature_key = _prompt_signature(pair.user)[:96] or "<empty>"
+        style_key = _preference_pair_style_bucket(pair)
+        hardness_key = _preference_pair_hardness_bucket(pair)
+        length_key = _length_key(pair)
+        quality_anchor = 0.60 + 0.40 * min(1.0, max(0.0, float(pair.quality_gap)) / 0.45)
+        coverage_gain = 0.0
+        if signature_key not in seen_signatures:
+            coverage_gain += 0.06
+        if style_key not in seen_styles:
+            coverage_gain += 0.34
+        if hardness_key not in seen_hardness:
+            coverage_gain += 0.08
+        if length_key not in seen_lengths:
+            coverage_gain += 0.04
+        return float(score + coverage_gain * quality_anchor)
+
+    while remaining and len(selected) < keep_n:
+        best_idx = max(
+            range(len(remaining)),
+            key=lambda idx: (_marginal_score(remaining[idx]), remaining[idx][0], -idx),
+        )
+        _score, pair = remaining.pop(best_idx)
+        selected.append(pair)
+        seen_signatures.add(_prompt_signature(pair.user)[:96] or "<empty>")
+        seen_styles.add(_preference_pair_style_bucket(pair))
+        seen_hardness.add(_preference_pair_hardness_bucket(pair))
+        seen_lengths.add(_length_key(pair))
+    return selected
+
+
 def _select_preference_pairs(
     pairs: Sequence[PreferencePair],
     strategy: str,
@@ -3922,7 +4035,10 @@ def _select_preference_pairs(
     if min_keep > 0:
         keep_n = max(keep_n, min(min_keep, total))
     keep_n = max(1, min(total, keep_n))
-    selected = [p for _s, p in scored[:keep_n]]
+    if mode == "coverage_margin":
+        selected = _select_preference_coverage_greedy(scored, keep_n=keep_n)
+    else:
+        selected = [p for _s, p in scored[:keep_n]]
 
     def _mean(vals: Sequence[float]) -> float:
         if not vals:

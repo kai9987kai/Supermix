@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import re
 import time
@@ -67,6 +68,170 @@ def _int_or_default(value, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+MAX_RUNTIME_REASONING_CYCLES = 64
+DEFAULT_ADAPTIVE_EXIT_TOL = 1e-3
+
+
+def _coerce_optional_positive_int(value, default: Optional[int] = None, max_value: Optional[int] = None) -> Optional[int]:
+    if value is None or value == "":
+        return default
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    coerced = max(1, coerced)
+    if max_value is not None:
+        coerced = min(int(max_value), coerced)
+    return coerced
+
+
+def _coerce_nonnegative_float(value, default: Optional[float] = None, max_value: Optional[float] = None) -> Optional[float]:
+    if value is None or value == "":
+        return default
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return default
+    coerced = max(0.0, coerced)
+    if max_value is not None:
+        coerced = min(float(max_value), coerced)
+    return coerced
+
+
+def _coerce_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "enable", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "disable", "disabled"}:
+        return False
+    return bool(default)
+
+
+def _model_forward_accepts_kwarg(model, name: str) -> bool:
+    try:
+        sig = inspect.signature(model.forward)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    if name in sig.parameters:
+        return True
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
+
+def model_supports_runtime_compute(model) -> bool:
+    return any(
+        _model_forward_accepts_kwarg(model, key)
+        for key in ("reasoning_cycles", "adaptive_compute", "exit_tol")
+    )
+
+
+def _tensorish_to_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, torch.Tensor):
+            if value.numel() == 0:
+                return None
+            return float(value.detach().float().mean().item())
+        return float(value)
+    except (TypeError, ValueError, RuntimeError):
+        return None
+
+
+def _first_module_attr_float(model, attr_name: str) -> Optional[float]:
+    if hasattr(model, attr_name):
+        value = _tensorish_to_float(getattr(model, attr_name))
+        if value is not None:
+            return value
+    if hasattr(model, "modules"):
+        for module in model.modules():
+            if module is model or not hasattr(module, attr_name):
+                continue
+            value = _tensorish_to_float(getattr(module, attr_name))
+            if value is not None:
+                return value
+    return None
+
+
+def get_last_cycles_used(model) -> Optional[float]:
+    return _first_module_attr_float(model, "last_cycles_used")
+
+
+def collect_runtime_compute_metrics(
+    model,
+    *,
+    requested_reasoning_cycles: Optional[int] = None,
+    adaptive_compute: bool = False,
+    exit_tol: Optional[float] = None,
+    applied_kwargs: Optional[Dict[str, object]] = None,
+) -> Dict[str, object]:
+    metrics: Dict[str, object] = {
+        "supported": model_supports_runtime_compute(model),
+        "requested_reasoning_cycles": requested_reasoning_cycles,
+        "max_reasoning_cycles": MAX_RUNTIME_REASONING_CYCLES,
+        "adaptive_compute": bool(adaptive_compute),
+        "exit_tol": exit_tol,
+        "applied": bool(applied_kwargs),
+        "applied_kwargs": dict(applied_kwargs or {}),
+    }
+    cycles_used = get_last_cycles_used(model)
+    if cycles_used is not None:
+        metrics["cycles_used"] = round(cycles_used, 4)
+    for attr_name, key in (
+        ("last_ponder_cost", "ponder_cost"),
+        ("last_consistency_loss", "consistency_loss"),
+        ("last_gating_entropy", "gating_entropy"),
+    ):
+        value = _first_module_attr_float(model, attr_name)
+        if value is not None:
+            metrics[key] = round(value, 6)
+    return metrics
+
+
+def forward_with_runtime_compute(
+    model,
+    x,
+    *,
+    reasoning_cycles: Optional[int] = None,
+    adaptive_compute: bool = False,
+    exit_tol: Optional[float] = None,
+    return_diagnostics: bool = False,
+):
+    requested_cycles = _coerce_optional_positive_int(
+        reasoning_cycles,
+        default=None,
+        max_value=MAX_RUNTIME_REASONING_CYCLES,
+    )
+    adaptive = _coerce_bool(adaptive_compute, default=False)
+    resolved_exit_tol = _coerce_nonnegative_float(
+        DEFAULT_ADAPTIVE_EXIT_TOL if exit_tol is None else exit_tol,
+        default=DEFAULT_ADAPTIVE_EXIT_TOL,
+    )
+    applied_kwargs: Dict[str, object] = {}
+    if requested_cycles is not None and _model_forward_accepts_kwarg(model, "reasoning_cycles"):
+        applied_kwargs["reasoning_cycles"] = requested_cycles
+    if _model_forward_accepts_kwarg(model, "adaptive_compute"):
+        applied_kwargs["adaptive_compute"] = adaptive
+    if resolved_exit_tol is not None and _model_forward_accepts_kwarg(model, "exit_tol"):
+        applied_kwargs["exit_tol"] = resolved_exit_tol
+
+    out = model(x, **applied_kwargs)
+    if return_diagnostics:
+        return out, collect_runtime_compute_metrics(
+            model,
+            requested_reasoning_cycles=requested_cycles,
+            adaptive_compute=adaptive,
+            exit_tol=resolved_exit_tol,
+            applied_kwargs=applied_kwargs,
+        )
+    return out
 
 
 _FOLLOWUP_QUERY_RE = re.compile(r"\b(it|that|this|they|them|same|previous|above|more|continue|deeper|expand)\b", re.I)
@@ -182,6 +347,9 @@ def _print_chat_help() -> None:
     print("  /creativity <0-1>   Set creative rewrite strength")
     print("  /top <n>            Show top reranked candidates each turn (0 disables)")
     print("  /timing on|off      Toggle per-turn timing output")
+    print("  /cycles <n|auto>    Set v50 reasoning cycles (auto uses model default)")
+    print("  /adaptive on|off    Toggle adaptive early-exit compute")
+    print("  /exit_tol <float>   Set adaptive exit tolerance")
     print("  /memory on|off      Toggle memory retrieval/writes for this session")
     print("  /db on|off          Toggle local LLM DB retrieval for this session")
     print("  /config             Print current runtime config")
@@ -275,6 +443,23 @@ def main():
         "--show_timing",
         action="store_true",
         help="Print per-turn timing breakdown (memory/db/inference/total).",
+    )
+    ap.add_argument(
+        "--reasoning_cycles",
+        type=int,
+        default=None,
+        help=f"Override v50 recursive reasoning cycles per inference (1-{MAX_RUNTIME_REASONING_CYCLES}; default uses model setting).",
+    )
+    ap.add_argument(
+        "--adaptive_compute",
+        action="store_true",
+        help="Enable v50 adaptive early exit during inference when supported.",
+    )
+    ap.add_argument(
+        "--adaptive_exit_tol",
+        type=float,
+        default=DEFAULT_ADAPTIVE_EXIT_TOL,
+        help="Latent-convergence tolerance for adaptive early exit.",
     )
     ap.add_argument("--memory_db", default="chat_memory.db", help="Persistent memory SQLite DB.")
     ap.add_argument("--memory_top_k", type=int, default=4, help="Number of memory snippets to retrieve each turn.")
@@ -412,11 +597,29 @@ def main():
     session_started_at = time.time()
     turn_count = 0
     last_turn_timing: Dict[str, float] = {}
+    last_compute_metrics: Dict[str, object] = {}
+    args.reasoning_cycles = _coerce_optional_positive_int(
+        args.reasoning_cycles,
+        default=None,
+        max_value=MAX_RUNTIME_REASONING_CYCLES,
+    )
+    args.adaptive_compute = bool(args.adaptive_compute)
+    args.adaptive_exit_tol = _coerce_nonnegative_float(
+        args.adaptive_exit_tol,
+        default=DEFAULT_ADAPTIVE_EXIT_TOL,
+    )
 
     print(f"\n{TerminalColors.SYSTEM}--- Session Info ---")
     print(f"Loaded: {Path(args.weights).name} [{resolved_model_size}] | Available labels: {len(available_labels)}")
     print(f"Device: {device_info.get('resolved', args.device)} | Threads intra={torch.get_num_threads()} interop={torch.get_num_interop_threads()}")
     print(f"Feature mode: {feature_mode}{feature_mode_note} | Style mode: {args.style_mode} (creativity={max(0.0, min(1.0, float(args.creativity))):.2f})")
+    print(
+        "Runtime compute: "
+        f"supported={'yes' if model_supports_runtime_compute(model) else 'no'} | "
+        f"cycles={args.reasoning_cycles if args.reasoning_cycles is not None else 'model default'} | "
+        f"adaptive={'on' if args.adaptive_compute else 'off'} | "
+        f"exit_tol={float(args.adaptive_exit_tol):.6g}"
+    )
     
     if llm_db:
         print(f"LLM DB: {args.llm_db} (top_k={args.db_top_k})")
@@ -473,6 +676,11 @@ def main():
                             "  last_timing="
                             + ", ".join(f"{k}={_format_ms(v)}" for k, v in last_turn_timing.items())
                         )
+                    if last_compute_metrics:
+                        print(
+                            "  last_compute="
+                            + ", ".join(f"{k}={v}" for k, v in last_compute_metrics.items())
+                        )
                 elif cmd == "config":
                     print(f"{TerminalColors.SYSTEM}Runtime config:{TerminalColors.RESET}")
                     print(
@@ -490,6 +698,12 @@ def main():
                     print(
                         f"  llm_db={'on' if session_db_enabled else 'off'} top_k={int(args.db_top_k)} "
                         f"score_scale={float(args.db_score_scale):.3f}"
+                    )
+                    print(
+                        f"  runtime_compute_supported={'yes' if model_supports_runtime_compute(model) else 'no'} "
+                        f"cycles={args.reasoning_cycles if args.reasoning_cycles is not None else 'model default'} "
+                        f"adaptive={'on' if args.adaptive_compute else 'off'} "
+                        f"exit_tol={float(args.adaptive_exit_tol):.6g}"
                     )
                 elif cmd == "style":
                     if arg not in {"auto", "balanced", "creative", "concise", "analyst"}:
@@ -518,6 +732,37 @@ def main():
                         print(f"{TerminalColors.SYSTEM}Usage: /timing on|off{TerminalColors.RESET}")
                         continue
                     print(f"{TerminalColors.SYSTEM}Per-turn timing {'enabled' if show_timing else 'disabled'}.{TerminalColors.RESET}")
+                elif cmd in {"cycles", "reasoning_cycles"}:
+                    if arg.lower() in {"", "auto", "default", "model"}:
+                        args.reasoning_cycles = None
+                    else:
+                        parsed_cycles = _coerce_optional_positive_int(
+                            arg,
+                            default=None,
+                            max_value=MAX_RUNTIME_REASONING_CYCLES,
+                        )
+                        if parsed_cycles is None:
+                            print(f"{TerminalColors.SYSTEM}Usage: /cycles <1-{MAX_RUNTIME_REASONING_CYCLES}|auto>{TerminalColors.RESET}")
+                            continue
+                        args.reasoning_cycles = parsed_cycles
+                    shown = args.reasoning_cycles if args.reasoning_cycles is not None else "model default"
+                    print(f"{TerminalColors.SYSTEM}Reasoning cycles set to {shown}.{TerminalColors.RESET}")
+                elif cmd == "adaptive":
+                    if arg.lower() in {"on", "1", "true", "yes"}:
+                        args.adaptive_compute = True
+                    elif arg.lower() in {"off", "0", "false", "no"}:
+                        args.adaptive_compute = False
+                    else:
+                        print(f"{TerminalColors.SYSTEM}Usage: /adaptive on|off{TerminalColors.RESET}")
+                        continue
+                    print(f"{TerminalColors.SYSTEM}Adaptive compute {'enabled' if args.adaptive_compute else 'disabled'}.{TerminalColors.RESET}")
+                elif cmd in {"exit_tol", "adaptive_exit_tol"}:
+                    parsed_tol = _coerce_nonnegative_float(arg, default=None)
+                    if parsed_tol is None:
+                        print(f"{TerminalColors.SYSTEM}Usage: /exit_tol <nonnegative float>{TerminalColors.RESET}")
+                        continue
+                    args.adaptive_exit_tol = parsed_tol
+                    print(f"{TerminalColors.SYSTEM}Adaptive exit tolerance set to {float(args.adaptive_exit_tol):.6g}.{TerminalColors.RESET}")
                 elif cmd == "memory":
                     if memory_db is None and arg.lower() in {"on", "1", "true"}:
                         print(f"{TerminalColors.SYSTEM}Memory DB is not available in this session.{TerminalColors.RESET}")
@@ -585,7 +830,15 @@ def main():
                     
             x = text_to_model_input(context, feature_mode=feature_mode).to(device)
             with torch.no_grad():
-                logits = model(x)[0, 0]  # (10,)
+                logits_tensor, last_compute_metrics = forward_with_runtime_compute(
+                    model,
+                    x,
+                    reasoning_cycles=args.reasoning_cycles,
+                    adaptive_compute=args.adaptive_compute,
+                    exit_tol=args.adaptive_exit_tol,
+                    return_diagnostics=True,
+                )
+                logits = logits_tensor[0, 0]  # (10,)
             t_infer += max(0.0, time.perf_counter() - _t)
 
             idx = torch.tensor(available_labels, dtype=torch.long, device=logits.device)
@@ -732,6 +985,15 @@ def main():
                     f"{TerminalColors.SYSTEM}Timing:{TerminalColors.RESET} "
                     + ", ".join(f"{k}={_format_ms(v)}" for k, v in last_turn_timing.items())
                 )
+                if last_compute_metrics:
+                    requested = last_compute_metrics.get("requested_reasoning_cycles") or "model default"
+                    print(
+                        f"{TerminalColors.SYSTEM}Compute:{TerminalColors.RESET} "
+                        f"supported={last_compute_metrics.get('supported')} "
+                        f"requested={requested} cycles_used={last_compute_metrics.get('cycles_used', 'n/a')} "
+                        f"adaptive={last_compute_metrics.get('adaptive_compute')} "
+                        f"applied={last_compute_metrics.get('applied')}"
+                    )
                 
     finally:
         executor.shutdown(wait=False)

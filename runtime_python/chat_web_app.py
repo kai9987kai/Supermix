@@ -201,6 +201,11 @@ select, input {
         <div class='row'><label>Creative Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div>
         <div class='row'><label>Temperature</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
     </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class='row'><label>Reasoning Cycles</label><input id='cycles' type='number' min='1' max='64' step='1' placeholder='auto'></div>
+        <div class='row'><label>Adaptive Compute</label><select id='adaptive'><option value='off'>off</option><option value='on'>on</option></select></div>
+    </div>
+    <div class='row'><label>Adaptive Exit Tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div>
     
     <div class='row'><label>Inference Width</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div>
     
@@ -236,20 +241,49 @@ promptEl.addEventListener('input', () => {
     promptEl.style.height = (promptEl.scrollHeight) + 'px';
 });
 
-function add(kind,text,timing,top){
+function add(kind,text,timing,top,compute){
     const d=document.createElement('div'); 
     d.className='msg '+kind; 
-    let html = `<div class='who'>${kind==='user'?'Human':'Supermix'}</div><div style="white-space:pre-wrap;">${text}</div>`;
-    
+    const who=document.createElement('div');
+    who.className='who';
+    who.textContent=kind==='user'?'Human':'Supermix';
+    const body=document.createElement('div');
+    body.style.whiteSpace='pre-wrap';
+    body.textContent=text;
+    d.appendChild(who);
+    d.appendChild(body);
     if(timing){
-        html += `<div class='tim'>Engine Latency: ${timing.total}ms | Infer: ${timing.infer}ms</div>`;
+        const t=document.createElement('div');
+        t.className='tim';
+        t.textContent=`Engine Latency: ${timing.total}ms | Infer: ${timing.infer}ms`;
+        d.appendChild(t);
+    }
+    if(compute){
+        const c=document.createElement('div');
+        c.className='tim';
+        const requested=compute.requested_reasoning_cycles??'default';
+        const used=compute.cycles_used??'n/a';
+        c.textContent=`Compute: supported=${compute.supported} requested=${requested} used=${used} adaptive=${compute.adaptive_compute} applied=${compute.applied}`;
+        d.appendChild(c);
     }
     if(top&&top.length){
-        html += `<div class='tim' style="border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; margin-top:8px;">
-            <b>Neural Probabilities:</b><br>${top.map((c,i)=>`${i+1}. ${c.text.slice(0,100)}... (${(c.score*100).toFixed(1)}%)`).join('<br>')}
-        </div>`;
+        const t=document.createElement('div');
+        t.className='tim';
+        t.style.borderTop='1px solid rgba(255,255,255,0.05)';
+        t.style.paddingTop='8px';
+        t.style.marginTop='8px';
+        const title=document.createElement('div');
+        title.textContent='Neural Probabilities:';
+        t.appendChild(title);
+        top.forEach((candidate,index)=>{
+            const row=document.createElement('div');
+            const score=Number(candidate.score);
+            const pct=Number.isFinite(score)?(score*100).toFixed(1):'n/a';
+            row.textContent=`${index+1}. ${String(candidate.text||'').slice(0,100)}... (${pct}%)`;
+            t.appendChild(row);
+        });
+        d.appendChild(t);
     }
-    d.innerHTML = html;
     msgs.appendChild(d); 
     msgs.scrollTop=msgs.scrollHeight; 
 }
@@ -285,12 +319,13 @@ async function loadModel(){
 }
 async function send(){
     const text=promptEl.value.trim(); if(!text) return; 
+    const cycles=el('cycles').value.trim();
     add('user',text); 
     promptEl.value=''; 
     promptEl.style.height = 'auto';
     try{
-        const d=await jpost('/api/chat',{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value)}); 
-        add('bot',d.response,d.timing_ms,d.top_candidates);
+        const d=await jpost('/api/chat',{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value),reasoning_cycles:cycles?Number(cycles):null,adaptive_compute:el('adaptive').value==='on',adaptive_exit_tol:Number(el('exitTol').value)});
+        add('bot',d.response,d.timing_ms,d.top_candidates,d.compute);
     }catch(e){ add('bot','CORE ERROR: '+e.message); }
 }
 async function clearSess(){
@@ -332,6 +367,9 @@ class Engine:
                 "model_size": self.model_size,
                 "available_labels": len(self.available_labels),
                 "device": self.device_info.get("resolved", str(self.device)),
+                "runtime_compute_supported": bool(
+                    self.model is not None and chat_app.model_supports_runtime_compute(self.model)
+                ),
                 "sessions": len(self.sessions),
             }
 
@@ -409,7 +447,17 @@ class Engine:
             self.sessions.pop(session_id, None)
             self.recent.pop(session_id, None)
 
-    def chat(self, session_id: str, user_text: str, style_mode: Optional[str] = None, response_temperature: Optional[float] = None, show_top_responses: int = 0) -> Dict[str, Any]:
+    def chat(
+        self,
+        session_id: str,
+        user_text: str,
+        style_mode: Optional[str] = None,
+        response_temperature: Optional[float] = None,
+        show_top_responses: int = 0,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: Optional[bool] = None,
+        adaptive_exit_tol: Optional[float] = None,
+    ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
         with self.lock:
@@ -429,7 +477,27 @@ class Engine:
         tt = time.perf_counter()
         x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
         with torch.no_grad():
-            logits = model(x)[0, 0]
+            logits_tensor, compute_metrics = chat_app.forward_with_runtime_compute(
+                model,
+                x,
+                reasoning_cycles=(
+                    self.defaults.get("reasoning_cycles")
+                    if reasoning_cycles is None
+                    else reasoning_cycles
+                ),
+                adaptive_compute=(
+                    self.defaults.get("adaptive_compute", False)
+                    if adaptive_compute is None
+                    else adaptive_compute
+                ),
+                exit_tol=(
+                    self.defaults.get("adaptive_exit_tol")
+                    if adaptive_exit_tol is None
+                    else adaptive_exit_tol
+                ),
+                return_diagnostics=True,
+            )
+            logits = logits_tensor[0, 0]
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
@@ -517,16 +585,21 @@ class Engine:
             if len(recent) > 24:
                 del recent[:-24]
 
+        timing_ms = {
+            "infer": round(t_infer * 1000, 1),
+            "rank_pick": round(t_rank * 1000, 1),
+            "total": round((time.perf_counter() - t0) * 1000, 1),
+        }
+        if "cycles_used" in compute_metrics:
+            timing_ms["cycles_used"] = compute_metrics["cycles_used"]
+
         return {
             "ok": True,
             "session_id": session_id,
             "response": resp,
             "style_mode": resolved_style,
-            "timing_ms": {
-                "infer": round(t_infer * 1000, 1),
-                "rank_pick": round(t_rank * 1000, 1),
-                "total": round((time.perf_counter() - t0) * 1000, 1),
-            },
+            "timing_ms": timing_ms,
+            "compute": compute_metrics,
             "top_candidates": top_candidates,
         }
 
@@ -566,6 +639,9 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 style_mode=p.get('style_mode'),
                 response_temperature=p.get('response_temperature'),
                 show_top_responses=int(p.get('show_top_responses') or 0),
+                reasoning_cycles=p.get('reasoning_cycles'),
+                adaptive_compute=p.get('adaptive_compute'),
+                adaptive_exit_tol=p.get('adaptive_exit_tol'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -603,6 +679,9 @@ def main() -> None:
     ap.add_argument('--temperature', type=float, default=0.0)
     ap.add_argument('--style_mode', choices=['auto','balanced','creative','concise','analyst'], default='auto')
     ap.add_argument('--creativity', type=float, default=0.2)
+    ap.add_argument('--reasoning_cycles', type=int, default=None)
+    ap.add_argument('--adaptive_compute', action='store_true')
+    ap.add_argument('--adaptive_exit_tol', type=float, default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL)
     args = ap.parse_args()
 
     configure_torch_runtime(
@@ -621,6 +700,16 @@ def main() -> None:
         'temperature': float(args.temperature),
         'style_mode': str(args.style_mode),
         'creativity': float(args.creativity),
+        'reasoning_cycles': chat_app._coerce_optional_positive_int(
+            args.reasoning_cycles,
+            default=None,
+            max_value=chat_app.MAX_RUNTIME_REASONING_CYCLES,
+        ),
+        'adaptive_compute': bool(args.adaptive_compute),
+        'adaptive_exit_tol': chat_app._coerce_nonnegative_float(
+            args.adaptive_exit_tol,
+            default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+        ),
     })
     if args.autoload:
         try:
