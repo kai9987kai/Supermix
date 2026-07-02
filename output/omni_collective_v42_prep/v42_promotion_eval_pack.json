@@ -1,0 +1,74 @@
+{
+  "evaluations": [
+    {
+      "prompt": "Reply in exactly two sentences explaining why regression tests matter.",
+      "expected": "Two grounded sentences that clearly explain safety against unintended behavior changes.",
+      "focus": "communication_and_coding",
+      "metric": "clarity_and_correctness",
+      "source": "promotion_eval_v41::regression_tests"
+    },
+    {
+      "prompt": "Which local model is best for benchmark-focused reasoning prompts?",
+      "expected": "Should explicitly prefer v40_benchmax or clearly justify a stronger newer benchmark specialist if one exists.",
+      "focus": "routing_and_model_selection",
+      "metric": "grounded_route_choice",
+      "source": "promotion_eval_v41::benchmark_route"
+    },
+    {
+      "prompt": "A checkpoint save failed on Windows with Access is denied. What should happen next?",
+      "expected": "Should recommend validating newest checkpoint or temp checkpoint, then resuming instead of restarting from zero.",
+      "focus": "coding_and_operations",
+      "metric": "repair_quality",
+      "source": "promotion_eval_v41::checkpoint_recovery"
+    },
+    {
+      "prompt": "What should a grounded assistant do when it cannot verify a current fact locally?",
+      "expected": "Must avoid guessing, state uncertainty clearly, and say what evidence or source is needed.",
+      "focus": "groundedness",
+      "metric": "uncertainty_honesty",
+      "source": "promotion_eval_v41::uncertainty"
+    },
+    {
+      "prompt": "Write a vivid but grounded paragraph about a storm-battered lighthouse at night.",
+      "expected": "Should be creative and readable without fabricating irrelevant facts or collapsing into bland filler.",
+      "focus": "creative_communication",
+      "metric": "creative_quality",
+      "source": "promotion_eval_v41::creative_grounded"
+    },
+    {
+      "prompt": "Generate a CIF-style seed for a thermoelectric oxide candidate with low thermal conductivity target.",
+      "expected": "Should stay within bounded materials language and avoid pretending to provide fully validated physical properties.",
+      "focus": "materials_grounding",
+      "metric": "specialist_groundedness",
+      "source": "promotion_eval_v41::materials"
+    },
+    {
+      "prompt": "Which local model should handle a benchmark-style reasoning prompt if exact score is the main goal?",
+      "expected": "v40_benchmax",
+      "focus": "benchmark_bridge",
+      "metric": "contains",
+      "source": "promotion_eval_v42::benchmark_route"
+    },
+    {
+      "prompt": "Translate TurboQuant into a v42 training implication in one sentence.",
+      "expected": "budget control and evidence compression for longer teacher traces, not quantization as a direct training target",
+      "focus": "budget_reasoning",
+      "metric": "contains",
+      "source": "promotion_eval_v42::turboquant_translation"
+    },
+    {
+      "prompt": "Which teacher is the best fit for failing-test and patch-repair traces?",
+      "expected": "Qwen/Qwen3-Coder-Next",
+      "focus": "teacher_roles",
+      "metric": "contains",
+      "source": "promotion_eval_v42::coder_teacher"
+    },
+    {
+      "prompt": "A large transcript only needs the one failing step and the next action. Which reasoning budget should v42 prefer?",
+      "expected": "medium",
+      "focus": "budget_reasoning",
+      "metric": "contains",
+      "source": "promotion_eval_v42::budget_choice"
+    }
+  ]
+}

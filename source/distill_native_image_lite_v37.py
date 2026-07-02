@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence
 
 import torch
-import torch.nn.functional as F 
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 

@@ -1,0 +1,290 @@
+{
+  "dry_run": true,
+  "base_mode": "frozen_counts_plus_v41_rows",
+  "source_summary": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v8_frontier_20260408\\omni_collective_v8_frontier_summary.json",
+  "prep_payload": {
+    "family": "omni_collective_v41",
+    "source_summary": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v8_frontier_20260408\\omni_collective_v8_frontier_summary.json",
+    "output_root": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep",
+    "model_config": {
+      "family": "omni_collective_v41",
+      "base_model_family": "omni_collective_v8",
+      "text_hidden": 288,
+      "fusion_hidden": 1152,
+      "expert_count": 12,
+      "expert_hidden": 1920,
+      "expert_top_k": 2,
+      "deliberation_passes": 12,
+      "minimum_passes": 6,
+      "new_heads": [
+        "latent_plan_slots",
+        "multi_token_prediction_aux",
+        "communication_polish_head",
+        "uncertainty_anchor_head"
+      ]
+    },
+    "communication_polish": {
+      "row_count": 18,
+      "source_counts": {
+        "communication_polish_v41::clarity_rewrite": 3,
+        "communication_polish_v41::coding_explain": 3,
+        "communication_polish_v41::compare_recommend": 3,
+        "communication_polish_v41::creative_grounded": 3,
+        "communication_polish_v41::grounded_uncertainty": 3,
+        "communication_polish_v41::human_collab": 3
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\v41_communication_polish_rows.jsonl"
+    },
+    "latent_plan": {
+      "row_count": 4,
+      "source_counts": {
+        "latent_plan_v41::debugging": 1,
+        "latent_plan_v41::human_explain": 1,
+        "latent_plan_v41::openscad": 1,
+        "latent_plan_v41::route_selection": 1
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\v41_latent_plan_rows.jsonl"
+    },
+    "code_critique_repair": {
+      "row_count": 5,
+      "source_counts": {
+        "code_repair_v41::checkpoint_write": 1,
+        "code_repair_v41::disk_full_resume": 1,
+        "code_repair_v41::openscad_fix": 1,
+        "code_repair_v41::review_rewrite": 1,
+        "code_repair_v41::routing_bug": 1
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\v41_code_critique_repair_rows.jsonl"
+    },
+    "reasoning_budget": {
+      "row_count": 6,
+      "source_counts": {
+        "reasoning_budget_v41::deep": 2,
+        "reasoning_budget_v41::medium": 2,
+        "reasoning_budget_v41::short": 2
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\v41_reasoning_budget_rows.jsonl"
+    },
+    "teacher_disagreement": {
+      "teacher_pair": [
+        "v40_benchmax",
+        "omni_collective_v7",
+        "qwen_v28"
+      ],
+      "row_count": 22,
+      "source_counts": {
+        "teacher_disagreement_v41::repair": 5,
+        "teacher_disagreement_v41::resolve": 5,
+        "teacher_disagreement_v41::route_then_answer": 5,
+        "teacher_disagreement_v41::stability": 7
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\v41_teacher_disagreement_rows.jsonl"
+    },
+    "promotion_eval_pack": {
+      "item_count": 6,
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\v41_promotion_eval_pack.json"
+    },
+    "blueprint_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v41_prep\\omni_collective_v41_blueprint.json"
+  },
+  "base_stage1_rows": 34124,
+  "base_stage2_rows": 34334,
+  "added_stage1_rows": 51,
+  "added_stage2_rows": 55,
+  "estimated_stage1_rows": 34175,
+  "estimated_stage2_rows": 34389,
+  "source_counts": {
+    "3d": 190,
+    "all_model_distill_total_v7": 206,
+    "benchmax_v33_v8": 2284,
+    "benchmax_v39_v8": 2560,
+    "bible": 180,
+    "books": 620,
+    "code_repair_v41::checkpoint_write": 1,
+    "code_repair_v41::disk_full_resume": 1,
+    "code_repair_v41::openscad_fix": 1,
+    "code_repair_v41::review_rewrite": 1,
+    "code_repair_v41::routing_bug": 1,
+    "coding": 380,
+    "coding_delta_jsonl_v5": 180,
+    "coding_delta_v5": 14,
+    "communication_polish_v41::clarity_rewrite": 3,
+    "communication_polish_v41::coding_explain": 3,
+    "communication_polish_v41::compare_recommend": 3,
+    "communication_polish_v41::creative_grounded": 3,
+    "communication_polish_v41::grounded_uncertainty": 3,
+    "communication_polish_v41::human_collab": 3,
+    "conversation_alignment_v6": 10,
+    "conversation_alignment_v7": 4,
+    "conversation_bible_v6": 180,
+    "conversation_books_smoke_v8": 50,
+    "conversation_books_v6": 720,
+    "conversation_books_v8": 1200,
+    "conversation_coding_v8": 380,
+    "conversation_creative_alt_v8": 900,
+    "conversation_creative_v6": 1100,
+    "conversation_creative_v8": 1750,
+    "conversation_delta_anchor_v6": 239,
+    "conversation_delta_anchor_v8": 201,
+    "conversation_delta_refresh_v6": 32,
+    "conversation_delta_refresh_v8": 32,
+    "conversation_dictionary_v6": 220,
+    "conversation_dictionary_v8": 320,
+    "conversation_hybrid_live_v8": 1500,
+    "conversation_hybrid_v6": 1398,
+    "conversation_math_v8": 82,
+    "conversation_quality_anchor_v6": 8,
+    "conversation_reasoning_v6": 960,
+    "conversation_reasoning_v8": 1800,
+    "conversation_science_novel_v6": 140,
+    "conversation_science_novel_v8": 200,
+    "conversation_science_v6": 180,
+    "conversation_science_v8": 300,
+    "conversation_style_edge_v8": 120,
+    "conversation_supermix_plus_v6": 1800,
+    "conversation_supermix_plus_v8": 3400,
+    "conversation_world_events_v6": 66,
+    "conversation_world_events_v8": 66,
+    "creative": 940,
+    "creative_100k": 280,
+    "cross_modal_selection_v8": 8,
+    "delta_anchor": 169,
+    "delta_official": 32,
+    "dictionary": 180,
+    "finnegans": 120,
+    "gemma4_slice_v8": 0,
+    "grounding_v6": 8,
+    "grounding_v7": 4,
+    "hybrid": 860,
+    "latent_plan_v41::debugging": 1,
+    "latent_plan_v41::human_explain": 1,
+    "latent_plan_v41::openscad": 1,
+    "latent_plan_v41::route_selection": 1,
+    "materials_grounding_v8": 20,
+    "math_exact_v6": 310,
+    "math_exact_v7_added": 757,
+    "math_jsonl_v6": 30,
+    "openscad_v5": 10,
+    "prompt_understanding_v5": 8,
+    "protein_folding_v6": 120,
+    "protein_folding_v7_added": 120,
+    "protein_pack_v7": 120,
+    "quality_anchor": 4,
+    "reasoning": 1400,
+    "reasoning_budget_v41::deep": 2,
+    "reasoning_budget_v41::medium": 2,
+    "reasoning_budget_v41::short": 2,
+    "science": 160,
+    "science_image": 422,
+    "science_novel": 120,
+    "specialist_profiles_v7": 77,
+    "supermix_plus": 2199,
+    "teacher_disagreement_v41::repair": 5,
+    "teacher_disagreement_v41::resolve": 5,
+    "teacher_disagreement_v41::route_then_answer": 5,
+    "teacher_disagreement_v41::stability": 7,
+    "three_d_generation_v8": 28,
+    "video_contact": 248,
+    "world_events": 66
+  },
+  "v41_row_groups": {
+    "communication_polish": {
+      "row_count": 18,
+      "source_counts": {
+        "communication_polish_v41::clarity_rewrite": 3,
+        "communication_polish_v41::coding_explain": 3,
+        "communication_polish_v41::compare_recommend": 3,
+        "communication_polish_v41::creative_grounded": 3,
+        "communication_polish_v41::grounded_uncertainty": 3,
+        "communication_polish_v41::human_collab": 3
+      },
+      "domain_counts": {
+        "coding": 3,
+        "creative": 3,
+        "general": 4,
+        "knowledge": 3,
+        "model_selection": 1,
+        "reasoning": 4
+      },
+      "intent_counts": {
+        "coding": 3,
+        "general": 12,
+        "knowledge": 3
+      }
+    },
+    "latent_plan": {
+      "row_count": 4,
+      "source_counts": {
+        "latent_plan_v41::debugging": 1,
+        "latent_plan_v41::human_explain": 1,
+        "latent_plan_v41::openscad": 1,
+        "latent_plan_v41::route_selection": 1
+      },
+      "domain_counts": {
+        "general": 1,
+        "model_selection": 1,
+        "reasoning": 1,
+        "spatial_3d": 1
+      },
+      "intent_counts": {
+        "general": 1,
+        "knowledge": 1,
+        "model_selection": 1,
+        "reasoning": 1
+      }
+    },
+    "code_critique_repair": {
+      "row_count": 5,
+      "source_counts": {
+        "code_repair_v41::checkpoint_write": 1,
+        "code_repair_v41::disk_full_resume": 1,
+        "code_repair_v41::openscad_fix": 1,
+        "code_repair_v41::review_rewrite": 1,
+        "code_repair_v41::routing_bug": 1
+      },
+      "domain_counts": {
+        "coding": 5
+      },
+      "intent_counts": {
+        "coding": 5
+      }
+    },
+    "reasoning_budget": {
+      "row_count": 6,
+      "source_counts": {
+        "reasoning_budget_v41::deep": 2,
+        "reasoning_budget_v41::medium": 2,
+        "reasoning_budget_v41::short": 2
+      },
+      "domain_counts": {
+        "coding": 3,
+        "reasoning": 3
+      },
+      "intent_counts": {
+        "reasoning": 6
+      }
+    },
+    "teacher_disagreement": {
+      "row_count": 22,
+      "source_counts": {
+        "teacher_disagreement_v41::repair": 5,
+        "teacher_disagreement_v41::resolve": 5,
+        "teacher_disagreement_v41::route_then_answer": 5,
+        "teacher_disagreement_v41::stability": 7
+      },
+      "domain_counts": {
+        "coding": 3,
+        "general": 7,
+        "knowledge": 3,
+        "materials": 3,
+        "model_selection": 3,
+        "spatial_3d": 3
+      },
+      "intent_counts": {
+        "coding": 3,
+        "general": 7,
+        "knowledge": 9,
+        "model_selection": 3
+      }
+    }
+  }
+}

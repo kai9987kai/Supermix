@@ -1,0 +1,74 @@
+{
+  "created_at": "2026-04-10T10:30:54Z",
+  "models_dir": "C:\\Users\\kai99\\Desktop\\models",
+  "common_summary": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_all_models_common_plus_summary_20260410.json",
+  "output_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_20260410",
+  "device_preference": "cpu",
+  "backend_cache_size": 3,
+  "sample_per_benchmark": 5,
+  "benchmarks": [
+    "arc_challenge",
+    "boolq",
+    "gsm8k",
+    "hellaswag",
+    "mmlu",
+    "piqa"
+  ],
+  "models_benchmarked": [
+    "auto_collective_loop"
+  ],
+  "summary_rows": [
+    {
+      "model": "auto_collective_loop",
+      "family": "router",
+      "overall_exact": 0.0,
+      "avg_token_f1": 0.03524894730808865,
+      "avg_char_similarity": 0.04043365026655553,
+      "avg_gen_seconds": 70.3780104080836,
+      "model_seconds": 2111.368270635605,
+      "benchmarks": {
+        "arc_challenge": 0.0,
+        "boolq": 0.0,
+        "gsm8k": 0.0,
+        "hellaswag": 0.0,
+        "mmlu": 0.0,
+        "piqa": 0.0
+      },
+      "runtime_settings": {
+        "model_key": "auto",
+        "action_mode": "auto",
+        "agent_mode": "collective_loop",
+        "loop_max_steps": 2,
+        "collective_consultant_keys": [
+          "omni_collective_v41",
+          "v40_benchmax",
+          "math_equation_micro_v1"
+        ],
+        "collective_consultant_limit": 3,
+        "backend_cache_size": 3,
+        "memory_enabled": false,
+        "web_search_enabled": false,
+        "cmd_open_enabled": false
+      },
+      "routed_model_counts": {
+        "omni_collective_v41": 22,
+        "math_equation_micro_v1": 6,
+        "three_d_generation_micro_v1": 1,
+        "v36_native": 1
+      },
+      "consultation_model_counts": {
+        "omni_collective_v41": 59,
+        "v40_benchmax": 59,
+        "math_equation_micro_v1": 57,
+        "three_d_generation_micro_v1": 2
+      },
+      "avg_loop_steps": 1.9333333333333333
+    }
+  ],
+  "artifacts": {
+    "prompts_jsonl": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_20260410\\benchmark_items.jsonl",
+    "details_jsonl": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_20260410\\benchmark_all_models_common_details.jsonl",
+    "table_csv": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_20260410\\benchmark_all_models_common_table.csv",
+    "graph_png": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_20260410\\benchmark_all_models_common_graph.png"
+  }
+}

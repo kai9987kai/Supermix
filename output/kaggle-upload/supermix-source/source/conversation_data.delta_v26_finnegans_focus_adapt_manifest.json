@@ -1,0 +1,38 @@
+{
+  "name": "delta_v26_finnegans_focus_adapt_2p315m",
+  "format": "jsonl_shards",
+  "created_at_utc": "2026-02-23T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy clarity baseline"
+    },
+    {
+      "path": "conversation_data.finnegans_wake_study_noninfringing_v1_500k.jsonl",
+      "rows": 500000,
+      "description": "Finnegans Wake non-verbatim study/style adaptation"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "novel style grounding"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "novel style reinforcement"
+    },
+    {
+      "path": "conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+      "rows": 75582,
+      "description": "creative/reasoning top-up"
+    },
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "lexical precision retention"
+    }
+  ],
+  "total_rows": 2315582
+}

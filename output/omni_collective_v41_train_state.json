@@ -1,0 +1,33 @@
+{
+  "status": "complete",
+  "stage": "done",
+  "resume_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_v41_stage_resume\\frontier_seed_41_distill_0_teacherlimit_0",
+  "zip_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v41_frontier_20260410_015540.zip",
+  "desktop_zip_path": "C:\\Users\\kai99\\Desktop\\models\\supermix_omni_collective_v41_frontier_20260410_015540.zip",
+  "artifact_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v41_frontier_20260410_015540",
+  "parameter_count": 136200770,
+  "stage1_best_score": 0.35005970260639196,
+  "stage2_best_score": 0.35752252840538074,
+  "runtime": {
+    "requested_device": "auto",
+    "resolved_device": "cpu",
+    "device_type": "cpu",
+    "amp_mode": "off",
+    "amp_enabled": false,
+    "amp_dtype_name": "none",
+    "scaler_enabled": false,
+    "compile_requested": false,
+    "compile_enabled": false,
+    "compile_mode": "reduce-overhead",
+    "compile_error": null,
+    "grad_accum_steps": 1,
+    "ema_decay": 0.999,
+    "warmup_steps": 0,
+    "warmup_ratio": 0.05,
+    "min_lr_scale": 0.05,
+    "git_commit": "04dfa61bf34f3b75d525c717375aec02ad0fbe1f",
+    "effective_batch_size": 4
+  },
+  "smoke_train": false,
+  "updated_at": "2026-04-10T01:57:31.043050"
+}

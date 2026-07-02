@@ -1,0 +1,202 @@
+{
+  "created_at": "2026-03-26T21:07:09.177695+00:00",
+  "student_model_size": "frontier_expert",
+  "feature_mode": "context_mix_v4",
+  "distill_dataset": {
+    "created_at": "2026-03-26T21:00:35Z",
+    "prompt_files": [
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.delta_anchor_mix_2026_03_26.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.delta_official_refresh_2026_03_26.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.coding_knowledge_2026_02_19.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.world_events_2026_02_19.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.quality_anchor_v2.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.science_essentials_smoke.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.science_novel_examples_smoke.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v28_cloud_plus_runpod_budget/prepared_train_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v29_delta_official_refresh_20260326/prepared_train_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_train_pairs.jsonl"
+    ],
+    "eval_files": [
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v28_cloud_plus_runpod_budget/prepared_eval_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v29_delta_official_refresh_20260326/prepared_eval_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_eval_pairs.jsonl"
+    ],
+    "rows_loaded": 71791,
+    "paper_rows": 20,
+    "paper_train_rows": 20,
+    "paper_eval_rows": 0,
+    "train_rows": 71571,
+    "stage2_reference_rows": 2600,
+    "eval_rows": 240,
+    "distill_rows": 960,
+    "stage2_train_rows": 3560,
+    "stage2_eval_rows": 240,
+    "stage3_polish_rows": 320,
+    "teacher_selection_counts": {
+      "hybrid_v31": 109,
+      "v32_latest": 590,
+      "reference": 115,
+      "qwen_base": 117,
+      "lite_v30": 19,
+      "qwen_v28": 3,
+      "champion_v28": 7
+    },
+    "prompt_source_counts": {
+      "unknown": 938,
+      "https://apnews.com/article/90e731743c18d6d82c343314e07b1630": 1,
+      "https://apnews.com/article/b5104d7ee02e35252560f38a4b016cb3": 1,
+      "frontier_paper_fast_quietstar_2025": 1,
+      "https://apnews.com/article/22e587df67e27cd1e1d96e446cb88378": 1,
+      "frontier_paper_moda_2026": 1,
+      "quality_anchor_math": 2,
+      "quality_anchor_ml": 1,
+      "frontier_paper_spin_2024": 1,
+      "frontier_paper_mod_2024": 1,
+      "quality_anchor_format": 1,
+      "frontier_paper_titans_2025": 1,
+      "conversation_data.delta_anchor_mix_2026_03_26.jsonl": 1,
+      "official_refresh_who_polio": 1,
+      "https://apnews.com/article/4e140876e5c2fe489655ad78089f9440": 1,
+      "https://apnews.com/article/7cd49e6b515f511a1e8eac1beaa4d598": 1,
+      "https://apnews.com/article/c30aa604712e3c5d711f47722c79e539": 1,
+      "https://apnews.com/article/a3726ab659321430bf3ca73cae50936e": 1,
+      "https://apnews.com/article/9b16a0419f8d7cc67c7e95939a8a954d": 1,
+      "https://apnews.com/article/85b79539f9e4b18e25dd6ef82d5b53ee": 1,
+      "https://apnews.com/article/450bcd7c820ce55efe6ea0aa53c213d1": 1,
+      "https://apnews.com/article/c10dbc6b621e196606fc79caab0eaad5": 1
+    },
+    "teacher_mean_composite": {
+      "hybrid_v31": 0.238339522608897,
+      "v32_latest": 0.3053516839670768,
+      "qwen_base": 0.21704508537221057,
+      "lite_v30": 0.5151128226233174,
+      "qwen_v28": 0.21817799516854394,
+      "champion_v28": 0.17079494560527403
+    },
+    "teacher_prior": {
+      "qwen_base": 0.015,
+      "qwen_v28": 0.06,
+      "v32_latest": 0.105,
+      "hybrid_v31": 0.04,
+      "lite_v30": 0.016,
+      "champion_v28": 0.024
+    },
+    "paper_urls": [
+      {
+        "slug": "moda_2026",
+        "title": "Mixture-of-Depths Attention",
+        "url": "https://arxiv.org/abs/2603.15619"
+      },
+      {
+        "slug": "fast_quietstar_2025",
+        "title": "Fast Quiet-STaR: Thinking Without Thought Tokens",
+        "url": "https://aclanthology.org/2025.findings-emnlp.1020.pdf"
+      },
+      {
+        "slug": "titans_2025",
+        "title": "Titans: Learning to Memorize at Test Time",
+        "url": "https://www.kognition.info/wp-content/uploads/2025/02/2501.00663v1.pdf"
+      },
+      {
+        "slug": "spin_2024",
+        "title": "Self-Play Fine-Tuning Converts Weak Language Models to Strong Language Models",
+        "url": "https://arxiv.org/abs/2401.01335"
+      },
+      {
+        "slug": "mod_2024",
+        "title": "Mixture-of-Depths",
+        "url": "https://arxiv.org/abs/2404.02258"
+      }
+    ],
+    "student_note": "The frontier v33 recipe combines adaptive depth reuse, memory-gated reasoning, and a staged direct-answer polish pass. The paper rows are concise synthesis notes, not full-paper reproductions.",
+    "device": "cuda"
+  },
+  "weights_bytes": {
+    "start_v32": 28162933,
+    "stage1": 39195878,
+    "stage2": 39195878,
+    "final": 39196622
+  },
+  "stage1_meta": {
+    "best_epoch": 12,
+    "best_val_loss": 2.220990524000051,
+    "num_examples": 960,
+    "trainable_parameters": 9784804,
+    "total_parameters": 9784804
+  },
+  "stage2_meta": {
+    "best_epoch": 14,
+    "best_val_loss": 2.289597141910607,
+    "num_examples": 3560,
+    "trainable_parameters": 9784804,
+    "total_parameters": 9784804
+  },
+  "final_meta": {
+    "best_epoch": 6,
+    "best_val_loss": 3.541919708251953,
+    "num_examples": 320,
+    "trainable_parameters": 9784804,
+    "total_parameters": 9784804
+  },
+  "benchmarks": {
+    "v32_vs_stage1_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.025,
+        "correct": 6,
+        "total": 240
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.0542,
+        "correct": 13,
+        "total": 240
+      }
+    ],
+    "stage1_vs_stage2_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.0542,
+        "correct": 13,
+        "total": 240
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.0667,
+        "correct": 16,
+        "total": 240
+      }
+    ],
+    "stage2_vs_stage3_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.0667,
+        "correct": 16,
+        "total": 240
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.0625,
+        "correct": 15,
+        "total": 240
+      }
+    ],
+    "v32_vs_final_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.025,
+        "correct": 6,
+        "total": 240
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.0625,
+        "correct": 15,
+        "total": 240
+      }
+    ]
+  },
+  "note": "The v33 frontier run combines latest-paper synthesis rows with a staged distill, full-mix refinement, and concise polish pass. It is a real new checkpoint, not a router over prior models."
+}

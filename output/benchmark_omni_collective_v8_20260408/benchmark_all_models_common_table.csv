@@ -1,0 +1,2 @@
+model,family,overall_exact,avg_token_f1,avg_char_similarity,avg_gen_seconds,model_seconds,arc_challenge,boolq,gsm8k,hellaswag,mmlu,piqa
+omni_collective_v8,fusion,0.213333,0.190681,0.314655,10.681841,3209.370991,0.100000,0.540000,0.000000,0.180000,0.080000,0.380000

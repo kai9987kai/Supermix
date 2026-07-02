@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-26",
+  "teacher_note": "v30 adapter generations were not stable enough for direct teacher distillation, so the lite student was trained on the v30 prepared train split instead.",
+  "base_small_model_path": "/workspace/supermix_runpod_budget/Supermix_29/source/champion_model_chat_v28_expert.pth",
+  "base_small_model_size_bytes": 18181129,
+  "lite_full_path": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v30_lite_student_20260326/champion_model_chat_v30_lite_student.pth",
+  "lite_full_size_bytes": 18187842,
+  "lite_fp16_path": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v30_lite_student_20260326/champion_model_chat_v30_lite_student_fp16.pth",
+  "lite_fp16_size_bytes": 9106898,
+  "eval_dataset": "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_eval_pairs.jsonl",
+  "benchmark_accuracy": {
+    "base_small_model": 0.125,
+    "lite_full": 0.125,
+    "lite_fp16": 0.125
+  }
+}

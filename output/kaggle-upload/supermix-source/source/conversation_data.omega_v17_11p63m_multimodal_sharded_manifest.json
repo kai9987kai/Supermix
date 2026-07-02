@@ -1,0 +1,43 @@
+{
+  "name": "omega_v17_11p63m_multimodal_sharded",
+  "format": "jsonl_shards",
+  "total_rows": 11627574,
+  "created_at_utc": "2026-02-22T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.omega_v14_creative_code_books_6m.jsonl",
+      "rows": 6000000,
+      "description": "creative+code+books"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image QA test set"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "extra english-heavy training"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "extra novel/book extracts"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3D model + video multimodal tests"
+    }
+  ]
+}

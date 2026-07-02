@@ -1,0 +1,36 @@
+{
+  "created_at": "2026-03-27T10:15:18Z",
+  "output": "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.reasoning_benchmix_v39_train.jsonl",
+  "row_count": 41838,
+  "source_counts": {
+    "v39_arc_train_direct": 1119,
+    "v39_arc_train_verify": 1119,
+    "v39_boolq_train_direct": 3200,
+    "v39_boolq_train_verify": 3200,
+    "v39_gsm8k_train_direct": 2600,
+    "v39_gsm8k_train_verify": 2600,
+    "v39_hellaswag_train_direct": 4200,
+    "v39_hellaswag_train_verify": 4200,
+    "v39_mmlu_aux_train_direct": 5600,
+    "v39_mmlu_aux_train_verify": 5600,
+    "v39_piqa_train_direct": 4200,
+    "v39_piqa_train_verify": 4200
+  },
+  "benchmark_counts": {
+    "arc_challenge": 2238,
+    "boolq": 6400,
+    "gsm8k": 5200,
+    "hellaswag": 8400,
+    "mmlu": 11200,
+    "piqa": 8400
+  },
+  "repair_counts": {
+    "direct": 20919,
+    "multiple_choice_verification": 1119,
+    "boolq_verification": 3200,
+    "math_verification": 2600,
+    "commonsense_verification": 8400,
+    "knowledge_verification": 5600
+  },
+  "note": "This v39 benchmix file adds train-only reasoning and commonsense rows from ARC-Challenge, BoolQ, GSM8K, HellaSwag, MMLU auxiliary_train, and PIQA, plus paired verification/correction rows."
+}

@@ -1,0 +1,293 @@
+{
+  "name": "omega_v26_60p50m_plus_finnegans_study_manifest",
+  "format": "jsonl_shards",
+  "total_rows": 60500000,
+  "created_at_utc": "2026-02-23T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.omega_v14_creative_code_books_6m.jsonl",
+      "rows": 6000000,
+      "description": "creative+code+books"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image QA test set"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "extra english-heavy training"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "extra novel/book extracts"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3D model + video multimodal tests"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials repeat for stronger scientific reasoning coverage"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy repeat for writing/grammar/conversation clarity"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "novel/book extract repeat for style and narrative dialogue"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image qa repeat"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d+video multimodal repeat"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science repeat v19"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy repeat v19"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book extracts repeat v19"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy repeat v19b"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book extracts repeat v19b"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image repeat v19"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d+video repeat v19"
+    },
+    {
+      "path": "conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "rows": 182034,
+      "description": "live knowledge / world+coding mixed dialogues"
+    },
+    {
+      "path": "conversation_data.coding_knowledge_2026_02_19.jsonl",
+      "rows": 380,
+      "description": "coding knowledge micro-shard"
+    },
+    {
+      "path": "conversation_data.world_events_2026_02_19.jsonl",
+      "rows": 66,
+      "description": "world events micro-shard"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "extra english-heavy repeat for conversational clarity"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "extra book extracts repeat for tone/dialogue style"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core repeat for breadth and fluency"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science repeat for reasoning retention"
+    },
+    {
+      "path": "conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "rows": 182034,
+      "description": "live knowledge grounding repeat"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy clarity/style repeat"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book/novel style repeat"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image multimodal repeat"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d/video multimodal repeat"
+    },
+    {
+      "path": "conversation_data.omega_v14_creative_code_books_6m.jsonl",
+      "rows": 6000000,
+      "description": "creative+code+books repeat for diversity and style"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core repeat for breadth/fluency/math"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science reasoning repeat"
+    },
+    {
+      "path": "conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "rows": 182034,
+      "description": "live knowledge repeat"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy refinement repeat"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book dialogue/style repeat"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image multimodal repeat"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d/video multimodal repeat"
+    },
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "WordNet dictionary meanings (all lemma-sense coverage + augmentation)"
+    },
+    {
+      "path": "conversation_data.science_novel_examples_v1_2m.jsonl",
+      "rows": 2000000,
+      "description": "science novel/narrative examples"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core repeat for breadth"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science repeat for reasoning retention"
+    },
+    {
+      "path": "conversation_data.bible_kjv_public_domain_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "public-domain KJV Bible whole-text coverage + grounded verse/passage tasks"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core repeat (broad fluency scale-up v25a)"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core repeat (broad fluency scale-up v25b)"
+    },
+    {
+      "path": "conversation_data.science_novel_examples_v1_2m.jsonl",
+      "rows": 2000000,
+      "description": "science novel examples repeat (reasoning+analogy scale-up v25a)"
+    },
+    {
+      "path": "conversation_data.science_novel_examples_v1_2m.jsonl",
+      "rows": 2000000,
+      "description": "science novel examples repeat (reasoning+analogy scale-up v25b)"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials repeat (core concepts retention v25a)"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials repeat (core concepts retention v25b)"
+    },
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "dictionary meanings repeat (lexicon grounding v25a)"
+    },
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "dictionary meanings repeat (lexicon grounding v25b)"
+    },
+    {
+      "path": "conversation_data.bible_kjv_public_domain_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "KJV Bible repeat (scripture reference robustness v25a)"
+    },
+    {
+      "path": "conversation_data.bible_kjv_public_domain_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "KJV Bible repeat (scripture reference robustness v25b)"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy conversation polish repeat (v25)"
+    },
+    {
+      "path": "conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+      "rows": 75582,
+      "description": "creative/reasoning top-up to reach exact 60M logical rows"
+    },
+    {
+      "path": "conversation_data.finnegans_wake_study_noninfringing_v1_500k.jsonl",
+      "rows": 500000,
+      "description": "Finnegans Wake non-verbatim study/style training shard (copyright-safe)"
+    }
+  ]
+}

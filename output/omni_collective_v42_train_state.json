@@ -1,0 +1,17 @@
+{
+  "status": "stage_running",
+  "stage": "stage1",
+  "epoch": 1,
+  "batch_index": 57,
+  "total_batches": 7477,
+  "avg_train_loss": 20.371157713103713,
+  "lr": 3.1016042780748666e-05,
+  "optimizer_steps": 57,
+  "avg_balance_loss": 0.104345,
+  "elapsed_seconds": 2882.304,
+  "eta_seconds": 375205.195,
+  "checkpoint_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_v42_stage_resume\\frontier_seed_42_distill_0_teacherlimit_0\\stage1_progress.pt",
+  "complete_weights_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_v42_stage_resume\\frontier_seed_42_distill_0_teacherlimit_0\\stage1_complete_weights.pth",
+  "complete_meta_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_v42_stage_resume\\frontier_seed_42_distill_0_teacherlimit_0\\stage1_complete.json",
+  "updated_at": "2026-04-10T20:06:49.513895"
+}

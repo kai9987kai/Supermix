@@ -52,7 +52,6 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "omniscient_expert",
     "neurogenesis_expert",
     "cognitive_expert",
-    "cognitive_leap_expert",
     "transcendent_expert",
     "omniversal_expert",
     "fractal_expert",
@@ -64,7 +63,6 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "frontier_collective_expert",
     "frontier_verifier_expert",
     "test_time_diff_expert",
-    "titan_dreamer_expert",
 )
 EXPANSION_DIM_MODEL_SIZES = frozenset({"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
 EXTRA_EXPANSION_DIM_MODEL_SIZES = frozenset({"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
@@ -5592,330 +5590,6 @@ class ChampionNetPaperFusionExpert(nn.Module):
         return x
 
 
-class CognitiveLeapExpertHead(nn.Module):
-    """
-    Generation v50: Cognitive Leap Expert
-    (Tiny Recursive Latent Reasoning + Adaptive Halting + Test-Time Compute Scaling)
-
-    Research-grounded recursive reasoning head:
-    1. TRM-style dual latents — a single tiny weight-tied core refines a
-       low-level scratchpad latent z_L and a high-level answer latent z_H
-       over outer/inner cycles (Jolicoeur-Martineau, arXiv:2510.04871).
-    2. Recurrent-depth test-time compute — the core is weight-tied, so
-       `reasoning_cycles` can be raised at inference to spend more compute
-       on hard inputs without retraining (Geiping et al., arXiv:2502.05171).
-    3. ACT-style differentiable halting — a halt head allocates probability
-       mass across cycles; the output is the halting-weighted mixture of
-       per-cycle decodes, so easy inputs effectively stop early
-       (HRM, arXiv:2506.21734).
-    4. Latent-convergence regularizer — penalizes z_H drift between later
-       cycles, pushing the recursion toward a fixed point so extra test-time
-       cycles refine rather than wander (RD-VLA, arXiv:2602.07845).
-    5. Hypersphere-normalized latents — each latent update is RMS-normalized
-       onto a learned-gain sphere for recursion stability (nGPT-inspired).
-    6. Cycle conditioning — a learned per-cycle embedding tells the
-       weight-tied core where it is in the recursion, which recent TRM
-       analysis found load-bearing (arXiv:2512.11847).
-    7. Deep improvement supervision — per-cycle decodes are cached during
-       training and `deep_supervision_loss(...)` applies progressively
-       weighted per-cycle losses so every cycle learns to improve on the
-       last (DIS, arXiv:2511.16886).
-    8. Convergence early-exit — in eval mode `adaptive_compute=True` stops
-       cycling once the answer latent stops moving or the halting mass is
-       spent, skipping wasted cycles on easy inputs (arXiv:2506.02536).
-    """
-
-    def __init__(
-        self,
-        in_dim: int = 256,
-        out_dim: int = 10,
-        latent_dim: int = 128,
-        core_dim: int = 256,
-        n_cycles: int = 3,
-        inner_steps: int = 2,
-        max_cycles: int = 16,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-        self.in_dim = in_dim
-        self.out_dim = out_dim
-        self.latent_dim = latent_dim
-        self.core_dim = core_dim
-        self.n_cycles = n_cycles
-        self.inner_steps = inner_steps
-        self.max_cycles = max_cycles
-
-        # Base projection (backward-compatible)
-        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
-        self.bias = nn.Parameter(torch.zeros(out_dim))
-
-        # Shared Expert
-        self.shared_up = nn.Linear(in_dim, 2048, bias=False)
-        self.shared_down = nn.Linear(2048, out_dim, bias=False)
-        self.shared_norm = nn.LayerNorm(out_dim)
-        self.shared_scale = nn.Parameter(torch.tensor(1.0))
-
-        # Latent initializers: input -> scratchpad latent / answer latent
-        self.thought_init = nn.Linear(in_dim, latent_dim, bias=False)
-        self.answer_init = nn.Linear(in_dim, latent_dim, bias=False)
-
-        # Tiny weight-tied recursive core: [x, z_L, z_H] -> delta z_L
-        self.recur_core = nn.Sequential(
-            nn.Linear(in_dim + 2 * latent_dim, core_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(core_dim, latent_dim),
-        )
-
-        # Outer answer update: [z_L, z_H] -> delta z_H
-        self.answer_update = nn.Sequential(
-            nn.Linear(2 * latent_dim, latent_dim),
-            nn.GELU(),
-            nn.Linear(latent_dim, latent_dim),
-        )
-
-        # Hypersphere gains for normalized latents (nGPT-style stability)
-        self.latent_gain = nn.Parameter(torch.ones(latent_dim))
-
-        # Cycle conditioning: tells the weight-tied core which cycle it is in
-        self.cycle_embed = nn.Embedding(max_cycles, latent_dim)
-
-        # ACT-style halting head over the answer latent
-        self.halt_head = nn.Linear(latent_dim, 1)
-
-        # Per-cycle decoder from answer latent to logits
-        self.decode_head = nn.Linear(latent_dim, out_dim, bias=False)
-
-        self.alpha = nn.Parameter(torch.tensor(0.0))
-        self.dropout = nn.Dropout(dropout)
-
-        # Diagnostics / regularizers tracked for the training loop
-        self.register_buffer("last_ponder_cost", torch.tensor(0.0))
-        self.register_buffer("last_consistency_loss", torch.tensor(0.0))
-        self.register_buffer("last_cycles_used", torch.tensor(0.0))
-
-        # Per-cycle decode cache for deep improvement supervision (train only)
-        self._cycle_logits = []
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-        if fan_in != 0:
-            bound = 1 / math.sqrt(fan_in)
-            nn.init.uniform_(self.bias, -bound, bound)
-
-        nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
-        nn.init.normal_(self.shared_down.weight, std=0.01)
-
-        nn.init.kaiming_uniform_(self.thought_init.weight, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.answer_init.weight, a=math.sqrt(5))
-
-        for layer in list(self.recur_core) + list(self.answer_update):
-            if isinstance(layer, nn.Linear):
-                nn.init.kaiming_uniform_(layer.weight, a=math.sqrt(5))
-                if layer.bias is not None:
-                    nn.init.zeros_(layer.bias)
-        # Last update layers start small so early recursion is near-identity
-        nn.init.normal_(self.recur_core[-1].weight, std=0.01)
-        nn.init.normal_(self.answer_update[-1].weight, std=0.01)
-
-        nn.init.normal_(self.cycle_embed.weight, std=0.02)
-
-        # Bias halting toward "continue" early in training so all cycles learn
-        nn.init.zeros_(self.halt_head.weight)
-        nn.init.constant_(self.halt_head.bias, -1.0)
-
-        nn.init.normal_(self.decode_head.weight, std=0.01)
-
-    def _sphere_norm(self, z):
-        # RMS-normalize onto the unit hypersphere, then apply learned gain
-        return F.normalize(z, p=2, dim=-1) * self.latent_gain
-
-    def deep_supervision_loss(self, targets):
-        """Deep-improvement-supervision loss over cached per-cycle decodes.
-
-        Practical DIS adaptation (arXiv:2511.16886): every cycle's decode is
-        supervised against the target with progressively increasing weight,
-        so each cycle learns to improve on the previous one rather than only
-        the final mixture receiving signal. Call after a training-mode
-        forward pass; returns a scalar loss.
-        """
-        if not self._cycle_logits:
-            raise RuntimeError(
-                "deep_supervision_loss requires a training-mode forward pass first"
-            )
-        targets_flat = targets.reshape(-1)
-        n = len(self._cycle_logits)
-        weights = torch.arange(
-            1, n + 1, device=targets_flat.device, dtype=self._cycle_logits[0].dtype
-        )
-        weights = weights / weights.sum()
-        loss = torch.zeros((), device=targets_flat.device, dtype=self._cycle_logits[0].dtype)
-        for w, logits in zip(weights, self._cycle_logits):
-            loss = loss + w * F.cross_entropy(logits, targets_flat)
-        return loss
-
-    def forward(
-        self,
-        x,
-        reasoning_cycles: Optional[int] = None,
-        adaptive_compute: bool = False,
-        exit_tol: float = 1e-3,
-    ):
-        N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
-        shape_prefix = x.shape[:-1]
-        x_flat = x.reshape(N, self.in_dim)
-
-        base_logits = F.linear(x_flat, self.weight, self.bias)
-
-        # Global Shared Expert
-        shared_out = self.shared_norm(
-            self.shared_down(self.dropout(F.silu(self.shared_up(x_flat))))
-        )
-
-        n_cycles = int(reasoning_cycles) if reasoning_cycles is not None else self.n_cycles
-        n_cycles = max(1, n_cycles)
-
-        # Initialize latents on the hypersphere
-        z_l = self._sphere_norm(self.thought_init(x_flat))
-        z_h = self._sphere_norm(self.answer_init(x_flat))
-
-        cycle_logits = []
-        halt_probs = []
-        remaining = torch.ones(N, 1, device=x_flat.device, dtype=x_flat.dtype)
-        ponder = torch.zeros(N, 1, device=x_flat.device, dtype=x_flat.dtype)
-        consistency = torch.zeros((), device=x_flat.device, dtype=x_flat.dtype)
-        prev_z_h = None
-        cycles_used = n_cycles
-
-        for t in range(n_cycles):
-            # Cycle conditioning: identity of the current cycle for the
-            # weight-tied core (clamped beyond the trained range)
-            cycle_idx = min(t, self.max_cycles - 1)
-            cycle_vec = self.cycle_embed.weight[cycle_idx].unsqueeze(0)
-            z_l_cond = z_l + cycle_vec
-
-            # Inner scratchpad refinement (weight-tied tiny core)
-            for _ in range(self.inner_steps):
-                core_in = torch.cat([x_flat, z_l_cond, z_h], dim=-1)
-                z_l_cond = self._sphere_norm(z_l_cond + self.recur_core(core_in))
-            z_l = z_l_cond
-            # Outer answer refinement
-            z_h = self._sphere_norm(
-                z_h + self.answer_update(torch.cat([z_l, z_h], dim=-1))
-            )
-
-            cycle_logits.append(self.decode_head(z_h))
-
-            # Latent-convergence measurement (regularizer + early-exit signal)
-            if prev_z_h is not None:
-                delta = (z_h - prev_z_h).pow(2).mean()
-                consistency = consistency + delta
-            else:
-                delta = None
-            prev_z_h = z_h
-
-            # Convergence early-exit: only at inference, never during training
-            converged = (
-                adaptive_compute
-                and not self.training
-                and delta is not None
-                and (delta.item() < exit_tol or remaining.mean().item() < 0.05)
-            )
-
-            # Differentiable ACT halting: probability of stopping at cycle t
-            h_t = torch.sigmoid(self.halt_head(z_h))  # (N, 1)
-            if t == n_cycles - 1 or converged:
-                p_t = remaining  # assign all leftover mass to the final cycle
-                halt_probs.append(p_t)
-                ponder = ponder + p_t * float(t + 1)
-                cycles_used = t + 1
-                break
-            p_t = remaining * h_t
-            remaining = remaining * (1.0 - h_t)
-            halt_probs.append(p_t)
-            ponder = ponder + p_t * float(t + 1)
-
-        self.last_cycles_used = torch.tensor(
-            float(cycles_used), device=x_flat.device
-        )
-        if self.training:
-            self.last_ponder_cost = ponder.mean()
-            self.last_consistency_loss = consistency / max(1, cycles_used - 1)
-            self._cycle_logits = cycle_logits
-        else:
-            self._cycle_logits = []
-
-        # Halting-weighted mixture of per-cycle decodes
-        logits_stack = torch.stack(cycle_logits, dim=1)  # (N, T, out_dim)
-        probs_stack = torch.stack(halt_probs, dim=1)  # (N, T, 1)
-        recursive_out = (logits_stack * probs_stack).sum(dim=1)  # (N, out_dim)
-
-        output = (
-            base_logits
-            + self.shared_scale * shared_out
-            + (self.alpha + 1e-4) * recursive_out
-        )
-
-        return output.view(*shape_prefix, -1)
-
-
-class ChampionNetCognitiveLeapExpert(nn.Module):
-    """
-    Backbone-compatible model with CognitiveLeapExpertHead (v50).
-
-    forward() accepts an optional reasoning_cycles override so callers can
-    scale test-time compute without rebuilding the model.
-    """
-    def __init__(
-        self,
-        latent_dim: int = 128,
-        core_dim: int = 256,
-        n_cycles: int = 3,
-        inner_steps: int = 2,
-        max_cycles: int = 16,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-        base = ChampionNet()
-        layers = [base.layers[i] for i in range(10)]
-        layers.append(CognitiveLeapExpertHead(
-            256, 10,
-            latent_dim=latent_dim,
-            core_dim=core_dim,
-            n_cycles=n_cycles,
-            inner_steps=inner_steps,
-            max_cycles=max_cycles,
-            dropout=dropout,
-        ))
-        layers.append(base.layers[11])
-        self.layers = nn.ModuleList(layers)
-
-    def forward(
-        self,
-        x,
-        reasoning_cycles: Optional[int] = None,
-        adaptive_compute: bool = False,
-        exit_tol: float = 1e-3,
-    ):
-        for layer in self.layers:
-            if isinstance(layer, CognitiveLeapExpertHead):
-                x = layer(
-                    x,
-                    reasoning_cycles=reasoning_cycles,
-                    adaptive_compute=adaptive_compute,
-                    exit_tol=exit_tol,
-                )
-            else:
-                x = layer(x)
-        return x
-
-    def deep_supervision_loss(self, targets):
-        return self.layers[10].deep_supervision_loss(targets)
-
-
 class ChampionNetHierarchicalExpert(nn.Module):
     """
     Backbone-compatible model with HierarchicalMoEClassifierHead.
@@ -6399,8 +6073,6 @@ def build_model(
         return ChampionNetNeurogenesisExpert(dropout=dropout)
     if model_size == "cognitive_expert":
         return ChampionNetCognitiveExpert(dropout=dropout)
-    if model_size == "cognitive_leap_expert":
-        return ChampionNetCognitiveLeapExpert(dropout=dropout)
     if model_size == "transcendent_expert":
         return ChampionNetTranscendentExpert(dropout=dropout)
     if model_size == "omniversal_expert":
@@ -6429,10 +6101,6 @@ def build_model(
         return ChampionNetFrontierVerifierExpert(dropout=dropout)
     if model_size == "test_time_diff_expert":
         return ChampionNetTestTimeDiffExpert(dropout=dropout)
-    if model_size == "titan_dreamer_expert":
-        from model_frontier_v43 import ChampionNetTitanDreamerExpert
-
-        return ChampionNetTitanDreamerExpert(dropout=dropout)
 
     raise ValueError(
         f"Unknown model_size={model_size!r}. Use one of {SUPPORTED_MODEL_SIZES}."
@@ -7197,35 +6865,6 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
-    if model_size == "cognitive_leap_expert":
-        head_pref = "layers.10."
-        allowed_missing = {
-            f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
-            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
-            f"{head_pref}shared_scale", f"{head_pref}alpha",
-            f"{head_pref}thought_init.weight", f"{head_pref}answer_init.weight",
-            f"{head_pref}latent_gain", f"{head_pref}cycle_embed.weight",
-            f"{head_pref}halt_head.weight", f"{head_pref}halt_head.bias",
-            f"{head_pref}decode_head.weight",
-        }
-        for i in (0, 3):  # recur_core linear layers
-            allowed_missing.add(f"{head_pref}recur_core.{i}.weight")
-            allowed_missing.add(f"{head_pref}recur_core.{i}.bias")
-        for i in (0, 2):  # answer_update linear layers
-            allowed_missing.add(f"{head_pref}answer_update.{i}.weight")
-            allowed_missing.add(f"{head_pref}answer_update.{i}.bias")
-
-        ckpt_size = detect_model_size_from_state_dict(state_dict)
-        if ckpt_size != "cognitive_leap_expert":
-            filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
-            incompatible = model.load_state_dict(filtered_sd, strict=False)
-        else:
-            incompatible = model.load_state_dict(state_dict, strict=False)
-
-        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
-        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
-        return missing_filtered, unexpected_filtered
-
 
     if model_size == "neurogenesis_expert":
         head_pref = "layers.10."
@@ -7793,7 +7432,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
-    if model_size in ("test_time_diff_expert", "titan_dreamer_expert"):
+    if model_size == "test_time_diff_expert":
         head_pref = "layers.10."
         target_state = model.state_dict()
         keep_head_keys = {
@@ -7807,7 +7446,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         }
 
         ckpt_size = detect_model_size_from_state_dict(state_dict)
-        if ckpt_size != model_size:
+        if ckpt_size != "test_time_diff_expert":
             candidate_state = {
                 key: value
                 for key, value in state_dict.items()
@@ -7857,8 +7496,6 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "large"
     if "layers.10.diff_q_pos.weight" in state_dict and "layers.10.predictive_prior.weight" in state_dict:
         return "test_time_diff_expert"
-    if "layers.10.titan_w1" in state_dict and "layers.10.recursion_router.weight" in state_dict:
-        return "titan_dreamer_expert"
     if "layers.10.domain_gate.weight" in state_dict or "layers.10.expert_gates.0.weight" in state_dict:
         return "hierarchical_expert"
     if "layers.10.shared_up.weight" in state_dict and "layers.10.gate.weight" in state_dict:
@@ -7883,8 +7520,6 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "omniscient_expert"
     if "layers.10.hypernet.0.weight" in state_dict and "layers.10.memory_matrix" in state_dict:
         return "cognitive_expert"
-    if "layers.10.recur_core.0.weight" in state_dict and "layers.10.halt_head.weight" in state_dict:
-        return "cognitive_leap_expert"
     if "layers.10.denoiser.0.0.weight" in state_dict and "layers.10.world_transition.0.weight" in state_dict:
         return "transcendent_expert"
     if "layers.10.ode_func.net.0.weight" in state_dict and "layers.10.holographic_memory" in state_dict:

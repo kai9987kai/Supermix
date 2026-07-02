@@ -1,0 +1,28 @@
+{
+  "name": "omega_v16_11m_science_images_englishmath_code_books_sharded",
+  "format": "jsonl_shards",
+  "total_rows": 11003494,
+  "created_at_utc": "2026-02-22T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.omega_v14_creative_code_books_6m.jsonl",
+      "rows": 6000000,
+      "description": "creative+code+books"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english writing/speaking + basic math"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "essential science knowledge"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "small science image QA set with local test images"
+    }
+  ]
+}

@@ -1723,7 +1723,7 @@ def _train_stage_resumable_v8(
                 elapsed = max(now_ts - stage_wall_start, 1e-6)
                 completed_batches = max(1, (epoch - 1) * total_batches + batch_index)
                 total_stage_batches = max(1, int(epochs) * total_batches)
-                rate = max(1, processed_batches_this_stage) / elapsed
+                rate = completed_batches / elapsed
                 remaining_batches = max(0, total_stage_batches - completed_batches)
                 eta_seconds = remaining_batches / rate if rate > 1e-9 else None
                 avg_loss = float(total_loss / max(total_items, 1))

@@ -1,0 +1,139 @@
+{
+  "created_at": "2026-03-26T19:25:28.780585+00:00",
+  "student_model_size": "neurogenesis_expert",
+  "feature_mode": "context_v2",
+  "distill_dataset": {
+    "created_at": "2026-03-26T19:24:30Z",
+    "prompt_files": [
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.delta_anchor_mix_2026_03_26.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.delta_official_refresh_2026_03_26.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.coding_knowledge_2026_02_19.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.world_events_2026_02_19.jsonl",
+      "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.quality_anchor_v2.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v28_cloud_plus_runpod_budget/prepared_train_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v29_delta_official_refresh_20260326/prepared_train_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_train_pairs.jsonl"
+    ],
+    "eval_files": [
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v28_cloud_plus_runpod_budget/prepared_eval_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v29_delta_official_refresh_20260326/prepared_eval_pairs.jsonl",
+      "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_eval_pairs.jsonl"
+    ],
+    "rows_loaded": 855,
+    "train_rows": 693,
+    "eval_rows": 162,
+    "distill_rows": 693,
+    "stage2_train_rows": 1546,
+    "stage2_eval_rows": 162,
+    "image_aux_rows": 160,
+    "teacher_selection_counts": {
+      "champion_v28": 281,
+      "lite_v30": 135,
+      "qwen_base": 135,
+      "hybrid_v31": 38,
+      "reference": 102,
+      "qwen_v28": 2
+    },
+    "prompt_source_counts": {
+      "unknown": 475,
+      "quality_anchor_math": 102,
+      "https://apnews.com/article/7cd49e6b515f511a1e8eac1beaa4d598": 5,
+      "https://apnews.com/article/85b79539f9e4b18e25dd6ef82d5b53ee": 5,
+      "conversation_data.delta_anchor_mix_2026_03_26.jsonl": 67,
+      "official_refresh_who_polio": 4,
+      "https://apnews.com/article/90e731743c18d6d82c343314e07b1630": 5,
+      "https://apnews.com/article/a3726ab659321430bf3ca73cae50936e": 5,
+      "https://apnews.com/article/b5104d7ee02e35252560f38a4b016cb3": 2,
+      "quality_anchor_format": 4,
+      "quality_anchor_ml": 4,
+      "https://apnews.com/article/9b16a0419f8d7cc67c7e95939a8a954d": 5,
+      "https://apnews.com/article/22e587df67e27cd1e1d96e446cb88378": 5,
+      "https://apnews.com/article/450bcd7c820ce55efe6ea0aa53c213d1": 1,
+      "https://apnews.com/article/c10dbc6b621e196606fc79caab0eaad5": 1,
+      "https://apnews.com/article/4e140876e5c2fe489655ad78089f9440": 1,
+      "https://apnews.com/article/c30aa604712e3c5d711f47722c79e539": 2
+    },
+    "teacher_mean_composite": {
+      "champion_v28": 0.3582723450004309,
+      "lite_v30": 0.3648830327247995,
+      "qwen_base": 0.22835113450602684,
+      "hybrid_v31": 0.17891771687518748,
+      "qwen_v28": 0.1612296037296037
+    },
+    "teacher_prior": {
+      "qwen_base": -0.01,
+      "qwen_v28": 0.012,
+      "qwen_v29": -0.02,
+      "qwen_v30": -0.03,
+      "champion_v28": 0.028,
+      "lite_v30": 0.04,
+      "hybrid_v31": 0.085
+    },
+    "student_note": "The image-generation variant is represented indirectly through image-prompt auxiliary rows. The diffusion renderer itself is not distilled into the text student.",
+    "device": "cuda"
+  },
+  "weights_bytes": {
+    "start_v31": 21740364,
+    "stage1": 28163116,
+    "final": 28162933
+  },
+  "stage1_meta": {
+    "best_epoch": 10,
+    "best_val_loss": 3.425072431564331,
+    "num_examples": 693,
+    "trainable_parameters": 7025467,
+    "total_parameters": 7025467
+  },
+  "final_meta": {
+    "best_epoch": 14,
+    "best_val_loss": 2.4237027013624037,
+    "num_examples": 1546,
+    "trainable_parameters": 7025467,
+    "total_parameters": 7025467
+  },
+  "benchmarks": {
+    "v31_vs_stage1_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.0864,
+        "correct": 14,
+        "total": 162
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.1173,
+        "correct": 19,
+        "total": 162
+      }
+    ],
+    "stage1_vs_final_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.1173,
+        "correct": 19,
+        "total": 162
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.1111,
+        "correct": 18,
+        "total": 162
+      }
+    ],
+    "v31_vs_final_on_eval": [
+      {
+        "slot": 0,
+        "accuracy": 0.0864,
+        "correct": 14,
+        "total": 162
+      },
+      {
+        "slot": 1,
+        "accuracy": 0.1111,
+        "correct": 18,
+        "total": 162
+      }
+    ]
+  },
+  "note": "The image-generation variant was distilled indirectly through image-prompt auxiliary rows. The diffusion renderer itself was not compressed into the Champion text model."
+}

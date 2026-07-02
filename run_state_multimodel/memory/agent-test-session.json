@@ -1,0 +1,93 @@
+{
+  "session_id": "agent-test-session",
+  "created_at": 1774625476.2725081,
+  "updated_at": 1774625495.73986,
+  "memories": [
+    {
+      "kind": "preference",
+      "text": "User preference: concise answers",
+      "source": "user",
+      "score": 1.0,
+      "updated_at": 1774625476.2725081
+    },
+    {
+      "kind": "fact",
+      "text": "Remembered fact: I prefer concise answers",
+      "source": "user",
+      "score": 1.0,
+      "updated_at": 1774625476.2725081
+    },
+    {
+      "kind": "lesson",
+      "text": "Successful answer pattern: What should I shorten? Paste the text or point me to the answer you want condensed.",
+      "source": "assistant",
+      "score": 0.35,
+      "updated_at": 1774625476.2725081
+    },
+    {
+      "kind": "lesson",
+      "text": "Successful answer pattern: This is an arithmetic sequence with common difference 2.",
+      "source": "assistant",
+      "score": 0.35,
+      "updated_at": 1774625495.73986
+    }
+  ],
+  "turns": [
+    {
+      "ts": 1774625476.2725081,
+      "user": "What are the latest OpenAI models? Keep it brief and remember that I prefer concise answers.",
+      "assistant": "What should I shorten? Paste the text or point me to the answer you want condensed.",
+      "model_key": "v30_lite",
+      "route_reason": "Manual selection kept V30 Lite FP16.",
+      "tools": [
+        {
+          "name": "web_search",
+          "query": "What are the latest OpenAI models? Keep it brief and remember that I prefer concise answers.",
+          "source": "duckduckgo",
+          "results": [
+            {
+              "title": "OpenAI models: All the models and what they're best for - Zapier",
+              "url": "https://zapier.com/blog/openai-models/",
+              "snippet": "This is your complete guide to all of OpenAI's major models . We'll look at what each one is good for, how much they cost, and how to make the most of them in your work.",
+              "domain": "zapier.com/blog/openai-models/"
+            },
+            {
+              "title": "Model Release Notes - OpenAI Help Center",
+              "url": "https://help.openai.com/en/articles/9624314-model-release-notes?_bhlid=3108fd4217ec87e158a70a9bfcae9090fc704157",
+              "snippet": "OpenAI o3 is our most powerful reasoning model that pushes the frontier across coding, math, science, visual perception, and more. It sets a new SOTA on benchmarks including Codeforces, SWE-bench (without building a custom model -specific scaffold), and MMMU.",
+              "domain": "help.openai.com/en/articles/9624314-model-release-notes?_bhlid=3108fd4217ec87e158a70a9bfcae9090fc704157"
+            },
+            {
+              "title": "Every OpenAI model in 2026: GPT-5, o3, Sora, and more",
+              "url": "https://www.eesel.ai/blog/openai-models-list",
+              "snippet": "Confused by GPT-5, GPT-4.1, and others? Our clear guide breaks down the complete OpenAI models list, explaining each model's use case and pricing.",
+              "domain": "www.eesel.ai/blog/openai-models-list"
+            },
+            {
+              "title": "The Complete Guide to OpenAI Models in 2026: From GPT-5.2 to Open ...",
+              "url": "https://aicomparison.ai/openai-models-guide/",
+              "snippet": "Users are no longer asking which model is \"smartest,\" but which model delivers the right level of reasoning, cost efficiency, and control for a specific task. This guide breaks down the entire OpenAI models lineup from the flagship GPT-5.2 family to reasoning-focused, multimodal, and open-source options like GPT-OSS.",
+              "domain": "aicomparison.ai/openai-models-guide/"
+            },
+            {
+              "title": "OpenAI's New Models Could Be Its Smartest and Most Powerful",
+              "url": "https://www.inc.com/ben-sherry/openais-new-models-could-be-its-smartest-and-most-powerful-thanks-to-this-new-feature/91177852",
+              "snippet": "The new OpenAI models , 03 and 04-mini, have special abilities that could help you do research and analyze documents.",
+              "domain": "www.inc.com/ben-sherry/openais-new-models-could-be-its-smartest-and-most-powerful-thanks-to-this-new-feature/91177852"
+            }
+          ]
+        }
+      ],
+      "consultants": []
+    },
+    {
+      "ts": 1774625495.73986,
+      "user": "What preference do you remember about how I want answers?",
+      "assistant": "This is an arithmetic sequence with common difference 2.",
+      "model_key": "v30_lite",
+      "route_reason": "Manual selection kept V30 Lite FP16.",
+      "tools": [],
+      "consultants": []
+    }
+  ]
+}

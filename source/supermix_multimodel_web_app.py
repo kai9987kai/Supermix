@@ -1,1272 +1,2780 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
-import base64
-import io
-import json
-import logging
 import os
-import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from flask import Flask, jsonify, request, send_from_directory
-from multimodel_catalog import DEFAULT_COMMON_SUMMARY, DEFAULT_MODELS_DIR, discover_model_records
+
+from multimodel_catalog import DEFAULT_COMMON_SUMMARY, DEFAULT_MODELS_DIR, discover_model_records, models_to_json
 from multimodel_runtime import UnifiedModelManager
-from PIL import Image
-
-app = Flask(__name__)
-manager: UnifiedModelManager | None = None
-
-def build_app(unified_manager: UnifiedModelManager) -> Flask:
-    global manager
-    manager = unified_manager
-    return app
+from qwen_chat_desktop_app import BASE_MODEL_OVERRIDE_ENV
 
 
-# ─── Benchmark graph embed helper ───────────────────────────────────────────
-def _bench_graph_b64() -> str:
-    """Return base64-encoded PNG of the benchmark graph, or empty string."""
-    candidates = [
-        Path(__file__).parent.parent / "output" / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.png",
-        Path("output") / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.png",
-        Path.home() / "Desktop" / "benchmark_graph_v46_common_v5_20suite.png",
-        Path(__file__).parent.parent / "output" / "v48_benchmark_comparison.png",
-        Path("output") / "v48_benchmark_comparison.png",
-        Path(__file__).parent.parent / "output" / "v47_benchmark_comparison.png",
-        Path("output") / "v47_benchmark_comparison.png",
-    ]
-    output_roots = [Path(__file__).parent.parent / "output", Path("output")]
-    for root in output_roots:
-        if root.exists():
-            candidates.extend(
-                sorted(
-                    root.glob("benchmark_local_all_models_multibench*.png"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
-            )
-    seen = set()
-    for p in candidates:
-        try:
-            key = p.resolve()
-        except Exception:
-            key = p
-        if key in seen:
-            continue
-        seen.add(key)
-        if p.exists() and p.suffix.lower() == ".png":
-            return base64.b64encode(p.read_bytes()).decode()
-    return ""
-
-
-def _latest_benchmark_json_path() -> Optional[Path]:
-    candidates = [
-        Path(__file__).parent.parent / "output" / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.json",
-        Path("output") / "benchmark_local_all_models_multibench_common_v5_20suite_evo3h_s5_20260506_post.json",
-        Path(__file__).parent.parent / "output" / "v48_benchmark_results.json",
-        Path("output") / "v48_benchmark_results.json",
-        Path(__file__).parent.parent / "output" / "v47_benchmark_results.json",
-        Path("output") / "v47_benchmark_results.json",
-    ]
-    output_roots = [Path(__file__).parent.parent / "output", Path("output")]
-    for root in output_roots:
-        if root.exists():
-            candidates.extend(
-                sorted(
-                    root.glob("benchmark_local_all_models_multibench*.json"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
-            )
-    seen = set()
-    for p in candidates:
-        try:
-            key = p.resolve()
-        except Exception:
-            key = p
-        if key in seen:
-            continue
-        seen.add(key)
-        if p.exists() and p.suffix.lower() == ".json":
-            return p
-    return None
-
-
-def _benchmark_rows_for_ui(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    raw_rows = data.get("rows") or data.get("models") or []
-    models: List[Dict[str, Any]] = []
-    for row in raw_rows:
-        if not isinstance(row, dict):
-            continue
-        mean = row.get("common_overall_exact")
-        if mean is None:
-            mean = row.get("mean")
-        if mean is None:
-            mean = row.get("recipe_eval_accuracy")
-        per_bench = row.get("per_benchmark")
-        if mean is None and isinstance(per_bench, dict) and per_bench:
-            vals = [float(v) for v in per_bench.values() if isinstance(v, (int, float))]
-            if vals:
-                mean = sum(vals) / len(vals)
-        if mean is None:
-            continue
-        models.append(
-            {
-                "key": row.get("model_key") or row.get("key") or row.get("label") or "model",
-                "label": row.get("label") or row.get("model_key") or row.get("key") or "model",
-                "mean": float(mean),
-                "benchmark_count": len(per_bench) if isinstance(per_bench, dict) else None,
-                "freshness": row.get("benchmark_freshness") or row.get("score_source") or "",
-            }
-        )
-    return models
-
-# ─── HTML / CSS / JS ─────────────────────────────────────────────────────────
-_BENCH_B64 = _bench_graph_b64()
-
-HTML_TEMPLATE = r"""<!doctype html>
+HTML = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Supermix Studio X - V46 20-Suite Champion</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <title>Supermix Studio</title>
   <style>
-    /* ── Design Tokens ────────────────────────────────────────────── */
-    :root {
-      --bg:           #020610;
-      --surface:      rgba(15, 23, 42, 0.7);
-      --surface-hi:   rgba(30, 41, 59, 0.85);
-      --border:       rgba(255, 255, 255, 0.08);
-      --border-blue:  rgba(56, 189, 248, 0.4);
-      --text:         #f1f5f9;
-      --muted:        #94a3b8;
-      --blue:         #38bdf8;
-      --cyan:         #22d3ee;
-      --teal:         #2dd4bf;
-      --purple:       #818cf8;
-      --amber:        #fbbf24;
-      --rose:         #fb7185;
-      --green:        #34d399;
-      --shadow-deep:  0 32px 96px rgba(0,0,0,0.7);
-      --shadow-card:  0 12px 40px rgba(0,0,0,0.5);
-      --glass:        blur(24px) saturate(180%);
+    :root{
+      --bg:#071019;--panel:rgba(10,20,33,.9);--panel-2:rgba(13,25,40,.96);--line:rgba(135,164,203,.15);
+      --text:#eef5ff;--muted:#9eb3cf;--blue:#70b8ff;--teal:#63d9c8;--amber:#ffb366;--rose:#ff8d9a;
+      --green:#8be1a7;--shadow:0 30px 80px rgba(0,0,0,.34);--r-xl:26px;--r-lg:18px;--r-md:14px;--r-sm:12px;
     }
-
-    /* ── Mesh Background ───────────────────────────────────────────── */
-    .mesh-bg {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      z-index: -1; background: var(--bg); overflow: hidden;
+    *{box-sizing:border-box} html,body{height:100%}
+    body{
+      margin:0;color:var(--text);overflow:hidden;
+      font-family:"Aptos","Bahnschrift","Segoe UI Variable Text","Segoe UI",sans-serif;
+      background:
+        radial-gradient(circle at 12% 18%, rgba(112,184,255,.18), transparent 24%),
+        radial-gradient(circle at 84% 86%, rgba(99,217,200,.14), transparent 26%),
+        radial-gradient(circle at 70% 16%, rgba(255,179,102,.12), transparent 22%),
+        linear-gradient(160deg,#040b14 0%,#081321 48%,#071019 100%);
     }
-    .mesh-bg::after {
-      content: ""; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
-      opacity: 0.15; pointer-events: none;
-      background-image:
-        radial-gradient(circle at 20% 30%, #3b82f6 0%, transparent 40%),
-        radial-gradient(circle at 80% 20%, #8b5cf6 0%, transparent 40%),
-        radial-gradient(circle at 40% 80%, #14b8a6 0%, transparent 40%),
-        radial-gradient(circle at 70% 70%, #f59e0b 0%, transparent 40%);
-      filter: blur(80px); animation: meshMove 40s ease-in-out infinite alternate;
+    .shell{display:grid;grid-template-columns:clamp(320px,23vw,380px) minmax(0,1fr);gap:18px;width:min(1560px,calc(100vw - 24px));height:calc(100vh - 24px);margin:12px auto}
+    .shell.focus-chat{grid-template-columns:minmax(0,1fr)}
+    .shell.focus-chat .side{display:none}
+    .shell.focus-chat .msg{max-width:min(1180px,94%)}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow);backdrop-filter:blur(18px);overflow:hidden}
+    .side{padding:18px;display:grid;grid-template-rows:auto auto auto auto 1fr;gap:14px;overflow:auto}
+    .hero,.card,.thread-card{border-radius:var(--r-lg);border:1px solid var(--line);background:var(--panel-2)}
+    .hero{padding:18px;background:linear-gradient(145deg,rgba(18,41,66,.96),rgba(10,20,33,.98))}
+    .eyebrow{display:inline-flex;align-items:center;gap:9px;color:var(--blue);font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;margin-bottom:12px}
+    .eyebrow::before{content:"";width:10px;height:10px;border-radius:999px;background:var(--blue);box-shadow:0 0 16px rgba(112,184,255,.75)}
+    h1{margin:0;font-size:31px;line-height:1.02;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
+    p{margin:10px 0 0;color:var(--muted);line-height:1.58;font-size:14px}
+    .pill-row,.cap-row,.chip-row,.action-row,.focus-row,.live-row{display:flex;flex-wrap:wrap;gap:8px}
+    .pill,.cap,.chip,.ghost,.primary,select,input,textarea{
+      border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);font:inherit
     }
-    @keyframes meshMove {
-      from { transform: translate(0, 0) rotate(0deg); }
-      to { transform: translate(-5%, -10.5%) rotate(12deg); }
+    .pill,.cap,.chip,.ghost,.primary{display:inline-flex;align-items:center;gap:8px;padding:9px 12px}
+    .cap{font-size:12px}
+    .cap.chat{border-color:rgba(112,184,255,.28);background:rgba(112,184,255,.08)}
+    .cap.image{border-color:rgba(99,217,200,.28);background:rgba(99,217,200,.08)}
+    .pill small{color:var(--muted)}
+    .card{padding:16px}
+    .card h2{margin:0 0 12px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+    .field{display:grid;gap:6px;margin-bottom:12px}
+    .field label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    select,input,textarea{width:100%;padding:12px 13px;border-radius:var(--r-sm);background:rgba(3,10,16,.82)}
+    textarea{resize:vertical;min-height:82px;max-height:220px;line-height:1.52}
+    select:focus,input:focus,textarea:focus{outline:none;border-color:rgba(112,184,255,.48);box-shadow:0 0 0 3px rgba(112,184,255,.11)}
+    .primary{cursor:pointer;background:linear-gradient(135deg,#2f74c5,var(--blue));font-weight:700}
+    .ghost{cursor:pointer}
+    .stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .stat{padding:12px;border-radius:var(--r-md);background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.04)}
+    .stat .k{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    .stat .v{margin-top:8px;font-size:24px;line-height:1;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
+    .stat .d{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.5}
+    .model-note,.status-box{padding:12px 13px;border-radius:var(--r-md);background:rgba(4,10,16,.82);border:1px solid rgba(255,255,255,.05);color:#c6d7ec}
+    .status-box{white-space:pre-wrap;min-height:116px;max-height:220px;overflow:auto;font-family:Consolas,"Cascadia Code",monospace;font-size:12px;line-height:1.5}
+    .chat{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;min-height:0;min-width:0}
+    .chat-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:18px 22px;border-bottom:1px solid var(--line);background:rgba(12,24,38,.94)}
+    .chat-head h3{margin:0;font-size:24px;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
+    .chat-sub{margin-top:8px;color:var(--muted);font-size:13px;line-height:1.58}
+    .live-strip{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:12px 22px;border-bottom:1px solid rgba(255,255,255,.05);background:rgba(8,16,27,.92)}
+    .live-strip .note{margin-top:4px}
+    .thread{padding:20px 22px;overflow:auto;display:flex;flex-direction:column;gap:16px;min-width:0;scrollbar-gutter:stable;background:
+      radial-gradient(circle at top right, rgba(112,184,255,.08), transparent 24%),
+      linear-gradient(180deg, rgba(7,12,20,.48), rgba(10,18,29,.92))
     }
-
-    /* ── Reset & Base ──────────────────────────────────────────────── */
-    *, *::before, *::after { box-sizing: border-box; }
-    body, html { height:100%; margin:0; padding:0; background:var(--bg); color:var(--text);
-                 font-family:'Inter',system-ui,sans-serif; overflow:hidden;
-                 -webkit-font-smoothing:antialiased; }
-    button { font-family:inherit; cursor:pointer; border:none; background:none; }
-    a { color:var(--blue); text-decoration:none; }
-
-    /* ── Shell Layout ───────────────────────────────────────────────── */
-    .shell { display:grid; grid-template-columns:80px 1fr 400px; height:100vh;
-             position: relative; overflow: hidden; }
-
-    /* ── Navigation Rail ─────────────────────────────────────────── */
-    .rail { background:rgba(2,8,16,0.35); border-right:1px solid var(--border);
-            display:flex; flex-direction:column; align-items:center;
-            padding:24px 0 28px; gap:8px; backdrop-filter: var(--glass); z-index:50; }
-
-    .rail-logo { width:48px; height:48px; border-radius:14px; margin-bottom:16px;
-                 background:linear-gradient(135deg,#0ea5e9,#6366f1);
-                 display:flex; align-items:center; justify-content:center;
-                 box-shadow:0 0 32px rgba(14,165,233,0.4); cursor:pointer;
-                 transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1); }
-    .rail-logo:hover { transform:scale(1.1) rotate(5deg); filter:brightness(1.1); }
-    
-    .rail-item { width:52px; height:52px; border-radius:14px;
-                 display:flex; align-items:center; justify-content:center;
-                 color:var(--muted); cursor:pointer; position:relative;
-                 transition:0.2s; }
-    .rail-item:hover { background:rgba(255,255,255,0.06); color:var(--text); }
-    .rail-item.on { color:var(--blue); background:rgba(56,189,248,0.12);
-                    box-shadow:inset 0 0 0 1px rgba(56,189,248,0.3); }
-    .rail-item[title]:hover::after { content:attr(title); position:absolute;
-      left:64px; top:50%; transform:translateY(-50%);
-      background:var(--surface-hi); border:1px solid var(--border);
-      border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600;
-      white-space:nowrap; color:var(--text); pointer-events:none; z-index:99; }
-    .rail-spacer { flex:1; }
-
-    /* ── Workspace (centre) ─────────────────────────────────────────── */
-    .workspace { display:grid; grid-template-rows:72px 1fr auto; height: 100vh; min-width:0; position:relative; overflow: hidden; }
-
-    /* header bar */
-    .wk-header { display:flex; align-items:center; justify-content:space-between;
-                 padding:0 40px; border-bottom:1px solid var(--border);
-                 background:rgba(2,8,16,0.25); backdrop-filter: var(--glass); z-index: 10; }
-    .wk-title { font-family:'Outfit',sans-serif; font-size:20px; font-weight:800;
-                background:linear-gradient(90deg,#fff 20%,#38bdf8);
-                -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-                letter-spacing:-0.01em; }
-    .model-pill { padding:5px 14px; background:rgba(56,189,248,0.1);
-                  border:1px solid rgba(56,189,248,0.25); border-radius:100px;
-                  font-size:11px; font-weight:800; color:var(--blue);
-                  text-transform:uppercase; letter-spacing:0.08em;
-                  transition:0.3s; }
-    .model-pill.v47 { background:rgba(45,212,191,0.12);
-                      border-color:rgba(45,212,191,0.35); color:var(--teal);
-                      box-shadow:0 0 15px rgba(45,212,191,0.1); }
-    .model-pill.v48 { background:rgba(244,114,182,0.12);
-                      border-color:rgba(244,114,182,0.35); color:#f9a8d4;
-                      box-shadow:0 0 15px rgba(244,114,182,0.12); }
-    .model-pill.v46 { background:rgba(52,211,153,0.13);
-                      border-color:rgba(52,211,153,0.45); color:#86efac;
-                      box-shadow:0 0 20px rgba(52,211,153,0.13); }
-
-    /* ── Thread ─────────────────────────────────────────────────────── */
-    .thread { padding:40px 14%; overflow-y:auto; display:flex;
-              flex-direction:column; gap:32px; scroll-behavior:smooth;
-              min-height: 0; flex: 1; }
-    .thread::-webkit-scrollbar { width:5px; }
-    .thread::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08);
-                                       border-radius:100px; }
-
-    /* Message rows */
-    .msg { display:flex; flex-direction:column; gap:12px; max-width:85%;
-           animation:msgIn 0.45s cubic-bezier(0.16,1,0.3,1); }
-    @keyframes msgIn { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
-    .msg.user  { align-self:flex-end; }
-    .msg.asst  { align-self:flex-start; }
-
-    .msg-meta { display:flex; align-items:center; gap:10px; font-size:11px;
-                color:var(--muted); margin-bottom:4px; font-weight:600; }
-    .msg.user .msg-meta { justify-content:flex-end; }
-    .msg-avatar { width:24px; height:24px; border-radius:8px; font-size:10px;
-                  font-weight:900; display:flex; align-items:center;
-                  justify-content:center; }
-    .msg.asst .msg-avatar { background:linear-gradient(135deg,#0ea5e9,#6366f1); color:#fff; }
-    .msg.user .msg-avatar { background:var(--surface-hi); color:var(--muted); }
-
-    .bubble { padding:22px 28px; border-radius:28px; font-size:16px; line-height:1.7;
-              background:var(--surface); border:1px solid var(--border);
-              box-shadow:var(--shadow-card); white-space:pre-wrap; word-break:break-word;
-              backdrop-filter: var(--glass); transition: transform 0.2s; }
-    .msg.user .bubble { background:linear-gradient(135deg,rgba(14,165,233,0.16),rgba(14,165,233,0.08));
-                        border-color:rgba(14,165,233,0.3); border-bottom-right-radius:8px; }
-    .msg.asst .bubble { border-bottom-left-radius:8px; }
-    .bubble:hover { transform: translateY(-1px); }
-    .mini-copy { margin-left:8px; padding:4px 8px; border-radius:999px;
-                 border:1px solid var(--border); color:var(--muted);
-                 background:rgba(255,255,255,.04); font-size:10px;
-                 font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
-    .mini-copy:hover { color:var(--text); border-color:rgba(56,189,248,.35);
-                       background:rgba(56,189,248,.08); }
-
-    .champion-card { padding:24px 28px; border-radius:28px;
-                     border:1px solid rgba(52,211,153,.28);
-                     background:
-                       linear-gradient(135deg,rgba(52,211,153,.12),rgba(14,165,233,.08)),
-                       rgba(2,8,16,.72);
-                     box-shadow:var(--shadow-card); backdrop-filter:var(--glass); }
-    .champion-head { display:flex; align-items:center; justify-content:space-between;
-                     gap:16px; margin-bottom:18px; }
-    .champion-title { font-family:'Outfit',sans-serif; font-size:20px;
-                      font-weight:800; letter-spacing:-.02em; }
-    .champion-badge { padding:6px 10px; border-radius:999px;
-                      background:rgba(52,211,153,.12);
-                      border:1px solid rgba(52,211,153,.35);
-                      color:#86efac; font-size:10px; font-weight:900;
-                      text-transform:uppercase; letter-spacing:.12em; white-space:nowrap; }
-    .signal-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-    .signal { border:1px solid var(--border); border-radius:18px;
-              background:rgba(0,0,0,.24); padding:14px 16px; }
-    .signal strong { display:block; color:var(--text); font-size:18px; margin-bottom:4px; }
-    .signal small { color:var(--muted); font-size:11px; line-height:1.35; }
-
-    /* Typing indicator */
-    .typing-dots { display:flex; gap:6px; padding:20px 24px; }
-    .typing-dots span { width:7px; height:7px; border-radius:50%;
-                        background:var(--muted); animation:dot 1.2s infinite ease-in-out; }
-    .typing-dots span:nth-child(2) { animation-delay:.2s; }
-    .typing-dots span:nth-child(3) { animation-delay:.4s; }
-    @keyframes dot { 0%,80%,100%{opacity:.3;transform:scale(0.85)}
-                     40%{opacity:1;transform:scale(1.1)} }
-
-    /* Trace cards */
-    .trace { margin-top:12px; border:1px solid rgba(255,255,255,0.08);
-             background:rgba(0,0,0,0.3); border-radius:18px; overflow:hidden;
-             transition: 0.2s; }
-    .trace:hover { border-color: rgba(255,255,255,0.15); }
-    .trace-hdr { display:flex; align-items:center; gap:10px;
-                 padding:12px 20px; font-size:10px; font-weight:900;
-                 text-transform:uppercase; letter-spacing:.14em;
-                 border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; }
-    .trace-body { padding:18px 20px; font-size:13px; font-family:'JetBrains Mono',monospace;
-                  color:var(--muted); line-height:1.6; }
-    .trace-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 24px;
-                  font-size:12.5px; }
-    .trace-kv strong { color:var(--text); font-weight: 700; }
-    .trace-step { display:flex; gap:14px; margin-bottom:14px; }
-    .trace-step-n { width:24px; height:24px; flex-shrink:0; border-radius:50%;
-                    border:1.5px solid var(--teal); display:flex;
-                    align-items:center; justify-content:center;
-                    font-size:10px; font-weight:800; color:var(--teal); }
-
-    /* ── Composer ───────────────────────────────────────────────────── */
-    .compose-wrap { padding:0 14% 32px; flex-shrink: 0; z-index: 20;
-                    background:linear-gradient(transparent,rgba(2,6,16,.9) 50%); }
-    .quickbar { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; }
-    .quick-chip { padding:9px 13px; border-radius:999px;
-                  border:1px solid var(--border); background:rgba(15,23,42,.72);
-                  color:var(--muted); font-size:12px; font-weight:800;
-                  backdrop-filter:var(--glass); transition:.2s; }
-    .quick-chip:hover { color:var(--text); border-color:rgba(56,189,248,.35);
-                        background:rgba(56,189,248,.1); transform:translateY(-1px); }
-    .compose-box { background:var(--surface-hi); border:1px solid var(--border);
-                   border-radius:26px; padding:8px; backdrop-filter: var(--glass);
-                   box-shadow:0 48px 112px rgba(0,0,0,.7);
-                   transition:border-color .3s, box-shadow .3s, transform .3s; }
-    .compose-box:focus-within { border-color:var(--border-blue);
-                                transform: translateY(-2px);
-                                box-shadow:0 0 0 4px rgba(56,189,248,.1),
-                                           0 48px 112px rgba(0,0,0,.7); }
-    textarea#prompt { width:100%; background:transparent; border:none; outline:none;
-                      color:var(--text); font-family:'Inter',sans-serif;
-                      font-size:16px; line-height:1.6; resize:none;
-                      padding:18px 24px; min-height:56px; max-height:300px; }
-    .compose-bar { display:flex; align-items:center; justify-content:space-between;
-                   padding:4px 14px 12px; }
-    .compose-tools { display:flex; align-items:center; gap:6px; }
-    .ic-btn { width:42px; height:42px; border-radius:12px; display:flex;
-              align-items:center; justify-content:center;
-              background:transparent; border:none; color:var(--muted);
-              transition:.2s; }
-    .ic-btn:hover { background:rgba(255,255,255,.08); color:var(--text); }
-    .ic-btn.on { color:var(--blue); background:rgba(56,189,248,.1); }
-
-    .send-btn { display:flex; align-items:center; gap:10px; padding:12px 28px;
-                background:var(--blue); color:#fff; border:none; border-radius:16px;
-                font-weight:800; font-size:14.5px;
-                box-shadow:0 10px 24px rgba(14,165,233,0.35); transition:.3s cubic-bezier(0.16,1,0.3,1); }
-    .send-btn:hover { transform:scale(1.04) translateY(-1px); 
-                      box-shadow:0 18px 36px rgba(14,165,233,0.5); }
-    .send-btn:active { transform:scale(0.98); }
-    .send-btn:disabled { opacity:.5; pointer-events:none; filter: grayscale(0.5); }
-
-    /* upload preview bar */
-    .upload-bar { display:none; align-items:center; gap:12px; padding:10px 16px;
-                  background:rgba(0,0,0,.4); border:1px solid var(--border);
-                  border-radius:16px; margin:0 14% 16px; font-size:12px; backdrop-filter: var(--glass); }
-    .upload-bar img { width:48px; height:48px; border-radius:10px; object-fit:cover; border:1px solid var(--border); }
-    .upload-bar .up-name { color:var(--text); flex:1; font-weight: 500; }
-    .upload-bar .up-rm { background:rgba(255,255,255,0.06); border:none; color:var(--muted);
-                         font-size:14px; width:28px; height:28px; border-radius:50%; transition: .2s; }
-    .upload-bar .up-rm:hover { background:rgba(251,113,133,0.2); color:var(--rose); }
-
-    /* ── Control Panel (right sidebar) ──────────────────────────────── */
-    .panel { background:rgba(15, 23, 42, 0.4); border-left:1px solid var(--border);
-             backdrop-filter: var(--glass); display:flex; flex-direction:column; overflow:hidden; }
-    .panel-tabs { display:flex; border-bottom:1px solid var(--border); background: rgba(0,0,0,0.1); }
-    .ptab { flex:1; padding:18px 8px; font-size:11px; font-weight:800;
-            text-align:center; text-transform:uppercase; letter-spacing:.14em;
-            color:var(--muted); cursor:pointer; border:none;
-            background:transparent; transition:.25s;
-            border-bottom:3px solid transparent; }
-    .ptab.on { color:var(--blue); border-bottom-color:var(--blue); background: rgba(56,189,248,0.04); }
-    .panel-body { flex:1; overflow-y:auto; padding:32px 28px; display:flex;
-                  flex-direction:column; gap:36px; }
-    .panel-body::-webkit-scrollbar { width:5px; }
-    .panel-body::-webkit-scrollbar-thumb { background:rgba(255,255,255,.06); border-radius:100px; }
-
-    .panel-section h4 { font-family:'Outfit',sans-serif; font-size:11px;
-                        text-transform:uppercase; letter-spacing:.18em;
-                        color:var(--muted); margin:0 0 20px; font-weight:900; }
-    .model-snapshot { margin-top:14px; padding:16px; border-radius:18px;
-                      border:1px solid rgba(52,211,153,.24);
-                      background:rgba(52,211,153,.07); font-size:12px;
-                      color:var(--muted); line-height:1.55; }
-    .model-snapshot strong { color:var(--text); font-size:13px; }
-
-    /* select / input inputs */
-    select, .cfg-input { width:100%; background:rgba(0,0,0,.4); border:1px solid var(--border);
-                         border-radius:12px; color:var(--text); padding:10px 16px;
-                         font-family:inherit; font-size:14px; transition: .2s; }
-    select:focus, .cfg-input:focus { border-color:var(--border-blue); outline:none; background:rgba(0,0,0,.6); }
-
-    /* Mode cards */
-    .modes { display:flex; flex-direction:column; gap:12px; }
-    .mode-card { padding:20px; border:1px solid var(--border);
-                 border-radius:20px; cursor:pointer;
-                 background:rgba(255,255,255,.015); transition:all 0.3s cubic-bezier(0.16,1,0.3,1); }
-    .mode-card:hover { background:rgba(255,255,255,.04);
-                       border-color:rgba(56,189,248,.35); transform: translateX(4px); }
-    .mode-card.on { background:rgba(56,189,248,.08);
-                    border-color:rgba(56,189,248,.5);
-                    box-shadow:0 8px 24px rgba(0,0,0,0.2), inset 0 0 20px rgba(56,189,248,0.03); }
-    .mode-card.on[data-mode="collective"] { background:rgba(45,212,191,.08);
-                                             border-color:rgba(45,212,191,.5); }
-    .mode-card.on[data-mode="loop"] { background:rgba(245,158,11,.08);
-                                       border-color:rgba(245,158,11,.5); }
-    .mc-title { font-size:14.5px; font-weight:800; margin-bottom:6px;
-                display:flex; align-items:center; gap:10px; }
-    .mc-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
-    .mc-dot.std  { background:var(--green); box-shadow:0 0 8px var(--green); }
-    .mc-dot.col  { background:var(--teal);  box-shadow:0 0 8px var(--teal); }
-    .mc-dot.loop { background:var(--amber); box-shadow:0 0 8px var(--amber); }
-    .mc-desc { font-size:12.5px; color:var(--muted); line-height:1.5; }
-
-    /* setting rows */
-    .cfg-row { display:flex; align-items:center; justify-content:space-between;
-               margin-bottom:16px; }
-    .cfg-row label { font-size:14px; color:var(--text); font-weight: 500; }
-
-    /* Benchmark graph tab */
-    .bench-wrap { border-radius:18px; overflow:hidden; background:rgba(0,0,0,0.4);
-                  border:1px solid var(--border); box-shadow:0 12px 32px rgba(0,0,0,0.3); }
-    .bench-wrap img { width:100%; display:block; filter: saturate(1.1) brightness(1.05); }
-    .bench-note { padding:18px 20px; font-size:12px; color:var(--muted);
-                  line-height:1.6; text-align: center; }
-
-    /* Status footer */
-    .panel-footer { padding:20px 28px; border-top:1px solid var(--border);
-                    font-family:'JetBrains Mono',monospace; font-size:11px;
-                    color:var(--muted); line-height:1.8; background:rgba(0,0,0,.4); }
-
-    /* Toasts */
-    #toasts { position:fixed; bottom:32px; left:50%; transform:translateX(-50%);
-              display:flex; flex-direction:column-reverse; gap:10px; z-index:999; }
-    .toast { padding:14px 24px; border-radius:16px; font-size:13.5px; font-weight:700;
-             background:var(--surface-hi); border:1px solid var(--border);
-             box-shadow:var(--shadow-deep); var(--glass);
-             animation:toastIn .4s cubic-bezier(0.16,1,.3,1); }
-    .toast.ok   { border-color:rgba(52,211,153,.5); color:var(--green); }
-    .toast.err  { border-color:rgba(251,113,133,.5); color:var(--rose); }
-    @keyframes toastIn { from{opacity:0;transform:translateY(16px) scale(0.95)} to{opacity:1;transform:none} }
-
-    @media (max-width: 1100px) {
-      .shell { grid-template-columns:64px 1fr; }
-      .panel { position:fixed; right:0; top:0; bottom:0; width:min(390px,92vw); z-index:80; }
-      .thread, .compose-wrap { padding-left:7%; padding-right:7%; }
-    }
-    @media (max-width: 760px) {
-      .shell { grid-template-columns:1fr; }
-      .rail { display:none; }
-      .panel { display:none; }
-      .wk-header { padding:0 18px; }
-      .thread { padding:24px 18px; gap:22px; }
-      .compose-wrap { padding:0 18px 18px; }
-      .msg { max-width:100%; }
-      .signal-grid { grid-template-columns:1fr; }
-      .champion-head { align-items:flex-start; flex-direction:column; }
-    }
+    .thread.compact{padding:14px 18px;gap:10px}
+    .thread.compact .msg{padding:11px 13px;border-radius:18px}
+    .thread.compact .body{font-size:14px;line-height:1.54}
+    .thread.compact .msg-top{margin-bottom:8px}
+    .thread.hide-meta .msg-meta,.thread.hide-meta .route,.thread.hide-meta .trace-box{display:none}
+    .msg.match-active{border-color:rgba(255,179,102,.45);box-shadow:0 0 0 1px rgba(255,179,102,.35),0 10px 28px rgba(0,0,0,.18)}
+    .welcome{padding:18px;border-radius:18px;border:1px solid rgba(112,184,255,.15);background:rgba(112,184,255,.06);color:var(--muted);line-height:1.62}
+    .msg{max-width:min(980px,92%);padding:14px 16px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.03);box-shadow:0 10px 28px rgba(0,0,0,.16)}
+    .msg.user{align-self:flex-end;background:linear-gradient(145deg,rgba(30,82,136,.92),rgba(17,49,84,.95));border-color:rgba(112,184,255,.28)}
+    .msg.assistant{align-self:flex-start}
+    .msg.pending{opacity:.72;border-style:dashed}
+    .msg-top{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}
+    .who{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    .msg-meta{display:flex;flex-wrap:wrap;gap:8px}
+    .meta-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);font-size:12px;color:#d1e1f5}
+    .meta-pill.accent{border-color:rgba(99,217,200,.24);background:rgba(99,217,200,.09)}
+    .body{white-space:pre-wrap;line-height:1.62;font-size:15px}
+    .route{margin-top:10px;color:var(--muted);font-size:12px;line-height:1.5}
+    .image-card{display:grid;gap:12px}
+    .image-card img{display:block;max-width:min(520px,100%);width:100%;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:#050b13}
+    .image-caption{color:#d1e1f5;font-size:13px;line-height:1.58}
+    .upload-box{display:grid;gap:10px;padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.06);background:rgba(4,10,16,.72)}
+    .upload-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .upload-preview{display:none;gap:10px;align-items:flex-start}
+    .upload-preview img{display:block;max-width:140px;width:140px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:#050b13}
+    .upload-meta{display:grid;gap:6px;font-size:12px;color:#c6d7ec;line-height:1.5}
+    .msg-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+    .mini-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;font:inherit}
+    .trace-box{margin-top:12px;padding:12px 13px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(6,12,20,.72);color:#c6d7ec;font-size:12px;line-height:1.55;white-space:pre-wrap}
+    .composer{padding:16px 22px;border-top:1px solid var(--line);background:rgba(9,18,29,.94);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:stretch;min-height:0}
+    .composer-main{display:grid;grid-template-rows:auto minmax(0,1fr);gap:10px;min-width:0;min-height:0}
+    .compose-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .deck-tabs{display:flex;flex-wrap:wrap;gap:8px}
+    .deck-tab{cursor:pointer}
+    .deck-tab.active{border-color:rgba(112,184,255,.36);background:rgba(112,184,255,.10)}
+    .compose-scroll{display:grid;gap:12px;max-height:min(42vh,430px);overflow:auto;padding-right:4px;min-height:0;scrollbar-gutter:stable}
+    .compose-panel{display:grid;gap:10px}
+    .compose-panel[hidden]{display:none}
+    .workbench-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:12px;align-items:start}
+    .workbench-grid.triad{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .response-deck{display:flex;flex-wrap:wrap;gap:8px}
+    .control-grid{display:grid;gap:10px}
+    .control-grid .field{margin-bottom:0}
+    .contract-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .contract-grid .field{margin-bottom:0}
+    .refine-deck{display:flex;flex-wrap:wrap;gap:8px}
+    .contract-note,.outcome-note{white-space:pre-wrap}
+    .mode-row{display:grid;grid-template-columns:180px 180px 1fr;gap:10px}
+    .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .thread-tools{display:grid;gap:10px}
+    .thread-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    .thread-kpi{padding:10px 11px;border-radius:12px;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.03)}
+    .thread-kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    .thread-kpi .v{margin-top:6px;font-size:18px;font-family:"Bahnschrift","Segoe UI Semibold",sans-serif}
+    .dispatch-box,.draft-list,.compare-slot,.context-list,.bookmark-list{padding:12px 13px;border-radius:var(--r-md);border:1px solid rgba(255,255,255,.06);background:rgba(4,10,16,.76)}
+    .dispatch-box{color:#d7e6fb;font-size:12px;line-height:1.55}
+    .dispatch-box strong{display:block;margin-bottom:8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+    .draft-list{display:grid;gap:8px;max-height:240px;overflow:auto}
+    .draft-item{padding:11px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.03)}
+    .draft-item-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+    .draft-item-title{font-size:13px;font-weight:700;color:#eef5ff}
+    .draft-item-sub{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5;white-space:pre-wrap}
+    .draft-item-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .compare-slot{display:grid;gap:6px;color:#d7e6fb}
+    .compare-slot.empty{color:var(--muted);opacity:.78}
+    .compare-slot .slot-head{display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .compare-slot .slot-label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    .compare-slot .slot-meta{font-size:12px;color:#d7e6fb}
+    .compare-slot .slot-body{font-size:12px;line-height:1.55;white-space:pre-wrap}
+    .context-list,.bookmark-list{display:grid;gap:8px;max-height:220px;overflow:auto}
+    .context-item,.bookmark-item{padding:11px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.03)}
+    .context-item-title,.bookmark-item-title{font-size:12px;font-weight:700;color:#eef5ff}
+    .context-item-sub,.bookmark-item-sub{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5;white-space:pre-wrap}
+    .context-item-actions,.bookmark-item-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .msg.bookmarked{box-shadow:0 0 0 1px rgba(255,179,102,.38),0 10px 28px rgba(0,0,0,.16)}
+    .focus-chip{cursor:pointer}
+    .focus-chip.active{border-color:rgba(112,184,255,.36);background:rgba(112,184,255,.10)}
+    .msg.dim{opacity:.28;transform:scale(.992)}
+    .composer-meta{display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .composer-stats{display:flex;flex-wrap:wrap;gap:8px}
+    .composer-stat{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);font-size:12px;color:#d1e1f5}
+    .note{font-size:12px;color:var(--muted);line-height:1.45}
+    .send-col{display:grid;grid-template-rows:auto auto 1fr;gap:10px;min-width:170px;align-items:stretch}
+    .send-col .primary{justify-content:center;min-height:54px}
+    .composer.compact .compose-scroll{max-height:min(22vh,210px)}
+    .composer.compact .compose-panel[data-compose-panel="media"],
+    .composer.compact .compose-panel[data-compose-panel="workbench"]{display:none !important}
+    .composer.compact .compose-panel[data-compose-panel="quick"] .chip-row,
+    .composer.compact .compose-panel[data-compose-panel="quick"] .focus-row{display:none}
+    .composer.compact textarea#prompt{min-height:64px}
+    .send-support{display:grid;gap:8px;align-content:start}
+    .toast-rack{position:fixed;right:16px;bottom:16px;display:grid;gap:10px;z-index:20}
+    .toast{padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(7,15,24,.94);box-shadow:0 18px 42px rgba(0,0,0,.28);max-width:380px}
+    .toast.err{border-color:rgba(255,141,154,.28)} .toast.ok{border-color:rgba(139,225,167,.22)}
+    .thread::-webkit-scrollbar,.side::-webkit-scrollbar,.status-box::-webkit-scrollbar,.compose-scroll::-webkit-scrollbar,.draft-list::-webkit-scrollbar,.context-list::-webkit-scrollbar,.bookmark-list::-webkit-scrollbar{width:8px}
+    .thread::-webkit-scrollbar-thumb,.side::-webkit-scrollbar-thumb,.status-box::-webkit-scrollbar-thumb,.compose-scroll::-webkit-scrollbar-thumb,.draft-list::-webkit-scrollbar-thumb,.context-list::-webkit-scrollbar-thumb,.bookmark-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px}
+    @media (max-height:900px){.compose-scroll{max-height:min(34vh,300px)}}
+    @media (max-width:1120px){body{overflow:auto}.shell{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 24px)}.workbench-grid,.workbench-grid.triad,.contract-grid{grid-template-columns:1fr}.compose-toolbar{display:grid}}
+    @media (max-width:760px){.shell{width:calc(100vw - 16px);margin:8px auto;gap:12px}.thread,.composer,.chat-head,.side,.live-strip{padding-left:14px;padding-right:14px}.stats,.thread-kpis,.subgrid{grid-template-columns:1fr 1fr}.mode-row,.workbench-grid,.workbench-grid.triad,.contract-grid{grid-template-columns:1fr}.composer{grid-template-columns:1fr}.send-col{min-width:0}.live-strip{display:grid}.compose-toolbar{display:grid}}
   </style>
 </head>
 <body>
-<div class="mesh-bg"></div>
-<div class="shell" id="shell">
-
-  <!-- ── Rail ── -->
-  <nav class="rail">
-    <div class="rail-logo" title="Supermix Studio X">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-        <path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/>
-      </svg>
-    </div>
-    <div class="rail-item on" data-tab="chat" title="Chat Lab">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M20,2H4C2.9,2,2,2.9,2,4v18l4-4h14c1.1,0,2-.9,2-2V4C22,2.9,21.1,2,20,2z"/>
-      </svg>
-    </div>
-    <div class="rail-item" data-tab="bench" title="Benchmarks">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19,3H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14c1.1,0,2-.9,2-2V5C21,3.9,20.1,3,19,3z M9,17H7v-7h2V17z M13,17h-2V7h2V17z M17,17h-2v-4h2V17z"/>
-      </svg>
-    </div>
-    <div class="rail-item" data-tab="settings" title="Settings">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19.14,12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4,2.81A.488.488,0,0,0,13.92,2.4H10.08a.488.488,0,0,0-.47.41L9.25,5.35c-.59.24-1.13.56-1.62.94L5.24,5.33c-.22-.08-.47,0-.59.22L2.72,8.87c-.11.2-.06.47.12.61l2.03,1.58c-.05.3-.07.62-.07.94s.02.64.07.94L2.84,14.53c-.18.14-.23.41-.12.61l1.92,3.32c.12.22.37.29.59.22l2.39-.96c.5.38,1.03.7,1.62.94l.36,2.54c.05.24.24.41.48.41h3.84c.24,0,.44-.17.47-.41l.36-2.54c.59-.24,1.13-.56,1.62-.94l2.39.96c.22.08.47,0,.59-.22l1.92-3.32c.12-.22.07-.47-.12-.61ZM12,15.6A3.6,3.6,0,1,1,15.6,12,3.605,3.605,0,0,1,12,15.6Z"/>
-      </svg>
-    </div>
-    <div class="rail-spacer"></div>
-    <div class="rail-item" title="Clear session" id="clearBtn">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19V4ZM6,19a2,2,0,0,0,2,2h8a2,2,0,0,0,2-2V7H6Z"/>
-      </svg>
-    </div>
-  </nav>
-
-  <!-- ── Workspace ── -->
-  <main class="workspace">
-    <header class="wk-header">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div class="wk-title">Supermix Studio X</div>
-        <div class="model-pill v46" id="activePill">V46 Champion</div>
-        <div class="model-pill" id="modePill" style="display:none">Standard</div>
-      </div>
-      <div class="wk-actions" id="wkActions"></div>
-    </header>
-
-    <div class="thread" id="thread">
-      <div class="champion-card">
-        <div class="champion-head">
-          <div>
-            <div class="champion-title">Omni Collective V46 Champion is loaded.</div>
-            <div style="color:var(--muted);font-size:13px;margin-top:4px">The promoted 20-suite model is selected by default for normal chat, reasoning, and benchmark-backed testing.</div>
-          </div>
-          <div class="champion-badge">active frontier</div>
+  <div class="shell" id="appShell">
+    <aside class="panel side">
+      <section class="hero">
+        <div class="eyebrow">Bundled Local Model Studio</div>
+        <h1>Supermix Studio</h1>
+        <p>One desktop interface for every local zip model, with per-prompt Auto routing and image-capable models rendered directly in the chat thread.</p>
+        <div class="pill-row" style="margin-top:14px">
+          <div class="pill"><strong id="catalogCount">0</strong><small>models detected</small></div>
+          <div class="pill"><strong id="activeBadge">Auto</strong><small>active route</small></div>
         </div>
-        <div class="signal-grid">
-          <div class="signal"><strong>1.000</strong><small>20-suite exact benchmark score</small></div>
-          <div class="signal"><strong>97 / 97</strong><small>latest local benchmark items passed</small></div>
-          <div class="signal"><strong>Guarded</strong><small>normal-chat drift repair enabled</small></div>
-        </div>
-      </div>
-    </div>
+      </section>
 
-    <!-- Upload preview bar -->
-    <div class="upload-bar" id="uploadBar">
-      <img id="imgThumb" src="" alt="">
-      <div class="up-name" id="imgName">image.png</div>
-      <button class="up-rm" id="clearUpBtn" title="Remove">&#x2715;</button>
-    </div>
-
-    <div class="compose-wrap">
-      <div class="quickbar" id="quickbar">
-        <button class="quick-chip" data-prompt="Hello. Reply like a normal helpful chat model.">Normal hello</button>
-        <button class="quick-chip" data-prompt="What model is active, and what benchmark score is it using?">Model status</button>
-        <button class="quick-chip" data-prompt="Give a concise step-by-step answer: if a train leaves at 3pm and takes 2 hours 35 minutes, when does it arrive?">Reasoning test</button>
-        <button class="quick-chip" data-prompt="Explain the benchmark graph in plain English.">Benchmark summary</button>
-      </div>
-      <div class="compose-box">
-        <textarea id="prompt" rows="1" placeholder="Message Omni V46 Champion..."></textarea>
-        <div class="compose-bar">
-          <div class="compose-tools">
-            <button class="ic-btn" title="Attach image" id="imgBtn">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M21,19V5a2,2,0,0,0-2-2H5A2,2,0,0,0,3,5V19a2,2,0,0,0,2,2H19A2,2,0,0,0,21,19ZM8.5,13.5l2.5,3L14.5,12l4.5,6H5Z"/>
-              </svg>
-            </button>
-            <button class="ic-btn" title="Web search" id="webBtn">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M15.5,14h-.79l-.28-.27A6.471,6.471,0,0,0,16,9.5,6.5,6.5,0,1,0,9.5,16a6.471,6.471,0,0,0,4.23-1.57l.27.28v.79l5,4.99L20.49,19Zm-6,0a4.5,4.5,0,1,1,4.5-4.5A4.494,4.494,0,0,1,9.5,14Z"/>
-              </svg>
-            </button>
-          </div>
-          <button class="send-btn" id="sendBtn">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2.01,21L23,12,2.01,3,2,10l15,2L2,14Z"/>
-            </svg>
-            Send
-          </button>
+      <section class="card">
+        <h2>Model Selector</h2>
+        <div class="field">
+          <label>Current Model</label>
+          <select id="modelSelect"></select>
         </div>
-      </div>
-      <input type="file" id="fileInput" accept="image/*" style="display:none">
-    </div>
-  </main>
-
-  <!-- ── Right Panel ── -->
-  <aside class="panel">
-    <div class="panel-tabs">
-      <button class="ptab on" data-ptab="model">Model</button>
-      <button class="ptab" data-ptab="mode">Mode</button>
-      <button class="ptab" data-ptab="bench">Bench</button>
-    </div>
-
-    <!-- MODEL tab -->
-    <div class="panel-body" id="ptab-model">
-      <div class="panel-section">
-        <h4>Active Model</h4>
-        <select id="modelSelect"></select>
-        <div class="model-snapshot" id="modelSnapshot">Loading champion manifest...</div>
-      </div>
-      <div class="panel-section">
-        <h4>V46 Champion System</h4>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div style="display:flex;align-items:center;gap:12px;font-size:13px">
-            <div style="width:10px;height:10px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)"></div>
-            Graph-of-Thoughts synthesis
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;font-size:13px">
-            <div style="width:10px;height:10px;border-radius:50%;background:var(--purple);box-shadow:0 0 10px var(--purple)"></div>
-            Mixture-of-Depths routing
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;font-size:13px">
-            <div style="width:10px;height:10px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan)"></div>
-            Continuous Latent C-CoT
-          </div>
-        </div>
-      </div>
-      <div class="panel-section">
-        <h4>Inference Settings</h4>
-        <div class="cfg-row">
-          <label>Loop budget</label>
-          <input class="cfg-input" type="number" id="loopBudget" value="4" min="2" max="16" style="width:70px">
-        </div>
-        <div class="cfg-row">
-          <label>Neural Memory</label>
-          <select class="cfg-input" id="memToggle" style="width:90px">
-            <option value="on">Enabled</option>
-            <option value="off">Disabled</option>
+        <div class="field">
+          <label>Action Mode</label>
+          <select id="actionMode">
+            <option value="auto">Auto</option>
+            <option value="text">Text</option>
+            <option value="vision">Vision</option>
+            <option value="image">Image</option>
           </select>
         </div>
-        <div class="cfg-row">
-          <label>Web Access</label>
-          <select class="cfg-input" id="webToggle" style="width:90px">
-            <option value="off">Local Only</option>
-            <option value="on">Hybrid Search</option>
+        <div class="action-row">
+          <button class="primary" id="loadModelBtn">Use Selection</button>
+          <button class="ghost" id="refreshBtn">Refresh</button>
+          <button class="ghost" id="clearBtn">Clear Chat</button>
+        </div>
+        <p class="model-note" id="modelNote">Scanning local models...</p>
+        <div class="cap-row" id="capabilities"></div>
+      </section>
+
+      <section class="card">
+        <h2>Discovery</h2>
+        <div class="field">
+          <label>Find Model</label>
+          <input id="modelSearch" placeholder="Search family, label, capability, or note">
+        </div>
+        <div class="field">
+          <label>Capability Filter</label>
+          <select id="capabilityFilter">
+            <option value="all">All Models</option>
+            <option value="chat">Chat</option>
+            <option value="vision">Vision</option>
+            <option value="image">Image</option>
           </select>
         </div>
-      </div>
-    </div>
+        <div class="chip-row" id="quickPickChips"></div>
+        <div class="note" id="discoveryNote">Use search and capability filters to narrow the installed model catalog.</div>
+      </section>
 
-    <!-- MODE tab -->
-    <div class="panel-body" id="ptab-mode" style="display:none">
-      <div class="panel-section">
-        <h4>Operational Mode</h4>
-        <div class="modes">
-          <div class="mode-card on" data-mode="off">
-            <div class="mc-title"><div class="mc-dot std"></div>Standard Case</div>
-            <div class="mc-desc">Optimal for direct queries and creative generation. High-speed single-pass.</div>
+      <section class="card">
+        <h2>Model Store</h2>
+        <div class="action-row">
+          <button class="ghost" id="refreshStoreBtn">Refresh Store</button>
+        </div>
+        <div class="note" id="modelStoreNote">Browse every published Supermix artifact from Hugging Face and install it into the local model directory.</div>
+        <div class="draft-list" id="modelStoreList">Loading remote store...</div>
+      </section>
+
+      <section class="card">
+        <h2>Runtime Snapshot</h2>
+        <div class="stats">
+          <div class="stat"><div class="k">Benchmark</div><div class="v" id="statBenchmark">-</div><div class="d" id="statBenchmarkDetail">Saved score</div></div>
+          <div class="stat"><div class="k">Family</div><div class="v" id="statFamily">-</div><div class="d" id="statFamilyDetail">Model line</div></div>
+          <div class="stat"><div class="k">Package</div><div class="v" id="statPackage">-</div><div class="d" id="statPackageDetail">Zip size</div></div>
+          <div class="stat"><div class="k">Active</div><div class="v" id="statActive">-</div><div class="d" id="statActiveDetail">Loaded backend</div></div>
+        </div>
+      </section>
+
+      <section class="card" id="threeDViewerCard" style="display:none">
+        <h2>3D Model Viewer</h2>
+        <div class="stats">
+          <div class="stat"><div class="k">Parameters</div><div class="v" id="threeDStatParams">-</div><div class="d">Small specialist size</div></div>
+          <div class="stat"><div class="k">Train Acc</div><div class="v" id="threeDStatTrain">-</div><div class="d">Last training run</div></div>
+          <div class="stat"><div class="k">Val Acc</div><div class="v" id="threeDStatVal">-</div><div class="d">Holdout accuracy</div></div>
+          <div class="stat"><div class="k">Concepts</div><div class="v" id="threeDStatConcepts">-</div><div class="d">OpenSCAD targets</div></div>
+        </div>
+        <p class="model-note" id="threeDViewerNote">Select the 3D model to inspect its packaged artifact.</p>
+        <div class="action-row" style="margin-top:12px">
+          <a class="ghost" id="threeDZipLink" href="#" download>Download Model ZIP</a>
+          <a class="ghost" id="threeDSummaryLink" href="#" download>Download Summary JSON</a>
+        </div>
+        <div class="status-box" id="threeDViewerSummary" style="margin-top:12px">Waiting for 3D model details...</div>
+      </section>
+
+      <section class="card">
+        <h2>Prompt Tuning</h2>
+        <div class="field">
+          <label>Agent Mode</label>
+          <select id="agentMode">
+            <option value="off">Off</option>
+            <option value="loop">Loop Agent</option>
+            <option value="collective">Collective Panel</option>
+            <option value="collective_loop">Collective + Loop</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Loop Budget</label>
+          <select id="loopBudget">
+            <option value="3">3 autonomous steps</option>
+            <option value="4" selected>4 autonomous steps</option>
+            <option value="6">6 autonomous steps</option>
+            <option value="8">8 autonomous steps</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Memory Learning</label>
+          <select id="memoryMode">
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Web Search Tool</label>
+          <select id="webSearchMode">
+            <option value="off">Off</option>
+            <option value="on">On</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Style</label>
+          <select id="styleMode">
+            <option value="auto">Auto</option>
+            <option value="balanced">Balanced</option>
+            <option value="concise">Concise</option>
+            <option value="creative">Creative</option>
+            <option value="analyst">Analyst</option>
+            <option value="coding">Coding</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>System Hint</label>
+          <textarea id="systemHint" placeholder="Optional session steering for text models. Example: prefer direct answers and concrete steps."></textarea>
+        </div>
+        <div class="field">
+          <label>Image Style</label>
+          <select id="imageStyle">
+            <option value="auto">Auto</option>
+            <option value="photo">Photo</option>
+            <option value="cinematic">Cinematic</option>
+            <option value="illustration">Illustration</option>
+            <option value="anime">Anime</option>
+          </select>
+        </div>
+        <div class="note">Loop Agent keeps planner, worker, and reviewer passes running until the task looks complete or the loop budget is spent. Collective Panel consults every chat-capable local model before synthesis, and Collective + Loop uses those consultations inside each autonomous cycle. Memory Learning persists session facts and strong prior exchanges, and Web Search gives the models a callable lookup tool for current information.</div>
+      </section>
+
+      <section class="card">
+        <h2>Session Brief</h2>
+        <div class="field">
+          <label>Objective</label>
+          <input id="sessionObjective" placeholder="What is this chat trying to achieve?">
+        </div>
+        <div class="field">
+          <label>Constraints</label>
+          <textarea id="sessionConstraints" placeholder="Deadlines, limits, must-use tools, style constraints, or facts to preserve."></textarea>
+        </div>
+        <div class="field">
+          <label>Done Looks Like</label>
+          <input id="sessionDone" placeholder="What would count as a good final answer?">
+        </div>
+        <div class="action-row">
+          <button class="ghost" id="applyBriefBtn">Apply To Hint</button>
+          <button class="ghost" id="clearBriefBtn">Clear Brief</button>
+        </div>
+        <div class="note" id="sessionBriefNote">Keep a compact working brief here. It can be folded into the next prompt without rewriting it every time.</div>
+      </section>
+
+      <section class="card">
+        <h2>Draft Shelf</h2>
+        <div class="field">
+          <label>Draft Label</label>
+          <input id="draftLabel" placeholder="Optional label for the current prompt draft">
+        </div>
+        <div class="action-row">
+          <button class="ghost" id="saveDraftBtn">Save Draft</button>
+          <button class="ghost" id="insertLatestDraftBtn">Insert Latest</button>
+        </div>
+        <div class="draft-list" id="savedDrafts">No saved drafts yet.</div>
+      </section>
+
+      <section class="card">
+        <h2>Context Bank</h2>
+        <div class="field">
+          <label>Manual Context Note</label>
+          <textarea id="contextNoteInput" placeholder="Save a fact, requirement, or constraint you want to keep on hand."></textarea>
+        </div>
+        <div class="action-row">
+          <button class="ghost" id="addContextNoteBtn">Add Note</button>
+          <button class="ghost" id="captureLastReplyBtn">Capture Last Reply</button>
+          <button class="ghost" id="clearContextBankBtn">Clear Context</button>
+        </div>
+        <div class="context-list" id="contextBankList">No saved context yet.</div>
+      </section>
+
+      <section class="card">
+        <h2>Exports</h2>
+        <div class="field">
+          <label>Save Path</label>
+          <input id="savePath" placeholder="Optional folder or full .png path">
+        </div>
+        <div class="action-row">
+          <button class="ghost" id="saveChatImageBtn">Save Chat Image</button>
+          <button class="ghost" id="saveLastImageBtn">Save Last Image</button>
+        </div>
+        <div class="note">Use a folder path to keep the generated filename, or a full `.png` path when you want a specific exported file target.</div>
+      </section>
+
+      <section class="card">
+        <h2>Thread Tools</h2>
+        <div class="thread-tools">
+          <div class="thread-kpis">
+            <div class="thread-kpi"><div class="k">Messages</div><div class="v" id="threadMessageCount">0</div></div>
+            <div class="thread-kpi"><div class="k">Assistant</div><div class="v" id="threadAssistantCount">0</div></div>
+            <div class="thread-kpi"><div class="k">Images</div><div class="v" id="threadImageCount">0</div></div>
           </div>
-          <div class="mode-card" data-mode="collective">
-            <div class="mc-title"><div class="mc-dot col"></div>Collective Synthesis</div>
-            <div class="mc-desc">Ensemble reasoning. V46 consults sub-experts before delivering a unified response.</div>
+          <div class="field" style="margin-bottom:0">
+            <label>Find In Thread</label>
+            <input id="threadFilter" placeholder="Filter replies, prompts, or route notes">
           </div>
-          <div class="mode-card" data-mode="loop">
-            <div class="mc-title"><div class="mc-dot loop"></div>Autonomous Frontier</div>
-            <div class="mc-desc">Recursive loop for complex workflows. Self-correcting multi-step planner.</div>
+          <div class="subgrid">
+            <button class="ghost" id="copyLastBtn">Copy Last Reply</button>
+            <button class="ghost" id="jumpBottomBtn">Jump To Latest</button>
+            <button class="ghost" id="copyThreadBtn">Copy Full Thread</button>
+            <button class="ghost" id="downloadThreadBtn">Download JSON</button>
+          </div>
+          <div class="subgrid">
+            <button class="ghost" id="toggleAutoScrollBtn">Auto-scroll On</button>
+            <button class="ghost" id="toggleMetaBtn">Hide Meta</button>
+            <button class="ghost" id="jumpMatchBtn">Next Match</button>
+            <button class="ghost" id="clearThreadFilterBtn">Clear Filter</button>
+          </div>
+          <div class="note" id="threadMatchNote">Matches: -</div>
+          <div class="note">Filter dims non-matching messages. Copy and download actions use the live session transcript you see in the thread.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Thread Navigator</h2>
+        <div class="bookmark-list" id="threadBookmarks">No bookmarks yet.</div>
+        <div class="note" id="bookmarkNote">Bookmark a message in the thread to jump back to it later.</div>
+      </section>
+
+      <section class="card">
+        <h2>Compare Bench</h2>
+        <div class="compare-slot empty" id="compareSlotA">Pin an assistant reply into slot A to compare models, tone, or route decisions.</div>
+        <div class="compare-slot empty" id="compareSlotB" style="margin-top:10px">Pin a second assistant reply into slot B for a direct side-by-side view.</div>
+        <div class="status-box" id="compareSummary" style="margin-top:12px">Choose two assistant replies to compare structure, route notes, and length.</div>
+        <div class="action-row" style="margin-top:12px">
+          <button class="ghost" id="swapCompareBtn">Swap A/B</button>
+          <button class="ghost" id="clearCompareBtn">Clear Compare</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Status</h2>
+        <div class="status-box" id="statusBox">Waiting for runtime status...</div>
+      </section>
+
+      <section class="card">
+        <h2>Memory Snapshot</h2>
+        <div class="status-box" id="memoryBox">Waiting for session memory...</div>
+      </section>
+    </aside>
+
+    <main class="panel chat">
+      <header class="chat-head">
+        <div>
+          <h3 id="chatTitle">Preparing multimodel runtime...</h3>
+          <div class="chat-sub" id="chatSub">The dropdown lets you pin one model, while Auto chooses the most appropriate local model for each prompt.</div>
+        </div>
+        <div class="pill" id="sessionBadge">session pending</div>
+      </header>
+
+      <section class="live-strip">
+        <div>
+          <div class="live-row" id="liveStateChips"></div>
+          <div class="note" id="liveStateNote">Checking runtime state...</div>
+        </div>
+        <div class="composer-stats" id="sessionMetrics"></div>
+      </section>
+
+      <section class="thread" id="thread">
+        <div class="welcome" id="welcomeCard">
+          Use <strong>Auto</strong> for per-prompt routing, or pin a single model from the dropdown.
+          Image-capable models can return generated images directly in this thread, and vision-capable models can analyze an uploaded image in the same chat.
+        </div>
+      </section>
+
+      <footer class="composer" id="composer">
+        <div class="composer-main">
+          <div class="compose-toolbar">
+            <div class="deck-tabs">
+              <button class="mini-btn deck-tab" id="composeQuickBtn" data-compose-tab="quick">Quick</button>
+              <button class="mini-btn deck-tab" id="composeMediaBtn" data-compose-tab="media">Media</button>
+              <button class="mini-btn deck-tab" id="composeWorkbenchBtn" data-compose-tab="workbench">Workbench</button>
+            </div>
+            <div class="action-row">
+              <button class="ghost" id="toggleSidebarBtn">Focus Layout</button>
+              <button class="ghost" id="toggleThreadDensityBtn">Compact Thread</button>
+              <button class="ghost" id="toggleComposerBtn">Compact Composer</button>
+            </div>
+          </div>
+          <div class="compose-scroll" id="composeScroll">
+            <section class="compose-panel" data-compose-panel="quick">
+              <textarea id="prompt" placeholder="Type a message, coding question, reasoning task, or image prompt. Press Enter to send, Shift+Enter for a new line."></textarea>
+              <div class="chip-row" id="starterChips"></div>
+              <div class="focus-row" id="focusChips"></div>
+            </section>
+            <section class="compose-panel" data-compose-panel="media" hidden>
+              <div class="mode-row">
+                <input id="imageWidth" type="number" min="64" max="1024" step="64" value="512" placeholder="Width">
+                <input id="imageHeight" type="number" min="64" max="1024" step="64" value="512" placeholder="Height">
+                <input id="imageSteps" type="number" min="1" max="4" step="1" value="2" placeholder="Steps">
+              </div>
+              <div class="upload-box" id="uploadBox" style="display:none">
+                <div class="upload-row">
+                  <input id="imageUpload" type="file" accept="image/*">
+                  <button class="ghost" id="uploadBtn">Upload Image</button>
+                  <button class="ghost" id="clearUploadBtn">Clear Upload</button>
+                </div>
+                <div class="note" id="uploadStatus">Select a vision-capable model or Auto to attach an image.</div>
+                <div class="upload-preview" id="uploadPreview"></div>
+              </div>
+            </section>
+            <section class="compose-panel" data-compose-panel="workbench" hidden>
+              <div class="workbench-grid">
+                <div class="dispatch-box" id="dispatchPreview">
+                  <strong>Dispatch Preview</strong>
+                  Route planning is loading.
+                </div>
+                <div class="dispatch-box">
+                  <strong>Response Deck</strong>
+                  <div class="response-deck" id="responseDeck"></div>
+                  <div class="note" id="responseDeckNote">Add a response shape or output contract without rewriting the whole prompt.</div>
+                </div>
+              </div>
+              <div class="workbench-grid triad">
+                <div class="dispatch-box">
+                  <strong>Outcome Board</strong>
+                  <div class="control-grid">
+                    <div class="field">
+                      <label>Deliverable</label>
+                      <input id="deliverableTarget" placeholder="What artifact should this chat produce?">
+                    </div>
+                    <div class="field">
+                      <label>Success Checks</label>
+                      <textarea id="successChecks" placeholder="What must be true for the answer to count as done?"></textarea>
+                    </div>
+                    <div class="field">
+                      <label>Risks Or Blockers</label>
+                      <textarea id="riskBox" placeholder="Uncertainties, blockers, sensitive assumptions, or traps to watch."></textarea>
+                    </div>
+                    <div class="action-row">
+                      <button class="ghost" id="applyOutcomeBtn">Fold Into Hint</button>
+                      <button class="ghost" id="clearOutcomeBtn">Clear Outcome</button>
+                    </div>
+                    <div class="note outcome-note" id="outcomeBoardNote">Turn the chat into a task-shaped workspace instead of a pure linear thread.</div>
+                  </div>
+                </div>
+                <div class="dispatch-box">
+                  <strong>Confidence Contract</strong>
+                  <div class="contract-grid">
+                    <div class="field">
+                      <label>Confidence Mode</label>
+                      <select id="confidenceMode">
+                        <option value="standard">Standard</option>
+                        <option value="calibrated">Calibrated answer</option>
+                        <option value="uncertainty_first">Uncertainty first</option>
+                        <option value="risk_controlled">Refuse if weak</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Evidence Mode</label>
+                      <select id="evidenceMode">
+                        <option value="balanced">Balanced</option>
+                        <option value="verify_first">Verify first</option>
+                        <option value="ledger">Assumption ledger</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Clarify First</label>
+                      <select id="clarifyMode">
+                        <option value="off">Off</option>
+                        <option value="on">On</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Surface Assumptions</label>
+                      <select id="assumptionMode">
+                        <option value="off">Off</option>
+                        <option value="on">On</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="note contract-note" id="confidenceContractNote" style="margin-top:10px">Make the assistant state confidence, uncertainty, and assumptions more deliberately when the task needs it.</div>
+                </div>
+                <div class="dispatch-box">
+                  <strong>Refinement Studio</strong>
+                  <div class="refine-deck" id="refinementDeck"></div>
+                  <div class="action-row" style="margin-top:10px">
+                    <button class="ghost" id="refineLastReplyBtn">Refine Last Reply</button>
+                    <button class="ghost" id="challengeLastReplyBtn">Challenge Last Reply</button>
+                  </div>
+                  <div class="note" id="refinementNote">Use self-critique and revision passes to tighten the latest answer before you send a follow-up.</div>
+                </div>
+              </div>
+              <div class="composer-meta">
+                <div class="composer-stats" id="promptStats"></div>
+                <div class="note" id="shortcutNote">Enter sends, Shift+Enter adds a new line.</div>
+              </div>
+            </section>
           </div>
         </div>
-      </div>
-      <div class="panel-section" id="loopPanel" style="display:none">
-        <h4>Loop Observation</h4>
-        <div class="loop-steps" id="loopSteps"></div>
-      </div>
-    </div>
-
-    <!-- BENCH tab -->
-    <div class="panel-body" id="ptab-bench" style="display:none">
-      <div class="panel-section">
-        <h4>V46 20-Suite Benchmarks</h4>
-        <div class="bench-wrap" id="benchWrap">
-          <img id="benchImg" src="" alt="Benchmark comparison" style="display:none">
-          <div class="bench-note" id="benchNote">Initializing frontier telemetry...</div>
+        <div class="send-col">
+          <button class="primary" id="sendBtn">Send</button>
+          <div class="send-support">
+            <div class="note" id="routeNote">Route: Auto</div>
+            <div class="note" id="composerDockNote">Quick keeps the prompt visible. Media holds image controls. Workbench holds route preview and response shaping.</div>
+          </div>
         </div>
-        <div style="margin-top:24px;display:flex;flex-direction:column;gap:12px" id="benchScores"></div>
-      </div>
-    </div>
+      </footer>
+    </main>
+  </div>
+  <div class="toast-rack" id="toastRack"></div>
 
-    <div class="panel-footer" id="panelStatus">system: active  |  accelerator: auto  |  v: 46.20</div>
-  </aside>
-</div>
-
-<div id="toasts"></div>
-
-<script>
-(function() {
-  'use strict';
-
-  // ── Helpers ──────────────────────────────────────────────────────────
-  const el   = id => document.getElementById(id);
-  const qs   = (sel, root=document) => root.querySelector(sel);
-  const qsa  = (sel, root=document) => [...root.querySelectorAll(sel)];
-  const sessionId = ([1e7]+-1e3+-4e3+-8e2+-1e11).replace(/[018]/g, c =>
-    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16));
-
-  let agentMode   = 'off';
-  let currentUpload = null;
-  let currentUpUrl  = '';
-  let loopStep = 0;
-  let catalogByKey = {};
-
-  async function api(path, body=null) {
-    const opts = body
-      ? { method:'POST', body:JSON.stringify(body),
-          headers:{'Content-Type':'application/json'} }
-      : {};
-    const r = await fetch(path, opts);
-    if (!r.ok) {
-      let message = await r.text();
-      try {
-        const parsed = JSON.parse(message);
-        if (parsed && parsed.error) message = parsed.error;
-      } catch (_) {}
-      throw new Error(message);
-    }
-    return r.json();
-  }
-
-  function toast(type, msg) {
-    const t = document.createElement('div');
-    t.className = `toast ${type}`;
-    t.textContent = msg;
-    el('toasts').prepend(t);
-    setTimeout(() => t.remove(), 4000);
-  }
-
-  // Smart Scrolling Logic
-  function scrollToBottom(force = false) {
+  <script>
+    const el = (id) => document.getElementById(id);
     const thread = el('thread');
-    const threshold = 120; // px from bottom
-    const isAtBottom = thread.scrollHeight - thread.scrollTop <= thread.clientHeight + threshold;
-    if (force || isAtBottom) {
-      thread.scrollTo({ top: thread.scrollHeight, behavior: 'smooth' });
+    const sessionKey = 'supermix-studio-session-id';
+    let sessionId = localStorage.getItem(sessionKey);
+    if(!sessionId){
+      sessionId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+      localStorage.setItem(sessionKey, sessionId);
     }
-  }
+    el('sessionBadge').textContent = 'session ' + sessionId.slice(0, 8);
 
-  // ── Tabs (rail) ─────────────────────────────────────────────────────
-  qsa('.rail-item[data-tab]').forEach(btn => {
-    btn.onclick = () => {
-      qsa('.rail-item[data-tab]').forEach(b => b.classList.remove('on'));
-      btn.classList.add('on');
-      const ptab = btn.dataset.tab === 'bench' ? 'bench'
-                 : btn.dataset.tab === 'settings' ? 'model'
-                 : 'model';
-      switchPtab(ptab);
-    };
-  });
+    const STARTERS = [
+      'Debug this stack trace and tell me the most likely root cause.',
+      'Compare two ways to solve this problem and tell me the tradeoffs.',
+      'Generate a cinematic poster of a storm-battered lighthouse at night.',
+      'Rewrite this draft so it sounds more direct and professional.',
+      'Give me a compact step-by-step plan to finish this task.'
+    ];
+    const RESPONSE_DECK = [
+      {key:'brief', label:'Brief', text:'Keep the answer compact and high-signal. Prefer a short paragraph or a tight bullet list.'},
+      {key:'checklist', label:'Checklist', text:'Return the answer as a practical checklist with only the steps that matter.'},
+      {key:'compare', label:'Compare', text:'Structure the answer as a comparison table or clear tradeoff breakdown before recommending one option.'},
+      {key:'json', label:'JSON', text:'Return the result as strict JSON with stable field names and no prose outside the JSON block.'},
+      {key:'deep', label:'Deep Dive', text:'Take extra time, show the reasoning path explicitly, and include the strongest caveats or failure modes.'},
+      {key:'ledger', label:'Evidence Ledger', text:'Structure the answer with separate sections for verified facts, assumptions, risks, and the next checks.'},
+      {key:'repair', label:'Critique + Repair', text:'First identify the weakest parts of the answer, then provide a corrected improved version.'},
+    ];
+    const FOCUS_PACKS = [
+      {key:'grounded', label:'Grounded', style:'analyst', hint:'Use only claims you can support from the prompt, chat context, or available tools. Flag uncertainty explicitly.'},
+      {key:'think', label:'Think Longer', style:'balanced', hint:'Spend extra time comparing options, checking for contradictions, and tightening the final answer before responding.'},
+      {key:'coding', label:'Coding', style:'coding', hint:'Prefer concrete debugging steps, direct fixes, and implementation detail over generic advice.'},
+      {key:'compare', label:'Compare', style:'analyst', hint:'Structure the answer as a compact comparison with tradeoffs, risks, and the strongest recommendation.'},
+      {key:'creative', label:'Creative', style:'creative', hint:'Keep the answer imaginative but coherent, with vivid detail and a clear final shape.'}
+    ];
+    const REFINEMENT_PRESETS = [
+      {key:'tighten', label:'Tighten', note:'Compress the answer while keeping the important substance.'},
+      {key:'challenge', label:'Challenge', note:'Stress-test weak assumptions before trusting the result.'},
+      {key:'humanize', label:'Humanize', note:'Improve communication quality, flow, and readability.'},
+      {key:'planify', label:'Planify', note:'Convert the answer into a concrete execution plan.'},
+      {key:'code_audit', label:'Code Audit', note:'Review the answer like a senior engineer and repair gaps.'},
+    ];
+    const uiStateKey = 'supermix-studio-ui-state-v5';
+    const briefMarker = '[Session Brief]';
+    const outcomeMarker = '[Outcome Board]';
+    const contractMarker = '[Confidence Contract]';
 
-  // ── Panel tabs ───────────────────────────────────────────────────────
-  qsa('.ptab').forEach(btn => {
-    btn.onclick = () => switchPtab(btn.dataset.ptab);
-  });
+    let catalog = [];
+    let modelStoreRows = [];
+    let modelStoreJobs = [];
+    let modelStorePollHandle = 0;
+    let selectedModelKey = 'auto';
+    let transcript = [];
+    let lastGeneratedImagePath = '';
+    let currentUploadedImagePath = '';
+    let currentUploadedImageUrl = '';
+    let currentUploadedImageName = '';
+    let activeFocusKey = '';
+    let composeTab = 'quick';
+    let focusLayout = false;
+    let compactThread = false;
+    let composerCompact = false;
+    let autoScrollEnabled = true;
+    let hideThreadMeta = false;
+    let threadMatches = [];
+    let threadMatchIndex = 0;
+    let sessionBrief = {objective:'', constraints:'', done:''};
+    let outcomeBoard = {deliverable:'', checks:'', risks:''};
+    let confidenceContract = {confidence_mode:'standard', evidence_mode:'balanced', clarify_first:'off', surface_assumptions:'off'};
+    let savedDrafts = [];
+    let contextBank = [];
+    let threadBookmarks = [];
+    let compareSlots = {a:null, b:null};
+    let messageSerial = 0;
 
-  function switchPtab(name) {
-    qsa('.ptab').forEach(b => b.classList.toggle('on', b.dataset.ptab === name));
-    ['model','mode','bench'].forEach(t =>
-      el(`ptab-${t}`).style.display = t===name ? 'flex' : 'none');
-    if (name === 'bench') loadBenchData();
-  }
+    function readUiState(){
+      try{
+        const raw = localStorage.getItem(uiStateKey);
+        if(!raw) return {};
+        return JSON.parse(raw) || {};
+      }catch(_error){
+        return {};
+      }
+    }
 
-  // ── Mode cards ───────────────────────────────────────────────────────
-  qsa('.mode-card').forEach(c => {
-    c.onclick = () => {
-      qsa('.mode-card').forEach(x => x.classList.remove('on'));
-      c.classList.add('on');
-      agentMode = c.dataset.mode;
-      el('loopPanel').style.display = agentMode==='loop' ? 'block' : 'none';
-      el('loopSteps').innerHTML = '';
-      loopStep = 0;
-      updateModePill();
-      toast('ok', `Switched to ${agentMode} mode`);
-    };
-  });
+    const bootState = readUiState();
+    sessionBrief = Object.assign({}, sessionBrief, bootState.sessionBrief || {});
+    outcomeBoard = Object.assign({}, outcomeBoard, bootState.outcomeBoard || {});
+    confidenceContract = Object.assign({}, confidenceContract, bootState.confidenceContract || {});
+    savedDrafts = Array.isArray(bootState.savedDrafts) ? bootState.savedDrafts.slice(0, 10) : [];
+    contextBank = Array.isArray(bootState.contextBank) ? bootState.contextBank.slice(0, 12) : [];
+    composeTab = typeof bootState.composeTab === 'string' ? bootState.composeTab : 'quick';
+    focusLayout = Boolean(bootState.focusLayout);
+    compactThread = Boolean(bootState.compactThread);
+    composerCompact = Boolean(bootState.composerCompact);
+    autoScrollEnabled = bootState.autoScrollEnabled !== false;
+    hideThreadMeta = Boolean(bootState.hideThreadMeta);
 
-  function updateModePill() {
-    const pill = el('modePill');
-    const labels = { off:'Standard', collective:'Collective', loop:'Autonomous' };
-    if (agentMode === 'off') { pill.style.display='none'; return; }
-    pill.style.display='block';
-    pill.textContent = labels[agentMode] || agentMode;
-    pill.style.color = agentMode==='collective' ? 'var(--teal)' : 'var(--amber)';
-    pill.style.borderColor = agentMode==='collective'
-      ? 'rgba(45,212,191,.4)' : 'rgba(245,158,11,.4)';
-    pill.style.background = agentMode==='collective'
-      ? 'rgba(45,212,191,.08)' : 'rgba(245,158,11,.08)';
-  }
+    function escapeHtml(value){
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    }
 
-  // ── Thread ───────────────────────────────────────────────────────────
-  function addMsg(role, text, trace=null, extra='') {
-    const row = document.createElement('div');
-    row.className = `msg ${role}`;
+    function persistUiState(){
+      localStorage.setItem(uiStateKey, JSON.stringify({
+        sessionBrief,
+        outcomeBoard,
+        confidenceContract,
+        composeTab,
+        focusLayout,
+        compactThread,
+        composerCompact,
+        autoScrollEnabled,
+        hideThreadMeta,
+        savedDrafts: savedDrafts.slice(0, 10),
+        contextBank: contextBank.slice(0, 12),
+      }));
+    }
 
-    const meta = document.createElement('div');
-    meta.className = 'msg-meta';
-    const av = document.createElement('div');
-    av.className = 'msg-avatar';
-    av.textContent = role==='user' ? 'U' : 'SX';
-    meta.append(av, document.createTextNode(role==='user' ? 'You' : 'Omni V46 Champion'));
-    if (role !== 'user') {
-      const copy = document.createElement('button');
-      copy.className = 'mini-copy';
-      copy.type = 'button';
-      copy.textContent = 'Copy';
-      copy.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(String(text || ''));
-          toast('ok', 'Copied response');
-        } catch (_) {
-          toast('err', 'Copy failed');
+    function textWordCount(value){
+      const text = String(value || '').trim();
+      return text ? text.split(/\\s+/).length : 0;
+    }
+
+    function summarizeText(value, maxLength){
+      const text = String(value || '').trim().replace(/\\s+/g, ' ');
+      if(!text) return '-';
+      if(text.length <= maxLength) return text;
+      return text.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
+    }
+
+    function currentSessionBrief(){
+      return {
+        objective: (el('sessionObjective')?.value || '').trim(),
+        constraints: (el('sessionConstraints')?.value || '').trim(),
+        done: (el('sessionDone')?.value || '').trim(),
+      };
+    }
+
+    function applySessionBriefInputs(){
+      el('sessionObjective').value = sessionBrief.objective || '';
+      el('sessionConstraints').value = sessionBrief.constraints || '';
+      el('sessionDone').value = sessionBrief.done || '';
+    }
+
+    function currentOutcomeBoard(){
+      return {
+        deliverable: (el('deliverableTarget')?.value || '').trim(),
+        checks: (el('successChecks')?.value || '').trim(),
+        risks: (el('riskBox')?.value || '').trim(),
+      };
+    }
+
+    function applyOutcomeBoardInputs(){
+      el('deliverableTarget').value = outcomeBoard.deliverable || '';
+      el('successChecks').value = outcomeBoard.checks || '';
+      el('riskBox').value = outcomeBoard.risks || '';
+    }
+
+    function currentConfidenceContract(){
+      return {
+        confidence_mode: (el('confidenceMode')?.value || 'standard').trim(),
+        evidence_mode: (el('evidenceMode')?.value || 'balanced').trim(),
+        clarify_first: (el('clarifyMode')?.value || 'off').trim(),
+        surface_assumptions: (el('assumptionMode')?.value || 'off').trim(),
+      };
+    }
+
+    function applyConfidenceContractInputs(){
+      el('confidenceMode').value = confidenceContract.confidence_mode || 'standard';
+      el('evidenceMode').value = confidenceContract.evidence_mode || 'balanced';
+      el('clarifyMode').value = confidenceContract.clarify_first || 'off';
+      el('assumptionMode').value = confidenceContract.surface_assumptions || 'off';
+    }
+
+    function buildSessionBriefText(source){
+      const brief = source || currentSessionBrief();
+      const lines = [];
+      if(brief.objective) lines.push('Objective: ' + brief.objective);
+      if(brief.constraints) lines.push('Constraints: ' + brief.constraints.replace(/\\s*\\n+\\s*/g, ' | '));
+      if(brief.done) lines.push('Done: ' + brief.done);
+      return lines.join('\\n');
+    }
+
+    function buildOutcomeBoardText(source){
+      const board = source || currentOutcomeBoard();
+      const lines = [];
+      if(board.deliverable) lines.push('Deliverable: ' + board.deliverable);
+      if(board.checks) lines.push('Success Checks: ' + board.checks.replace(/\\s*\\n+\\s*/g, ' | '));
+      if(board.risks) lines.push('Risks: ' + board.risks.replace(/\\s*\\n+\\s*/g, ' | '));
+      return lines.join('\\n');
+    }
+
+    function buildConfidenceContractText(source){
+      const contract = source || currentConfidenceContract();
+      const lines = [];
+      if(contract.confidence_mode === 'calibrated'){
+        lines.push('Calibrate the answer explicitly: separate what is strong from what is uncertain.');
+      }else if(contract.confidence_mode === 'uncertainty_first'){
+        lines.push('Lead with uncertainty when it materially changes the decision, then give the best supported answer.');
+      }else if(contract.confidence_mode === 'risk_controlled'){
+        lines.push('If confidence is too weak, refuse to guess and ask for clarification or more evidence.');
+      }
+      if(contract.evidence_mode === 'verify_first'){
+        lines.push('Prefer verification before strong claims. Mark anything not directly supported as tentative.');
+      }else if(contract.evidence_mode === 'ledger'){
+        lines.push('Use an assumption ledger: verified facts, assumptions, risks, and next checks.');
+      }
+      if(contract.clarify_first === 'on'){
+        lines.push('If the request is materially ambiguous, ask a short clarifying question before committing to an answer.');
+      }
+      if(contract.surface_assumptions === 'on'){
+        lines.push('Expose the key assumptions behind the answer instead of hiding them.');
+      }
+      return lines.join('\\n');
+    }
+
+    function stripManagedBlocks(value){
+      let text = String(value || '');
+      [briefMarker, outcomeMarker, contractMarker].forEach((marker) => {
+        const markerIndex = text.indexOf(marker);
+        if(markerIndex !== -1){
+          text = text.slice(0, markerIndex);
+        }
+      });
+      return text.trim();
+    }
+
+    function composeSystemHint(){
+      const base = stripManagedBlocks(el('systemHint').value || '');
+      const brief = buildSessionBriefText();
+      const outcome = buildOutcomeBoardText();
+      const contract = buildConfidenceContractText();
+      return [
+        base,
+        brief ? `${briefMarker}\\n${brief}` : '',
+        outcome ? `${outcomeMarker}\\n${outcome}` : '',
+        contract ? `${contractMarker}\\n${contract}` : '',
+      ].filter(Boolean).join('\\n\\n');
+    }
+
+    function syncSessionBrief(){
+      sessionBrief = currentSessionBrief();
+      persistUiState();
+      renderSessionBrief();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function syncOutcomeBoard(){
+      outcomeBoard = currentOutcomeBoard();
+      persistUiState();
+      renderOutcomeBoard();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function syncConfidenceContract(){
+      confidenceContract = currentConfidenceContract();
+      persistUiState();
+      renderConfidenceContract();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function clearSessionBrief(){
+      sessionBrief = {objective:'', constraints:'', done:''};
+      applySessionBriefInputs();
+      persistUiState();
+      renderSessionBrief();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function clearOutcomeBoard(){
+      outcomeBoard = {deliverable:'', checks:'', risks:''};
+      applyOutcomeBoardInputs();
+      persistUiState();
+      renderOutcomeBoard();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+    }
+
+    function renderSessionBrief(){
+      const brief = currentSessionBrief();
+      const parts = [];
+      if(brief.objective) parts.push(`Objective: ${brief.objective}`);
+      if(brief.constraints) parts.push(`Constraints: ${brief.constraints.replace(/\\s*\\n+\\s*/g, ' | ')}`);
+      if(brief.done) parts.push(`Done: ${brief.done}`);
+      el('sessionBriefNote').textContent = parts.length
+        ? parts.join('\\n')
+        : 'Keep a compact working brief here. It can be folded into the next prompt without rewriting it every time.';
+    }
+
+    function renderOutcomeBoard(){
+      const board = currentOutcomeBoard();
+      const parts = [];
+      if(board.deliverable) parts.push(`Deliverable: ${board.deliverable}`);
+      if(board.checks) parts.push(`Checks: ${board.checks.replace(/\\s*\\n+\\s*/g, ' | ')}`);
+      if(board.risks) parts.push(`Risks: ${board.risks.replace(/\\s*\\n+\\s*/g, ' | ')}`);
+      el('outcomeBoardNote').textContent = parts.length
+        ? parts.join('\\n')
+        : 'Turn the chat into a task-shaped workspace instead of a pure linear thread.';
+    }
+
+    function renderConfidenceContract(){
+      const contract = currentConfidenceContract();
+      const lines = [];
+      lines.push(`Confidence: ${contract.confidence_mode.replaceAll('_', ' ')}`);
+      lines.push(`Evidence: ${contract.evidence_mode.replaceAll('_', ' ')}`);
+      if(contract.clarify_first === 'on') lines.push('Clarify before committing when ambiguity matters.');
+      if(contract.surface_assumptions === 'on') lines.push('Assumptions will be surfaced instead of hidden.');
+      el('confidenceContractNote').textContent = lines.join('\\n');
+    }
+
+    function applyBriefToHint(){
+      const composed = composeSystemHint();
+      el('systemHint').value = composed;
+      updatePromptStats();
+      updateDispatchPreview();
+      showToast('ok', composed ? 'Session brief folded into system hint.' : 'No brief to apply.');
+    }
+
+    function applyLayoutState(){
+      el('appShell').classList.toggle('focus-chat', focusLayout);
+      el('toggleSidebarBtn').textContent = focusLayout ? 'Show Studio Rail' : 'Focus Layout';
+      el('composerDockNote').textContent = focusLayout
+        ? 'Focus layout hides the left rail so the thread and composer get the full width.'
+        : 'Quick keeps the prompt visible. Media holds image controls. Workbench holds route preview and response shaping.';
+      applyThreadMetaState();
+      applyComposerCompactState();
+      applyAutoScrollState();
+    }
+
+    function applyThreadDensity(){
+      thread.classList.toggle('compact', compactThread);
+      el('toggleThreadDensityBtn').textContent = compactThread ? 'Comfortable Thread' : 'Compact Thread';
+    }
+
+    function setComposeTab(nextTab){
+      const allowed = ['quick', 'media', 'workbench'];
+      const cooked = allowed.includes(nextTab) ? nextTab : 'quick';
+      const finalTab = composerCompact ? 'quick' : cooked;
+      composeTab = finalTab;
+      document.querySelectorAll('[data-compose-tab]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.composeTab === finalTab);
+      });
+      document.querySelectorAll('[data-compose-panel]').forEach((panel) => {
+        panel.hidden = panel.dataset.composePanel !== finalTab;
+      });
+      persistUiState();
+    }
+
+    function buildResponseDeck(){
+      const box = el('responseDeck');
+      box.innerHTML = '';
+      RESPONSE_DECK.forEach((item) => {
+        const button = document.createElement('button');
+        button.className = 'chip';
+        button.type = 'button';
+        button.textContent = item.label;
+        button.onclick = () => {
+          const current = (el('prompt').value || '').trim();
+          const nextPrompt = [current, item.text].filter(Boolean).join('\\n\\n');
+          el('prompt').value = nextPrompt;
+          updatePromptStats();
+          el('prompt').focus();
+          showToast('ok', `${item.label} response shape added.`);
+        };
+        box.appendChild(button);
+      });
+    }
+
+    function buildRefinementPrompt(sourceText, presetKey){
+      const clean = String(sourceText || '').trim();
+      if(!clean) return '';
+      if(presetKey === 'challenge'){
+        return `Critique the answer below. Identify the weakest assumptions, missing risks, or wrong turns. Then provide a corrected stronger version.\n\n[Answer]\n${clean}`;
+      }
+      if(presetKey === 'humanize'){
+        return `Rewrite the answer below so it communicates better to a human reader: cleaner flow, clearer headings, less jargon, and better transitions. Preserve the substance.\n\n[Answer]\n${clean}`;
+      }
+      if(presetKey === 'planify'){
+        return `Turn the answer below into an execution plan with milestones, decision points, checks, and the immediate next action.\n\n[Answer]\n${clean}`;
+      }
+      if(presetKey === 'code_audit'){
+        return `Review the answer below like a senior engineer. Find implementation gaps, risky assumptions, missing edge cases, and weak tradeoffs. Then provide an improved version.\n\n[Answer]\n${clean}`;
+      }
+      return `Revise the answer below. Make it shorter, clearer, and more information-dense without losing important substance. Return only the improved version.\n\n[Answer]\n${clean}`;
+    }
+
+    function latestAssistantReply(){
+      return [...transcript].reverse().find((item) => item.role === 'assistant' && item.response) || null;
+    }
+
+    function queueRefinementPrompt(sourceText, presetKey, sourceLabel){
+      const prompt = buildRefinementPrompt(sourceText, presetKey);
+      if(!prompt){
+        showToast('err', 'There is no assistant reply to refine yet.');
+        return;
+      }
+      el('prompt').value = prompt;
+      setComposeTab('quick');
+      updatePromptStats();
+      el('prompt').focus();
+      const preset = REFINEMENT_PRESETS.find((item) => item.key === presetKey);
+      showToast('ok', `${preset?.label || 'Refinement'} prompt prepared${sourceLabel ? ` from ${sourceLabel}` : ''}.`);
+    }
+
+    function buildRefinementDeck(){
+      const box = el('refinementDeck');
+      box.innerHTML = '';
+      REFINEMENT_PRESETS.forEach((preset) => {
+        const button = document.createElement('button');
+        button.className = 'chip';
+        button.type = 'button';
+        button.textContent = preset.label;
+        button.onclick = () => {
+          const last = latestAssistantReply();
+          queueRefinementPrompt(last?.response || '', preset.key, 'latest reply');
+        };
+        box.appendChild(button);
+      });
+    }
+
+    function inferDraftLabel(prompt){
+      const compact = summarizeText(prompt, 42);
+      return compact === '-' ? 'Untitled draft' : compact;
+    }
+
+    function renderSavedDrafts(){
+      const box = el('savedDrafts');
+      box.innerHTML = '';
+      if(!savedDrafts.length){
+        box.textContent = 'No saved drafts yet.';
+        return;
+      }
+      savedDrafts.forEach((draft) => {
+        const item = document.createElement('div');
+        item.className = 'draft-item';
+        item.innerHTML = `
+          <div class="draft-item-top">
+            <div>
+              <div class="draft-item-title">${escapeHtml(draft.label || 'Untitled draft')}</div>
+              <div class="note">${escapeHtml(draft.model_label || draft.model_key || 'current route')}</div>
+            </div>
+            <div class="note">${escapeHtml(draft.created_at || '')}</div>
+          </div>
+          <div class="draft-item-sub">${escapeHtml(summarizeText(draft.prompt, 180))}</div>
+        `;
+        const actions = document.createElement('div');
+        actions.className = 'draft-item-actions';
+        const insertBtn = document.createElement('button');
+        insertBtn.className = 'mini-btn';
+        insertBtn.textContent = 'Insert';
+        insertBtn.onclick = () => {
+          el('prompt').value = draft.prompt || '';
+          if(draft.model_key && findRecord(draft.model_key)){
+            selectedModelKey = draft.model_key;
+            el('modelSelect').value = draft.model_key;
+            updateModelPanel(findRecord(draft.model_key));
+            refreshUploadPanel();
+          }
+          if(draft.style_mode) el('styleMode').value = draft.style_mode;
+          updatePromptStats();
+          updateLiveState();
+          updateDispatchPreview();
+          el('prompt').focus();
+        };
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'mini-btn';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.onclick = () => {
+          savedDrafts = savedDrafts.filter((itemDraft) => itemDraft.id !== draft.id);
+          persistUiState();
+          renderSavedDrafts();
+          updateDispatchPreview();
+        };
+        actions.appendChild(insertBtn);
+        actions.appendChild(deleteBtn);
+        item.appendChild(actions);
+        box.appendChild(item);
+      });
+    }
+
+    function saveCurrentDraft(){
+      const prompt = (el('prompt').value || '').trim();
+      if(!prompt){
+        showToast('err', 'Write a prompt before saving a draft.');
+        return;
+      }
+      const record = findRecord(el('modelSelect').value) || findRecord(selectedModelKey) || findRecord('auto');
+      const label = (el('draftLabel').value || '').trim() || inferDraftLabel(prompt);
+      const draft = {
+        id: String(Date.now()),
+        label,
+        prompt,
+        model_key: record?.key || selectedModelKey,
+        model_label: record?.label || record?.key || 'Auto',
+        style_mode: el('styleMode').value,
+        created_at: new Date().toLocaleString(),
+      };
+      savedDrafts = [draft, ...savedDrafts.filter((item) => item.prompt !== prompt)].slice(0, 10);
+      persistUiState();
+      renderSavedDrafts();
+      updateDispatchPreview();
+      showToast('ok', `Saved draft: ${label}`);
+    }
+
+    function renderContextBank(){
+      const box = el('contextBankList');
+      box.innerHTML = '';
+      if(!contextBank.length){
+        box.textContent = 'No saved context yet.';
+        return;
+      }
+      contextBank.forEach((entry) => {
+        const item = document.createElement('div');
+        item.className = 'context-item';
+        item.innerHTML = `
+          <div class="context-item-title">${escapeHtml(entry.label || 'Context')}</div>
+          <div class="context-item-sub">${escapeHtml(summarizeText(entry.text, 190))}</div>
+        `;
+        const actions = document.createElement('div');
+        actions.className = 'context-item-actions';
+
+        const insertBtn = document.createElement('button');
+        insertBtn.className = 'mini-btn';
+        insertBtn.textContent = 'Insert';
+        insertBtn.onclick = () => {
+          const current = (el('prompt').value || '').trim();
+          el('prompt').value = [current, entry.text].filter(Boolean).join('\\n\\n');
+          updatePromptStats();
+          el('prompt').focus();
+        };
+
+        const hintBtn = document.createElement('button');
+        hintBtn.className = 'mini-btn';
+        hintBtn.textContent = 'To Hint';
+        hintBtn.onclick = () => {
+          const base = stripManagedBlocks(el('systemHint').value || '');
+          el('systemHint').value = [base, entry.text].filter(Boolean).join('\\n\\n');
+          updatePromptStats();
+          updateDispatchPreview();
+        };
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'mini-btn';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.onclick = () => {
+          contextBank = contextBank.filter((row) => row.id !== entry.id);
+          persistUiState();
+          renderContextBank();
+          updatePromptStats();
+          updateLiveState();
+        };
+
+        actions.appendChild(insertBtn);
+        actions.appendChild(hintBtn);
+        actions.appendChild(deleteBtn);
+        item.appendChild(actions);
+        box.appendChild(item);
+      });
+    }
+
+    function addContextEntry(text, label){
+      const clean = String(text || '').trim();
+      if(!clean) return false;
+      const entry = {
+        id: String(Date.now() + Math.random()),
+        label: label || inferDraftLabel(clean),
+        text: clean,
+      };
+      contextBank = [entry, ...contextBank.filter((item) => item.text !== clean)].slice(0, 12);
+      persistUiState();
+      renderContextBank();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+      return true;
+    }
+
+    function addManualContext(){
+      const text = (el('contextNoteInput').value || '').trim();
+      if(!text){
+        showToast('err', 'Write a context note first.');
+        return;
+      }
+      if(addContextEntry(text, 'Manual note')){
+        el('contextNoteInput').value = '';
+        showToast('ok', 'Context note saved.');
+      }
+    }
+
+    function captureLastAssistantContext(){
+      const last = [...transcript].reverse().find((item) => item.role === 'assistant' && item.response);
+      if(!last){
+        showToast('err', 'No assistant reply to capture yet.');
+        return;
+      }
+      if(addContextEntry(last.response || '', last.model_label || 'Last reply')){
+        showToast('ok', 'Last reply added to context bank.');
+      }
+    }
+
+    function clearContextBank(){
+      contextBank = [];
+      persistUiState();
+      renderContextBank();
+      updatePromptStats();
+      updateLiveState();
+      updateDispatchPreview();
+      showToast('ok', 'Context bank cleared.');
+    }
+
+    function renderThreadBookmarks(){
+      const box = el('threadBookmarks');
+      box.innerHTML = '';
+      if(!threadBookmarks.length){
+        box.textContent = 'No bookmarks yet.';
+        el('bookmarkNote').textContent = 'Bookmark a message in the thread to jump back to it later.';
+        return;
+      }
+      threadBookmarks.forEach((entry) => {
+        const item = document.createElement('div');
+        item.className = 'bookmark-item';
+        item.innerHTML = `
+          <div class="bookmark-item-title">${escapeHtml(entry.label || 'Bookmark')}</div>
+          <div class="bookmark-item-sub">${escapeHtml(summarizeText(entry.snippet, 150))}</div>
+        `;
+        const actions = document.createElement('div');
+        actions.className = 'bookmark-item-actions';
+
+        const jumpBtn = document.createElement('button');
+        jumpBtn.className = 'mini-btn';
+        jumpBtn.textContent = 'Jump';
+        jumpBtn.onclick = () => {
+          const node = document.getElementById(entry.message_id);
+          if(node){
+            node.scrollIntoView({behavior:'smooth', block:'center'});
+            node.classList.remove('dim');
+          }
+        };
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'mini-btn';
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = () => {
+          threadBookmarks = threadBookmarks.filter((itemRow) => itemRow.id !== entry.id);
+          renderThreadBookmarks();
+          const node = document.getElementById(entry.message_id);
+          if(node){
+            node.classList.remove('bookmarked');
+          }
+        };
+
+        actions.appendChild(jumpBtn);
+        actions.appendChild(removeBtn);
+        item.appendChild(actions);
+        box.appendChild(item);
+      });
+      el('bookmarkNote').textContent = `${threadBookmarks.length} bookmark${threadBookmarks.length === 1 ? '' : 's'} in this thread.`;
+    }
+
+    function addThreadBookmark(card){
+      if(!card) return;
+      const messageId = card.dataset.messageId || '';
+      const snippet = card.dataset.messageText || '';
+      if(!messageId || !snippet){
+        showToast('err', 'Nothing bookmarkable on this message.');
+        return;
+      }
+      const label = card.dataset.messageLabel || card.dataset.messageRole || 'Message';
+      const entry = {
+        id: String(Date.now() + Math.random()),
+        message_id: messageId,
+        label,
+        snippet,
+      };
+      threadBookmarks = [entry, ...threadBookmarks.filter((item) => item.message_id !== messageId)].slice(0, 14);
+      card.classList.add('bookmarked');
+      renderThreadBookmarks();
+      showToast('ok', 'Thread bookmark saved.');
+    }
+
+    function renderCompareSlot(nodeId, slotLabel, payload){
+      const node = el(nodeId);
+      if(!payload){
+        node.className = 'compare-slot empty';
+        node.textContent = `Pin an assistant reply into slot ${slotLabel} to compare models, tone, or route decisions.`;
+        return;
+      }
+      node.className = 'compare-slot';
+      node.innerHTML = `
+        <div class="slot-head">
+          <div class="slot-label">Slot ${slotLabel}</div>
+          <div class="slot-meta">${escapeHtml(payload.model_label || 'Assistant')} | ${payload.word_count} words</div>
+        </div>
+        <div class="slot-body">${escapeHtml(summarizeText(payload.response, 200))}</div>
+        <div class="note">${escapeHtml(payload.route_reason || 'No route note saved for this reply.')}</div>
+      `;
+    }
+
+    function renderCompareBench(){
+      renderCompareSlot('compareSlotA', 'A', compareSlots.a);
+      renderCompareSlot('compareSlotB', 'B', compareSlots.b);
+      const a = compareSlots.a;
+      const b = compareSlots.b;
+      if(!a || !b){
+        el('compareSummary').textContent = 'Choose two assistant replies to compare structure, route notes, and length.';
+        return;
+      }
+      const wordDelta = Math.abs((a.word_count || 0) - (b.word_count || 0));
+      const longer = (a.word_count || 0) === (b.word_count || 0)
+        ? 'same length'
+        : ((a.word_count || 0) > (b.word_count || 0) ? `A longer by ${wordDelta} words` : `B longer by ${wordDelta} words`);
+      const modelDelta = a.model_label === b.model_label ? 'same model family' : `${a.model_label} vs ${b.model_label}`;
+      const routeDelta = a.route_reason && b.route_reason
+        ? (a.route_reason === b.route_reason ? 'same route note' : 'different route notes')
+        : 'one or both route notes missing';
+      el('compareSummary').textContent = [
+        `Models: ${modelDelta}`,
+        `Length: ${longer}`,
+        `Routing: ${routeDelta}`,
+        `A preview: ${summarizeText(a.response, 140)}`,
+        `B preview: ${summarizeText(b.response, 140)}`,
+      ].join('\\n\\n');
+    }
+
+    function snapshotAssistantReply(payload){
+      return {
+        model_label: payload.model_label || 'Assistant',
+        response: payload.response || '',
+        route_reason: payload.route_reason || '',
+        word_count: textWordCount(payload.response || ''),
+      };
+    }
+
+    function describeAgentMode(mode){
+      const value = String(mode || 'off');
+      if(value === 'loop' || value === 'loop_agent') return 'loop agent';
+      if(value === 'collective') return 'collective panel';
+      if(value === 'collective_loop' || value === 'collective_loop_agent') return 'collective + loop';
+      return 'single reply';
+    }
+
+    function updateDispatchPreview(){
+      const record = findRecord(el('modelSelect').value || selectedModelKey) || findRecord(selectedModelKey) || findRecord('auto');
+      const prompt = (el('prompt').value || '').trim();
+      const lines = [];
+      lines.push(`Route: ${record?.key === 'auto' ? 'Auto chooser' : (record?.label || record?.key || 'Auto')}`);
+      lines.push(`Mode: ${el('actionMode').value} | Agent: ${describeAgentMode(el('agentMode').value)} | Style: ${el('styleMode').value}`);
+      if(el('agentMode').value === 'loop' || el('agentMode').value === 'collective_loop'){
+        lines.push(`Loop budget: ${el('loopBudget').value} autonomous step(s)`);
+      }
+      lines.push(`Payload: ${textWordCount(prompt)} words${currentUploadedImagePath ? ' | image attached' : ''}${activeFocusKey ? ` | focus ${activeFocusKey}` : ''}`);
+      const brief = buildSessionBriefText();
+      if(brief) lines.push(`Brief: ${brief.replace(/\\n+/g, ' | ')}`);
+      const outcome = buildOutcomeBoardText();
+      if(outcome) lines.push(`Outcome: ${outcome.replace(/\\n+/g, ' | ')}`);
+      const contract = buildConfidenceContractText();
+      if(contract) lines.push(`Trust contract: ${contract.replace(/\\n+/g, ' | ')}`);
+      if(contextBank.length){
+        const preview = contextBank.slice(0, 3).map((item) => item.label || inferDraftLabel(item.text)).join(', ');
+        lines.push(`Context bank: ${contextBank.length} saved${preview ? ` | ${preview}` : ''}`);
+      }
+      const hint = stripManagedBlocks(el('systemHint').value || '');
+      if(hint) lines.push(`Hint: ${summarizeText(hint, 170)}`);
+      el('dispatchPreview').innerHTML = `<strong>Dispatch Preview</strong>${escapeHtml(lines.join('\\n')).replaceAll('\\n', '<br>')}`;
+    }
+
+    function showToast(kind, message){
+      const item = document.createElement('div');
+      item.className = 'toast ' + (kind || 'ok');
+      item.textContent = message;
+      el('toastRack').appendChild(item);
+      setTimeout(() => item.remove(), 3200);
+    }
+
+    async function copyText(text, successMessage){
+      try{
+        await navigator.clipboard.writeText(text);
+        showToast('ok', successMessage || 'Copied.');
+      }catch(error){
+        showToast('err', 'Clipboard error: ' + error.message);
+      }
+    }
+
+    async function jget(path){
+      const response = await fetch(path);
+      const data = await response.json();
+      if(!response.ok || data.ok === false){
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      return data;
+    }
+
+    async function jpost(path, payload){
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload || {})
+      });
+      const data = await response.json();
+      if(!response.ok || data.ok === false){
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      return data;
+    }
+
+    function bytesToText(value){
+      const num = Number(value || 0);
+      if(!num) return '-';
+      if(num >= 1024*1024*1024) return (num / (1024*1024*1024)).toFixed(2) + ' GB';
+      if(num >= 1024*1024) return (num / (1024*1024)).toFixed(1) + ' MB';
+      return num + ' B';
+    }
+
+    function buildTranscriptEntry(kind, payload){
+      const role = kind === 'user' ? 'user' : 'assistant';
+      return {
+        role,
+        kind: payload.kind || (payload.uploaded_image_url ? 'image' : 'text'),
+        model_label: payload.model_label || (role === 'user' ? 'You' : 'Assistant'),
+        response: payload.response || '',
+        prompt_used: payload.prompt_used || payload.response || '',
+        output_path: payload.output_path || payload.uploaded_image_path || '',
+        image_url: payload.image_url || payload.uploaded_image_url || '',
+        route_reason: payload.route_reason || ''
+      };
+    }
+
+    function scoreText(record){
+      if(record.common_overall_exact != null) return record.common_overall_exact.toFixed(3);
+      if(record.recipe_eval_accuracy != null) return record.recipe_eval_accuracy.toFixed(3) + ' *';
+      return '-';
+    }
+
+    function findRecord(key){
+      return catalog.find(item => item.key === key) || null;
+    }
+
+    function filteredCatalogRecords(){
+      const search = (el('modelSearch')?.value || '').trim().toLowerCase();
+      const capability = (el('capabilityFilter')?.value || 'all').trim().toLowerCase();
+      let rows = catalog.filter((record) => {
+        if(capability !== 'all' && !(record.capabilities || []).includes(capability)) return false;
+        if(!search) return true;
+        const hay = [
+          record.key,
+          record.label,
+          record.family,
+          record.kind,
+          record.note,
+          record.benchmark_hint,
+          (record.capabilities || []).join(' ')
+        ].join(' ').toLowerCase();
+        return hay.includes(search);
+      });
+      const selected = findRecord(selectedModelKey);
+      if(selected && !rows.some((item) => item.key === selected.key)){
+        rows = [selected, ...rows];
+      }
+      const autoRecord = findRecord('auto');
+      if(autoRecord && !rows.some((item) => item.key === 'auto')){
+        rows = [autoRecord, ...rows];
+      }
+      return rows;
+    }
+
+    function catalogBestRecord(predicate){
+      const matches = catalog.filter((record) => record.key !== 'auto' && (!predicate || predicate(record)));
+      if(!matches.length) return null;
+      return matches.sort((a, b) => {
+        const scoreA = Number(a.common_overall_exact ?? a.recipe_eval_accuracy ?? -1);
+        const scoreB = Number(b.common_overall_exact ?? b.recipe_eval_accuracy ?? -1);
+        return scoreB - scoreA;
+      })[0];
+    }
+
+    function buildQuickPickRows(){
+      const rows = [];
+      const overall = catalogBestRecord(() => true);
+      if(overall) rows.push({label:'Top Benchmark', key:overall.key});
+      const image = catalogBestRecord((record) => (record.capabilities || []).includes('image'));
+      if(image) rows.push({label:'Best Image', key:image.key});
+      const vision = catalogBestRecord((record) => (record.capabilities || []).includes('vision'));
+      if(vision) rows.push({label:'Best Vision', key:vision.key});
+      const omni = catalogBestRecord((record) => String(record.family || '').toLowerCase().includes('omni'));
+      if(omni) rows.push({label:'Latest Omni', key:omni.key});
+      const specialist3d = catalog.find((record) => record.key === 'three_d_generation_micro_v1');
+      if(specialist3d) rows.push({label:'3D Specialist', key:specialist3d.key});
+      return rows;
+    }
+
+    function renderQuickPickChips(){
+      const box = el('quickPickChips');
+      box.innerHTML = '';
+      buildQuickPickRows().forEach((item) => {
+        const button = document.createElement('button');
+        button.className = 'ghost';
+        button.textContent = item.label;
+        button.onclick = () => {
+          selectedModelKey = item.key;
+          el('modelSelect').value = item.key;
+          updateModelPanel(findRecord(item.key));
+          updateLiveState();
+          showToast('ok', `Selected ${findRecord(item.key)?.label || item.key}.`);
+        };
+        box.appendChild(button);
+      });
+    }
+
+    function updateDiscoveryNote(rows){
+      const capability = (el('capabilityFilter')?.value || 'all').trim().toLowerCase();
+      const search = (el('modelSearch')?.value || '').trim();
+      const topVisible = catalogBestRecord((record) => rows.some((item) => item.key === record.key));
+      const parts = [`${Math.max(0, rows.filter((row) => row.key !== 'auto').length)} visible`];
+      parts.push(capability === 'all' ? 'all capabilities' : capability);
+      if(search) parts.push(`search: ${search}`);
+      if(topVisible) parts.push(`top visible: ${topVisible.label}`);
+      el('discoveryNote').textContent = parts.join(' | ');
+    }
+
+    function latestStoreJob(fileName){
+      return (modelStoreJobs || []).find((job) => job.file_name === fileName) || null;
+    }
+
+    function renderModelStore(){
+      const box = el('modelStoreList');
+      box.innerHTML = '';
+      if(!modelStoreRows.length){
+        box.textContent = 'No remote store entries loaded yet.';
+        return;
+      }
+      const activeJobs = (modelStoreJobs || []).filter((job) => ['queued', 'downloading'].includes(job.status || '')).length;
+      el('modelStoreNote').textContent = activeJobs
+        ? `${activeJobs} install job${activeJobs === 1 ? '' : 's'} running. Installed files refresh the local catalog automatically.`
+        : 'Browse every published Supermix artifact from Hugging Face and install it into the local model directory.';
+      modelStoreRows.forEach((row) => {
+        const item = document.createElement('div');
+        item.className = 'draft-item';
+        const job = latestStoreJob(row.file_name);
+        const jobStatus = job ? String(job.status || '') : '';
+        const progress = job && Number(job.total_bytes || 0) > 0
+          ? `${Math.min(100, Math.round((Number(job.downloaded_bytes || 0) / Number(job.total_bytes || 1)) * 100))}%`
+          : '';
+        const statusText = row.installed
+          ? (row.selectable ? 'Installed and selectable' : 'Downloaded locally')
+          : (jobStatus ? `${jobStatus}${progress ? ` ${progress}` : ''}` : 'Remote only');
+        item.innerHTML = `
+          <div class="draft-item-top">
+            <div>
+              <div class="draft-item-title">${escapeHtml(row.label || row.file_name)}</div>
+              <div class="note">${escapeHtml(row.file_name)}</div>
+            </div>
+            <div class="note">${escapeHtml(bytesToText(row.size_bytes || 0))}</div>
+          </div>
+          <div class="draft-item-sub">${escapeHtml([
+            row.family || 'other',
+            row.known ? ((row.capabilities || []).join(', ') || row.kind || 'known artifact') : 'download-only artifact',
+            statusText
+          ].filter(Boolean).join(' | '))}</div>
+        `;
+        if(row.note){
+          const note = document.createElement('div');
+          note.className = 'note';
+          note.textContent = row.note;
+          item.appendChild(note);
+        }
+        if(job && job.error){
+          const err = document.createElement('div');
+          err.className = 'note';
+          err.textContent = 'Install error: ' + job.error;
+          item.appendChild(err);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'draft-item-actions';
+        const openBtn = document.createElement('a');
+        openBtn.className = 'mini-btn';
+        openBtn.href = row.download_url || '#';
+        openBtn.target = '_blank';
+        openBtn.rel = 'noreferrer';
+        openBtn.textContent = 'Open Remote';
+        actions.appendChild(openBtn);
+
+        const installBtn = document.createElement('button');
+        installBtn.className = 'mini-btn';
+        installBtn.textContent = row.installed ? 'Installed' : (jobStatus === 'downloading' ? 'Downloading...' : 'Install');
+        installBtn.disabled = Boolean(row.installed || ['queued', 'downloading'].includes(jobStatus));
+        installBtn.onclick = () => installStoreModel(row.file_name);
+        actions.appendChild(installBtn);
+        item.appendChild(actions);
+        box.appendChild(item);
+      });
+    }
+
+    async function refreshModelStore(force=false){
+      const suffix = force ? '?refresh=1' : '';
+      try{
+        const [storeResp, jobsResp] = await Promise.all([
+          jget('/api/model_store' + suffix),
+          jget('/api/model_store/jobs')
+        ]);
+        modelStoreRows = storeResp.models || [];
+        modelStoreJobs = jobsResp.jobs || [];
+        renderModelStore();
+        if(modelStorePollHandle){
+          clearTimeout(modelStorePollHandle);
+          modelStorePollHandle = 0;
+        }
+        if((modelStoreJobs || []).some((job) => ['queued', 'downloading'].includes(job.status || ''))){
+          modelStorePollHandle = setTimeout(() => refreshModelStore(false), 3000);
+        }
+      }catch(error){
+        el('modelStoreNote').textContent = 'Model store error: ' + error.message;
+        el('modelStoreList').textContent = 'Unable to reach the remote model store right now.';
+      }
+    }
+
+    async function installStoreModel(fileName){
+      try{
+        const data = await jpost('/api/model_store/install', {file_name: fileName});
+        showToast('ok', `Install started for ${fileName}.`);
+        modelStoreJobs = [data.job || {}, ...(modelStoreJobs || []).filter((job) => job.job_id !== data.job?.job_id)];
+        renderModelStore();
+        refreshModelStore(false);
+        refresh();
+      }catch(error){
+        showToast('err', error.message);
+      }
+    }
+
+    function renderCapabilities(record){
+      const box = el('capabilities');
+      box.innerHTML = '';
+      (record?.capabilities || []).forEach(cap => {
+        const chip = document.createElement('div');
+        chip.className = 'cap ' + cap;
+        chip.textContent = cap === 'image' ? 'Image' : (cap === 'vision' ? 'Vision' : 'Chat');
+        box.appendChild(chip);
+      });
+    }
+
+    function shouldShowUpload(record){
+      if(!record) return false;
+      if(record.key === 'auto') return true;
+      if((record.capabilities || []).includes('vision')) return true;
+      return el('agentMode').value === 'collective';
+    }
+
+    function renderUploadPreview(){
+      const box = el('uploadPreview');
+      if(!currentUploadedImageUrl){
+        box.style.display = 'none';
+        box.innerHTML = '';
+        return;
+      }
+      box.style.display = 'grid';
+      box.innerHTML = `
+        <img src="${escapeHtml(currentUploadedImageUrl)}" alt="uploaded image">
+        <div class="upload-meta">
+          <strong>${escapeHtml(currentUploadedImageName || 'uploaded image')}</strong>
+          <div>${escapeHtml(currentUploadedImagePath)}</div>
+        </div>
+      `;
+    }
+
+    function refreshUploadPanel(){
+      const record = findRecord(el('modelSelect').value) || findRecord(selectedModelKey) || findRecord('auto');
+      const visible = shouldShowUpload(record);
+      el('uploadBox').style.display = visible ? 'grid' : 'none';
+      if(!visible){
+        el('uploadStatus').textContent = 'Select a vision-capable model or Auto to attach an image.';
+      } else if(currentUploadedImagePath){
+        el('uploadStatus').textContent = 'Uploaded image is attached to the next prompt.';
+      } else {
+        el('uploadStatus').textContent = 'Upload an image if you want the vision models to analyze it.';
+      }
+      renderUploadPreview();
+    }
+
+    function updateModelPanel(record){
+      if(!record) return;
+      el('modelNote').textContent = record.note || record.benchmark_hint || 'No extra note.';
+      renderCapabilities(record);
+      el('statBenchmark').textContent = scoreText(record);
+      el('statBenchmarkDetail').textContent = record.score_source === 'recipe_eval_only' ? 'Recipe holdout only' : (record.common_row_key || 'No benchmark row');
+      el('statFamily').textContent = record.family || '-';
+      el('statFamilyDetail').textContent = record.kind || '-';
+      el('statPackage').textContent = bytesToText(record.zip_size_bytes);
+      el('statPackageDetail').textContent = record.zip_name || '';
+      refreshThreeDViewer(findRecord(el('modelSelect').value) || record);
+    }
+
+    function summarizeTranscript(){
+      const messages = transcript.length;
+      const assistant = transcript.filter(item => item.role === 'assistant').length;
+      const images = transcript.filter(item => item.kind === 'image' || item.image_url).length;
+      el('threadMessageCount').textContent = String(messages);
+      el('threadAssistantCount').textContent = String(assistant);
+      el('threadImageCount').textContent = String(images);
+      const sessionBits = [
+        `${messages} msgs`,
+        `${assistant} replies`,
+        images ? `${images} image outputs` : 'text-first session'
+      ];
+      el('sessionMetrics').innerHTML = sessionBits.map((bit) => `<div class="composer-stat">${escapeHtml(bit)}</div>`).join('');
+    }
+
+    function updatePromptStats(){
+      const text = el('prompt').value || '';
+      const words = text.trim() ? text.trim().split(/\\s+/).length : 0;
+      const chars = text.length;
+      const brief = buildSessionBriefText();
+      const outcome = buildOutcomeBoardText();
+      const contract = currentConfidenceContract();
+      const bits = [
+        `${words} words`,
+        `${chars} chars`,
+        currentUploadedImagePath ? 'image attached' : 'no image',
+        activeFocusKey ? `focus: ${activeFocusKey}` : 'focus: standard',
+        brief ? 'brief active' : 'brief off',
+        outcome ? 'outcome board on' : 'outcome board off',
+        contract.confidence_mode !== 'standard' || contract.evidence_mode !== 'balanced' || contract.clarify_first === 'on' || contract.surface_assumptions === 'on'
+          ? 'trust contract on'
+          : 'trust contract off',
+        contextBank.length ? `context ${contextBank.length}` : 'context off'
+      ];
+      el('promptStats').innerHTML = bits.map((bit) => `<div class="composer-stat">${escapeHtml(bit)}</div>`).join('');
+      updateDispatchPreview();
+    }
+
+    function updateLiveState(status){
+      const chips = [];
+      chips.push(selectedModelKey === 'auto' ? 'Auto route' : (findRecord(selectedModelKey)?.label || selectedModelKey));
+      chips.push('action ' + el('actionMode').value);
+      chips.push(describeAgentMode(el('agentMode').value));
+      if(el('agentMode').value === 'loop' || el('agentMode').value === 'collective_loop') chips.push(`loop x${el('loopBudget').value}`);
+      chips.push(el('memoryMode').value === 'on' ? 'memory on' : 'memory off');
+      chips.push(el('webSearchMode').value === 'on' ? 'web tool on' : 'web tool off');
+      if(buildSessionBriefText()) chips.push('brief armed');
+      if(buildOutcomeBoardText()) chips.push('outcome board armed');
+      const contract = currentConfidenceContract();
+      if(contract.confidence_mode !== 'standard') chips.push(contract.confidence_mode.replaceAll('_', ' '));
+      if(contract.evidence_mode !== 'balanced') chips.push(contract.evidence_mode.replaceAll('_', ' '));
+      if(contract.clarify_first === 'on') chips.push('clarify first');
+      if(contextBank.length) chips.push(`context ${contextBank.length}`);
+      if(currentUploadedImagePath) chips.push('image attached');
+      el('liveStateChips').innerHTML = chips.map((bit, idx) => `<div class="meta-pill ${idx === 0 ? 'accent' : ''}">${escapeHtml(bit)}</div>`).join('');
+      el('liveStateNote').textContent = status?.last_route_reason || 'Use focus packs to bias how the assistant approaches the next prompt.';
+      updateDispatchPreview();
+    }
+
+    function applyThreadFilter(){
+      const query = (el('threadFilter').value || '').trim().toLowerCase();
+      threadMatches = [];
+      threadMatchIndex = 0;
+      thread.querySelectorAll('.msg').forEach((node) => {
+        const text = (node.dataset.search || '').toLowerCase();
+        const hit = Boolean(query) && text.includes(query);
+        node.classList.toggle('dim', Boolean(query) && !hit);
+        node.classList.toggle('match-active', false);
+        if(hit){
+          threadMatches.push(node);
+        }
+      });
+      updateThreadMatchNote(query);
+    }
+
+    function updateThreadMatchNote(query){
+      const hasQuery = Boolean(query && query.trim());
+      el('threadMatchNote').textContent = hasQuery ? `Matches: ${threadMatches.length}` : 'Matches: -';
+    }
+
+    function jumpToNextMatch(){
+      if(!threadMatches.length){
+        showToast('err', 'No matches in this thread filter.');
+        return;
+      }
+      thread.querySelectorAll('.match-active').forEach((node) => node.classList.remove('match-active'));
+      const index = threadMatchIndex % threadMatches.length;
+      const node = threadMatches[index];
+      node.classList.add('match-active');
+      node.scrollIntoView({behavior:'smooth', block:'center'});
+      threadMatchIndex = (index + 1) % threadMatches.length;
+    }
+
+    function applyThreadMetaState(){
+      thread.classList.toggle('hide-meta', hideThreadMeta);
+      el('toggleMetaBtn').textContent = hideThreadMeta ? 'Show Meta' : 'Hide Meta';
+    }
+
+    function applyAutoScrollState(){
+      el('toggleAutoScrollBtn').textContent = autoScrollEnabled ? 'Auto-scroll On' : 'Auto-scroll Off';
+    }
+
+    function applyComposerCompactState(){
+      const composer = el('composer');
+      composer.classList.toggle('compact', composerCompact);
+      if(composerCompact && composeTab !== 'quick'){
+        setComposeTab('quick');
+      }
+      el('toggleComposerBtn').textContent = composerCompact ? 'Full Composer' : 'Compact Composer';
+    }
+
+    function isNearBottom(){
+      const remaining = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      return remaining < 60;
+    }
+
+    function syncAutoScrollFromThread(){
+      if(isNearBottom()){
+        if(!autoScrollEnabled){
+          autoScrollEnabled = true;
+          applyAutoScrollState();
+          persistUiState();
+        }
+      }else if(autoScrollEnabled){
+        autoScrollEnabled = false;
+        applyAutoScrollState();
+        persistUiState();
+      }
+    }
+
+    function transcriptAsText(){
+      return transcript.map((item, index) => {
+        const role = item.role === 'assistant' ? 'Assistant' : 'You';
+        const route = item.route_reason ? `\\nRoute: ${item.route_reason}` : '';
+        const content = item.kind === 'image'
+          ? (item.prompt_used || item.response || '[image output]')
+          : (item.response || '');
+        return `${index + 1}. ${role} (${item.model_label || '-'})\\n${content}${route}`;
+      }).join('\\n\\n');
+    }
+
+    function downloadTranscriptJson(){
+      const blob = new Blob([JSON.stringify({session_id: sessionId, transcript}, null, 2)], {type:'application/json'});
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `supermix_thread_${sessionId.slice(0, 8)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(link.href);
+        link.remove();
+      }, 0);
+    }
+
+    function jumpToLatest(force){
+      if(!force && !autoScrollEnabled){
+        return;
+      }
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function formatMetric(value){
+      if(value == null || Number.isNaN(Number(value))) return '-';
+      return Number(value).toFixed(3);
+    }
+
+    function setThreeDDownloadLink(id, href, label){
+      const link = el(id);
+      link.href = href || '#';
+      link.textContent = label;
+      link.style.pointerEvents = href ? 'auto' : 'none';
+      link.style.opacity = href ? '1' : '.45';
+    }
+
+    async function refreshThreeDViewer(record){
+      const card = el('threeDViewerCard');
+      if(!record || record.key !== 'three_d_generation_micro_v1'){
+        card.style.display = 'none';
+        return;
+      }
+      card.style.display = 'block';
+      el('threeDViewerSummary').textContent = 'Loading packaged 3D model details...';
+      try{
+        const data = await jget('/api/three_d_model_view');
+        const model = data.model || {};
+        el('threeDStatParams').textContent = model.parameter_count != null ? String(model.parameter_count) : '-';
+        el('threeDStatTrain').textContent = formatMetric(model.train_accuracy);
+        el('threeDStatVal').textContent = formatMetric(model.val_accuracy);
+        el('threeDStatConcepts').textContent = model.concept_count != null ? String(model.concept_count) : '-';
+        const counts = [
+          model.zip_name || '',
+          model.source_rows != null ? `${model.source_rows} source rows` : '',
+          model.train_rows != null ? `${model.train_rows} train` : '',
+          model.val_rows != null ? `${model.val_rows} val` : ''
+        ].filter(Boolean).join(' | ');
+        const concepts = (model.concept_labels || []).slice(0, 10).join(', ');
+        el('threeDViewerNote').textContent = [counts, concepts ? `Concepts: ${concepts}` : ''].filter(Boolean).join('\\n');
+        const samples = (model.sample_predictions || []).map((item) => {
+          const confidence = item.confidence != null ? ` (${formatMetric(item.confidence)})` : '';
+          return `${item.predicted_label || item.predicted_concept || 'prediction'}${confidence}\\nPrompt: ${item.prompt || ''}`;
+        });
+        el('threeDViewerSummary').textContent = samples.length
+          ? samples.join('\\n\\n')
+          : 'No sample predictions were packaged with this model.';
+        setThreeDDownloadLink('threeDZipLink', model.download_zip_url || '', 'Download Model ZIP');
+        setThreeDDownloadLink('threeDSummaryLink', model.download_summary_url || '', 'Download Summary JSON');
+      }catch(error){
+        el('threeDViewerSummary').textContent = '3D model viewer error: ' + error.message;
+        setThreeDDownloadLink('threeDZipLink', '', 'Download Model ZIP');
+        setThreeDDownloadLink('threeDSummaryLink', '', 'Download Summary JSON');
+      }
+    }
+
+    function renderCatalog(){
+      const select = el('modelSelect');
+      select.innerHTML = '';
+      const rows = filteredCatalogRecords();
+      rows.forEach(record => {
+        const option = document.createElement('option');
+        option.value = record.key;
+        option.textContent = record.key === 'auto'
+          ? 'Auto'
+          : `${record.label} (${record.family}, ${scoreText(record)})`;
+        select.appendChild(option);
+      });
+      if(rows.length && !rows.some((item) => item.key === selectedModelKey)){
+        selectedModelKey = rows[0].key;
+      }
+      select.value = selectedModelKey;
+      el('catalogCount').textContent = String(Math.max(0, catalog.length - 1));
+      updateDiscoveryNote(rows);
+      updateModelPanel(findRecord(selectedModelKey) || findRecord('auto'));
+      refreshUploadPanel();
+    }
+
+    function addMessage(kind, payload){
+      const card = document.createElement('div');
+      card.className = 'msg ' + kind;
+      const messageId = 'msg-' + (++messageSerial);
+      const messageText = payload.response || payload.prompt_used || '';
+      const messageLabel = payload.model_label || (kind === 'user' ? 'You' : 'Assistant');
+      card.id = messageId;
+      card.dataset.messageId = messageId;
+      card.dataset.messageRole = kind;
+      card.dataset.messageLabel = messageLabel;
+      card.dataset.messageText = messageText;
+      const metaBadges = [];
+      if(payload.model_label) metaBadges.push(`<span class="meta-pill">${escapeHtml(payload.model_label)}</span>`);
+      if(payload.kind === 'image') metaBadges.push('<span class="meta-pill">image</span>');
+      card.innerHTML = `
+        <div class="msg-top">
+          <div class="who">${kind === 'user' ? 'You' : 'Assistant'}</div>
+          <div class="msg-meta">${metaBadges.join('')}</div>
+        </div>
+      `;
+      const actions = document.createElement('div');
+      actions.className = 'msg-actions';
+      if(payload.kind === 'image'){
+        const block = document.createElement('div');
+        block.className = 'image-card';
+        const caption = payload.prompt_used || payload.response || '';
+        block.innerHTML = `
+          <img src="${escapeHtml(payload.image_url || '')}" alt="generated image">
+          <div class="image-caption">${escapeHtml(caption)}</div>
+        `;
+        card.appendChild(block);
+        if(payload.output_path){
+          actions.innerHTML = `<button class="mini-btn save-image-btn" data-output-path="${escapeHtml(payload.output_path || '')}">Save Image To Path</button>`;
+          lastGeneratedImagePath = payload.output_path || lastGeneratedImagePath;
+        }
+      } else {
+        const body = document.createElement('div');
+        body.className = 'body';
+        body.textContent = payload.response || '';
+        card.appendChild(body);
+        if(payload.uploaded_image_url){
+          const preview = document.createElement('div');
+          preview.className = 'image-card';
+          preview.innerHTML = `
+            <img src="${escapeHtml(payload.uploaded_image_url || '')}" alt="uploaded image">
+            <div class="image-caption">${escapeHtml(payload.uploaded_image_name || 'Attached image')}</div>
+          `;
+          card.appendChild(preview);
+        }
+      }
+      if(payload.response){
+        actions.innerHTML += `<button class="mini-btn copy-text-btn" data-copy-text="${escapeHtml(payload.response || '')}">Copy Text</button>`;
+      }
+      if(messageText && payload.kind !== 'image'){
+        actions.innerHTML += `<button class="mini-btn pin-context-btn">Pin Context</button>`;
+        actions.innerHTML += `<button class="mini-btn bookmark-msg-btn">Bookmark</button>`;
+      }
+      if(kind === 'assistant' && payload.response){
+        actions.innerHTML += `<button class="mini-btn reuse-msg-btn" data-reuse-text="${escapeHtml(payload.response || '')}">Reuse In Prompt</button>`;
+        actions.innerHTML += `<button class="mini-btn refine-msg-btn" data-refine-mode="tighten">Tighten</button>`;
+        actions.innerHTML += `<button class="mini-btn refine-msg-btn" data-refine-mode="challenge">Challenge</button>`;
+        actions.innerHTML += `<button class="mini-btn refine-msg-btn" data-refine-mode="humanize">Humanize</button>`;
+        actions.innerHTML += `<button class="mini-btn compare-a-btn">Pin A</button>`;
+        actions.innerHTML += `<button class="mini-btn compare-b-btn">Pin B</button>`;
+      }
+      if(payload.route_reason){
+        const route = document.createElement('div');
+        route.className = 'route';
+        route.textContent = payload.route_reason;
+        card.appendChild(route);
+      }
+      if(payload.agent_trace){
+        const blocks = [];
+        if((payload.agent_trace.memory_notes || []).length){
+          blocks.push('Memory\\n' + payload.agent_trace.memory_notes.map(item => '- ' + item).join('\\n'));
+        }
+        if((payload.agent_trace.consulted_models || []).length){
+          blocks.push('Consulted Models\\n' + payload.agent_trace.consulted_models.join(', '));
+        }
+        if((payload.agent_trace.skipped_models || []).length){
+          const skippedBits = payload.agent_trace.skipped_models.map(item => `- ${(item.model_label || item.model_key || 'model')}: ${item.error || 'unavailable'}`);
+          blocks.push('Skipped Models\\n' + skippedBits.join('\\n'));
+        }
+        if((payload.agent_trace.tool_events || []).length){
+          const searchBits = payload.agent_trace.tool_events.map(event => {
+            if(event.name === 'open_cmd'){
+              return `- open_cmd -> ${(event.results || [])[0]?.snippet || 'Command Prompt opened'}`;
+            }
+            const domains = (event.results || []).slice(0, 3).map(item => item.domain || item.url || item.title).filter(Boolean).join(', ');
+            return `- ${event.query}${domains ? ' -> ' + domains : ''}`;
+          });
+          blocks.push('Tool Activity\\n' + searchBits.join('\\n'));
+        }
+        if((payload.agent_trace.loop_steps || []).length){
+          const loopBits = payload.agent_trace.loop_steps.map((step) => {
+            const parts = [`Step ${step.step || '?'}`];
+            if(step.goal) parts.push(`goal: ${step.goal}`);
+            if(step.worker_excerpt) parts.push(`worker: ${step.worker_excerpt}`);
+            if(step.review_note) parts.push(`review: ${step.review_note}`);
+            if(step.next_step) parts.push(`next: ${step.next_step}`);
+            return '- ' + parts.join(' | ');
+          });
+          const head = [
+            `mode ${describeAgentMode(payload.agent_trace.agent_mode)}`,
+            payload.agent_trace.loop_controller_model ? `controller ${payload.agent_trace.loop_controller_model}` : '',
+            payload.agent_trace.loop_budget ? `budget ${payload.agent_trace.loop_budget}` : '',
+            payload.agent_trace.loop_completed === true ? 'complete' : 'still open',
+          ].filter(Boolean).join(' | ');
+          const reason = payload.agent_trace.loop_completion_reason ? `\\n${payload.agent_trace.loop_completion_reason}` : '';
+          blocks.push('Loop Agent\\n' + head + reason + '\\n' + loopBits.join('\\n'));
+        }
+        if(blocks.length){
+          const trace = document.createElement('div');
+          trace.className = 'trace-box';
+          trace.textContent = blocks.join('\\n\\n');
+          card.appendChild(trace);
+        }
+      }
+      if(actions.children.length){
+        card.appendChild(actions);
+      }
+      card.dataset.search = [
+        payload.model_label || '',
+        payload.response || '',
+        payload.prompt_used || '',
+        payload.route_reason || '',
+        payload.uploaded_image_name || ''
+      ].join(' ');
+      if(kind === 'assistant' && payload.response){
+        card.dataset.comparePayload = JSON.stringify(snapshotAssistantReply(payload));
+      }
+      thread.appendChild(card);
+      jumpToLatest(false);
+      transcript.push(buildTranscriptEntry(kind, payload));
+      summarizeTranscript();
+      applyThreadFilter();
+    }
+
+    async function refresh(){
+      try{
+        const [statusResp, catalogResp, memoryResp] = await Promise.all([
+          jget('/api/status'),
+          jget('/api/catalog'),
+          jget('/api/memory?session_id=' + encodeURIComponent(sessionId))
+        ]);
+        catalog = catalogResp.models || [];
+        selectedModelKey = statusResp.status.selected_model_key || selectedModelKey || 'auto';
+        renderQuickPickChips();
+        renderCatalog();
+        const activeRecord = findRecord(statusResp.status.active_model_key || selectedModelKey) || findRecord(selectedModelKey) || findRecord('auto');
+        updateModelPanel(activeRecord);
+        el('statusBox').textContent = JSON.stringify(statusResp.status, null, 2);
+        el('memoryBox').textContent = JSON.stringify(memoryResp.memory || {}, null, 2);
+        el('activeBadge').textContent = statusResp.status.active_model_label || (selectedModelKey === 'auto' ? 'Auto' : selectedModelKey);
+        el('statActive').textContent = statusResp.status.active_model_label || '-';
+        el('statActiveDetail').textContent = statusResp.status.device || 'runtime idle';
+        el('chatTitle').textContent = statusResp.status.active_model_label
+          ? `Supermix Studio - ${statusResp.status.active_model_label}`
+          : 'Supermix Studio';
+        el('chatSub').textContent = statusResp.status.last_route_reason || 'Auto chooses a model per prompt, while manual selection pins one model.';
+        el('routeNote').textContent = 'Route: ' + (selectedModelKey === 'auto' ? 'Auto' : (findRecord(selectedModelKey)?.label || selectedModelKey));
+        updateLiveState(statusResp.status);
+        summarizeTranscript();
+        updatePromptStats();
+      }catch(error){
+        el('statusBox').textContent = 'Status error: ' + error.message;
+      }
+    }
+
+    async function selectModel(){
+      const modelKey = el('modelSelect').value;
+      try{
+        const data = await jpost('/api/select_model', {model_key: modelKey});
+        selectedModelKey = data.status.selected_model_key || modelKey;
+        renderCatalog();
+        showToast('ok', (modelKey === 'auto' ? 'Auto routing enabled.' : 'Selection updated.'));
+        refresh();
+      }catch(error){
+        showToast('err', error.message);
+      }
+    }
+
+    async function clearChat(){
+      try{
+        await jpost('/api/clear', {session_id: sessionId});
+        thread.innerHTML = '';
+        transcript = [];
+        threadBookmarks = [];
+        compareSlots = {a:null, b:null};
+        lastGeneratedImagePath = '';
+        clearUploadedImage();
+        const welcome = document.createElement('div');
+        welcome.className = 'welcome';
+        welcome.textContent = 'Session cleared.';
+        thread.appendChild(welcome);
+        renderThreadBookmarks();
+        renderCompareBench();
+        summarizeTranscript();
+        updatePromptStats();
+      }catch(error){
+        showToast('err', error.message);
+      }
+    }
+
+    function currentSavePath(){
+      return el('savePath').value.trim();
+    }
+
+    async function exportChatImage(){
+      if(!transcript.length){
+        showToast('err', 'There is no conversation to export yet.');
+        return;
+      }
+      try{
+        const data = await jpost('/api/export_chat_image', {
+          session_id: sessionId,
+          destination_path: currentSavePath(),
+          transcript
+        });
+        showToast('ok', 'Chat image saved to ' + data.saved_path);
+      }catch(error){
+        showToast('err', error.message);
+      }
+    }
+
+    async function saveGeneratedImage(sourcePath){
+      if(!sourcePath){
+        showToast('err', 'Missing generated image path.');
+        return;
+      }
+      try{
+        const data = await jpost('/api/save_generated_image', {
+          source_path: sourcePath,
+          destination_path: currentSavePath()
+        });
+        showToast('ok', 'Image saved to ' + data.saved_path);
+      }catch(error){
+        showToast('err', error.message);
+      }
+    }
+
+    async function saveLastImage(){
+      if(!lastGeneratedImagePath){
+        showToast('err', 'There is no generated image in this session yet.');
+        return;
+      }
+      await saveGeneratedImage(lastGeneratedImagePath);
+    }
+
+    async function sendPrompt(){
+      let prompt = el('prompt').value.trim();
+      if(!prompt && currentUploadedImagePath){
+        prompt = 'What is in this image?';
+      }
+      if(!prompt) return;
+      el('prompt').value = '';
+      const payload = {
+        session_id: sessionId,
+        message: prompt,
+        model_key: el('modelSelect').value,
+        action_mode: el('actionMode').value,
+        settings: {
+          agent_mode: el('agentMode').value,
+          loop_max_steps: Number(el('loopBudget').value || 4),
+          memory_enabled: el('memoryMode').value === 'on',
+          web_search_enabled: el('webSearchMode').value === 'on',
+          uploaded_image_path: currentUploadedImagePath,
+          style_mode: el('styleMode').value,
+          system_hint: composeSystemHint(),
+          image_style: el('imageStyle').value,
+          image_width: Number(el('imageWidth').value || 512),
+          image_height: Number(el('imageHeight').value || 512),
+          image_steps: Number(el('imageSteps').value || 2)
         }
       };
-      meta.appendChild(copy);
-    }
-    row.appendChild(meta);
-
-    const bub = document.createElement('div');
-    bub.className = 'bubble';
-    bub.innerHTML = escHtml(text).replace(/\n/g,'<br>');
-
-    if (extra) {
-      const eDiv = document.createElement('div');
-      eDiv.style.cssText = 'margin-top:10px;';
-      eDiv.innerHTML = extra;
-      bub.appendChild(eDiv);
-    }
-    row.appendChild(bub);
-
-    if (trace) {
-      row.appendChild(buildTrace(trace));
-    }
-    el('thread').appendChild(row);
-    scrollToBottom(role === 'user'); // Force scroll for user, smart scroll for bot
-    return row;
-  }
-
-  function escHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-                    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
-  function buildTrace(trace) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'trace';
-
-    if (trace.loop_steps && trace.loop_steps.length) {
-      const hdr = document.createElement('div');
-      hdr.className = 'trace-hdr';
-      hdr.style.color = 'var(--amber)';
-      hdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,4V1L8,5l4,4V6c3.31,0,6,2.69,6,6a5.987,5.987,0,0,1-.7,2.8l1.46,1.46A7.93,7.93,0,0,0,20,12C20,7.58,16.42,4,12,4Zm0,14c-3.31,0-6-2.69-6-6a5.987,5.987,0,0,1,.7-2.8L5.24,7.74A7.93,7.93,0,0,0,4,12c0,4.42,3.58,8,8,8v3l4-4-4-4Z"/></svg> Autonomous Logic Chain — ${trace.loop_steps.length} cycles`;
-      wrapper.appendChild(hdr);
-
-      const body = document.createElement('div');
-      body.className = 'trace-body';
-      trace.loop_steps.forEach(s => {
-        body.innerHTML += `<div class="trace-step">
-          <div class="trace-step-n">${s.step}</div>
-          <div><strong style="color:var(--text)">${escHtml(s.goal||'Strategy Initialization')}</strong><br>
-          <span style="color:var(--muted);font-size:11px">${escHtml((s.worker_excerpt||'').slice(0,140))}...</span></div>
-        </div>`;
+      addMessage('user', {
+        response: prompt,
+        kind: 'text',
+        uploaded_image_url: currentUploadedImageUrl,
+        uploaded_image_path: currentUploadedImagePath,
+        uploaded_image_name: currentUploadedImageName
       });
-      wrapper.appendChild(body);
-
-    } else if (trace.reasoning_passes != null) {
-      const hdr = document.createElement('div');
-      hdr.className = 'trace-hdr';
-      hdr.style.color = 'var(--teal)';
-      hdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10,0,1,0,22,12,10.011,10.011,0,0,0,12,2Zm1,15H11V11h2Zm0-8H11V7h2Z"/></svg> V46 Reasoning Telemetry`;
-      wrapper.appendChild(hdr);
-      const body = document.createElement('div');
-      body.className = 'trace-body';
-      body.innerHTML = `<div class="trace-grid">
-        <div class="trace-kv">Reasoning Passes: <strong>${trace.reasoning_passes}</strong></div>
-        <div class="trace-kv">GoT Synthesis: <strong style="color:${trace.graph_synthesis_applied?'var(--teal)':'var(--muted)'}">${trace.graph_synthesis_applied?'Enabled':'Bypassed'}</strong></div>
-        <div class="trace-kv">MoD Routed: <strong>${trace.mixture_of_depths_skipped===0?'Full':'Optimized'}</strong></div>
-        <div class="trace-kv">C-CoT Latent: <strong style="color:${trace.continuous_latent_active?'var(--cyan)':'var(--muted)'}">${trace.continuous_latent_active?'Fluid':'Static'}</strong></div>
-      </div>`;
-      wrapper.appendChild(body);
-
-    } else if (trace.consulted_models && trace.consulted_models.length) {
-      const hdr = document.createElement('div');
-      hdr.className = 'trace-hdr';
-      hdr.style.color = 'var(--purple)';
-      hdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16,11c1.66,0,2.99-1.34,2.99-3S17.66,5,16,5s-3,1.34-3,3S14.34,11,16,11Zm-8,0c1.66,0,2.99-1.34,2.99-3S9.66,5,8,5S5,6.34,5,8,6.34,11,8,11Zm0,2c-2.33,0-7,1.17-7,3.5V19H15V16.5C15,14.17,10.33,13,8,13Zm8,0c-.29,0-.62,.02-.97,.05C16.52,14.3,17,15.77,17,17.5V19H23V16.5C23,14.17,18.33,13,16,13Z"/></svg> Ensemble Consultation — ${trace.consulted_models.length} Nodes`;
-      wrapper.appendChild(hdr);
-      const body = document.createElement('div');
-      body.className = 'trace-body';
-      body.style.fontSize = '12px';
-      body.innerHTML = '<span style="color:var(--muted)">Expert weights synthesized from:</span> ' + trace.consulted_models.join(', ');
-      wrapper.appendChild(body);
+      el('sendBtn').disabled = true;
+      el('sendBtn').textContent = 'Working...';
+      try{
+        const data = await jpost('/api/chat', payload);
+        addMessage('assistant', data);
+        selectedModelKey = data.selected_model_key || selectedModelKey;
+        if(activeFocusKey){
+          el('systemHint').value = '';
+          activeFocusKey = '';
+          renderFocusChips();
+        }
+        clearUploadedImage();
+        refresh();
+      }catch(error){
+        addMessage('assistant', {response: 'Error: ' + error.message, kind: 'text'});
+      }finally{
+        el('sendBtn').disabled = false;
+        el('sendBtn').textContent = 'Send';
+      }
     }
 
-    if (!wrapper.children.length) return document.createTextNode('');
-    return wrapper;
-  }
-
-  // ── Loop step UI ─────────────────────────────────────────────────────
-  function addLoopStep(n, title, sub, state='active') {
-    const steps = el('loopSteps');
-    loopStep = n;
-    const item = document.createElement('div');
-    item.className = 'lstep';
-    item.id = `lstep-${n}`;
-    item.innerHTML = `<div class="lstep-n ${state}">${n}</div>
-      <div class="lstep-info">
-        <div class="lstep-title">${escHtml(title)}</div>
-        <div class="lstep-sub">${escHtml(sub)}</div>
-      </div>`;
-    steps.appendChild(item);
-    if (el('ptab-mode').style.display !== 'none') {
-      item.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    async function uploadImage(){
+      const file = el('imageUpload').files?.[0];
+      if(!file){
+        showToast('err', 'Choose an image file first.');
+        return;
+      }
+      const form = new FormData();
+      form.append('session_id', sessionId);
+      form.append('file', file);
+      try{
+        const response = await fetch('/api/upload_image', {method: 'POST', body: form});
+        const data = await response.json();
+        if(!response.ok || data.ok === false){
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        currentUploadedImagePath = data.saved_path || '';
+        currentUploadedImageUrl = data.image_url || '';
+        currentUploadedImageName = data.filename || file.name;
+        el('uploadStatus').textContent = 'Uploaded image is attached to the next prompt.';
+        renderUploadPreview();
+        updatePromptStats();
+        showToast('ok', 'Image uploaded.');
+      }catch(error){
+        showToast('err', error.message);
+      }
     }
-  }
 
-  function finaliseLoopSteps() {
-    qsa('.lstep-n').forEach(n => {
-      n.classList.remove('active');
-      n.classList.add('done');
+    function clearUploadedImage(){
+      currentUploadedImagePath = '';
+      currentUploadedImageUrl = '';
+      currentUploadedImageName = '';
+      el('imageUpload').value = '';
+      refreshUploadPanel();
+      updatePromptStats();
+    }
+
+    function buildStarterChips(){
+      const box = el('starterChips');
+      box.innerHTML = '';
+      STARTERS.forEach(text => {
+        const chip = document.createElement('button');
+        chip.className = 'chip';
+        chip.textContent = text;
+        chip.onclick = () => {
+          el('prompt').value = text;
+          el('prompt').focus();
+        };
+        box.appendChild(chip);
+      });
+    }
+
+    function renderFocusChips(){
+      const box = el('focusChips');
+      box.innerHTML = '';
+      FOCUS_PACKS.forEach((pack) => {
+        const chip = document.createElement('button');
+        chip.className = 'chip focus-chip' + (activeFocusKey === pack.key ? ' active' : '');
+        chip.textContent = pack.label;
+        chip.onclick = () => {
+          if(activeFocusKey === pack.key){
+            activeFocusKey = '';
+            el('systemHint').value = '';
+          } else {
+            activeFocusKey = pack.key;
+            el('systemHint').value = pack.hint;
+            if(pack.style) el('styleMode').value = pack.style;
+          }
+          renderFocusChips();
+          updatePromptStats();
+          updateLiveState();
+        };
+        box.appendChild(chip);
+      });
+    }
+
+    el('loadModelBtn').onclick = selectModel;
+    el('refreshBtn').onclick = refresh;
+    el('clearBtn').onclick = clearChat;
+    el('sendBtn').onclick = sendPrompt;
+    el('uploadBtn').onclick = uploadImage;
+    el('clearUploadBtn').onclick = clearUploadedImage;
+    el('saveChatImageBtn').onclick = exportChatImage;
+    el('saveLastImageBtn').onclick = saveLastImage;
+    el('addContextNoteBtn').onclick = addManualContext;
+    el('captureLastReplyBtn').onclick = captureLastAssistantContext;
+    el('clearContextBankBtn').onclick = clearContextBank;
+    el('toggleSidebarBtn').onclick = () => {
+      focusLayout = !focusLayout;
+      persistUiState();
+      applyLayoutState();
+    };
+    el('toggleThreadDensityBtn').onclick = () => {
+      compactThread = !compactThread;
+      persistUiState();
+      applyThreadDensity();
+    };
+    el('toggleComposerBtn').onclick = () => {
+      composerCompact = !composerCompact;
+      persistUiState();
+      applyComposerCompactState();
+    };
+    el('refreshStoreBtn').onclick = () => refreshModelStore(true);
+    document.querySelectorAll('[data-compose-tab]').forEach((button) => {
+      button.onclick = () => setComposeTab(button.dataset.composeTab || 'quick');
     });
-  }
-
-  // ── Typing indicator ─────────────────────────────────────────────────
-  function addTyping() {
-    const row = document.createElement('div');
-    row.className = 'msg asst';
-    row.id = 'typing';
-    const meta = document.createElement('div');
-    meta.className = 'msg-meta';
-    const av = document.createElement('div');
-    av.className = 'msg-avatar';
-    av.textContent = 'SX';
-    meta.append(av, document.createTextNode('V46 synthesis...'));
-    row.appendChild(meta);
-    const dots = document.createElement('div');
-    dots.className = 'typing-dots bubble';
-    dots.innerHTML = '<span></span><span></span><span></span>';
-    row.appendChild(dots);
-    el('thread').appendChild(row);
-    scrollToBottom();
-  }
-
-  function removeTyping() {
-    const t = el('typing');
-    if (t) t.remove();
-  }
-
-  // ── Auto-resize textarea ─────────────────────────────────────────────
-  const textarea = el('prompt');
-  textarea.addEventListener('input', () => {
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 360) + 'px';
-  });
-  textarea.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el('sendBtn').click(); }
-  });
-  qsa('.quick-chip').forEach(btn => {
-    btn.onclick = () => {
-      textarea.value = btn.dataset.prompt || btn.textContent.trim();
-      textarea.dispatchEvent(new Event('input'));
-      textarea.focus();
+    el('modelSearch').addEventListener('input', renderCatalog);
+    el('capabilityFilter').addEventListener('change', renderCatalog);
+    el('modelSelect').addEventListener('change', () => {
+      refreshUploadPanel();
+      refreshThreeDViewer(findRecord(el('modelSelect').value));
+      updateLiveState();
+      updateDiscoveryNote(filteredCatalogRecords());
+    });
+    el('agentMode').addEventListener('change', () => { refreshUploadPanel(); updateLiveState(); });
+    el('loopBudget').addEventListener('change', () => { updateLiveState(); updatePromptStats(); });
+    el('actionMode').addEventListener('change', () => { refreshUploadPanel(); updateLiveState(); updatePromptStats(); });
+    el('memoryMode').addEventListener('change', updateLiveState);
+    el('webSearchMode').addEventListener('change', updateLiveState);
+    el('styleMode').addEventListener('change', updatePromptStats);
+    el('systemHint').addEventListener('input', updatePromptStats);
+    el('sessionObjective').addEventListener('input', syncSessionBrief);
+    el('sessionConstraints').addEventListener('input', syncSessionBrief);
+    el('sessionDone').addEventListener('input', syncSessionBrief);
+    el('deliverableTarget').addEventListener('input', syncOutcomeBoard);
+    el('successChecks').addEventListener('input', syncOutcomeBoard);
+    el('riskBox').addEventListener('input', syncOutcomeBoard);
+    el('confidenceMode').addEventListener('change', syncConfidenceContract);
+    el('evidenceMode').addEventListener('change', syncConfidenceContract);
+    el('clarifyMode').addEventListener('change', syncConfidenceContract);
+    el('assumptionMode').addEventListener('change', syncConfidenceContract);
+    el('threadFilter').addEventListener('input', applyThreadFilter);
+    el('clearThreadFilterBtn').onclick = () => {
+      el('threadFilter').value = '';
+      applyThreadFilter();
     };
-  });
-
-  // ── Image upload ─────────────────────────────────────────────────────
-  el('imgBtn').onclick = () => el('fileInput').click();
-  el('fileInput').onchange = async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const fd = new FormData();
-      fd.append('session_id', sessionId);
-      fd.append('file', file);
-      const r = await fetch('/api/upload_image', { method:'POST', body:fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'Upload failed');
-      currentUpload = data.saved_path;
-      currentUpUrl  = data.image_url;
-      el('imgThumb').src  = data.image_url;
-      el('imgName').textContent = file.name;
-      el('uploadBar').style.display = 'flex';
-      el('imgBtn').classList.add('on');
-      toast('ok', 'Data artifact attached');
-    } catch(err) { toast('err', err.message); }
-  };
-
-  el('clearUpBtn').onclick = () => {
-    currentUpload = null; currentUpUrl = '';
-    el('fileInput').value = '';
-    el('uploadBar').style.display = 'none';
-    el('imgBtn').classList.remove('on');
-  };
-
-  // ── Send ─────────────────────────────────────────────────────────────
-  el('sendBtn').onclick = async () => {
-    const text = textarea.value.trim();
-    if (!text && !currentUpload) return;
-
-    let extra = '';
-    if (currentUpUrl) extra = `<img src="${currentUpUrl}" style="margin-top:10px;width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid var(--border)">`;
-    addMsg('user', text || 'Cognitive analysis of artifact.', null, extra);
-
-    textarea.value = '';
-    textarea.style.height = 'auto';
-    el('sendBtn').disabled = true;
-    addTyping();
-
-    if (agentMode === 'loop') {
-      el('loopSteps').innerHTML = '';
-      loopStep = 0;
-      addLoopStep(1, 'Target Initialization', 'Constructing reasoning graph...', 'active');
-      switchPtab('mode');
-    }
-
-    const payload = {
-      session_id: sessionId,
-      message: text,
-      model_key: el('modelSelect').value,
-      action_mode: 'text',
-      settings: {
-        agent_mode: agentMode,
-        loop_max_steps: parseInt(el('loopBudget').value),
-        memory_enabled: el('memToggle').value === 'on',
-        web_search_enabled: el('webToggle').value === 'on',
-        uploaded_image_path: currentUpload
+    el('jumpMatchBtn').onclick = jumpToNextMatch;
+    el('toggleAutoScrollBtn').onclick = () => {
+      autoScrollEnabled = !autoScrollEnabled;
+      applyAutoScrollState();
+      persistUiState();
+      if(autoScrollEnabled){
+        jumpToLatest(true);
       }
     };
-
-    currentUpload = null; currentUpUrl = '';
-    el('uploadBar').style.display = 'none';
-    el('imgBtn').classList.remove('on');
-
-    try {
-      const data = await api('/api/chat', payload);
-      removeTyping();
-
-      if (agentMode === 'loop' && data.agent_trace && data.agent_trace.loop_steps) {
-        el('loopSteps').innerHTML = '';
-        data.agent_trace.loop_steps.forEach((s, i) => {
-          addLoopStep(i+1, s.goal || `Phase ${i+1}`, s.worker_excerpt || '', 'done');
-        });
-        finaliseLoopSteps();
+    el('toggleMetaBtn').onclick = () => {
+      hideThreadMeta = !hideThreadMeta;
+      applyThreadMetaState();
+      persistUiState();
+    };
+    thread.addEventListener('scroll', syncAutoScrollFromThread);
+    thread.addEventListener('click', (event) => {
+      const button = event.target.closest('.save-image-btn');
+      if(button){
+        saveGeneratedImage(button.dataset.outputPath || '');
+        return;
       }
-
-      addMsg('assistant', data.response || '(Inference finalized)', data.agent_trace);
-      updateStatus(data);
-    } catch(err) {
-      removeTyping();
-      addMsg('assistant', 'System Fault: ' + err.message);
-      toast('err', err.message);
-    } finally {
-      el('sendBtn').disabled = false;
-    }
-  };
-
-  // ── Clear ─────────────────────────────────────────────────────────────
-  el('clearBtn').onclick = async () => {
-    try {
-      await api('/api/clear', { session_id: sessionId });
-      el('thread').innerHTML = '';
-      el('loopSteps').innerHTML = '';
-      addMsg('assistant', 'Session memory cleared. Omni V46 is ready for the next message.');
-      toast('ok', 'System memory purged');
-    } catch(e) { toast('err', e.message); }
-  };
-
-  // ── Model init ────────────────────────────────────────────────────────
-  async function initModels() {
-    try {
-      const data = await api('/api/catalog');
-      const sel  = el('modelSelect');
-      sel.innerHTML = '';
-      catalogByKey = {};
-      let preferred = null;
-      let auto = null;
-      (data.models || []).forEach(m => {
-        catalogByKey[m.key] = m;
-        const opt = document.createElement('option');
-        opt.value = m.key;
-        const score = m.common_overall_exact != null ? m.common_overall_exact : m.recipe_eval_accuracy;
-        const scoreText = score != null ? ` - ${(Number(score) * 100).toFixed(1)}%` : '';
-        opt.textContent = m.key === 'auto' ? 'Auto Router' : `${m.label}${scoreText}`;
-        if (m.key === 'omni_collective_v46') preferred = opt;
-        if (m.key === 'auto') auto = opt;
-        sel.appendChild(opt);
-      });
-      if (preferred) preferred.selected = true;
-      else if (auto) auto.selected = true;
-      sel.onchange = () => updateStatus();
-      updateStatus();
-    } catch(e) { console.warn('Catalog failure', e); }
-  }
-
-  async function updateStatus(data) {
-    try {
-      const s = await api('/api/status');
-      const st = s.status || {};
-      const sel = el('modelSelect');
-      const selected = catalogByKey[sel.value] || {};
-      const selectedLabel = selected.label || (sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '');
-      const label = st.active_model_label || selectedLabel || 'Auto Router';
-      const score = selected.common_overall_exact != null ? selected.common_overall_exact : selected.recipe_eval_accuracy;
-      const scoreText = score != null ? `${(Number(score) * 100).toFixed(1)}%` : 'pending';
-      el('panelStatus').textContent =
-        `model: ${label || '-'}\ndevice: ${st.device || '-'}\nbenchmark: ${scoreText}\nmode: ${agentMode}`;
-      el('activePill').textContent = String(label).toLowerCase().includes('v46') ? 'V46 Champion' : (label || 'Auto');
-      const lowered = label.toLowerCase();
-      const pillClass = lowered.includes('v46') ? ' v46' : (lowered.includes('v48') ? ' v48' : (lowered.includes('v47') ? ' v47' : ''));
-      el('activePill').className = 'model-pill' + pillClass;
-      const snap = el('modelSnapshot');
-      if (snap) {
-        const benchCount = selected.per_benchmark ? Object.keys(selected.per_benchmark).length : selected.benchmark_count;
-        snap.innerHTML = `<strong>${escHtml(label || 'Selected model')}</strong><br>` +
-          `Benchmark: ${escHtml(scoreText)}${benchCount ? ` across ${benchCount} suites` : ''}<br>` +
-          `Source: ${escHtml(selected.selection_policy || selected.score_source || 'runtime catalog')}`;
+      const copyButton = event.target.closest('.copy-text-btn');
+      if(copyButton){
+        copyText(copyButton.dataset.copyText || '', 'Message copied.');
+        return;
       }
-    } catch(_) {}
-  }
-
-  // ── Benchmark tab ─────────────────────────────────────────────────────
-  async function loadBenchData() {
-    try {
-      const r = await api('/api/benchmark');
-      const nota  = el('benchNote');
-      const img   = el('benchImg');
-      const scores = el('benchScores');
-
-      if (r.graph_b64) {
-        img.src = 'data:image/png;base64,' + r.graph_b64;
-        img.style.display = 'block';
-        nota.style.display = 'none';
-      } else {
-        nota.textContent = 'No benchmark graph was found yet.';
+      const reuseButton = event.target.closest('.reuse-msg-btn');
+      if(reuseButton){
+        el('prompt').value = reuseButton.dataset.reuseText || '';
+        el('prompt').focus();
+        updatePromptStats();
+        return;
       }
-
-      if (r.models) {
-        scores.innerHTML = '';
-        const topMean = Math.max(...r.models.map(m => Number(m.mean) || 0), 0);
-        r.models.forEach(m => {
-          const raw = Number(m.mean) || 0;
-          const pctNum = raw <= 1.001 ? raw * 100 : raw;
-          const pct = Math.max(0, Math.min(100, pctNum)).toFixed(1);
-          const loweredLabel = String(m.label || '').toLowerCase();
-          const isTop = Math.abs((Number(m.mean) || 0) - topMean) < 0.001 || loweredLabel.includes('v46');
-          const bar = document.createElement('div');
-          bar.style.cssText = 'margin-bottom:10px';
-          bar.innerHTML = `<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-            <span style="color:${isTop?'#86efac':'var(--text)'};font-weight:${isTop?700:400}">${escHtml(m.label)}</span>
-            <span style="color:${isTop?'#86efac':'var(--muted)'}">${pct}%</span>
-          </div>
-          <div style="background:rgba(255,255,255,0.06);border-radius:4px;height:4px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:${isTop?'#34d399':'var(--blue)'};border-radius:4px;transition:.6s"></div>
-          </div>`;
-          scores.appendChild(bar);
-        });
+      const refineButton = event.target.closest('.refine-msg-btn');
+      if(refineButton){
+        const card = refineButton.closest('.msg');
+        queueRefinementPrompt(card?.dataset.messageText || '', refineButton.dataset.refineMode || 'tighten', card?.dataset.messageLabel || 'reply');
+        return;
       }
-    } catch(e) {
-      el('benchNote').textContent = 'Benchmark data unavailable.';
-    }
-  }
+      const pinContextButton = event.target.closest('.pin-context-btn');
+      if(pinContextButton){
+        const card = pinContextButton.closest('.msg');
+        if(addContextEntry(card?.dataset.messageText || '', card?.dataset.messageLabel || 'Pinned message')){
+          showToast('ok', 'Message added to context bank.');
+        }else{
+          showToast('err', 'Nothing to add from this message.');
+        }
+        return;
+      }
+      const bookmarkButton = event.target.closest('.bookmark-msg-btn');
+      if(bookmarkButton){
+        addThreadBookmark(bookmarkButton.closest('.msg'));
+        return;
+      }
+      const compareAButton = event.target.closest('.compare-a-btn');
+      if(compareAButton){
+        const card = compareAButton.closest('.msg');
+        compareSlots.a = JSON.parse(card?.dataset.comparePayload || 'null');
+        renderCompareBench();
+        showToast('ok', 'Reply pinned to slot A.');
+        return;
+      }
+      const compareBButton = event.target.closest('.compare-b-btn');
+      if(compareBButton){
+        const card = compareBButton.closest('.msg');
+        compareSlots.b = JSON.parse(card?.dataset.comparePayload || 'null');
+        renderCompareBench();
+        showToast('ok', 'Reply pinned to slot B.');
+      }
+    });
+    el('prompt').addEventListener('keydown', (event) => {
+      if(event.key === 'Enter' && !event.shiftKey){
+        event.preventDefault();
+        sendPrompt();
+      }
+    });
+    el('prompt').addEventListener('input', updatePromptStats);
+    el('applyBriefBtn').onclick = applyBriefToHint;
+    el('applyOutcomeBtn').onclick = () => {
+      const composed = composeSystemHint();
+      el('systemHint').value = composed;
+      updatePromptStats();
+      updateDispatchPreview();
+      showToast('ok', composed ? 'Outcome board folded into system hint.' : 'No outcome board to apply.');
+    };
+    el('clearOutcomeBtn').onclick = () => {
+      clearOutcomeBoard();
+      showToast('ok', 'Outcome board cleared.');
+    };
+    el('clearBriefBtn').onclick = () => {
+      clearSessionBrief();
+      showToast('ok', 'Session brief cleared.');
+    };
+    el('refineLastReplyBtn').onclick = () => {
+      const last = latestAssistantReply();
+      queueRefinementPrompt(last?.response || '', 'tighten', 'latest reply');
+    };
+    el('challengeLastReplyBtn').onclick = () => {
+      const last = latestAssistantReply();
+      queueRefinementPrompt(last?.response || '', 'challenge', 'latest reply');
+    };
+    el('saveDraftBtn').onclick = saveCurrentDraft;
+    el('insertLatestDraftBtn').onclick = () => {
+      if(!savedDrafts.length){
+        showToast('err', 'No saved drafts yet.');
+        return;
+      }
+      el('prompt').value = savedDrafts[0].prompt || '';
+      updatePromptStats();
+      el('prompt').focus();
+    };
+    el('copyLastBtn').onclick = () => {
+      const last = [...transcript].reverse().find((item) => item.role === 'assistant' && item.response);
+      if(!last){
+        showToast('err', 'No assistant reply yet.');
+        return;
+      }
+      copyText(last.response || '', 'Last reply copied.');
+    };
+    el('copyThreadBtn').onclick = () => {
+      if(!transcript.length){
+        showToast('err', 'No thread to copy yet.');
+        return;
+      }
+      copyText(transcriptAsText(), 'Thread copied.');
+    };
+    el('downloadThreadBtn').onclick = () => {
+      if(!transcript.length){
+        showToast('err', 'No thread to download yet.');
+        return;
+      }
+      downloadTranscriptJson();
+      showToast('ok', 'Thread JSON downloaded.');
+    };
+    el('jumpBottomBtn').onclick = () => jumpToLatest(true);
+    el('swapCompareBtn').onclick = () => {
+      const temp = compareSlots.a;
+      compareSlots.a = compareSlots.b;
+      compareSlots.b = temp;
+      renderCompareBench();
+    };
+    el('clearCompareBtn').onclick = () => {
+      compareSlots = {a:null, b:null};
+      renderCompareBench();
+    };
 
-  // ── Init ─────────────────────────────────────────────────────────────
-  initModels();
-})();
-</script>
+    buildStarterChips();
+    buildResponseDeck();
+    buildRefinementDeck();
+    applySessionBriefInputs();
+    applyOutcomeBoardInputs();
+    applyConfidenceContractInputs();
+    applyLayoutState();
+    applyThreadDensity();
+    applyThreadFilter();
+    setComposeTab(composeTab);
+    renderSessionBrief();
+    renderOutcomeBoard();
+    renderConfidenceContract();
+    renderSavedDrafts();
+    renderContextBank();
+    renderThreadBookmarks();
+    renderCompareBench();
+    renderFocusChips();
+    summarizeTranscript();
+    updatePromptStats();
+    updateLiveState();
+    refreshModelStore(true);
+    refresh();
+  </script>
 </body>
 </html>
 """
 
-# ─── Flask routes ─────────────────────────────────────────────────────────────
 
-@app.route("/")
-def index():
-    return HTML_TEMPLATE
+def build_app(manager: UnifiedModelManager) -> Flask:
+    app = Flask(__name__)
 
-@app.route("/api/status")
-def api_status():
-    return jsonify({"status": manager.status()})
+    @app.get("/")
+    def index():
+        return HTML
 
-@app.route("/api/catalog")
-def api_catalog():
-    from multimodel_catalog import models_to_json
-    return jsonify({"models": models_to_json(manager.records)})
+    @app.get("/api/catalog")
+    def api_catalog():
+        return jsonify({"ok": True, "models": models_to_json(manager.records)})
 
-@app.route("/api/chat", methods=["POST"])
-def api_chat():
-    data = request.json or {}
-    try:
-        result = manager.handle_prompt(
-            session_id=data.get("session_id", "default"),
-            prompt=data.get("message", ""),
-            model_key=data.get("model_key", "auto"),
-            action_mode=data.get("action_mode", "text"),
-            settings=data.get("settings", {})
-        )
-        if hasattr(result, "to_dict"):
-            return jsonify(result.to_dict())
-        return jsonify(result)
-    except Exception as exc:
-        logging.exception("Chat request failed")
-        return jsonify({"ok": False, "error": str(exc)}), 500
+    @app.get("/api/model_store")
+    def api_model_store():
+        force_refresh = str(request.args.get("refresh") or "").strip().lower() in {"1", "true", "yes"}
+        payload = manager.model_store_catalog(force_refresh=force_refresh)
+        return jsonify({"ok": True, **payload})
 
-@app.route("/api/clear", methods=["POST"])
-def api_clear():
-    data = request.json or {}
-    manager.clear(data.get("session_id", "default"))
-    return jsonify({"ok": True})
+    @app.get("/api/model_store/jobs")
+    def api_model_store_jobs():
+        return jsonify({"ok": True, **manager.model_store_jobs()})
 
-@app.route("/api/upload_image", methods=["POST"])
-def api_upload_image():
-    session_id = request.form.get("session_id", "default")
-    file = request.files.get("file")
-    if not file:
-        return jsonify({"error": "No file provided"}), 400
-    raw_bytes = file.read()
-    filename = file.filename or "upload.png"
-    result = manager.store_uploaded_image(
-        session_id=session_id, filename=filename, raw_bytes=raw_bytes
-    )
-    return jsonify(result)
-
-@app.route("/api/benchmark")
-def api_benchmark():
-    """Serve the benchmark graph (base64) and scores JSON."""
-    b64 = _bench_graph_b64()
-    models = []
-    source = ""
-    generated_at = ""
-    benchmark_path = _latest_benchmark_json_path()
-    if benchmark_path:
+    @app.post("/api/model_store/install")
+    def api_model_store_install():
+        payload = request.get_json(force=True, silent=True) or {}
+        file_name = str(payload.get("file_name") or "").strip()
+        if not file_name:
+            return jsonify({"ok": False, "error": "file_name is required"}), 400
         try:
-            data = json.loads(benchmark_path.read_text(encoding="utf-8"))
-            models = _benchmark_rows_for_ui(data)
-            source = str(benchmark_path)
-            generated_at = data.get("created_at", "")
-        except Exception:
-            logging.exception("Benchmark JSON load failed")
-    return jsonify(
-        {
-            "graph_b64": b64,
-            "models": models,
-            "source": source,
-            "generated_at": generated_at,
-        }
-    )
+            job = manager.install_model_store_artifact(file_name)
+            return jsonify({"ok": True, "job": job})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
 
-@app.route("/uploads/<session_slug>/<filename>")
-def serve_upload(session_slug, filename):
-    safe_slug = "".join(c for c in session_slug if c.isalnum() or c in ("-", "_"))
-    return send_from_directory(manager.uploads_dir / safe_slug, filename)
+    @app.get("/api/status")
+    def api_status():
+        return jsonify({"ok": True, "status": manager.status()})
+
+    @app.get("/api/memory")
+    def api_memory():
+        session_id = str(request.args.get("session_id") or "").strip()
+        if not session_id:
+            return jsonify({"ok": False, "error": "session_id is required"}), 400
+        return jsonify({"ok": True, "memory": manager.session_memory_snapshot(session_id)})
+
+    @app.get("/api/three_d_model_view")
+    def api_three_d_model_view():
+        try:
+            payload = dict(manager.three_d_model_view())
+            payload["download_zip_url"] = "/download/three_d_model_zip"
+            payload["download_summary_url"] = "/download/three_d_model_summary" if payload.get("summary_path") else ""
+            return jsonify({"ok": True, "model": payload})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+
+    @app.post("/api/upload_image")
+    def api_upload_image():
+        session_id = str(request.form.get("session_id") or "").strip()
+        if not session_id:
+            return jsonify({"ok": False, "error": "session_id is required"}), 400
+        upload = request.files.get("file")
+        if upload is None or not getattr(upload, "filename", ""):
+            return jsonify({"ok": False, "error": "file is required"}), 400
+        try:
+            result = manager.store_uploaded_image(
+                session_id=session_id,
+                filename=str(upload.filename),
+                raw_bytes=upload.read(),
+            )
+            return jsonify(result)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/select_model")
+    def api_select_model():
+        payload = request.get_json(force=True, silent=True) or {}
+        model_key = str(payload.get("model_key") or "auto").strip() or "auto"
+        status = manager.select_model(model_key=model_key, eager=False)
+        return jsonify({"ok": True, "status": status})
+
+    @app.post("/api/chat")
+    def api_chat():
+        payload = request.get_json(force=True, silent=True) or {}
+        session_id = str(payload.get("session_id") or "").strip() or str(uuid.uuid4())
+        prompt = str(payload.get("message") or "").strip()
+        if not prompt:
+            return jsonify({"ok": False, "error": "message is required"}), 400
+        try:
+            result = manager.handle_prompt(
+                session_id=session_id,
+                prompt=prompt,
+                model_key=str(payload.get("model_key") or "auto").strip() or "auto",
+                action_mode=str(payload.get("action_mode") or "auto").strip().lower(),
+                settings=dict(payload.get("settings") or {}),
+            )
+            return jsonify(result)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/clear")
+    def api_clear():
+        payload = request.get_json(force=True, silent=True) or {}
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            return jsonify({"ok": False, "error": "session_id is required"}), 400
+        manager.clear(session_id)
+        return jsonify({"ok": True, "cleared": True})
+
+    @app.post("/api/save_generated_image")
+    def api_save_generated_image():
+        payload = request.get_json(force=True, silent=True) or {}
+        source_path = str(payload.get("source_path") or "").strip()
+        if not source_path:
+            return jsonify({"ok": False, "error": "source_path is required"}), 400
+        try:
+            result = manager.save_generated_image(
+                source_path=source_path,
+                destination_hint=str(payload.get("destination_path") or "").strip(),
+            )
+            return jsonify(result)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/export_chat_image")
+    def api_export_chat_image():
+        payload = request.get_json(force=True, silent=True) or {}
+        transcript = payload.get("transcript")
+        if not isinstance(transcript, list) or not transcript:
+            return jsonify({"ok": False, "error": "transcript is required"}), 400
+        try:
+            result = manager.export_chat_image(
+                session_id=str(payload.get("session_id") or "").strip() or str(uuid.uuid4()),
+                transcript=transcript,
+                destination_hint=str(payload.get("destination_path") or "").strip(),
+            )
+            return jsonify(result)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.get("/generated/<path:model_key>/<path:filename>")
+    def generated_file(model_key: str, filename: str):
+        target_dir = manager.generated_dir / model_key
+        return send_from_directory(target_dir, filename)
+
+    @app.get("/uploads/<path:session_key>/<path:filename>")
+    def uploaded_file(session_key: str, filename: str):
+        target_dir = manager.uploads_dir / session_key
+        return send_from_directory(target_dir, filename)
+
+    @app.get("/download/three_d_model_zip")
+    def download_three_d_model_zip():
+        try:
+            payload = manager.three_d_model_view()
+            zip_path = Path(str(payload.get("zip_path") or "")).resolve()
+            return send_from_directory(str(zip_path.parent), zip_path.name, as_attachment=True)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+
+    @app.get("/download/three_d_model_summary")
+    def download_three_d_model_summary():
+        try:
+            payload = manager.three_d_model_view()
+            summary_path = Path(str(payload.get("summary_path") or "")).resolve()
+            if not summary_path.exists():
+                raise FileNotFoundError(summary_path)
+            return send_from_directory(str(summary_path.parent), summary_path.name, as_attachment=True)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+
+    return app
 
 
-# ─── Entrypoint ───────────────────────────────────────────────────────────────
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Unified local Supermix multimodel web app.")
+    parser.add_argument("--models_dir", default=str(DEFAULT_MODELS_DIR))
+    parser.add_argument("--common_summary", default="")
+    parser.add_argument("--qwen_base_model_dir", default="")
+    parser.add_argument("--state_dir", default="")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8040)
+    parser.add_argument("--device_preference", default="cuda,npu,xpu,cpu,dml,mps")
+    return parser.parse_args()
 
-def main():
-    global manager
-    parser = argparse.ArgumentParser(description="Supermix Studio X - V46 20-Suite Champion")
-    parser.add_argument("--port",   type=int, default=5000, help="Port to listen on")
-    parser.add_argument("--models", type=str, default=str(DEFAULT_MODELS_DIR),
-                        help="Path to local models directory")
-    parser.add_argument("--host",   type=str, default="0.0.0.0")
-    args = parser.parse_args()
 
+def main() -> None:
+    args = parse_args()
+    if str(args.qwen_base_model_dir or "").strip():
+        os.environ[BASE_MODEL_OVERRIDE_ENV] = str(Path(args.qwen_base_model_dir).resolve())
+    models_dir = Path(args.models_dir).resolve()
+    common_summary = Path(args.common_summary).resolve() if str(args.common_summary or "").strip() else None
+    state_dir = Path(args.state_dir).resolve() if str(args.state_dir or "").strip() else (Path.cwd().resolve() / "run_state_multimodel")
+    extraction_root = state_dir / "extracted_models"
+    generated_dir = state_dir / "generated_images"
+
+    records = tuple(
+        discover_model_records(
+            models_dir=models_dir,
+            common_summary_path=common_summary if common_summary is not None else Path(),
+        )
+    ) if common_summary is not None else tuple(discover_model_records(models_dir=models_dir))
     manager = UnifiedModelManager(
-        records=discover_model_records(Path(args.models)),
-        extraction_root=Path("tmp/ext"),
-        generated_dir=Path("tmp/gen"),
-        models_dir=Path(args.models),
+        records=records,
+        extraction_root=extraction_root,
+        generated_dir=generated_dir,
+        device_preference=str(args.device_preference),
+        models_dir=models_dir,
+        common_summary_path=common_summary if common_summary is not None else DEFAULT_COMMON_SUMMARY,
     )
-    print(f"[Supermix Studio X] starting on http://{args.host}:{args.port}")
-    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    app = build_app(manager)
+    print(f"Supermix Studio: http://{args.host}:{args.port}")
+    app.run(host=args.host, port=int(args.port), threaded=True)
 
 
 if __name__ == "__main__":
     main()
-

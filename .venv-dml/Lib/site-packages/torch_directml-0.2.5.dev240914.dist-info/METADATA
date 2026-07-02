@@ -1,0 +1,92 @@
+Metadata-Version: 2.1
+Name: torch-directml
+Version: 0.2.5.dev240914
+Summary: A DirectML backend for hardware acceleration in PyTorch.
+Home-page: https://github.com/microsoft/directml
+Author: Microsoft Corporation
+Author-email: askdirectml@microsoft.com
+License: MIT
+Project-URL: Bug Tracker, https://github.com/microsoft/directml/issues
+Keywords: pytorch,plugin,machine learning,directml,directx,d3d12
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Education
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Topic :: Scientific/Engineering
+Classifier: Topic :: Scientific/Engineering :: Mathematics
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Topic :: Software Development
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Programming Language :: C++
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+License-File: LICENSE
+License-File: NOTICE
+Requires-Dist: torch==2.4.1
+Requires-Dist: torchvision==0.19.1
+
+# PyTorch with DirectML
+DirectML acceleration for PyTorch is currently available for Public Preview. PyTorch with DirectML enables training and inference of complex machine learning models on a wide range of DirectX 12-compatible hardware.
+
+DirectML is a high-performance, hardware-accelerated DirectX 12 library for machine learning. DirectML provides GPU acceleration for common machine learning tasks across a broad range of supported hardware and drivers, including all DirectX 12-capable GPUs from vendors such as AMD, Intel, NVIDIA, and Qualcomm.
+
+More information about DirectML can be found in [Introduction to DirectML](https://docs.microsoft.com/windows/win32/direct3d12/dml-intro).
+
+PyTorch on DirectML is supported on both the latest versions of Windows 10 and the [Windows Subsystem for Linux](https://docs.microsoft.com/windows/wsl/about), and is available for download as a PyPI package. For more information about getting started, see [GPU accelerated ML training (docs.microsoft.com)](http://aka.ms/gpuinwsldocs)
+
+
+## Samples
+Refer to the [Pytorch with DirectML Samples Repo](https://github.com/microsoft/DirectML/tree/master/PyTorch) for samples. 
+
+## Roadmap
+`torch-directml` is actively under development and we're always adding more operators. For a list of all the operators we support and their data type coverage, refer to the [PyTorch DirectML Operator Roadmap](https://github.com/microsoft/DirectML/wiki/PyTorch-DirectML-Operator-Roadmap) in the DirectML repository wiki. If you require support for an operator that isn't in this list, see the [Feedback](#feedback) section below on how to file an issue. 
+
+## Feedback
+
+We look forward to hearing from you!
+
+* For TensorFlow with DirectML issues, bugs, and feedback; or for general DirectML issues and feedback, please [file an issue](https://github.com/microsoft/DirectML-Samples/issues) or contact us directly at askdirectml@microsoft.com.
+
+* For PyTorch with DirectML issues, bugs, and feedback; or for general DirectML issues and feedback, please [file an issue](https://github.com/microsoft/DirectML-Samples/issues) or contact us directly at askdirectml@microsoft.com.
+
+* For Windows ML issues, please file a GitHub issue at [microsoft/Windows-Machine-Learning](https://github.com/Microsoft/Windows-Machine-Learning/issues) or contact us directly at askwindowsml@microsoft.com.
+
+* For ONNX Runtime issues, please file an issue at [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime/issues).
+
+## Contributing
+
+This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
+the rights to use your contribution. For details, visit https://cla.microsoft.com.
+
+When you submit a pull request, a CLA-bot will automatically determine whether you need to provide
+a CLA and decorate the PR appropriately (e.g., label, comment). Simply follow the instructions
+provided by the bot. You will only need to do this once across all repos using our CLA.
+
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
+contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
+## Data Collection Notice
+
+The software may collect information about you and your use of the software and send it to Microsoft. Microsoft may use this information to provide services and improve our products and services. There are also some features in the software that may enable you and Microsoft to collect data from users of your applications. If you use these features, you must comply with applicable law, including providing appropriate notices to users of your applications together with a copy of Microsoft's privacy statement. Our privacy statement is located at https://go.microsoft.com/fwlink/?LinkID=824704. You can learn more about data collection and use in the help documentation and our privacy statement. Your use of the software operates as your consent to these practices.
+
+Specifically, in torch-directml, we are collecting the GPU device info and operators that fall back to CPU for improving operator coverage.
+### 
+
+
+## External Links
+
+- [PyTorch homepage](https://pytorch.org/)
+- [PyTorch DirectML Operator Roadmap](https://github.com/microsoft/DirectML/wiki/PyTorch-DirectML-Operator-Roadmap)
+- [Pytorch with DirectML Samples Repo](https://github.com/microsoft/DirectML/tree/master/PyTorch)
+

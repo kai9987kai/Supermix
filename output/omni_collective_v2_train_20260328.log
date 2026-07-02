@@ -1,0 +1,126 @@
+{"event": "dataset_built", "summary": {"stage1_rows": 3424, "stage2_rows": 3830, "source_counts": {"3d_video": 204, "books": 260, "coding": 280, "creative": 420, "hybrid": 360, "quality_anchor": 5, "reasoning": 620, "science_image": 202, "supermix_plus": 899, "world_events": 66}}}
+{"event": "label_space", "train_rows": 3365, "val_rows": 465, "response_bank": 2986, "vocab_size": 65}
+{"event": "warm_start", "info": {"loaded": true, "matched_keys": 31, "missing_keys": ["embedding.weight", "word_embedding.weight", "word_norm.weight", "word_norm.bias", "char_conv.0.weight", "char_conv.0.bias", "char_conv.2.weight", "char_conv.2.bias", "char_conv_norm.weight", "char_conv_norm.bias", "prompt_feature_proj.0.weight", "prompt_feature_proj.0.bias", "prompt_feature_proj.2.weight", "prompt_feature_proj.2.bias", "prompt_feature_norm.weight", "prompt_feature_norm.bias", "deep_image_encoder.0.weight", "deep_image_encoder.1.weight", "deep_image_encoder.1.bias", "deep_image_encoder.1.running_mean", "deep_image_encoder.1.running_var", "deep_image_encoder.4.weight", "deep_image_encoder.5.weight", "deep_image_encoder.5.bias", "deep_image_encoder.5.running_mean", "deep_image_encoder.5.running_var", "deep_image_encoder.7.layers.2.weight", "deep_image_encoder.7.layers.2.bias", "deep_image_encoder.7.layers.4.weight", "deep_image_encoder.7.layers.4.bias", "deep_image_encoder.9.weight", "deep_image_encoder.10.weight", "deep_image_encoder.10.bias", "deep_image_encoder.10.running_mean", "deep_image_encoder.10.running_var", "deep_image_encoder.12.layers.2.weight", "deep_image_encoder.12.layers.2.bias", "deep_image_encoder.12.layers.4.weight", "deep_image_encoder.12.layers.4.bias", "deep_image_norm.weight", "deep_image_norm.bias", "fusion_in.0.weight", "fusion_in.0.bias", "depth_router.weight", "depth_router.bias", "depth_blocks.0.norm.weight", "depth_blocks.0.norm.bias", "depth_blocks.0.layers.0.weight", "depth_blocks.0.layers.0.bias", "depth_blocks.0.layers.3.weight", "depth_blocks.0.layers.3.bias", "depth_blocks.0.gate.weight", "depth_blocks.0.gate.bias", "depth_blocks.1.norm.weight", "depth_blocks.1.norm.bias", "depth_blocks.1.layers.0.weight", "depth_blocks.1.layers.0.bias", "depth_blocks.1.layers.3.weight", "depth_blocks.1.layers.3.bias", "depth_blocks.1.gate.weight", "depth_blocks.1.gate.bias", "depth_blocks.2.norm.weight", "depth_blocks.2.norm.bias", "depth_blocks.2.layers.0.weight", "depth_blocks.2.layers.0.bias", "depth_blocks.2.layers.3.weight", "depth_blocks.2.layers.3.bias", "depth_blocks.2.gate.weight", "depth_blocks.2.gate.bias", "intent_head.weight", "intent_head.bias", "response_head.weight", "response_head.bias", "vision_head.weight", "domain_head.weight", "domain_head.bias"], "unexpected_keys": []}}
+{"event": "stage_start", "train_rows": 3009, "val_rows": 465, "response_bank": 2986, "batch_size": 64, "learning_rate": 0.001, "epochs": 2}
+{"event": "epoch_end", "epoch": 1, "train_loss": 9.079303617848238, "val_intent_accuracy": 0.6408602150537634, "val_response_accuracy": 0.07526881720430108, "val_vision_accuracy": 0.0, "val_domain_accuracy": 0.7182795698924731, "score": 0.30569892473118276}
+{"event": "epoch_end", "epoch": 2, "train_loss": 7.525407660280838, "val_intent_accuracy": 0.7419354838709677, "val_response_accuracy": 0.07526881720430108, "val_vision_accuracy": 0.0, "val_domain_accuracy": 0.7139784946236559, "score": 0.32505376344086023}
+{"event": "stage_start", "train_rows": 3365, "val_rows": 465, "response_bank": 2986, "batch_size": 32, "learning_rate": 0.00055, "epochs": 2}
+{"event": "epoch_end", "epoch": 1, "train_loss": 9.241056405134046, "val_intent_accuracy": 0.8559139784946237, "val_response_accuracy": 0.08172043010752689, "val_vision_accuracy": 0.16, "val_domain_accuracy": 0.8408602150537634, "score": 0.40012903225806457}
+{"event": "epoch_end", "epoch": 2, "train_loss": 7.416517325425396, "val_intent_accuracy": 0.8516129032258064, "val_response_accuracy": 0.09247311827956989, "val_vision_accuracy": 0.24, "val_domain_accuracy": 0.7935483870967742, "score": 0.4066451612903225}
+{
+  "zip_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v2_frontier_20260328.zip",
+  "desktop_zip_path": "C:\\Users\\kai99\\Desktop\\models\\supermix_omni_collective_v2_frontier_20260328.zip",
+  "artifact_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v2_frontier_20260328",
+  "parameter_count": 3206878,
+  "stage1_val": {
+    "intent_accuracy": 0.7419354838709677,
+    "response_accuracy": 0.07526881720430108,
+    "vision_accuracy": 0.0,
+    "domain_accuracy": 0.7139784946236559
+  },
+  "stage2_val": {
+    "intent_accuracy": 0.8516129032258064,
+    "response_accuracy": 0.09247311827956989,
+    "vision_accuracy": 0.24,
+    "domain_accuracy": 0.7935483870967742
+  },
+  "warm_start": {
+    "loaded": true,
+    "matched_keys": 31,
+    "missing_keys": [
+      "embedding.weight",
+      "word_embedding.weight",
+      "word_norm.weight",
+      "word_norm.bias",
+      "char_conv.0.weight",
+      "char_conv.0.bias",
+      "char_conv.2.weight",
+      "char_conv.2.bias",
+      "char_conv_norm.weight",
+      "char_conv_norm.bias",
+      "prompt_feature_proj.0.weight",
+      "prompt_feature_proj.0.bias",
+      "prompt_feature_proj.2.weight",
+      "prompt_feature_proj.2.bias",
+      "prompt_feature_norm.weight",
+      "prompt_feature_norm.bias",
+      "deep_image_encoder.0.weight",
+      "deep_image_encoder.1.weight",
+      "deep_image_encoder.1.bias",
+      "deep_image_encoder.1.running_mean",
+      "deep_image_encoder.1.running_var",
+      "deep_image_encoder.4.weight",
+      "deep_image_encoder.5.weight",
+      "deep_image_encoder.5.bias",
+      "deep_image_encoder.5.running_mean",
+      "deep_image_encoder.5.running_var",
+      "deep_image_encoder.7.layers.2.weight",
+      "deep_image_encoder.7.layers.2.bias",
+      "deep_image_encoder.7.layers.4.weight",
+      "deep_image_encoder.7.layers.4.bias",
+      "deep_image_encoder.9.weight",
+      "deep_image_encoder.10.weight",
+      "deep_image_encoder.10.bias",
+      "deep_image_encoder.10.running_mean",
+      "deep_image_encoder.10.running_var",
+      "deep_image_encoder.12.layers.2.weight",
+      "deep_image_encoder.12.layers.2.bias",
+      "deep_image_encoder.12.layers.4.weight",
+      "deep_image_encoder.12.layers.4.bias",
+      "deep_image_norm.weight",
+      "deep_image_norm.bias",
+      "fusion_in.0.weight",
+      "fusion_in.0.bias",
+      "depth_router.weight",
+      "depth_router.bias",
+      "depth_blocks.0.norm.weight",
+      "depth_blocks.0.norm.bias",
+      "depth_blocks.0.layers.0.weight",
+      "depth_blocks.0.layers.0.bias",
+      "depth_blocks.0.layers.3.weight",
+      "depth_blocks.0.layers.3.bias",
+      "depth_blocks.0.gate.weight",
+      "depth_blocks.0.gate.bias",
+      "depth_blocks.1.norm.weight",
+      "depth_blocks.1.norm.bias",
+      "depth_blocks.1.layers.0.weight",
+      "depth_blocks.1.layers.0.bias",
+      "depth_blocks.1.layers.3.weight",
+      "depth_blocks.1.layers.3.bias",
+      "depth_blocks.1.gate.weight",
+      "depth_blocks.1.gate.bias",
+      "depth_blocks.2.norm.weight",
+      "depth_blocks.2.norm.bias",
+      "depth_blocks.2.layers.0.weight",
+      "depth_blocks.2.layers.0.bias",
+      "depth_blocks.2.layers.3.weight",
+      "depth_blocks.2.layers.3.bias",
+      "depth_blocks.2.gate.weight",
+      "depth_blocks.2.gate.bias",
+      "intent_head.weight",
+      "intent_head.bias",
+      "response_head.weight",
+      "response_head.bias",
+      "vision_head.weight",
+      "domain_head.weight",
+      "domain_head.bias"
+    ],
+    "unexpected_keys": []
+  },
+  "dataset_summary": {
+    "stage1_rows": 3424,
+    "stage2_rows": 3830,
+    "source_counts": {
+      "3d_video": 204,
+      "books": 260,
+      "coding": 280,
+      "creative": 420,
+      "hybrid": 360,
+      "quality_anchor": 5,
+      "reasoning": 620,
+      "science_image": 202,
+      "supermix_plus": 899,
+      "world_events": 66
+    }
+  }
+}

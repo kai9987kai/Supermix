@@ -1,0 +1,80 @@
+('C:\\Users\\kai99\\Desktop\\New folder '
+ '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\SupermixStudioDesktop.pkg',
+ {'BINARY': True,
+  'DATA': True,
+  'EXECUTABLE': True,
+  'EXTENSION': True,
+  'PYMODULE': True,
+  'PYSOURCE': True,
+  'PYZ': False,
+  'SPLASH': True,
+  'SYMLINK': False},
+ [('pyi-contents-directory _internal', '', 'OPTION'),
+  ('PYZ-00.pyz',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\PYZ-00.pyz',
+   'PYZ'),
+  ('struct',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\localpycs\\struct.pyc',
+   'PYMODULE'),
+  ('pyimod01_archive',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\localpycs\\pyimod01_archive.pyc',
+   'PYMODULE'),
+  ('pyimod02_importers',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\localpycs\\pyimod02_importers.pyc',
+   'PYMODULE'),
+  ('pyimod03_ctypes',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\localpycs\\pyimod03_ctypes.pyc',
+   'PYMODULE'),
+  ('pyimod04_pywin32',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\build\\SupermixStudioDesktop\\localpycs\\pyimod04_pywin32.pyc',
+   'PYMODULE'),
+  ('pyiboot01_bootstrap',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'PYSOURCE'),
+  ('pyi_rth_pkgutil',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py',
+   'PYSOURCE'),
+  ('pyi_rth_multiprocessing',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
+   'PYSOURCE'),
+  ('pyi_rth_inspect',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py',
+   'PYSOURCE'),
+  ('pyi_rth_setuptools',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py',
+   'PYSOURCE'),
+  ('pyi_rth_mplconfig',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_mplconfig.py',
+   'PYSOURCE'),
+  ('pyi_rth_nltk',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks\\pyi_rth_nltk.py',
+   'PYSOURCE'),
+  ('pyi_rth__tkinter',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\.venv-dml\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth__tkinter.py',
+   'PYSOURCE'),
+  ('supermix_multimodel_desktop_app',
+   'C:\\Users\\kai99\\Desktop\\New folder '
+   '(9)\\Supermix_27\\source\\supermix_multimodel_desktop_app.py',
+   'PYSOURCE')],
+ 'python312.dll',
+ True,
+ False,
+ False,
+ [],
+ None,
+ None,
+ None)

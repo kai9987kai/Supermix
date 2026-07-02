@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1408" viewBox="0 0 1200 1408">
+<style>
+text { font-family: "Segoe UI", Arial, sans-serif; fill: #111827; }
+.small { font-size: 12px; fill: #4b5563; }
+.label { font-size: 14px; }
+.title { font-size: 24px; font-weight: 700; }
+.subtitle { font-size: 14px; fill: #374151; }
+.tick { font-size: 12px; fill: #6b7280; }
+.grid { stroke: #e5e7eb; stroke-width: 1; }
+.axis { stroke: #9ca3af; stroke-width: 1.5; }
+</style>
+<rect x="0" y="0" width="1200" height="1408" fill="#ffffff" />
+<text class="title" x="320" y="36">Local Model Benchmark Graph</text>
+<text class="subtitle" x="320" y="60">Built from local zips in C:\Users\kai99\Desktop\models. Common-benchmark scores come from the saved expanded sweep. v39 is recipe-eval only.</text>
+<text class="small" x="320" y="82">Duplicate downloads and alternate packaging were collapsed so each distinct local model family appears once.</text>
+<line class="grid" x1="320.00" y1="302" x2="320.00" y2="1306" />
+<text class="tick" x="320.00" y="1328" text-anchor="middle">0.00</text>
+<line class="grid" x1="472.00" y1="302" x2="472.00" y2="1306" />
+<text class="tick" x="472.00" y="1328" text-anchor="middle">0.05</text>
+<line class="grid" x1="624.00" y1="302" x2="624.00" y2="1306" />
+<text class="tick" x="624.00" y="1328" text-anchor="middle">0.10</text>
+<line class="grid" x1="776.00" y1="302" x2="776.00" y2="1306" />
+<text class="tick" x="776.00" y="1328" text-anchor="middle">0.15</text>
+<line class="grid" x1="928.00" y1="302" x2="928.00" y2="1306" />
+<text class="tick" x="928.00" y="1328" text-anchor="middle">0.20</text>
+<line class="grid" x1="1080.00" y1="302" x2="1080.00" y2="1306" />
+<text class="tick" x="1080.00" y="1328" text-anchor="middle">0.25</text>
+<line class="axis" x1="320" y1="1304" x2="1080" y2="1304" />
+<text class="label" x="308" y="317" text-anchor="end">v40_benchmax</text>
+<rect x="320" y="301" width="739.73" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="1067.73" y="316">0.243</text>
+<text class="small" x="1092" y="316">common</text>
+<text class="label" x="308" y="351" text-anchor="end">omni_collective_v8</text>
+<rect x="320" y="335" width="648.53" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="976.53" y="350">0.213</text>
+<text class="small" x="1092" y="350">common</text>
+<text class="label" x="308" y="385" text-anchor="end">v33_final</text>
+<rect x="320" y="369" width="567.47" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="895.47" y="384">0.187</text>
+<text class="small" x="1092" y="384">common</text>
+<text class="label" x="308" y="419" text-anchor="end">v39_final</text>
+<rect x="320" y="403" width="547.20" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="875.20" y="418">0.180</text>
+<line x1="486.90" y1="399" x2="486.90" y2="425" stroke="#b91c1c" stroke-width="2" />
+<circle cx="486.90" cy="412" r="5" fill="#b91c1c" />
+<text class="small" x="496.90" y="404">recipe 0.055</text>
+<text class="small" x="1092" y="418">common</text>
+<text class="label" x="308" y="453" text-anchor="end">omni_collective_v1</text>
+<rect x="320" y="437" width="496.53" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="824.53" y="452">0.163</text>
+<text class="small" x="1092" y="452">common</text>
+<text class="label" x="308" y="487" text-anchor="end">v34_final</text>
+<rect x="320" y="471" width="486.40" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="814.40" y="486">0.160</text>
+<text class="small" x="1092" y="486">common alias</text>
+<text class="label" x="308" y="521" text-anchor="end">v36_native</text>
+<rect x="320" y="505" width="466.13" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="794.13" y="520">0.153</text>
+<text class="small" x="1092" y="520">common</text>
+<text class="label" x="308" y="555" text-anchor="end">v35_final</text>
+<rect x="320" y="539" width="466.13" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="794.13" y="554">0.153</text>
+<text class="small" x="1092" y="554">common alias</text>
+<text class="label" x="308" y="589" text-anchor="end">three_d_generation_micro_v1</text>
+<rect x="320" y="573" width="425.60" height="18" rx="4" fill="#0891b2" opacity="0.92" />
+<text class="small" x="753.60" y="588">0.140</text>
+<text class="small" x="1092" y="588">common</text>
+<text class="label" x="308" y="623" text-anchor="end">protein_folding_micro_v1</text>
+<rect x="320" y="607" width="405.33" height="18" rx="4" fill="#6d28d9" opacity="0.92" />
+<text class="small" x="733.33" y="622">0.133</text>
+<text class="small" x="1092" y="622">common</text>
+<text class="label" x="308" y="657" text-anchor="end">omni_collective_v2</text>
+<rect x="320" y="641" width="374.93" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="702.93" y="656">0.123</text>
+<text class="small" x="1092" y="656">common</text>
+<text class="label" x="308" y="691" text-anchor="end">omni_collective_v7</text>
+<rect x="320" y="675" width="324.27" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="652.27" y="690">0.107</text>
+<text class="small" x="1092" y="690">common</text>
+<text class="label" x="308" y="725" text-anchor="end">omni_collective_v5</text>
+<rect x="320" y="709" width="283.73" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="611.73" y="724">0.093</text>
+<text class="small" x="1092" y="724">common</text>
+<text class="label" x="308" y="759" text-anchor="end">omni_collective_v4</text>
+<rect x="320" y="743" width="273.60" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="601.60" y="758">0.090</text>
+<text class="small" x="1092" y="758">common</text>
+<text class="label" x="308" y="793" text-anchor="end">omni_collective_v6</text>
+<rect x="320" y="777" width="222.93" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="550.93" y="792">0.073</text>
+<text class="small" x="1092" y="792">common</text>
+<text class="label" x="308" y="827" text-anchor="end">v31_image_variant</text>
+<rect x="320" y="811" width="202.67" height="18" rx="4" fill="#6b7280" opacity="0.92" />
+<text class="small" x="530.67" y="826">0.067</text>
+<text class="small" x="1092" y="826">common alias</text>
+<text class="label" x="308" y="861" text-anchor="end">v31_final</text>
+<rect x="320" y="845" width="202.67" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="530.67" y="860">0.067</text>
+<text class="small" x="1092" y="860">common</text>
+<text class="label" x="308" y="895" text-anchor="end">omni_collective_v3</text>
+<rect x="320" y="879" width="202.67" height="18" rx="4" fill="#db2777" opacity="0.92" />
+<text class="small" x="530.67" y="894">0.067</text>
+<text class="small" x="1092" y="894">common</text>
+<text class="label" x="308" y="929" text-anchor="end">v32_final</text>
+<rect x="320" y="913" width="192.53" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="520.53" y="928">0.063</text>
+<text class="small" x="1092" y="928">common</text>
+<text class="label" x="308" y="963" text-anchor="end">qwen_v28</text>
+<rect x="320" y="947" width="60.80" height="18" rx="4" fill="#d97706" opacity="0.92" />
+<text class="small" x="388.80" y="962">0.020</text>
+<text class="small" x="1092" y="962">common</text>
+<text class="label" x="308" y="997" text-anchor="end">v38_native_xlite_fp16</text>
+<rect x="320" y="981" width="40.53" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="368.53" y="996">0.013</text>
+<text class="small" x="1092" y="996">common alias</text>
+<text class="label" x="308" y="1031" text-anchor="end">v38_native_xlite</text>
+<rect x="320" y="1015" width="40.53" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="368.53" y="1030">0.013</text>
+<text class="small" x="1092" y="1030">common</text>
+<text class="label" x="308" y="1065" text-anchor="end">v37_native_lite</text>
+<rect x="320" y="1049" width="40.53" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="368.53" y="1064">0.013</text>
+<text class="small" x="1092" y="1064">common</text>
+<text class="label" x="308" y="1099" text-anchor="end">v30_lite_fp16</text>
+<rect x="320" y="1083" width="30.40" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="358.40" y="1098">0.010</text>
+<text class="small" x="1092" y="1098">common</text>
+<text class="label" x="308" y="1133" text-anchor="end">math_equation_micro_v1</text>
+<rect x="320" y="1117" width="30.40" height="18" rx="4" fill="#0f766e" opacity="0.92" />
+<text class="small" x="358.40" y="1132">0.010</text>
+<text class="small" x="1092" y="1132">common</text>
+<text class="label" x="308" y="1167" text-anchor="end">qwen_v30_experimental</text>
+<rect x="320" y="1151" width="10.13" height="18" rx="4" fill="#d97706" opacity="0.92" />
+<text class="small" x="338.13" y="1166">0.003</text>
+<text class="small" x="1092" y="1166">common</text>
+<text class="label" x="308" y="1201" text-anchor="end">science_vision_micro_v1</text>
+<rect x="320" y="1185" width="760" height="18" rx="4" fill="#f9fafb" stroke="#d1d5db" stroke-dasharray="4 4" />
+<text class="small" x="328" y="1200">no common-benchmark score</text>
+<text class="small" x="1092" y="1200">specialist_only</text>
+<text class="label" x="308" y="1235" text-anchor="end">dcgan_v2_in_progress</text>
+<rect x="320" y="1219" width="760" height="18" rx="4" fill="#f9fafb" stroke="#d1d5db" stroke-dasharray="4 4" />
+<text class="small" x="328" y="1234">no common-benchmark score</text>
+<text class="small" x="1092" y="1234">specialist_only</text>
+<text class="label" x="308" y="1269" text-anchor="end">dcgan_mnist_model</text>
+<rect x="320" y="1253" width="760" height="18" rx="4" fill="#f9fafb" stroke="#d1d5db" stroke-dasharray="4 4" />
+<text class="small" x="328" y="1268">no common-benchmark score</text>
+<text class="small" x="1092" y="1268">specialist_only</text>
+<rect x="320" y="86" width="12" height="12" fill="#db2777" />
+<text class="small" x="338" y="96">Omni fused multimodal model</text>
+<rect x="320" y="104" width="12" height="12" fill="#2563eb" />
+<text class="small" x="338" y="114">Champion-family text model</text>
+<rect x="320" y="122" width="12" height="12" fill="#15803d" />
+<text class="small" x="338" y="132">Native image-capable checkpoint</text>
+<rect x="320" y="140" width="12" height="12" fill="#0891b2" />
+<text class="small" x="338" y="150">3d</text>
+<rect x="320" y="158" width="12" height="12" fill="#6d28d9" />
+<text class="small" x="338" y="168">Protein-folding specialist model</text>
+<rect x="320" y="176" width="12" height="12" fill="#6b7280" />
+<text class="small" x="338" y="186">Wrapper or alias artifact</text>
+<rect x="320" y="194" width="12" height="12" fill="#d97706" />
+<text class="small" x="338" y="204">Qwen adapter scored on the common benchmark sweep</text>
+<rect x="320" y="212" width="12" height="12" fill="#0f766e" />
+<text class="small" x="338" y="222">Math specialist model</text>
+<rect x="320" y="230" width="12" height="12" fill="#7c3aed" />
+<text class="small" x="338" y="240">Vision specialist artifact</text>
+<rect x="320" y="248" width="12" height="12" fill="#b91c1c" />
+<text class="small" x="338" y="258">GAN image-generation specialist</text>
+<circle cx="325" cy="280" r="5" fill="#b91c1c" />
+<text class="small" x="338" y="284">Recipe holdout marker when no common-benchmark run exists</text>
+<text class="small" x="320" y="1382">Generated 2026-04-08 22:14 UTC from output/benchmark_all_models_common_plus_summary_20260408.json and the local models directory.</text>
+</svg>

@@ -1,0 +1,13 @@
+{
+  "name": "delta_v26_finnegans_focus_stage6_resume_dictionary_only",
+  "format": "jsonl_shards",
+  "created_at_utc": "2026-02-23T00:00:00Z",
+  "total_rows": 1000000,
+  "shards": [
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "resume-only final stage after PC restart"
+    }
+  ]
+}

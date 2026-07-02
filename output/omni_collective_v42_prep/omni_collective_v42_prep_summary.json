@@ -1,0 +1,66 @@
+{
+  "family": "omni_collective_v42",
+  "prepared_from": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v41_frontier_20260410_015540\\omni_collective_v41_frontier_summary.json",
+  "output_root": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep",
+  "v41_base_output_root": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base",
+  "row_groups": {
+    "benchmark_bridge": {
+      "row_count": 9,
+      "source_counts": {
+        "benchmark_bridge_v42::arc-challenge": 1,
+        "benchmark_bridge_v42::boolq": 1,
+        "benchmark_bridge_v42::bridge_rationale": 1,
+        "benchmark_bridge_v42::disagreement_resolution": 1,
+        "benchmark_bridge_v42::gsm8k": 1,
+        "benchmark_bridge_v42::hellaswag": 1,
+        "benchmark_bridge_v42::mmlu": 1,
+        "benchmark_bridge_v42::piqa": 1,
+        "benchmark_bridge_v42::route_selection": 1
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v42_benchmark_bridge_rows.jsonl"
+    },
+    "teacher_roles": {
+      "row_count": 8,
+      "source_counts": {
+        "teacher_roles_v42::coder_next": 1,
+        "teacher_roles_v42::gemma4_grounded": 1,
+        "teacher_roles_v42::qwen35_long_context": 1,
+        "teacher_roles_v42::qwen_omni": 1,
+        "teacher_roles_v42::teacher_choice": 4
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v42_teacher_role_rows.jsonl"
+    },
+    "verifier_repair": {
+      "row_count": 8,
+      "source_counts": {
+        "teacher_verifier_v42::benchmark_repair": 1,
+        "teacher_verifier_v42::budget_repair": 1,
+        "teacher_verifier_v42::coding_repair": 1,
+        "teacher_verifier_v42::multimodal_repair": 1,
+        "teacher_verifier_v42::repair_rule": 4
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v42_verifier_repair_rows.jsonl"
+    },
+    "turboquant_budget": {
+      "row_count": 8,
+      "source_counts": {
+        "turboquant_budget_v42::compressed_log_summary": 1,
+        "turboquant_budget_v42::evidence_rule": 4,
+        "turboquant_budget_v42::math_budget": 1,
+        "turboquant_budget_v42::model_compare_budget": 1,
+        "turboquant_budget_v42::training_translation": 1
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v42_turboquant_budget_rows.jsonl"
+    },
+    "diversity_mix": {
+      "row_count": 24,
+      "source_counts": {
+        "diversity_mix_v42::persona_style": 24
+      },
+      "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v42_diversity_rows.jsonl"
+    }
+  },
+  "promotion_eval_pack_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v42_promotion_eval_pack.json",
+  "total_new_rows": 57,
+  "blueprint_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\omni_collective_v42_blueprint.json"
+}

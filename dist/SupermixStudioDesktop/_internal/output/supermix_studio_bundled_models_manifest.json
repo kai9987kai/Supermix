@@ -1,0 +1,91 @@
+﻿{
+    "generated_at":  "2026-03-28T16:18:02.5251326+00:00",
+    "models_dir":  "C:\\Users\\kai99\\Desktop\\models",
+    "bundled_model_count":  21,
+    "bundled_models":  [
+                           {
+                               "name":  "champion_v30_lite_student_fp16_bundle_20260326.zip",
+                               "size_bytes":  8338150
+                           },
+                           {
+                               "name":  "champion_v31_hybrid_plus_refresh_bundle_20260326.zip",
+                               "size_bytes":  40352564
+                           },
+                           {
+                               "name":  "champion_v31_hybrid_plus_refresh_final_model_20260326.zip",
+                               "size_bytes":  20044285
+                           },
+                           {
+                               "name":  "champion_v31_image_variant_bundle_20260326.zip",
+                               "size_bytes":  20446544
+                           },
+                           {
+                               "name":  "champion_v32_omnifuse_bundle_20260326.zip",
+                               "size_bytes":  53521722
+                           },
+                           {
+                               "name":  "champion_v33_frontier_full_bundle_20260326.zip",
+                               "size_bytes":  114224171
+                           },
+                           {
+                               "name":  "champion_v33_frontier_full_model_20260326.zip",
+                               "size_bytes":  36659380
+                           },
+                           {
+                               "name":  "champion_v34_frontier_plus_full_model_20260326.zip",
+                               "size_bytes":  39809657
+                           },
+                           {
+                               "name":  "champion_v35_collective_allteachers_full_model_20260326.zip",
+                               "size_bytes":  48785667
+                           },
+                           {
+                               "name":  "champion_v36_native_image_single_checkpoint_model_20260327.zip",
+                               "size_bytes":  72345211
+                           },
+                           {
+                               "name":  "champion_v37_native_image_lite_single_checkpoint_model_20260327.zip",
+                               "size_bytes":  25622496
+                           },
+                           {
+                               "name":  "champion_v38_native_image_xlite_single_checkpoint_model_20260327.zip",
+                               "size_bytes":  20158956
+                           },
+                           {
+                               "name":  "champion_v38_native_image_xlite_single_checkpoint_model_fp16_20260327.zip",
+                               "size_bytes":  10006122
+                           },
+                           {
+                               "name":  "champion_v39_frontier_reasoning_plus_full_model_20260327.zip",
+                               "size_bytes":  78674889
+                           },
+                           {
+                               "name":  "qwen_supermix_enhanced_v28_cloud_plus_runpod_budget_final_adapter.zip",
+                               "size_bytes":  68382272
+                           },
+                           {
+                               "name":  "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_adapter.zip",
+                               "size_bytes":  68377426
+                           },
+                           {
+                               "name":  "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_bundle.zip",
+                               "size_bytes":  68512531
+                           },
+                           {
+                               "name":  "supermix_math_equation_micro_v1_20260327.zip",
+                               "size_bytes":  12831
+                           },
+                           {
+                               "name":  "supermix_omni_collective_v1_20260327.zip",
+                               "size_bytes":  747231
+                           },
+                           {
+                               "name":  "supermix_omni_collective_v2_frontier_20260328.zip",
+                               "size_bytes":  11991754
+                           },
+                           {
+                               "name":  "supermix_science_image_recognition_micro_v1_20260327.zip",
+                               "size_bytes":  435711
+                           }
+                       ]
+}

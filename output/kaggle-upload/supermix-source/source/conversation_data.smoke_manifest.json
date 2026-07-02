@@ -1,0 +1,1 @@
+{"name": "smoke_2shard", "shards": [{"path": "conversation_data.book_extracts_smoke_v5.jsonl", "rows": 20}, {"path": "conversation_data.english_math_smoke.jsonl", "rows": 500}]}

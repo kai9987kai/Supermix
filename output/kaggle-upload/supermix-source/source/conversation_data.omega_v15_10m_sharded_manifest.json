@@ -1,0 +1,18 @@
+{
+  "name": "omega_v15_english_math_code_books_10m_sharded",
+  "format": "jsonl_shards",
+  "total_rows": 10000000,
+  "created_at_utc": "2026-02-22T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.omega_v14_creative_code_books_6m.jsonl",
+      "rows": 6000000,
+      "description": "base creative+code+books corpus"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english writing/grammar/vocabulary + basic math corpus"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "name": "delta_v20_curriculum_meaningful_conversation_multimodal_adapt",
+  "format": "jsonl_shards",
+  "total_rows": 2437628,
+  "created_at_utc": "2026-02-22T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy warmup"
+    },
+    {
+      "path": "conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "rows": 182034,
+      "description": "live knowledge grounding"
+    },
+    {
+      "path": "conversation_data.coding_knowledge_2026_02_19.jsonl",
+      "rows": 380,
+      "description": "coding knowledge"
+    },
+    {
+      "path": "conversation_data.world_events_2026_02_19.jsonl",
+      "rows": 66,
+      "description": "world events knowledge"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science reasoning core"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image multimodal bridge"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d/video multimodal bridge"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy refinement"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book tone/style refinement"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book dialogue style reinforcement"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d/video repeat"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image repeat"
+    }
+  ]
+}

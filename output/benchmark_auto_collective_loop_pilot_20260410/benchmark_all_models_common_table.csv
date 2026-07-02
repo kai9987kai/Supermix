@@ -1,0 +1,2 @@
+model,family,overall_exact,avg_token_f1,avg_char_similarity,avg_gen_seconds,model_seconds,arc_challenge,boolq,gsm8k,hellaswag,mmlu,piqa
+auto_collective_loop,router,0.000000,0.030286,0.140056,209.623314,1257.752416,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000

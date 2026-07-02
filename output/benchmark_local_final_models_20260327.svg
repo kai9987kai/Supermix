@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="672" viewBox="0 0 1200 672">
+<style>
+text { font-family: "Segoe UI", Arial, sans-serif; fill: #111827; }
+.small { font-size: 12px; fill: #4b5563; }
+.label { font-size: 14px; }
+.title { font-size: 24px; font-weight: 700; }
+.subtitle { font-size: 14px; fill: #374151; }
+.tick { font-size: 12px; fill: #6b7280; }
+.grid { stroke: #e5e7eb; stroke-width: 1; }
+.axis { stroke: #9ca3af; stroke-width: 1.5; }
+</style>
+<rect x="0" y="0" width="1200" height="672" fill="#ffffff" />
+<text class="title" x="320" y="36">Local Model Benchmark Graph</text>
+<text class="subtitle" x="320" y="60">Built from local zips in C:\Users\kai99\Desktop\models. Common-benchmark scores come from the saved expanded sweep. v39 is recipe-eval only.</text>
+<text class="small" x="320" y="82">Duplicate downloads and alternate packaging were collapsed so each distinct local model family appears once.</text>
+<line class="grid" x1="320.00" y1="110" x2="320.00" y2="570" />
+<text class="tick" x="320.00" y="592" text-anchor="middle">0.00</text>
+<line class="grid" x1="510.00" y1="110" x2="510.00" y2="570" />
+<text class="tick" x="510.00" y="592" text-anchor="middle">0.05</text>
+<line class="grid" x1="700.00" y1="110" x2="700.00" y2="570" />
+<text class="tick" x="700.00" y="592" text-anchor="middle">0.10</text>
+<line class="grid" x1="890.00" y1="110" x2="890.00" y2="570" />
+<text class="tick" x="890.00" y="592" text-anchor="middle">0.15</text>
+<line class="grid" x1="1080.00" y1="110" x2="1080.00" y2="570" />
+<text class="tick" x="1080.00" y="592" text-anchor="middle">0.20</text>
+<line class="axis" x1="320" y1="568" x2="1080" y2="568" />
+<text class="label" x="308" y="125" text-anchor="end">v33_final</text>
+<rect x="320" y="109" width="709.33" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="1037.33" y="124">0.187</text>
+<text class="small" x="1092" y="124">common</text>
+<text class="label" x="308" y="159" text-anchor="end">v34_final</text>
+<rect x="320" y="143" width="608.00" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="936.00" y="158">0.160</text>
+<text class="small" x="1092" y="158">common alias</text>
+<text class="label" x="308" y="193" text-anchor="end">v36_native</text>
+<rect x="320" y="177" width="582.67" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="910.67" y="192">0.153</text>
+<text class="small" x="1092" y="192">common</text>
+<text class="label" x="308" y="227" text-anchor="end">v35_final</text>
+<rect x="320" y="211" width="582.67" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="910.67" y="226">0.153</text>
+<text class="small" x="1092" y="226">common alias</text>
+<text class="label" x="308" y="261" text-anchor="end">v31_image_variant</text>
+<rect x="320" y="245" width="253.33" height="18" rx="4" fill="#6b7280" opacity="0.92" />
+<text class="small" x="581.33" y="260">0.067</text>
+<text class="small" x="1092" y="260">common alias</text>
+<text class="label" x="308" y="295" text-anchor="end">v31_final</text>
+<rect x="320" y="279" width="253.33" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="581.33" y="294">0.067</text>
+<text class="small" x="1092" y="294">common</text>
+<text class="label" x="308" y="329" text-anchor="end">v32_final</text>
+<rect x="320" y="313" width="240.67" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="568.67" y="328">0.063</text>
+<text class="small" x="1092" y="328">common</text>
+<text class="label" x="308" y="363" text-anchor="end">v39_final</text>
+<rect x="320" y="347" width="760" height="18" rx="4" fill="#f9fafb" stroke="#d1d5db" stroke-dasharray="4 4" />
+<text class="small" x="328" y="362">no common-benchmark score</text>
+<line x1="528.62" y1="343" x2="528.62" y2="369" stroke="#b91c1c" stroke-width="2" />
+<circle cx="528.62" cy="356" r="5" fill="#b91c1c" />
+<text class="small" x="538.62" y="348">recipe 0.055</text>
+<text class="small" x="1092" y="362">recipe only</text>
+<text class="label" x="308" y="397" text-anchor="end">qwen_v28</text>
+<rect x="320" y="381" width="76.00" height="18" rx="4" fill="#d97706" opacity="0.92" />
+<text class="small" x="404.00" y="396">0.020</text>
+<text class="small" x="1092" y="396">common</text>
+<text class="label" x="308" y="431" text-anchor="end">v38_native_xlite</text>
+<rect x="320" y="415" width="50.67" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="378.67" y="430">0.013</text>
+<text class="small" x="1092" y="430">common</text>
+<text class="label" x="308" y="465" text-anchor="end">v37_native_lite</text>
+<rect x="320" y="449" width="50.67" height="18" rx="4" fill="#15803d" opacity="0.92" />
+<text class="small" x="378.67" y="464">0.013</text>
+<text class="small" x="1092" y="464">common</text>
+<text class="label" x="308" y="499" text-anchor="end">v30_lite_fp16</text>
+<rect x="320" y="483" width="38.00" height="18" rx="4" fill="#2563eb" opacity="0.92" />
+<text class="small" x="366.00" y="498">0.010</text>
+<text class="small" x="1092" y="498">common</text>
+<text class="label" x="308" y="533" text-anchor="end">qwen_v30_experimental</text>
+<rect x="320" y="517" width="12.67" height="18" rx="4" fill="#d97706" opacity="0.92" />
+<text class="small" x="340.67" y="532">0.003</text>
+<text class="small" x="1092" y="532">common</text>
+<rect x="320" y="86" width="12" height="12" fill="#d97706" />
+<text class="small" x="338" y="96">Qwen adapter scored on saved common benchmark</text>
+<rect x="320" y="104" width="12" height="12" fill="#2563eb" />
+<text class="small" x="338" y="114">Champion-family final model</text>
+<rect x="320" y="122" width="12" height="12" fill="#15803d" />
+<text class="small" x="338" y="132">Native-image text+image checkpoint</text>
+<rect x="320" y="140" width="12" height="12" fill="#6b7280" />
+<text class="small" x="338" y="150">Wrapper or alias artifact</text>
+<circle cx="835" cy="92" r="5" fill="#b91c1c" />
+<text class="small" x="848" y="96">Recipe holdout marker when no common-benchmark run exists</text>
+<text class="small" x="320" y="646">Generated 2026-03-27 12:21 UTC from output/benchmark_all_models_common_plus_summary_20260327.json and the local models directory.</text>
+</svg>

@@ -1,0 +1,30 @@
+Starting smoke test for Paper Fusion Expert (v29)...
+Using device: cpu
+  Set layers.10.shared_scale to 1.0
+  Set layers.10.alpha to 1.0
+  Set layers.10.ssm_adapter.gate to 1.0
+Dummy input shape: torch.Size([4, 3, 128])
+Running forward pass (train mode)...
+Output shape: torch.Size([4, 3, 10])
+RoMA manifold alignment loss: 0.910413
+Running global backward pass...
+CE Loss: 3.0729, Total Loss: 3.0820
+Checking gradients...
+  mor_router.sub_routers.0.weight: OK
+  mor_router.sub_routers.1.weight: OK
+  mor_router.sub_routers.2.weight: OK
+  mor_router.main_router.weight: OK
+  ssm_adapter.A: CRITICAL: NO GRADIENT!
+  ssm_adapter.B: OK
+  ssm_adapter.C: OK
+  ssm_adapter.gate: OK
+  experts_up.0.weight: OK
+  experts_down.0.weight: OK
+  shared_up.weight: CRITICAL: NO GRADIENT!
+Traceback (most recent call last):
+  File "<string>", line 8, in <module>
+    test_paper_fusion_expert.smoke_test_paper_fusion()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\test_paper_fusion_expert.py", line 81, in smoke_test_paper_fusion
+    raise AssertionError(f"Missing gradients in: {failed}")
+AssertionError: Missing gradients in: ['ssm_adapter.A', 'shared_up.weight']

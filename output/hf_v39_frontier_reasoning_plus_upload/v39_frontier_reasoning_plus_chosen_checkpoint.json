@@ -1,0 +1,23 @@
+{
+  "chosen_stage": "stage2",
+  "chosen_accuracy": 0.0549,
+  "scores": {
+    "stage1": 0.0511,
+    "stage2": 0.0549,
+    "stage3": 0.0492
+  },
+  "paths": {
+    "stage1": {
+      "weights": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v39_frontier_reasoning_plus_20260327/champion_model_chat_v39_frontier_reasoning_plus_stage1.pth",
+      "meta": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v39_frontier_reasoning_plus_20260327/chat_model_meta_v39_frontier_reasoning_plus_stage1.json"
+    },
+    "stage2": {
+      "weights": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v39_frontier_reasoning_plus_20260327/champion_model_chat_v39_frontier_reasoning_plus_stage2.pth",
+      "meta": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v39_frontier_reasoning_plus_20260327/chat_model_meta_v39_frontier_reasoning_plus_stage2.json"
+    },
+    "stage3": {
+      "weights": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v39_frontier_reasoning_plus_20260327/champion_model_chat_v39_frontier_reasoning_plus_stage3.pth",
+      "meta": "/workspace/supermix_runpod_budget/persistent/artifacts/champion_v39_frontier_reasoning_plus_20260327/chat_model_meta_v39_frontier_reasoning_plus_stage3.json"
+    }
+  }
+}

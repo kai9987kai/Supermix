@@ -1,54 +1,45 @@
 # Supermix_29
 
-Supermix_29 is the working monorepo for the current Supermix / ChampionNet / Omni Collective line.
+Supermix_29 is the active monorepo for the current Supermix desktop app, the Omni Collective training line, specialist model experiments, benchmark tooling, and local-first packaging flow.
 
-This repository combines:
-
-- local-first chat and multimodal runtime code
-- experimental training and continuation pipelines
-- desktop EXE and installer packaging
-- benchmark tooling and graph generation
-- published-model export helpers
-- bundled datasets and generated research artifacts
-
-It is intentionally a mixed workspace, not a minimal source-only model repo.
+This repo is intentionally a mixed workspace. It contains source code, training scripts, build helpers, generated manifests, research outputs, and packaging metadata for a local-first multimodel app.
 
 ## Current status
 
-As of March 29, 2026:
+As of April 7, 2026:
 
-- the latest finished omni checkpoint in this repo is `omni_collective_v4`
-- the latest packaged desktop release is `studio-desktop-20260329-omni-v4-allmodels`
-- the installer bundle currently includes `23` zipped model artifacts from the local model-pack directory used by the desktop build
-- a `v5` continuation path exists in `source/` and is currently an in-progress local experiment, not a finished released model
+- the latest finished full omni checkpoint in this workspace is `omni_collective_v7`
+- the latest interim omni artifact is `omni_collective_v8_preview`
+- the full `omni_collective_v8` training run is still in progress locally
+- the latest desktop release is `studio-desktop-20260407-curated-core-model-store`
+- the desktop installer now uses a curated built-in bundle plus an in-app Hugging Face model store instead of shipping the full legacy model zoo
 
 ## What is in this repo
 
 - `source/`
   - active development workspace
-  - training scripts, model definitions, dataset builders, benchmark runners, desktop packaging helpers
+  - model definitions, training scripts, dataset builders, benchmark runners, desktop/web app code, release helpers
 - `runtime_python/`
-  - packaged local runtime path
-  - simpler run path than the full `source/` workspace
+  - simpler runtime path for lighter local usage
 - `datasets/`
-  - conversation, coding, reasoning, science, and related local training inputs
+  - local conversation, coding, reasoning, science, and specialist training inputs
 - `output/`
-  - generated artifacts, benchmark graphs, summaries, logs, Hugging Face upload folders
+  - generated graphs, summaries, manifests, previews, logs, and Hugging Face upload staging
 - `installer/`
-  - Inno Setup definitions for the desktop app
+  - Inno Setup definitions and post-install notes for the desktop app
 - `dist/`
-  - built EXEs and installer outputs
+  - locally built EXEs and installer outputs
 - `web_static/`
-  - lightweight browser-only metadata bundle
+  - lightweight browser-only metadata/static bundle
 
 ## Main capabilities
 
-- multimodel desktop app with model selector, Auto routing, collective mode, and agent mode
-- local chat, image-prompt, math, science-image, and omni-fusion model families
-- native-image experimental checkpoints
-- training pipelines for frontier, omni, lite, and specialist model lines
-- benchmark sweeps across common text benchmarks
-- export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
+- multimodel desktop app with selector, `Auto` routing, collective mode, and agent mode
+- local chat, omni, image, vision, math, protein, 3D, and materials specialist model families
+- desktop installer with curated built-in models and downloadable legacy/optional models
+- benchmark sweeps and local graph generation for the model zoo
+- Hugging Face publishing helpers for models, installers, and downloadable model-store artifacts
+- training pipelines for omni, frontier, native-image, and specialist lines
 
 ## Quick start
 
@@ -65,21 +56,25 @@ runtime_python\launch_chat_web_supermix.bat
 runtime_python\launch_chat_terminal_supermix.bat
 ```
 
-### Run the active source app
+### Run the active source web app
 
 ```bash
 python source/chat_web_app.py
 ```
 
-### Run the desktop multimodel app from source
+### Run the multimodel desktop app from source
 
 ```bash
 python source/supermix_multimodel_desktop_app.py
 ```
 
-### Run the browser-only static bundle
+### Run the training monitor
 
-Open:
+```bash
+python source/training_monitor_gui.py --root .
+```
+
+### Open the browser-only static bundle
 
 ```text
 web_static/index.html
@@ -87,14 +82,18 @@ web_static/index.html
 
 ## Current desktop release
 
-Latest release published from this repo:
+Latest desktop release:
 
 - Release page:
-  - `https://github.com/kai9987kai/Supermix_29/releases/tag/studio-desktop-20260329-omni-v4-allmodels`
-- Installer:
-  - `https://github.com/kai9987kai/Supermix_29/releases/download/studio-desktop-20260329-omni-v4-allmodels/SupermixStudioDesktopSetup.exe`
-- EXE:
-  - `https://github.com/kai9987kai/Supermix_29/releases/download/studio-desktop-20260329-omni-v4-allmodels/SupermixStudioDesktop.exe`
+  - `https://github.com/kai9987kai/Supermix_29/releases/tag/studio-desktop-20260407-curated-core-model-store`
+- Portable EXE:
+  - `https://github.com/kai9987kai/Supermix_29/releases/download/studio-desktop-20260407-curated-core-model-store/SupermixStudioDesktop.exe`
+- Full installer:
+  - `https://huggingface.co/datasets/Kai9987kai/supermix-studio-desktop-installer/resolve/main/SupermixStudioDesktopSetup.exe?download=true`
+- SHA256:
+  - `https://huggingface.co/datasets/Kai9987kai/supermix-studio-desktop-installer/resolve/main/SupermixStudioDesktopReleaseSHA256.txt?download=true`
+- Curated bundle manifest:
+  - `https://huggingface.co/datasets/Kai9987kai/supermix-studio-desktop-installer/resolve/main/SupermixStudioDesktopCuratedBundleManifest.json?download=true`
 
 Local build outputs:
 
@@ -102,9 +101,50 @@ Local build outputs:
 - `dist/installer/SupermixStudioDesktopSetup.exe`
 - `dist/installer/SupermixStudioDesktopReleaseSHA256.txt`
 
+Why the installer is on Hugging Face:
+
+- the full installer is about `2.97 GB`
+- GitHub release assets are capped below that size
+- the GitHub release hosts the EXE and notes, while Hugging Face hosts the oversized installer
+
+## Curated bundled models
+
+The curated installer build ships these models by default:
+
+- `v40_benchmax`
+- `omni_collective_v8_preview`
+- `omni_collective_v7`
+- `science_vision_micro_v1`
+- `v38_native_xlite_fp16`
+- `dcgan_v2_in_progress`
+- `math_equation_micro_v1`
+- `protein_folding_micro_v1`
+- `mattergen_micro_v1`
+- `three_d_generation_micro_v1`
+
+The live curated bundle manifest is:
+
+- [`output/supermix_studio_bundled_models_manifest.json`](output/supermix_studio_bundled_models_manifest.json)
+
+## Model store
+
+The desktop app now supports an in-app model store backed by your Hugging Face model zoo.
+
+- model zoo:
+  - `https://huggingface.co/datasets/Kai9987kai/supermix-model-zoo`
+- published downloadable artifacts:
+  - `33` model zips
+- downloaded models install into the local models directory and automatically become available to:
+  - model selection
+  - `Auto` routing
+  - collective mode
+  - agent mode
+
+This lets the installer stay curated while older or optional models remain one-click downloadable.
+
 ## Model families in the workspace
 
-The repo contains code and artifacts for several model lines:
+The current workspace includes code and/or packaged artifacts for:
 
 - Qwen adapter line
   - `v28`
@@ -116,6 +156,7 @@ The repo contains code and artifacts for several model lines:
   - `v34`
   - `v35`
   - `v39`
+  - `v40_benchmax`
 - native-image line
   - `v36`
   - `v37`
@@ -125,33 +166,44 @@ The repo contains code and artifacts for several model lines:
   - `v2`
   - `v3`
   - `v4`
+  - `v5`
+  - `v6`
+  - `v7`
+  - `v8_preview`
+  - `v8` in progress locally
 - specialist lines
   - `math_equation_micro_v1`
-  - `science_image_recognition_micro_v1`
+  - `science_vision_micro_v1`
+  - `protein_folding_micro_v1`
+  - `mattergen_micro_v1`
+  - `three_d_generation_micro_v1`
+  - `dcgan_mnist_model`
+  - `dcgan_v2_in_progress`
 
 ## Latest finished omni model
 
-The latest finished omni checkpoint in this repo is `omni_collective_v4`.
+The latest finished full omni checkpoint in this workspace is `omni_collective_v7`.
 
-Key details from [`output/supermix_omni_collective_v4_frontier_20260329/omni_collective_v4_frontier_summary.json`](output/supermix_omni_collective_v4_frontier_20260329/omni_collective_v4_frontier_summary.json):
+Local artifact:
 
-- parameter count: `19,032,281`
-- stage-1 rows: `8,589`
-- stage-2 rows: `9,447`
-- final stage-2 weighted validation score: `0.5176`
-- final stage-2 validation:
-  - intent: `0.8195`
-  - response: `0.1402`
-  - vision: `0.9020`
-  - domain: `0.7765`
+- `output/supermix_omni_collective_v7_frontier_20260403.zip`
 
-Local packaged artifact:
+The latest preview checkpoint is:
 
-- [`output/supermix_omni_collective_v4_frontier_20260329.zip`](output/supermix_omni_collective_v4_frontier_20260329.zip)
+- `output/supermix_omni_collective_v8_preview_20260407_001155.zip`
 
-## Hugging Face models
+The current long-running experiment is `omni_collective_v8`, which is still training locally and is not yet the published stable omni release.
 
-Public model repos already published from this workspace:
+## Hugging Face publishing
+
+Public Hugging Face repos used by this workspace now include:
+
+- model zoo:
+  - `Kai9987kai/supermix-model-zoo`
+- desktop installer mirror:
+  - `Kai9987kai/supermix-studio-desktop-installer`
+
+Previously published model repos from this workspace include:
 
 - `Kai9987kai/supermix-v33-frontier`
 - `Kai9987kai/supermix-omni-collective-v1`
@@ -160,33 +212,33 @@ Public model repos already published from this workspace:
 - `Kai9987kai/supermix-omni-collective-v2-frontier`
 - `Kai9987kai/supermix-math-equation-micro-v1`
 - `Kai9987kai/supermix-omni-collective-v4-frontier`
+- `Kai9987kai/supermix-omni-collective-v7-frontier`
 
-## Hugging Face datasets
-
-Public dataset repos already published from this workspace:
+Public dataset repos include:
 
 - `Kai9987kai/supermix-conversation-datasets`
 - `Kai9987kai/supermix-science-vision-dataset`
 
 ## Benchmarks
 
-The current local multibench comparison bundle is:
+The current local all-model graph bundle is:
 
-- [`output/pdf/benchmark_local_all_models_multibench_20260329.pdf`](output/pdf/benchmark_local_all_models_multibench_20260329.pdf)
-- [`output/benchmark_local_all_models_multibench_20260329.json`](output/benchmark_local_all_models_multibench_20260329.json)
-- [`output/benchmark_local_all_models_multibench_20260329.csv`](output/benchmark_local_all_models_multibench_20260329.csv)
+- `output/pdf/benchmark_local_all_models_multibench_20260403.pdf`
+- `output/benchmark_local_all_models_multibench_20260403.json`
+- `output/benchmark_local_all_models_multibench_20260403.csv`
 
-The current graph covers `20` benchmarked local model entries and keeps specialist-only models labeled separately when the common text suite is not the right evaluation fit.
+The current preview benchmark bundle for `omni_collective_v8_preview` is:
 
-Representative current common-benchmark leaders from the local graph JSON:
+- `output/benchmark_omni_collective_v8_preview_20260407_001155/benchmark_all_models_common_summary.json`
+- `output/benchmark_omni_collective_v8_preview_20260407_001155/benchmark_all_models_common_graph.png`
 
-- `v33_final`: `0.1867`
-- `v39_final`: `0.1800`
-- `omni_collective_v1`: `0.1633`
-- `v34_final`: `0.1600`
-- `v36_native`: `0.1533`
-- `v35_final`: `0.1533`
-- `omni_collective_v4`: `0.0900`
+Representative current results:
+
+- `v40_benchmax`: `0.2433` common benchmark score
+- `omni_collective_v8_preview`: `0.2167` on the reduced preview benchmark sweep
+- `omni_collective_v7`: `0.1067` on the current 6-benchmark local sweep
+
+Specialist-only models remain in the graph inventory even when the common text benchmark is not the right evaluation fit.
 
 ## Training entry points
 
@@ -196,9 +248,14 @@ Representative training and continuation scripts:
 - `source/train_omni_collective_v3.py`
 - `source/train_omni_collective_v4.py`
 - `source/train_omni_collective_v5.py`
+- `source/train_omni_collective_v6.py`
+- `source/train_omni_collective_v7.py`
+- `source/train_omni_collective_v8.py`
 - `source/train_math_equation_model.py`
 - `source/train_image_recognition_model.py`
-- `source/build_reasoning_benchmix_v39.py`
+- `source/train_protein_folding_model.py`
+- `source/train_three_d_generation_model.py`
+- `source/train_mattergen_generation_model.py`
 - `source/benchmark_all_models_common.py`
 
 If you want the active experimental path, start in `source/`.
@@ -212,61 +269,15 @@ Primary desktop build helpers:
 - `SupermixStudioDesktop.spec`
 - `installer/SupermixStudioDesktop.iss`
 
-The current bundled-model manifest is:
+The current desktop app now supports:
 
-- [`output/supermix_studio_bundled_models_manifest.json`](output/supermix_studio_bundled_models_manifest.json)
+- curated built-in bundle seeding
+- in-app Hugging Face model-store downloads
+- richer chat UI with drafts, context bank, compare bench, and dispatch preview
+- richer training monitor with recovery posture, rescue guidance, and fleet spotlight summaries
 
-## Research and experiment notes
+## Notes
 
-This repo is a living experiment workspace. It contains finished artifacts, release-ready packaging, and in-progress work at the same time.
-
-That means you will see mixed generations such as:
-
-- `v28`
-- `v30`
-- `v33`
-- `v34`
-- `v35`
-- `v36`
-- `v37`
-- `v38`
-- `v39`
-- `omni_collective_v1` through `omni_collective_v5`
-
-That is expected.
-
-## Recommended starting points
-
-If you want to:
-
-- run a packaged local system
-  - use `runtime_python/`
-- work on the active multimodel app
-  - use `source/supermix_multimodel_web_app.py`
-  - use `source/supermix_multimodel_desktop_app.py`
-- work on training
-  - start in `source/`
-- inspect the current benchmark outputs
-  - use `output/benchmark_local_all_models_multibench_20260329.*`
-- build a Windows installer
-  - use the PowerShell build scripts in `source/` plus `installer/`
-
-## Platform notes
-
-- Windows is the main desktop packaging target
-- the repo includes PyInstaller specs, PowerShell build scripts, and Inno Setup definitions
-- some training flows were designed around cloud GPU workflows, but the repo also supports local CPU experimentation
-
-## Security note
-
-Do not commit or publish browser-session dumps, cookies, temporary automation state, or live access tokens.
-
-Relevant policy docs:
-
-- `SECURITY.md`
-- `CONTRIBUTING.md`
-- `CODE_OF_CONDUCT.md`
-
-## License
-
-See `LICENSE`.
+- this repo is intentionally not a clean source-only model repo
+- large local artifacts, checkpoints, and logs are often kept locally and mirrored selectively to releases or Hugging Face
+- the safest way to consume the desktop app is through the curated-core release plus the in-app model store

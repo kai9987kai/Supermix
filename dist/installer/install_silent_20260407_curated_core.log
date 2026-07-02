@@ -1,0 +1,495 @@
+﻿2026-04-07 20:32:59.292   Log opened. (Time zone: UTC+01:00)
+2026-04-07 20:32:59.293   Setup version: Inno Setup version 6.7.1
+2026-04-07 20:32:59.293   Original Setup EXE: C:\Users\kai99\Desktop\New folder (9)\Supermix_27\dist\installer\SupermixStudioDesktopSetup.exe
+2026-04-07 20:32:59.294   Setup command line: /SL5="$2D0014,2971083247,898560,C:\Users\kai99\Desktop\New folder (9)\Supermix_27\dist\installer\SupermixStudioDesktopSetup.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="C:\Users\kai99\Desktop\New folder (9)\Supermix_27\dist\installer\install_silent_20260407_curated_core.log" 
+2026-04-07 20:32:59.294   Windows version: 10.0.26200
+2026-04-07 20:32:59.294   Windows architecture: Arm64 (64-bit)
+2026-04-07 20:32:59.294   Machine types supported by system: x86 x64 Arm64
+2026-04-07 20:32:59.294   User privileges: Administrative
+2026-04-07 20:32:59.467   Administrative install mode: Yes
+2026-04-07 20:32:59.467   Install mode root key: HKEY_LOCAL_MACHINE
+2026-04-07 20:32:59.467   64-bit install mode: Yes
+2026-04-07 20:32:59.467   RedirectionGuard status for current process: Enabled in enforcing mode
+2026-04-07 20:32:59.481   Created protected temporary directory: C:\Users\kai99\AppData\Local\Temp\is-YF5G8ITPPG.tmp
+2026-04-07 20:33:00.584   Found 54 files to register with RestartManager.
+2026-04-07 20:33:00.584   Calling RestartManager's RmGetList.
+2026-04-07 20:33:07.853   RmGetList finished successfully.
+2026-04-07 20:33:07.854   RestartManager found no applications using one of our files.
+2026-04-07 20:33:07.907   Starting the installation process.
+2026-04-07 20:33:07.959   Directory for uninstall files: C:\Program Files\Supermix Studio
+2026-04-07 20:33:07.979   Will append to existing uninstall log: C:\Program Files\Supermix Studio\unins000.dat
+2026-04-07 20:33:07.998   -- File entry --
+2026-04-07 20:33:07.999   Dest filename: C:\Program Files\Supermix Studio\unins000.exe
+2026-04-07 20:33:07.999   Non-default bitness: 32-bit
+2026-04-07 20:33:08.021   Time stamp of our file: 2026-04-07 20:32:58.372
+2026-04-07 20:33:08.021   Dest file exists.
+2026-04-07 20:33:08.022   Time stamp of existing file: 2026-04-07 03:12:22.347
+2026-04-07 20:33:08.022   Version of our file: 51.1054.0.0
+2026-04-07 20:33:08.136   Version of existing file: 51.1054.0.0
+2026-04-07 20:33:08.136   Installing the file.
+2026-04-07 20:33:08.190   Leaving temporary file in place for now.
+2026-04-07 20:33:08.191   -- File entry --
+2026-04-07 20:33:08.192   Dest filename: C:\Program Files\Supermix Studio\SupermixStudioDesktop.exe
+2026-04-07 20:33:08.199   Time stamp of our file: 2026-04-07 19:06:20.000
+2026-04-07 20:33:08.199   Dest file exists.
+2026-04-07 20:33:08.199   Time stamp of existing file: 2026-04-07 01:15:38.000
+2026-04-07 20:33:08.199   Installing the file.
+2026-04-07 20:33:15.975   Successfully installed the file.
+2026-04-07 20:33:15.976   -- File entry --
+2026-04-07 20:33:15.976   Dest filename: C:\Program Files\Supermix Studio\_internal\81d243bd2c585b0f4821__mypyc.cp312-win_amd64.pyd
+2026-04-07 20:33:15.977   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:15.977   Dest file exists.
+2026-04-07 20:33:15.977   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:15.977   Installing the file.
+2026-04-07 20:33:15.991   Successfully installed the file.
+2026-04-07 20:33:15.991   -- File entry --
+2026-04-07 20:33:15.992   Dest filename: C:\Program Files\Supermix Studio\_internal\base_library.zip
+2026-04-07 20:33:15.992   Time stamp of our file: 2026-04-07 19:09:26.000
+2026-04-07 20:33:15.992   Dest file exists.
+2026-04-07 20:33:15.992   Time stamp of existing file: 2026-04-07 01:18:54.000
+2026-04-07 20:33:15.992   Installing the file.
+2026-04-07 20:33:16.067   Successfully installed the file.
+2026-04-07 20:33:16.068   -- File entry --
+2026-04-07 20:33:16.068   Dest filename: C:\Program Files\Supermix Studio\_internal\libcrypto-3.dll
+2026-04-07 20:33:16.068   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.068   Dest file exists.
+2026-04-07 20:33:16.068   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.068   Installing the file.
+2026-04-07 20:33:16.382   Successfully installed the file.
+2026-04-07 20:33:16.382   -- File entry --
+2026-04-07 20:33:16.382   Dest filename: C:\Program Files\Supermix Studio\_internal\libffi-8.dll
+2026-04-07 20:33:16.382   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.382   Dest file exists.
+2026-04-07 20:33:16.382   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.382   Installing the file.
+2026-04-07 20:33:16.391   Successfully installed the file.
+2026-04-07 20:33:16.391   -- File entry --
+2026-04-07 20:33:16.392   Dest filename: C:\Program Files\Supermix Studio\_internal\libssl-3.dll
+2026-04-07 20:33:16.392   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.393   Dest file exists.
+2026-04-07 20:33:16.393   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.393   Installing the file.
+2026-04-07 20:33:16.438   Successfully installed the file.
+2026-04-07 20:33:16.439   -- File entry --
+2026-04-07 20:33:16.439   Dest filename: C:\Program Files\Supermix Studio\_internal\msvcp140.dll
+2026-04-07 20:33:16.439   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.439   Dest file exists.
+2026-04-07 20:33:16.440   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.440   Installing the file.
+2026-04-07 20:33:16.507   Successfully installed the file.
+2026-04-07 20:33:16.507   -- File entry --
+2026-04-07 20:33:16.508   Dest filename: C:\Program Files\Supermix Studio\_internal\pyexpat.pyd
+2026-04-07 20:33:16.508   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.508   Dest file exists.
+2026-04-07 20:33:16.508   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.508   Installing the file.
+2026-04-07 20:33:16.523   Successfully installed the file.
+2026-04-07 20:33:16.523   -- File entry --
+2026-04-07 20:33:16.523   Dest filename: C:\Program Files\Supermix Studio\_internal\python3.dll
+2026-04-07 20:33:16.523   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.523   Dest file exists.
+2026-04-07 20:33:16.523   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.523   Installing the file.
+2026-04-07 20:33:16.532   Successfully installed the file.
+2026-04-07 20:33:16.536   -- File entry --
+2026-04-07 20:33:16.536   Dest filename: C:\Program Files\Supermix Studio\_internal\python312.dll
+2026-04-07 20:33:16.536   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:16.536   Dest file exists.
+2026-04-07 20:33:16.536   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:16.536   Installing the file.
+2026-04-07 20:33:17.143   Successfully installed the file.
+2026-04-07 20:33:17.143   -- File entry --
+2026-04-07 20:33:17.143   Dest filename: C:\Program Files\Supermix Studio\_internal\select.pyd
+2026-04-07 20:33:17.144   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.144   Dest file exists.
+2026-04-07 20:33:17.144   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.144   Installing the file.
+2026-04-07 20:33:17.147   Successfully installed the file.
+2026-04-07 20:33:17.147   -- File entry --
+2026-04-07 20:33:17.147   Dest filename: C:\Program Files\Supermix Studio\_internal\sqlite3.dll
+2026-04-07 20:33:17.147   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.147   Dest file exists.
+2026-04-07 20:33:17.147   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.147   Installing the file.
+2026-04-07 20:33:17.273   Successfully installed the file.
+2026-04-07 20:33:17.274   -- File entry --
+2026-04-07 20:33:17.274   Dest filename: C:\Program Files\Supermix Studio\_internal\tcl86t.dll
+2026-04-07 20:33:17.274   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.274   Dest file exists.
+2026-04-07 20:33:17.274   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.275   Installing the file.
+2026-04-07 20:33:17.431   Successfully installed the file.
+2026-04-07 20:33:17.431   -- File entry --
+2026-04-07 20:33:17.441   Dest filename: C:\Program Files\Supermix Studio\_internal\tk86t.dll
+2026-04-07 20:33:17.441   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.441   Dest file exists.
+2026-04-07 20:33:17.441   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.441   Installing the file.
+2026-04-07 20:33:17.726   Successfully installed the file.
+2026-04-07 20:33:17.726   -- File entry --
+2026-04-07 20:33:17.727   Dest filename: C:\Program Files\Supermix Studio\_internal\torch_directml_native.cp312-win_amd64.pyd
+2026-04-07 20:33:17.728   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.728   Dest file exists.
+2026-04-07 20:33:17.728   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.728   Installing the file.
+2026-04-07 20:33:17.836   Successfully installed the file.
+2026-04-07 20:33:17.836   -- File entry --
+2026-04-07 20:33:17.836   Dest filename: C:\Program Files\Supermix Studio\_internal\unicodedata.pyd
+2026-04-07 20:33:17.837   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.837   Dest file exists.
+2026-04-07 20:33:17.837   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.837   Installing the file.
+2026-04-07 20:33:17.906   Successfully installed the file.
+2026-04-07 20:33:17.907   -- File entry --
+2026-04-07 20:33:17.907   Dest filename: C:\Program Files\Supermix Studio\_internal\vcruntime140.dll
+2026-04-07 20:33:17.908   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.908   Dest file exists.
+2026-04-07 20:33:17.908   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.908   Installing the file.
+2026-04-07 20:33:17.920   Successfully installed the file.
+2026-04-07 20:33:17.921   -- File entry --
+2026-04-07 20:33:17.921   Dest filename: C:\Program Files\Supermix Studio\_internal\vcruntime140_1.dll
+2026-04-07 20:33:17.921   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.921   Dest file exists.
+2026-04-07 20:33:17.921   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.921   Installing the file.
+2026-04-07 20:33:17.925   Successfully installed the file.
+2026-04-07 20:33:17.925   -- File entry --
+2026-04-07 20:33:17.926   Dest filename: C:\Program Files\Supermix Studio\_internal\zlib1.dll
+2026-04-07 20:33:17.926   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.926   Dest file exists.
+2026-04-07 20:33:17.926   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.926   Installing the file.
+2026-04-07 20:33:17.947   Successfully installed the file.
+2026-04-07 20:33:17.948   -- File entry --
+2026-04-07 20:33:17.948   Dest filename: C:\Program Files\Supermix Studio\_internal\_asyncio.pyd
+2026-04-07 20:33:17.949   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.949   Dest file exists.
+2026-04-07 20:33:17.949   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.949   Installing the file.
+2026-04-07 20:33:17.955   Successfully installed the file.
+2026-04-07 20:33:17.955   -- File entry --
+2026-04-07 20:33:17.955   Dest filename: C:\Program Files\Supermix Studio\_internal\_bz2.pyd
+2026-04-07 20:33:17.955   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.955   Dest file exists.
+2026-04-07 20:33:17.956   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.956   Installing the file.
+2026-04-07 20:33:17.962   Successfully installed the file.
+2026-04-07 20:33:17.962   -- File entry --
+2026-04-07 20:33:17.962   Dest filename: C:\Program Files\Supermix Studio\_internal\_cffi_backend.cp312-win_amd64.pyd
+2026-04-07 20:33:17.963   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.963   Dest file exists.
+2026-04-07 20:33:17.964   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.964   Installing the file.
+2026-04-07 20:33:17.977   Successfully installed the file.
+2026-04-07 20:33:17.977   -- File entry --
+2026-04-07 20:33:17.978   Dest filename: C:\Program Files\Supermix Studio\_internal\_ctypes.pyd
+2026-04-07 20:33:17.978   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.978   Dest file exists.
+2026-04-07 20:33:17.979   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.979   Installing the file.
+2026-04-07 20:33:17.987   Successfully installed the file.
+2026-04-07 20:33:17.987   -- File entry --
+2026-04-07 20:33:17.987   Dest filename: C:\Program Files\Supermix Studio\_internal\_decimal.pyd
+2026-04-07 20:33:17.988   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:17.988   Dest file exists.
+2026-04-07 20:33:17.988   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:17.988   Installing the file.
+2026-04-07 20:33:18.004   Successfully installed the file.
+2026-04-07 20:33:18.004   -- File entry --
+2026-04-07 20:33:18.005   Dest filename: C:\Program Files\Supermix Studio\_internal\_elementtree.pyd
+2026-04-07 20:33:18.007   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.007   Dest file exists.
+2026-04-07 20:33:18.007   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.007   Installing the file.
+2026-04-07 20:33:18.025   Successfully installed the file.
+2026-04-07 20:33:18.025   -- File entry --
+2026-04-07 20:33:18.025   Dest filename: C:\Program Files\Supermix Studio\_internal\_hashlib.pyd
+2026-04-07 20:33:18.026   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.026   Dest file exists.
+2026-04-07 20:33:18.026   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.026   Installing the file.
+2026-04-07 20:33:18.031   Successfully installed the file.
+2026-04-07 20:33:18.032   -- File entry --
+2026-04-07 20:33:18.032   Dest filename: C:\Program Files\Supermix Studio\_internal\_lzma.pyd
+2026-04-07 20:33:18.034   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.034   Dest file exists.
+2026-04-07 20:33:18.035   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.035   Installing the file.
+2026-04-07 20:33:18.046   Successfully installed the file.
+2026-04-07 20:33:18.046   -- File entry --
+2026-04-07 20:33:18.046   Dest filename: C:\Program Files\Supermix Studio\_internal\_multiprocessing.pyd
+2026-04-07 20:33:18.049   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.049   Dest file exists.
+2026-04-07 20:33:18.049   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.049   Installing the file.
+2026-04-07 20:33:18.052   Successfully installed the file.
+2026-04-07 20:33:18.052   -- File entry --
+2026-04-07 20:33:18.052   Dest filename: C:\Program Files\Supermix Studio\_internal\_overlapped.pyd
+2026-04-07 20:33:18.052   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.052   Dest file exists.
+2026-04-07 20:33:18.052   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.052   Installing the file.
+2026-04-07 20:33:18.058   Successfully installed the file.
+2026-04-07 20:33:18.058   -- File entry --
+2026-04-07 20:33:18.058   Dest filename: C:\Program Files\Supermix Studio\_internal\_queue.pyd
+2026-04-07 20:33:18.058   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.058   Dest file exists.
+2026-04-07 20:33:18.059   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.059   Installing the file.
+2026-04-07 20:33:18.061   Successfully installed the file.
+2026-04-07 20:33:18.062   -- File entry --
+2026-04-07 20:33:18.062   Dest filename: C:\Program Files\Supermix Studio\_internal\_socket.pyd
+2026-04-07 20:33:18.062   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.063   Dest file exists.
+2026-04-07 20:33:18.063   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.063   Installing the file.
+2026-04-07 20:33:18.067   Successfully installed the file.
+2026-04-07 20:33:18.068   -- File entry --
+2026-04-07 20:33:18.068   Dest filename: C:\Program Files\Supermix Studio\_internal\_sqlite3.pyd
+2026-04-07 20:33:18.069   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.069   Dest file exists.
+2026-04-07 20:33:18.069   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.069   Installing the file.
+2026-04-07 20:33:18.079   Successfully installed the file.
+2026-04-07 20:33:18.079   -- File entry --
+2026-04-07 20:33:18.079   Dest filename: C:\Program Files\Supermix Studio\_internal\_ssl.pyd
+2026-04-07 20:33:18.079   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.079   Dest file exists.
+2026-04-07 20:33:18.080   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.080   Installing the file.
+2026-04-07 20:33:18.090   Successfully installed the file.
+2026-04-07 20:33:18.091   -- File entry --
+2026-04-07 20:33:18.091   Dest filename: C:\Program Files\Supermix Studio\_internal\_testcapi.pyd
+2026-04-07 20:33:18.092   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.092   Dest file exists.
+2026-04-07 20:33:18.092   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.092   Installing the file.
+2026-04-07 20:33:18.106   Successfully installed the file.
+2026-04-07 20:33:18.107   -- File entry --
+2026-04-07 20:33:18.107   Dest filename: C:\Program Files\Supermix Studio\_internal\_testinternalcapi.pyd
+2026-04-07 20:33:18.108   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.108   Dest file exists.
+2026-04-07 20:33:18.108   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.108   Installing the file.
+2026-04-07 20:33:18.112   Successfully installed the file.
+2026-04-07 20:33:18.113   -- File entry --
+2026-04-07 20:33:18.113   Dest filename: C:\Program Files\Supermix Studio\_internal\_tkinter.pyd
+2026-04-07 20:33:18.113   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.113   Dest file exists.
+2026-04-07 20:33:18.113   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.113   Installing the file.
+2026-04-07 20:33:18.119   Successfully installed the file.
+2026-04-07 20:33:18.119   -- File entry --
+2026-04-07 20:33:18.120   Dest filename: C:\Program Files\Supermix Studio\_internal\_uuid.pyd
+2026-04-07 20:33:18.120   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.120   Dest file exists.
+2026-04-07 20:33:18.121   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.121   Installing the file.
+2026-04-07 20:33:18.124   Successfully installed the file.
+2026-04-07 20:33:18.125   -- File entry --
+2026-04-07 20:33:18.125   Dest filename: C:\Program Files\Supermix Studio\_internal\_wmi.pyd
+2026-04-07 20:33:18.126   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.126   Dest file exists.
+2026-04-07 20:33:18.126   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.126   Installing the file.
+2026-04-07 20:33:18.131   Successfully installed the file.
+2026-04-07 20:33:18.131   -- File entry --
+2026-04-07 20:33:18.131   Dest filename: C:\Program Files\Supermix Studio\_internal\_zoneinfo.pyd
+2026-04-07 20:33:18.131   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.131   Dest file exists.
+2026-04-07 20:33:18.131   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.131   Installing the file.
+2026-04-07 20:33:18.136   Successfully installed the file.
+2026-04-07 20:33:18.136   -- File entry --
+2026-04-07 20:33:18.136   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\entry_points.txt
+2026-04-07 20:33:18.146   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.146   Dest file exists.
+2026-04-07 20:33:18.146   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.146   Installing the file.
+2026-04-07 20:33:18.148   Successfully installed the file.
+2026-04-07 20:33:18.154   -- File entry --
+2026-04-07 20:33:18.154   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\INSTALLER
+2026-04-07 20:33:18.156   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.156   Dest file exists.
+2026-04-07 20:33:18.156   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.156   Installing the file.
+2026-04-07 20:33:18.157   Successfully installed the file.
+2026-04-07 20:33:18.158   -- File entry --
+2026-04-07 20:33:18.158   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\METADATA
+2026-04-07 20:33:18.159   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.159   Dest file exists.
+2026-04-07 20:33:18.159   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.159   Installing the file.
+2026-04-07 20:33:18.167   Successfully installed the file.
+2026-04-07 20:33:18.167   -- File entry --
+2026-04-07 20:33:18.170   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\RECORD
+2026-04-07 20:33:18.171   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.171   Dest file exists.
+2026-04-07 20:33:18.171   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.172   Installing the file.
+2026-04-07 20:33:18.176   Successfully installed the file.
+2026-04-07 20:33:18.176   -- File entry --
+2026-04-07 20:33:18.176   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\REQUESTED
+2026-04-07 20:33:18.176   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.176   Dest file exists.
+2026-04-07 20:33:18.177   Time stamp of existing file: 2026-04-07 01:17:48.000
+2026-04-07 20:33:18.177   Installing the file.
+2026-04-07 20:33:18.178   Successfully installed the file.
+2026-04-07 20:33:18.178   -- File entry --
+2026-04-07 20:33:18.183   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\top_level.txt
+2026-04-07 20:33:18.184   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.184   Dest file exists.
+2026-04-07 20:33:18.184   Time stamp of existing file: 2026-04-07 01:17:48.000
+2026-04-07 20:33:18.186   Installing the file.
+2026-04-07 20:33:18.186   Successfully installed the file.
+2026-04-07 20:33:18.186   -- File entry --
+2026-04-07 20:33:18.196   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\WHEEL
+2026-04-07 20:33:18.197   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.197   Dest file exists.
+2026-04-07 20:33:18.197   Time stamp of existing file: 2026-04-07 01:17:48.000
+2026-04-07 20:33:18.197   Installing the file.
+2026-04-07 20:33:18.199   Successfully installed the file.
+2026-04-07 20:33:18.199   -- File entry --
+2026-04-07 20:33:18.199   Dest filename: C:\Program Files\Supermix Studio\_internal\accelerate-1.12.0.dist-info\licenses\LICENSE
+2026-04-07 20:33:18.201   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.201   Dest file exists.
+2026-04-07 20:33:18.201   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.201   Installing the file.
+2026-04-07 20:33:18.204   Successfully installed the file.
+2026-04-07 20:33:18.204   -- File entry --
+2026-04-07 20:33:18.204   Dest filename: C:\Program Files\Supermix Studio\_internal\aiohttp\_http_parser.cp312-win_amd64.pyd
+2026-04-07 20:33:18.214   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.214   Dest file exists.
+2026-04-07 20:33:18.214   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.214   Installing the file.
+2026-04-07 20:33:18.302   Successfully installed the file.
+2026-04-07 20:33:18.302   -- File entry --
+2026-04-07 20:33:18.302   Dest filename: C:\Program Files\Supermix Studio\_internal\aiohttp\_http_writer.cp312-win_amd64.pyd
+2026-04-07 20:33:18.307   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.307   Dest file exists.
+2026-04-07 20:33:18.319   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.319   Installing the file.
+2026-04-07 20:33:18.338   Successfully installed the file.
+2026-04-07 20:33:18.338   -- File entry --
+2026-04-07 20:33:18.338   Dest filename: C:\Program Files\Supermix Studio\_internal\aiohttp\_websocket\mask.cp312-win_amd64.pyd
+2026-04-07 20:33:18.339   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.339   Dest file exists.
+2026-04-07 20:33:18.340   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.340   Installing the file.
+2026-04-07 20:33:18.342   Successfully installed the file.
+2026-04-07 20:33:18.342   -- File entry --
+2026-04-07 20:33:18.346   Dest filename: C:\Program Files\Supermix Studio\_internal\aiohttp\_websocket\reader_c.cp312-win_amd64.pyd
+2026-04-07 20:33:18.347   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.347   Dest file exists.
+2026-04-07 20:33:18.347   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.347   Installing the file.
+2026-04-07 20:33:18.366   Successfully installed the file.
+2026-04-07 20:33:18.366   -- File entry --
+2026-04-07 20:33:18.366   Dest filename: C:\Program Files\Supermix Studio\_internal\assets\supermix_qwen_icon.ico
+2026-04-07 20:33:18.367   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.367   Dest file exists.
+2026-04-07 20:33:18.367   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.367   Installing the file.
+2026-04-07 20:33:18.373   Successfully installed the file.
+2026-04-07 20:33:18.373   -- File entry --
+2026-04-07 20:33:18.373   Dest filename: C:\Program Files\Supermix Studio\_internal\assets\supermix_qwen_icon.png
+2026-04-07 20:33:18.377   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.377   Dest file exists.
+2026-04-07 20:33:18.377   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.377   Installing the file.
+2026-04-07 20:33:18.389   Successfully installed the file.
+2026-04-07 20:33:18.390   -- File entry --
+2026-04-07 20:33:18.390   Dest filename: C:\Program Files\Supermix Studio\_internal\assets\supermix_qwen_installer_small.bmp
+2026-04-07 20:33:18.390   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.390   Dest file exists.
+2026-04-07 20:33:18.390   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.390   Installing the file.
+2026-04-07 20:33:18.391   Successfully installed the file.
+2026-04-07 20:33:18.392   -- File entry --
+2026-04-07 20:33:18.396   Dest filename: C:\Program Files\Supermix Studio\_internal\assets\supermix_qwen_installer_wizard.bmp
+2026-04-07 20:33:18.397   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.397   Dest file exists.
+2026-04-07 20:33:18.397   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.397   Installing the file.
+2026-04-07 20:33:18.434   Successfully installed the file.
+2026-04-07 20:33:18.434   -- File entry --
+2026-04-07 20:33:18.435   Dest filename: C:\Program Files\Supermix Studio\_internal\assets\supermix_qwen_splash.png
+2026-04-07 20:33:18.446   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.446   Dest file exists.
+2026-04-07 20:33:18.446   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.446   Installing the file.
+2026-04-07 20:33:18.505   Successfully installed the file.
+2026-04-07 20:33:18.506   -- File entry --
+2026-04-07 20:33:18.507   Dest filename: C:\Program Files\Supermix Studio\_internal\attrs-26.1.0.dist-info\INSTALLER
+2026-04-07 20:33:18.509   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.509   Dest file exists.
+2026-04-07 20:33:18.509   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.510   Installing the file.
+2026-04-07 20:33:18.510   Successfully installed the file.
+2026-04-07 20:33:18.519   -- File entry --
+2026-04-07 20:33:18.523   Dest filename: C:\Program Files\Supermix Studio\_internal\attrs-26.1.0.dist-info\METADATA
+2026-04-07 20:33:18.523   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.523   Dest file exists.
+2026-04-07 20:33:18.523   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.523   Installing the file.
+2026-04-07 20:33:18.533   Successfully installed the file.
+2026-04-07 20:33:18.533   -- File entry --
+2026-04-07 20:33:18.533   Dest filename: C:\Program Files\Supermix Studio\_internal\attrs-26.1.0.dist-info\RECORD
+2026-04-07 20:33:18.533   Time stamp of our file: 2026-04-07 19:08:02.000
+2026-04-07 20:33:18.533   Dest file exists.
+2026-04-07 20:33:18.534   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.534   Installing the file.
+2026-04-07 20:33:18.543   Successfully installed the file.
+2026-04-07 20:33:18.543   -- File entry --
+2026-04-07 20:33:18.543   Dest filename: C:\Program Files\Supermix Studio\_internal\attrs-26.1.0.dist-info\WHEEL
+2026-04-07 20:33:18.549   Time stamp of our file: 2026-04-07 19:08:00.000
+2026-04-07 20:33:18.549   Dest file exists.
+2026-04-07 20:33:18.549   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.549   Installing the file.
+2026-04-07 20:33:18.551   Successfully installed the file.
+2026-04-07 20:33:18.555   -- File entry --
+2026-04-07 20:33:18.556   Dest filename: C:\Program Files\Supermix Studio\_internal\attrs-26.1.0.dist-info\licenses\LICENSE
+2026-04-07 20:33:18.557   Time stamp of our file: 2026-04-07 19:08:02.000
+2026-04-07 20:33:18.557   Dest file exists.
+2026-04-07 20:33:18.557   Time stamp of existing file: 2026-04-07 01:17:50.000
+2026-04-07 20:33:18.557   Installing the file.
+2026-04-07 20:33:18.557   Successfully installed the file.
+2026-04-07 20:33:18.557   -- File entry --
+2026-04-07 20:33:18.562   Dest filename: C:\Program Files\Supermix Studio\_internal\bundled_base_model\config.json
+2026-04-07 20:33:18.562   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.562   Dest file exists.
+2026-04-07 20:33:18.562   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.562   Installing the file.
+2026-04-07 20:33:18.563   Successfully installed the file.
+2026-04-07 20:33:18.564   -- File entry --
+2026-04-07 20:33:18.564   Dest filename: C:\Program Files\Supermix Studio\_internal\bundled_base_model\generation_config.json
+2026-04-07 20:33:18.570   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.570   Dest file exists.
+2026-04-07 20:33:18.570   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.570   Installing the file.
+2026-04-07 20:33:18.571   Successfully installed the file.
+2026-04-07 20:33:18.571   -- File entry --
+2026-04-07 20:33:18.571   Dest filename: C:\Program Files\Supermix Studio\_internal\bundled_base_model\merges.txt
+2026-04-07 20:33:18.571   Time stamp of our file: 2026-04-07 19:06:22.000
+2026-04-07 20:33:18.571   Dest file exists.
+2026-04-07 20:33:18.572   Time stamp of existing file: 2026-04-07 01:15:40.000
+2026-04-07 20:33:18.572   Installing the file.
+2026-04-07 20:33:18.878   Successfully installed the file.
+2026-04-07 20:33:18.879   -- File entry --
+2026-04-07 20:33:18.879   Dest filename: C:\Program Files\Supermix Studio\_internal\bundled_base_model\model.safetensors
+2026-04-07 20:33:18.879   Time stamp of our file: 2026-04-07 19:06:26.000
+2026-04-07 20:33:18.879   Dest file exists.
+2026-04-07 20:33:18.879   Time stamp of existing file: 2026-04-07 01:15:44.000
+2026-04-07 20:33:18.879   Installing the file.
+2026-04-07 20:33:18.880   Defaulting to Abort for suppressed message box (Abort/Retry/Ignore):
+                          C:\Program Files\Supermix Studio\_internal\bundled_base_model\model.safetensors
+                          
+                          An error occurred while trying to copy a file:
+                          There is not enough space on the disk.
+2026-04-07 20:33:18.888   User canceled the installation process.
+2026-04-07 20:33:18.888   Rolling back changes.
+2026-04-07 20:33:18.896   Starting the uninstallation process.
+2026-04-07 20:33:18.897   Uninstallation process succeeded.
+2026-04-07 20:33:18.905   Deinitializing Setup.
+2026-04-07 20:33:18.964   Log closed.

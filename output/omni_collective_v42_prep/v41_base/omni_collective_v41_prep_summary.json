@@ -1,0 +1,84 @@
+{
+  "family": "omni_collective_v41",
+  "source_summary": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v41_frontier_20260410_015540\\omni_collective_v41_frontier_summary.json",
+  "output_root": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base",
+  "model_config": {
+    "family": "omni_collective_v41",
+    "base_model_family": "omni_collective_v8",
+    "text_hidden": 288,
+    "fusion_hidden": 1152,
+    "expert_count": 12,
+    "expert_hidden": 1920,
+    "expert_top_k": 2,
+    "deliberation_passes": 12,
+    "minimum_passes": 6,
+    "new_heads": [
+      "latent_plan_slots",
+      "multi_token_prediction_aux",
+      "communication_polish_head",
+      "uncertainty_anchor_head"
+    ]
+  },
+  "communication_polish": {
+    "row_count": 18,
+    "source_counts": {
+      "communication_polish_v41::clarity_rewrite": 3,
+      "communication_polish_v41::coding_explain": 3,
+      "communication_polish_v41::compare_recommend": 3,
+      "communication_polish_v41::creative_grounded": 3,
+      "communication_polish_v41::grounded_uncertainty": 3,
+      "communication_polish_v41::human_collab": 3
+    },
+    "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\v41_communication_polish_rows.jsonl"
+  },
+  "latent_plan": {
+    "row_count": 4,
+    "source_counts": {
+      "latent_plan_v41::debugging": 1,
+      "latent_plan_v41::human_explain": 1,
+      "latent_plan_v41::openscad": 1,
+      "latent_plan_v41::route_selection": 1
+    },
+    "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\v41_latent_plan_rows.jsonl"
+  },
+  "code_critique_repair": {
+    "row_count": 5,
+    "source_counts": {
+      "code_repair_v41::checkpoint_write": 1,
+      "code_repair_v41::disk_full_resume": 1,
+      "code_repair_v41::openscad_fix": 1,
+      "code_repair_v41::review_rewrite": 1,
+      "code_repair_v41::routing_bug": 1
+    },
+    "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\v41_code_critique_repair_rows.jsonl"
+  },
+  "reasoning_budget": {
+    "row_count": 6,
+    "source_counts": {
+      "reasoning_budget_v41::deep": 2,
+      "reasoning_budget_v41::medium": 2,
+      "reasoning_budget_v41::short": 2
+    },
+    "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\v41_reasoning_budget_rows.jsonl"
+  },
+  "teacher_disagreement": {
+    "teacher_pair": [
+      "v40_benchmax",
+      "qwen_v30",
+      "omni_collective_v8"
+    ],
+    "row_count": 20,
+    "source_counts": {
+      "teacher_disagreement_v41::repair": 5,
+      "teacher_disagreement_v41::resolve": 5,
+      "teacher_disagreement_v41::route_then_answer": 5,
+      "teacher_disagreement_v41::stability": 5
+    },
+    "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\v41_teacher_disagreement_rows.jsonl"
+  },
+  "promotion_eval_pack": {
+    "item_count": 6,
+    "path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\v41_promotion_eval_pack.json"
+  },
+  "blueprint_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_collective_v42_prep\\v41_base\\omni_collective_v41_blueprint.json"
+}

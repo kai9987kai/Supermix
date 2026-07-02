@@ -1,0 +1,30 @@
+Starting smoke test for Paper Fusion Expert (v29)...
+Using device: cpu
+  Set layers.10.shared_scale to 1.0
+  Set layers.10.alpha to 1.0
+  Set layers.10.shared_down.weight to random normal for gradient flow
+  Set layers.10.ssm_adapter.A to mild range [-1, -0.1]
+  Set layers.10.ssm_adapter.gate to 1.0
+Dummy input shape: torch.Size([4, 3, 128])
+Running forward pass (train mode)...
+Output shape: torch.Size([4, 3, 10])
+RoMA manifold alignment loss: 0.871712
+Running global backward pass...
+CE Loss: 2.6997, Total Loss: 2.7084
+Checking gradients...
+  ssm_adapter.A: ZERO (expected in single-pass, A*h where h=0)
+  mor_router.sub_routers.0.weight: OK
+  mor_router.sub_routers.1.weight: OK
+  mor_router.sub_routers.2.weight: OK
+  mor_router.main_router.weight: OK
+  ssm_adapter.B: OK
+  ssm_adapter.C: OK
+  ssm_adapter.gate: OK
+  experts_up.0.weight: OK
+  experts_down.0.weight: OK
+  shared_up.weight: OK
+All gradients verified successfully.
+
+Parameter count: 2,658,532 trainable / 2,658,532 total
+
+Smoke test PASSED!

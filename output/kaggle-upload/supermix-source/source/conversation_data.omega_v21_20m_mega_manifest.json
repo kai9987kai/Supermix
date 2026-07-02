@@ -1,0 +1,169 @@
+{
+  "name": "omega_v21_20m_mega_creative_reasoning",
+  "format": "jsonl_shards",
+  "total_rows": 20055530,
+  "created_at_utc": "2026-02-22T22:30:00Z",
+  "description": "v21 mega dataset: all v20 shards + new creative/reasoning synthetic data. Targets ~20M rows with enhanced coverage of analogies, debates, storytelling, chain-of-thought reasoning, Socratic dialogue, and emotional intelligence.",
+  "shards": [
+    {
+      "path": "conversation_data.omega_v14_creative_code_books_6m.jsonl",
+      "rows": 6000000,
+      "description": "creative+code+books core"
+    },
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "english+math core"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image QA test set"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "extra english-heavy training"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "extra novel/book extracts"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3D model + video multimodal tests"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials repeat for stronger scientific reasoning coverage"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy repeat for writing/grammar/conversation clarity"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "novel/book extract repeat for style and narrative dialogue"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image qa repeat"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d+video multimodal repeat"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science repeat v19"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy repeat v19"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book extracts repeat v19"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy repeat v19b"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book extracts repeat v19b"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image repeat v19"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d+video repeat v19"
+    },
+    {
+      "path": "conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "rows": 182034,
+      "description": "live knowledge / world+coding mixed dialogues"
+    },
+    {
+      "path": "conversation_data.coding_knowledge_2026_02_19.jsonl",
+      "rows": 380,
+      "description": "coding knowledge micro-shard"
+    },
+    {
+      "path": "conversation_data.world_events_2026_02_19.jsonl",
+      "rows": 66,
+      "description": "world events micro-shard"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "extra english-heavy repeat for conversational clarity"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "extra book extracts repeat for tone/dialogue style"
+    },
+    {
+      "path": "conversation_data.mega_creative_analogies_v1_500k.jsonl",
+      "rows": 500000,
+      "description": "[NEW v21] Synthetic analogy pairs: explain-X-like-Y across 50+ domains"
+    },
+    {
+      "path": "conversation_data.mega_creative_debates_v1_400k.jsonl",
+      "rows": 400000,
+      "description": "[NEW v21] Balanced pro/con debate pairs on 40+ topics"
+    },
+    {
+      "path": "conversation_data.mega_creative_storytelling_v1_500k.jsonl",
+      "rows": 500000,
+      "description": "[NEW v21] Story-continuation prompts across 15 genres"
+    },
+    {
+      "path": "conversation_data.mega_reasoning_cot_v1_750k.jsonl",
+      "rows": 750000,
+      "description": "[NEW v21] Chain-of-thought reasoning: math + logic puzzles"
+    },
+    {
+      "path": "conversation_data.mega_reasoning_socratic_v1_300k.jsonl",
+      "rows": 300000,
+      "description": "[NEW v21] Socratic dialogue chains probing deeper understanding"
+    },
+    {
+      "path": "conversation_data.mega_empathy_emotional_v1_300k.jsonl",
+      "rows": 300000,
+      "description": "[NEW v21] Emotionally-aware, empathetic response pairs"
+    },
+    {
+      "path": "conversation_data.mega_reasoning_cot_v1_750k.jsonl",
+      "rows": 750000,
+      "description": "[NEW v21] Chain-of-thought repeat for stronger analytical reasoning"
+    },
+    {
+      "path": "conversation_data.mega_creative_analogies_v1_500k.jsonl",
+      "rows": 250328,
+      "description": "[NEW v21] Analogy repeat for creative depth"
+    }
+  ]
+}

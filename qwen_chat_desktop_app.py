@@ -1,0 +1,1137 @@
+import argparse
+import atexit
+import base64
+import html
+import json
+import logging
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
+from typing import Optional
+
+try:
+    import webview
+except ImportError:  # pragma: no cover - handled at runtime with a clear error
+    webview = None
+
+
+DEFAULT_BASE_MODEL = (
+    r"C:\Users\kai99\.cache\huggingface\hub\models--Qwen--Qwen2.5-0.5B-Instruct"
+    r"\snapshots\7ae557604adf67be50417f59c2c2f167def9a775"
+)
+DEFAULT_BASE_MODEL_REPO = "Qwen/Qwen2.5-0.5B-Instruct"
+BASE_MODEL_OVERRIDE_ENV = "SUPERMIX_QWEN_BASE_MODEL_DIR"
+MODEL_REPO_ID_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+$")
+MODEL_WEIGHT_FILES = (
+    "model.safetensors",
+    "model.safetensors.index.json",
+    "pytorch_model.bin",
+    "pytorch_model.bin.index.json",
+)
+APP_ICON_FILENAME = "supermix_qwen_icon.ico"
+SPLASH_IMAGE_FILENAME = "supermix_qwen_splash.png"
+APP_STATE_DIRNAME = "SupermixQwenDesktop"
+
+LOADING_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Supermix Qwen Desktop</title>
+  <style>
+    :root {
+      --bg: #08111e;
+      --panel: #111c30;
+      --border: #24324c;
+      --text: #e6eefc;
+      --muted: #9cb1d4;
+      --accent: #4f8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at top, rgba(79, 140, 255, 0.18), transparent 38%),
+        linear-gradient(180deg, #0a1424, var(--bg));
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    .card {
+      width: min(700px, calc(100vw - 40px));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(17, 28, 48, 0.94);
+      padding: 28px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 18px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(79, 140, 255, 0.8);
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 30px;
+      line-height: 1.15;
+    }
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    .box {
+      margin-top: 18px;
+      padding: 16px;
+      border-radius: 12px;
+      background: #0b1322;
+      border: 1px solid var(--border);
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      color: #bfd0f0;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(0.82); opacity: 0.55; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge"><span class="dot"></span>Supermix Qwen Desktop</div>
+    <h1>Starting chat interface</h1>
+    <p>The desktop app is launching the local Python chat server and will switch into the live interface as soon as the server reports ready.</p>
+    <div class="box">__STATUS__</div>
+  </div>
+</body>
+</html>
+"""
+
+ERROR_HTML = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Supermix Qwen Desktop Error</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #120f16;
+      color: #f3e9ef;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    .card {
+      width: min(820px, calc(100vw - 40px));
+      border: 1px solid #5a2a3b;
+      border-radius: 18px;
+      background: #1c1420;
+      padding: 28px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+    }
+    p {
+      margin: 0 0 14px;
+      color: #d9bac7;
+      line-height: 1.55;
+    }
+    .box {
+      margin-top: 18px;
+      padding: 16px;
+      border-radius: 12px;
+      background: #100c12;
+      border: 1px solid #5a2a3b;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      color: #ffd5e1;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Startup failed</h1>
+    <p>__MESSAGE__</p>
+    <div class="box">__DETAILS__</div>
+  </div>
+</body>
+</html>
+"""
+
+
+def configure_logging(log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
+def resolve_runtime_state_dir() -> Path:
+    override = str(os.environ.get("SUPERMIX_QWEN_DESKTOP_STATE_DIR") or "").strip()
+    candidates: list[Path] = []
+    if override:
+        candidates.append(Path(override).expanduser())
+    for env_name in ("LOCALAPPDATA", "APPDATA"):
+        raw = str(os.environ.get(env_name) or "").strip()
+        if raw:
+            candidates.append(Path(raw) / APP_STATE_DIRNAME)
+    candidates.append(Path.home() / f".{APP_STATE_DIRNAME}")
+    candidates.append(Path(tempfile.gettempdir()) / APP_STATE_DIRNAME)
+
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            test_file = candidate / ".write_test"
+            test_file.write_text("ok", encoding="utf-8")
+            test_file.unlink(missing_ok=True)
+            return candidate.resolve()
+        except Exception:
+            continue
+    raise PermissionError("Could not create a writable runtime state directory for Supermix Qwen Desktop.")
+
+
+def render_loading_html(status: str) -> str:
+    return LOADING_HTML.replace("__STATUS__", html.escape(status))
+
+
+def render_error_html(message: str, details: str) -> str:
+    return (
+        ERROR_HTML
+        .replace("__MESSAGE__", html.escape(message))
+        .replace("__DETAILS__", html.escape(details))
+    )
+
+
+def render_splash_html(status: str, splash_data_uri: str) -> str:
+    image_markup = (
+        f'<img class="hero" src="{splash_data_uri}" alt="Supermix Qwen">'
+        if splash_data_uri
+        else '<div class="hero hero-fallback">SQ</div>'
+    )
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Supermix Qwen Desktop</title>
+  <style>
+    :root {{
+      --bg-top: #07101d;
+      --bg-bottom: #0b2035;
+      --panel: rgba(10, 20, 35, 0.86);
+      --border: rgba(124, 164, 215, 0.24);
+      --text: #edf4ff;
+      --muted: #a8bedf;
+      --accent: #63b4ff;
+      --warm: #ff9e61;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 16% 18%, rgba(77, 166, 255, 0.28), transparent 28%),
+        radial-gradient(circle at 85% 82%, rgba(255, 152, 88, 0.24), transparent 30%),
+        linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }}
+    .frame {{
+      width: min(940px, calc(100vw - 32px));
+      border-radius: 24px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      box-shadow: 0 36px 120px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(12px);
+    }}
+    .hero {{
+      display: block;
+      width: 100%;
+      height: auto;
+    }}
+    .hero-fallback {{
+      height: 260px;
+      display: grid;
+      place-items: center;
+      font-size: 92px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      background:
+        radial-gradient(circle at top left, rgba(99, 180, 255, 0.35), transparent 30%),
+        linear-gradient(180deg, #0b1628, #102946);
+    }}
+    .meta {{
+      display: grid;
+      gap: 14px;
+      padding: 22px 24px 26px;
+    }}
+    .eyebrow {{
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.1;
+    }}
+    p {{
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 15px;
+    }}
+    .status {{
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: rgba(7, 14, 24, 0.92);
+      border: 1px solid rgba(99, 180, 255, 0.18);
+      color: #d4e4fb;
+      white-space: pre-wrap;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+    }}
+    .progress {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--warm);
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+    }}
+    .pulse {{
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--warm);
+      box-shadow: 0 0 18px rgba(255, 158, 97, 0.8);
+      animation: pulse 1.1s ease-in-out infinite;
+    }}
+    @keyframes pulse {{
+      0%, 100% {{ transform: scale(1); opacity: 1; }}
+      50% {{ transform: scale(0.7); opacity: 0.45; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="frame">
+    {image_markup}
+    <div class="meta">
+      <div class="eyebrow">Local model startup</div>
+      <h1>Preparing the Supermix Qwen desktop chat</h1>
+      <p>The launcher is starting the local Python model server and will switch into the live chat window as soon as the adapter reports ready.</p>
+      <div class="progress"><span class="pulse"></span>Loading model + adapter</div>
+      <div class="status">{html.escape(status)}</div>
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+def iter_search_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add_path(path: Optional[Path]) -> None:
+        if path is None:
+            return
+        for candidate in (path, *path.parents):
+            key = str(candidate.resolve())
+            if key not in seen:
+                seen.add(key)
+                roots.append(candidate.resolve())
+
+    add_path(Path.cwd())
+    add_path(Path(sys.executable).resolve().parent)
+    add_path(Path(__file__).resolve().parent)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        add_path(Path(meipass))
+    return roots
+
+
+def iter_runtime_roots(project_root: Optional[Path] = None) -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add_path(path: Optional[Path]) -> None:
+        if path is None:
+            return
+        resolved = path.resolve()
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            roots.append(resolved)
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        add_path(Path(meipass))
+    add_path(project_root)
+    add_path(Path(sys.executable).resolve().parent)
+    add_path(Path.cwd())
+    add_path(Path(__file__).resolve().parents[1])
+    return roots
+
+
+def resolve_runtime_path(project_root: Path, relative_path: Path, required: bool = False) -> Optional[Path]:
+    for root in iter_runtime_roots(project_root):
+        candidate = (root / relative_path).resolve()
+        if candidate.exists():
+            return candidate
+    if required:
+        raise FileNotFoundError(f"Could not resolve runtime path for {relative_path}")
+    return None
+
+
+def resolve_server_script_path(project_root: Path) -> Path:
+    return resolve_runtime_path(project_root, Path("source") / "qwen_chat_web_app.py", required=True)
+
+
+def resolve_asset_path(project_root: Path, asset_name: str) -> Optional[Path]:
+    return resolve_runtime_path(project_root, Path("assets") / asset_name, required=False)
+
+
+def encode_image_as_data_uri(image_path: Optional[Path]) -> str:
+    if image_path is None or not image_path.exists():
+        return ""
+    if image_path.suffix.lower() == ".png":
+        mime = "image/png"
+    elif image_path.suffix.lower() == ".ico":
+        mime = "image/x-icon"
+    else:
+        mime = "application/octet-stream"
+    raw = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{raw}"
+
+
+def find_project_root() -> Path:
+    for root in iter_search_roots():
+        has_artifacts = (root / "artifacts").exists()
+        has_source = (root / "source" / "qwen_chat_web_app.py").exists()
+        if has_artifacts and has_source:
+            return root
+    return Path.cwd().resolve()
+
+
+def load_json_if_exists(path: Path) -> Optional[dict]:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logging.warning("Failed to load JSON from %s: %s", path, exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def format_artifact_label(value: str) -> str:
+    text = str(value or "").strip().replace("qwen_supermix_enhanced_", "")
+    text = re.sub(r"[_\-]+", " ", text).strip()
+    words = []
+    for word in text.split():
+        words.append(word.upper() if re.fullmatch(r"v\d+", word.lower()) else word.capitalize())
+    return " ".join(words) or "Latest Adapter"
+
+
+def looks_like_model_repo_id(value: str) -> bool:
+    return bool(MODEL_REPO_ID_RE.fullmatch(str(value or "").strip()))
+
+
+def safe_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError as exc:
+        logging.debug("Skipping inaccessible path during exists() probe: %s (%s)", path, exc)
+        return False
+
+
+def safe_is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError as exc:
+        logging.debug("Skipping inaccessible path during is_dir() probe: %s (%s)", path, exc)
+        return False
+
+
+def safe_resolve(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError as exc:
+        logging.debug("Falling back to unresolved path for %s (%s)", path, exc)
+        return path
+
+
+def sorted_child_dirs(path: Path) -> list[Path]:
+    try:
+        children = [child for child in path.iterdir() if safe_is_dir(child)]
+    except OSError as exc:
+        logging.debug("Skipping inaccessible directory listing: %s (%s)", path, exc)
+        return []
+
+    def mtime(child: Path) -> float:
+        try:
+            return child.stat().st_mtime
+        except OSError as exc:
+            logging.debug("Skipping mtime probe for %s (%s)", child, exc)
+            return -1.0
+
+    return sorted(children, key=mtime, reverse=True)
+
+
+def is_local_model_dir(path: Path) -> bool:
+    return safe_is_dir(path) and safe_exists(path / "config.json") and any(safe_exists(path / name) for name in MODEL_WEIGHT_FILES)
+
+
+def iter_hf_cache_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add_path(path: Optional[Path]) -> None:
+        if path is None:
+            return
+        candidate = path.expanduser()
+        resolved = safe_resolve(candidate)
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            roots.append(resolved)
+
+    for env_name in ("HF_HUB_CACHE", "TRANSFORMERS_CACHE"):
+        raw = str(os.environ.get(env_name) or "").strip()
+        if raw:
+            add_path(Path(raw))
+    hf_home = str(os.environ.get("HF_HOME") or "").strip()
+    if hf_home:
+        add_path(Path(hf_home) / "hub")
+    xdg_cache = str(os.environ.get("XDG_CACHE_HOME") or "").strip()
+    if xdg_cache:
+        add_path(Path(xdg_cache) / "huggingface" / "hub")
+    add_path(Path.home() / ".cache" / "huggingface" / "hub")
+    local_appdata = str(os.environ.get("LOCALAPPDATA") or "").strip()
+    if local_appdata:
+        add_path(Path(local_appdata) / "huggingface" / "hub")
+    return roots
+
+
+def find_cached_model_snapshot(repo_id: str, extra_roots: Optional[list[Path]] = None) -> Optional[Path]:
+    folder_name = f"models--{repo_id.replace('/', '--')}"
+    roots = list(extra_roots or []) + iter_hf_cache_roots()
+    seen: set[str] = set()
+
+    def iter_snapshot_candidates(repo_cache_dir: Path) -> list[Path]:
+        candidates: list[Path] = []
+        refs_dir = repo_cache_dir / "refs"
+        for ref_name in ("main", "master"):
+            ref_file = refs_dir / ref_name
+            if safe_exists(ref_file):
+                try:
+                    snapshot_name = ref_file.read_text(encoding="utf-8", errors="ignore").strip()
+                except OSError as exc:
+                    logging.debug("Skipping inaccessible HF ref file %s (%s)", ref_file, exc)
+                    snapshot_name = ""
+                if snapshot_name:
+                    candidates.append(repo_cache_dir / "snapshots" / snapshot_name)
+        snapshots_dir = repo_cache_dir / "snapshots"
+        if safe_exists(snapshots_dir):
+            candidates.extend(sorted_child_dirs(snapshots_dir))
+        return candidates
+
+    for root in roots:
+        for repo_cache_dir in (root, root / folder_name):
+            key = str(repo_cache_dir)
+            if key in seen:
+                continue
+            seen.add(key)
+            if is_local_model_dir(repo_cache_dir):
+                return safe_resolve(repo_cache_dir)
+            if not safe_exists(repo_cache_dir):
+                continue
+            for snapshot_dir in iter_snapshot_candidates(repo_cache_dir):
+                if is_local_model_dir(snapshot_dir):
+                    return safe_resolve(snapshot_dir)
+    return None
+
+
+def resolve_local_base_model_path(value: str) -> str:
+    raw = str(value or "").strip()
+    override_raw = str(os.environ.get(BASE_MODEL_OVERRIDE_ENV) or "").strip()
+    repo_id = raw if looks_like_model_repo_id(raw) else DEFAULT_BASE_MODEL_REPO
+    bundled_base_model = find_bundled_base_model_dir()
+
+    if override_raw:
+        override_path = Path(override_raw).expanduser()
+        resolved_override = find_cached_model_snapshot(repo_id, extra_roots=[override_path])
+        if resolved_override is not None:
+            return str(resolved_override)
+        raise FileNotFoundError(
+            f"{BASE_MODEL_OVERRIDE_ENV} is set to '{override_path}', but no usable local base model was found there for '{repo_id}'."
+        )
+
+    if raw:
+        raw_path = Path(raw).expanduser()
+        if safe_exists(raw_path):
+            if not is_local_model_dir(raw_path):
+                raise FileNotFoundError(f"Base model directory exists but does not look usable for offline loading: {raw_path}")
+            return str(safe_resolve(raw_path))
+        if looks_like_model_repo_id(raw):
+            if raw == DEFAULT_BASE_MODEL_REPO and bundled_base_model is not None:
+                return str(bundled_base_model)
+            resolved_snapshot = find_cached_model_snapshot(raw)
+            if resolved_snapshot is not None:
+                return str(resolved_snapshot)
+            default_snapshot = Path(DEFAULT_BASE_MODEL)
+            if raw == DEFAULT_BASE_MODEL_REPO and safe_exists(default_snapshot) and is_local_model_dir(default_snapshot):
+                return str(safe_resolve(default_snapshot))
+            raise FileNotFoundError(
+                f"Could not find a local Hugging Face cache snapshot for '{raw}'. "
+                f"Set {BASE_MODEL_OVERRIDE_ENV} to a local model directory or pre-download the base model."
+            )
+        raise FileNotFoundError(f"Base model path does not exist: {raw_path}")
+
+    if bundled_base_model is not None:
+        return str(bundled_base_model)
+
+    default_snapshot = Path(DEFAULT_BASE_MODEL)
+    if safe_exists(default_snapshot) and is_local_model_dir(default_snapshot):
+        return str(safe_resolve(default_snapshot))
+
+    resolved_snapshot = find_cached_model_snapshot(DEFAULT_BASE_MODEL_REPO)
+    if resolved_snapshot is not None:
+        return str(resolved_snapshot)
+
+    raise FileNotFoundError(
+        f"Could not resolve a local base model for '{DEFAULT_BASE_MODEL_REPO}'. "
+        f"Set {BASE_MODEL_OVERRIDE_ENV} to a local model directory or pre-download the base model."
+    )
+
+
+def describe_adapter_artifact(adapter_dir: Path) -> dict[str, str]:
+    artifact_dir = adapter_dir.parent
+    benchmark = load_json_if_exists(artifact_dir / "benchmark_results.json") or {}
+    base = benchmark.get("base") if isinstance(benchmark.get("base"), dict) else {}
+    tuned = benchmark.get("tuned") if isinstance(benchmark.get("tuned"), dict) else {}
+    train_stats = benchmark.get("train_stats") if isinstance(benchmark.get("train_stats"), dict) else {}
+
+    benchmark_line = ""
+    if tuned:
+        token_f1 = float(tuned.get("token_f1") or 0.0)
+        token_f1_delta = token_f1 - float(base.get("token_f1") or 0.0)
+        perplexity = float(tuned.get("perplexity") or 0.0)
+        perplexity_delta = perplexity - float(base.get("perplexity") or 0.0)
+        benchmark_line = (
+            f"token_f1={token_f1:.3f} ({token_f1_delta:+.3f}) | "
+            f"perplexity={perplexity:.2f} ({perplexity_delta:+.2f})"
+        )
+
+    training_line = ""
+    train_seconds = float(train_stats.get("train_seconds") or 0.0)
+    if train_seconds > 0:
+        training_line = f"train_time={train_seconds / 3600.0:.1f}h"
+
+    return {
+        "label": format_artifact_label(artifact_dir.name),
+        "artifact_dir": str(artifact_dir),
+        "benchmark_line": benchmark_line,
+        "training_line": training_line,
+    }
+
+
+def find_bundled_artifact_dir() -> Optional[Path]:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return None
+    candidate = Path(meipass) / "bundled_latest_artifact"
+    if (candidate / "adapter" / "adapter_config.json").exists():
+        return candidate.resolve()
+    return None
+
+
+def find_bundled_adapter_dir() -> Optional[Path]:
+    bundled_artifact = find_bundled_artifact_dir()
+    if bundled_artifact is not None:
+        return (bundled_artifact / "adapter").resolve()
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return None
+    candidate = Path(meipass) / "bundled_latest_adapter"
+    if (candidate / "adapter_config.json").exists():
+        return candidate.resolve()
+    return None
+
+
+def find_bundled_base_model_dir() -> Optional[Path]:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return None
+    for folder_name in ("bundled_base_model", "base_model"):
+        candidate = Path(meipass) / folder_name
+        if is_local_model_dir(candidate):
+            return safe_resolve(candidate)
+    return None
+
+
+def score_adapter_dir(adapter_dir: Path) -> tuple[int, float]:
+    parent = adapter_dir.parent
+    benchmark_file = parent / "benchmark_results.json"
+    if benchmark_file.exists():
+        return (2, benchmark_file.stat().st_mtime)
+    checkpoint_meta = parent / "checkpoint_meta.json"
+    if checkpoint_meta.exists():
+        return (1, checkpoint_meta.stat().st_mtime)
+    weight_file = adapter_dir / "adapter_model.safetensors"
+    if weight_file.exists():
+        return (0, weight_file.stat().st_mtime)
+    return (0, adapter_dir.stat().st_mtime)
+
+
+def resolve_gui_default_adapter_dir(project_root: Path) -> Optional[Path]:
+    pointer_path = project_root / ".gui_default_adapter.txt"
+    if not pointer_path.exists():
+        return None
+    try:
+        raw = pointer_path.read_text(encoding="utf-8").lstrip("\ufeff").strip()
+    except OSError as exc:
+        logging.warning("Failed to read GUI default adapter pointer %s: %s", pointer_path, exc)
+        return None
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (project_root / candidate).resolve()
+    cfg = candidate / "adapter_config.json"
+    weights = candidate / "adapter_model.safetensors"
+    if cfg.exists() and weights.exists():
+        return candidate.resolve()
+    logging.warning("Ignoring invalid GUI default adapter pointer %s -> %s", pointer_path, candidate)
+    return None
+
+
+def find_latest_adapter_dir(project_root: Path) -> Path:
+    pinned = resolve_gui_default_adapter_dir(project_root)
+    if pinned is not None:
+        return pinned
+    bundled = find_bundled_adapter_dir()
+    if bundled is not None:
+        return bundled
+
+    candidates: dict[str, Path] = {}
+    patterns = [
+        "artifacts/qwen_supermix_enhanced_*/adapter",
+        "artifacts/*/adapter",
+        "artifacts/**/adapter",
+    ]
+    for pattern in patterns:
+        for candidate in project_root.glob(pattern):
+            cfg = candidate / "adapter_config.json"
+            weights = candidate / "adapter_model.safetensors"
+            if cfg.exists() and weights.exists():
+                candidates[str(candidate.resolve())] = candidate.resolve()
+    if not candidates:
+        raise FileNotFoundError("Could not find any Qwen adapter directory under artifacts.")
+    return max(candidates.values(), key=score_adapter_dir)
+
+
+def resolve_adapter_dir(project_root: Path, explicit_adapter_dir: str) -> Path:
+    raw = str(explicit_adapter_dir or "").strip()
+    if raw:
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = (project_root / candidate).resolve()
+        if not (candidate / "adapter_config.json").exists():
+            raise FileNotFoundError(f"Adapter directory is missing adapter_config.json: {candidate}")
+        return candidate
+    return find_latest_adapter_dir(project_root)
+
+
+def resolve_base_model_path(adapter_dir: Path, explicit_base_model: str) -> str:
+    if str(explicit_base_model or "").strip():
+        return resolve_local_base_model_path(str(explicit_base_model).strip())
+    cfg_path = adapter_dir / "adapter_config.json"
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        base_model = str(data.get("base_model_name_or_path") or "").strip()
+        if base_model:
+            return resolve_local_base_model_path(base_model)
+    except Exception as exc:
+        logging.warning("Failed to read base model path from %s: %s", cfg_path, exc)
+    return resolve_local_base_model_path("")
+
+
+def choose_port(host: str, preferred_port: int) -> int:
+    if int(preferred_port) > 0:
+        return int(preferred_port)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        sock.listen(1)
+        return int(sock.getsockname()[1])
+
+
+def resolve_python_executable(explicit_python: str) -> str:
+    if str(explicit_python or "").strip():
+        return str(explicit_python).strip()
+    candidates: list[str] = []
+    if not getattr(sys, "frozen", False):
+        candidates.append(sys.executable)
+    for name in ("python", "python3"):
+        path = shutil.which(name)
+        if path:
+            candidates.append(path)
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError("Could not find a usable Python executable. Pass --python_exe explicitly.")
+
+
+def wait_for_server(url: str, timeout_sec: float, process: subprocess.Popen[bytes], log_path: Path) -> None:
+    deadline = time.time() + float(timeout_sec)
+    last_error = ""
+    while time.time() < deadline:
+        if process.poll() is not None:
+            try:
+                log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+            except Exception:
+                log_tail = ""
+            raise RuntimeError(
+                f"Server process exited early with code {process.returncode}.\n\n{log_tail}"
+            )
+        try:
+            with urllib.request.urlopen(f"{url}/api/status", timeout=2.0) as resp:
+                if int(getattr(resp, "status", 200)) == 200:
+                    return
+        except Exception as exc:
+            last_error = str(exc)
+            time.sleep(0.25)
+    raise TimeoutError(f"Timed out waiting for local server at {url}. Last error: {last_error}")
+
+
+class ServerProcess:
+    def __init__(
+        self,
+        project_root: Path,
+        python_exe: str,
+        script_path: Path,
+        base_model: str,
+        adapter_dir: Path,
+        host: str,
+        port: int,
+        device: str,
+        log_path: Path,
+    ) -> None:
+        self.project_root = project_root
+        self.python_exe = python_exe
+        self.script_path = script_path
+        self.base_model = base_model
+        self.adapter_dir = adapter_dir
+        self.host = host
+        self.port = int(port)
+        self.device = device
+        self.log_path = log_path
+        self.process: Optional[subprocess.Popen[bytes]] = None
+        self._log_handle = None
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    def start(self) -> None:
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        env = dict(os.environ)
+        env["TOKENIZERS_PARALLELISM"] = "false"
+        cmd = [
+            self.python_exe,
+            "-u",
+            str(self.script_path),
+            "--base_model",
+            self.base_model,
+            "--adapter_dir",
+            str(self.adapter_dir),
+            "--host",
+            self.host,
+            "--port",
+            str(self.port),
+            "--device",
+            self.device,
+        ]
+        logging.info("Launching server subprocess: %s", cmd)
+        self._log_handle = self.log_path.open("w", encoding="utf-8")
+        self.process = subprocess.Popen(
+            cmd,
+            cwd=str(self.project_root),
+            stdout=self._log_handle,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+
+    def stop(self) -> None:
+        if self.process is not None and self.process.poll() is None:
+            logging.info("Stopping server subprocess pid=%s", self.process.pid)
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        self.process = None
+        if self._log_handle is not None:
+            self._log_handle.close()
+            self._log_handle = None
+
+
+class DesktopApp:
+    def __init__(
+        self,
+        project_root: Path,
+        server_script_path: Path,
+        python_exe: str,
+        base_model: str,
+        adapter_dir: Path,
+        host: str,
+        port: int,
+        device: str,
+        server_timeout: float,
+        server_log_path: Path,
+    ) -> None:
+        self.project_root = project_root
+        self.server_script_path = server_script_path
+        self.python_exe = python_exe
+        self.base_model = base_model
+        self.adapter_dir = adapter_dir
+        self.host = host
+        self.port = int(port)
+        self.device = device
+        self.server_timeout = float(server_timeout)
+        self.server_log_path = server_log_path
+        self.server = ServerProcess(
+            project_root=project_root,
+            python_exe=python_exe,
+            script_path=server_script_path,
+            base_model=base_model,
+            adapter_dir=adapter_dir,
+            host=host,
+            port=port,
+            device=device,
+            log_path=server_log_path,
+        )
+
+    @property
+    def url(self) -> str:
+        return self.server.url
+
+    def stop(self) -> None:
+        self.server.stop()
+
+    def start_backend(self) -> None:
+        self.server.start()
+        assert self.server.process is not None
+        wait_for_server(
+            url=self.url,
+            timeout_sec=self.server_timeout,
+            process=self.server.process,
+            log_path=self.server_log_path,
+        )
+
+    def bootstrap(self, window, splash_window=None) -> None:
+        try:
+            self.start_backend()
+            logging.info("Desktop app ready at %s", self.url)
+            window.load_url(self.url)
+            window.show()
+            if splash_window is not None:
+                splash_window.destroy()
+        except Exception as exc:
+            logging.exception("Desktop startup failed")
+            details = (
+                f"{exc}\n\n"
+                f"project_root = {self.project_root}\n"
+                f"server_script = {self.server_script_path}\n"
+                f"python_exe = {self.python_exe}\n"
+                f"adapter_dir = {self.adapter_dir}\n"
+                f"base_model = {self.base_model}\n"
+                f"device = {self.device}\n"
+                f"url = {self.url}\n"
+                f"server_log = {self.server_log_path}\n"
+            )
+            if splash_window is not None:
+                try:
+                    splash_window.destroy()
+                except Exception:
+                    logging.exception("Failed to close splash window after startup error")
+            window.load_html(render_error_html("The Python chat server could not be started.", details))
+            window.show()
+
+    def run_server_only(self) -> None:
+        self.start_backend()
+        logging.info("Server-only mode ready at %s", self.url)
+        print(self.url)
+        try:
+            while self.server.process is not None and self.server.process.poll() is None:
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            logging.info("Server-only mode interrupted by user")
+        finally:
+            self.stop()
+
+
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Desktop launcher for the latest Supermix Qwen chat UI.")
+    ap.add_argument("--root", default="", help="Optional project root. Defaults to auto-detect.")
+    ap.add_argument("--python_exe", default="", help="Optional Python executable used to run the server script.")
+    ap.add_argument("--adapter_dir", default="", help="Optional adapter dir. Defaults to the newest available adapter.")
+    ap.add_argument("--base_model", default="", help="Optional base model path. Defaults to adapter_config.json value.")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=0, help="Port for the embedded local server. 0 picks a free port.")
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    ap.add_argument("--width", type=int, default=1360)
+    ap.add_argument("--height", type=int, default=920)
+    ap.add_argument("--title", default="Supermix Qwen Desktop")
+    ap.add_argument("--server_timeout", type=float, default=240.0)
+    ap.add_argument("--server_only", action="store_true", help="Run the server subprocess without opening a webview.")
+    return ap.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    project_root = Path(args.root).resolve() if str(args.root or "").strip() else find_project_root()
+    state_dir = resolve_runtime_state_dir() if getattr(sys, "frozen", False) else project_root
+    log_path = (
+        state_dir / f"{Path(sys.executable).stem}.log"
+        if getattr(sys, "frozen", False)
+        else project_root / "supermix_qwen_desktop.log"
+    )
+    configure_logging(log_path)
+
+    adapter_dir = resolve_adapter_dir(project_root, args.adapter_dir)
+    base_model = resolve_base_model_path(adapter_dir, args.base_model)
+    server_script_path = resolve_server_script_path(project_root)
+    python_exe = resolve_python_executable(args.python_exe)
+    port = choose_port(args.host, args.port)
+    server_log_path = (
+        state_dir / "supermix_qwen_server.log"
+        if getattr(sys, "frozen", False)
+        else project_root / "supermix_qwen_server.log"
+    )
+
+    app = DesktopApp(
+        project_root=project_root,
+        server_script_path=server_script_path,
+        python_exe=python_exe,
+        base_model=base_model,
+        adapter_dir=adapter_dir,
+        host=args.host,
+        port=port,
+        device=args.device,
+        server_timeout=args.server_timeout,
+        server_log_path=server_log_path,
+    )
+    atexit.register(app.stop)
+
+    if args.server_only:
+        app.run_server_only()
+        return
+
+    if webview is None:
+        raise RuntimeError("pywebview is not installed. Run `python -m pip install pywebview` before launching the desktop app.")
+
+    artifact_info = describe_adapter_artifact(adapter_dir)
+    status_lines = [
+        f"project_root = {project_root}",
+        f"state_dir = {state_dir}",
+        f"server_script = {server_script_path}",
+        f"python_exe = {python_exe}",
+        f"release = {artifact_info['label']}",
+        f"adapter_dir = {adapter_dir}",
+        f"artifact_dir = {artifact_info['artifact_dir']}",
+        f"base_model = {base_model}",
+        f"device = {args.device}",
+        f"target_url = {app.url}",
+    ]
+    if artifact_info["benchmark_line"]:
+        status_lines.append(f"benchmark = {artifact_info['benchmark_line']}")
+    if artifact_info["training_line"]:
+        status_lines.append(f"training = {artifact_info['training_line']}")
+    icon_path = resolve_asset_path(project_root, APP_ICON_FILENAME)
+    splash_path = resolve_asset_path(project_root, SPLASH_IMAGE_FILENAME)
+    splash_data_uri = encode_image_as_data_uri(splash_path)
+    show_startup_splash = bool(splash_data_uri)
+
+    window = webview.create_window(
+        args.title,
+        html=render_loading_html("\n".join(status_lines)),
+        width=int(args.width),
+        height=int(args.height),
+        min_size=(980, 720),
+        text_select=True,
+        confirm_close=True,
+        background_color="#08111e",
+        hidden=show_startup_splash,
+    )
+    splash_window = None
+    if show_startup_splash:
+        splash_window = webview.create_window(
+            f"{args.title} Loading",
+            html=render_splash_html("\n".join(status_lines), splash_data_uri),
+            width=960,
+            height=560,
+            min_size=(960, 560),
+            resizable=False,
+            frameless=True,
+            easy_drag=True,
+            shadow=True,
+            on_top=True,
+            background_color="#07101d",
+        )
+    webview.start(
+        app.bootstrap,
+        args=(window, splash_window),
+        debug=False,
+        http_server=False,
+        icon=str(icon_path) if icon_path else None,
+    )
+
+
+if __name__ == "__main__":
+    main()

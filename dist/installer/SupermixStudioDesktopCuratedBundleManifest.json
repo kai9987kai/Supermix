@@ -1,0 +1,88 @@
+﻿{
+    "generated_at":  "2026-04-10T11:44:12.4177762+01:00",
+    "models_dir":  "C:\\Users\\kai99\\Desktop\\models",
+    "bundle_strategy":  "curated_core_plus_model_store",
+    "bundled_model_count":  11,
+    "bundled_model_keys":  [
+                               "v40_benchmax",
+                               "omni_collective_v41",
+                               "omni_collective_v8",
+                               "omni_collective_v7",
+                               "science_vision_micro_v1",
+                               "v38_native_xlite_fp16",
+                               "dcgan_v2_in_progress",
+                               "math_equation_micro_v1",
+                               "protein_folding_micro_v1",
+                               "mattergen_micro_v1",
+                               "three_d_generation_micro_v1"
+                           ],
+    "bundled_models":  [
+                           {
+                               "key":  "v40_benchmax",
+                               "label":  "V40 Benchmax",
+                               "name":  "supermix_v40_benchmax_v40_v39data_v39recipe_20260330.zip",
+                               "size_bytes":  81205267
+                           },
+                           {
+                               "key":  "omni_collective_v41",
+                               "label":  "Omni Collective V41 Frontier",
+                               "name":  "supermix_omni_collective_v41_frontier_20260410_015540.zip",
+                               "size_bytes":  505064875
+                           },
+                           {
+                               "key":  "omni_collective_v8",
+                               "label":  "Omni Collective V8 Frontier",
+                               "name":  "supermix_omni_collective_v8_frontier_20260408.zip",
+                               "size_bytes":  415181135
+                           },
+                           {
+                               "key":  "omni_collective_v7",
+                               "label":  "Omni Collective V7 Frontier",
+                               "name":  "supermix_omni_collective_v7_frontier_20260403.zip",
+                               "size_bytes":  287731972
+                           },
+                           {
+                               "key":  "science_vision_micro_v1",
+                               "label":  "Science Vision Micro",
+                               "name":  "supermix_science_image_recognition_micro_v1_20260327.zip",
+                               "size_bytes":  435711
+                           },
+                           {
+                               "key":  "v38_native_xlite_fp16",
+                               "label":  "V38 Native Image XLite FP16",
+                               "name":  "champion_v38_native_image_xlite_single_checkpoint_model_fp16_20260327.zip",
+                               "size_bytes":  10006122
+                           },
+                           {
+                               "key":  "dcgan_v2_in_progress",
+                               "label":  "DCGAN V2 CIFAR",
+                               "name":  "dcgan_v2_in_progress.zip",
+                               "size_bytes":  61069961
+                           },
+                           {
+                               "key":  "math_equation_micro_v1",
+                               "label":  "Math Equation Micro",
+                               "name":  "supermix_math_equation_micro_v1_20260327.zip",
+                               "size_bytes":  12831
+                           },
+                           {
+                               "key":  "protein_folding_micro_v1",
+                               "label":  "Protein Folding Micro",
+                               "name":  "supermix_protein_folding_micro_v1_20260331.zip",
+                               "size_bytes":  118774
+                           },
+                           {
+                               "key":  "mattergen_micro_v1",
+                               "label":  "MatterGen Micro",
+                               "name":  "supermix_mattergen_micro_v1_20260403.zip",
+                               "size_bytes":  175479
+                           },
+                           {
+                               "key":  "three_d_generation_micro_v1",
+                               "label":  "3D Generation Micro",
+                               "name":  "supermix_3d_generation_micro_v1_20260403.zip",
+                               "size_bytes":  151177
+                           }
+                       ],
+    "remote_model_store_repo":  "Kai9987kai/supermix-model-zoo"
+}

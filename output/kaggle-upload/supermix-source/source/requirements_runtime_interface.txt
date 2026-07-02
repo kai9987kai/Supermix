@@ -1,0 +1,6 @@
+torch
+flask
+
+# Optional Windows GPU backend
+# torch-directml
+

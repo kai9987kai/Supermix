@@ -1,0 +1,216 @@
+{
+  "created_at": "2026-03-27T11:15:18Z",
+  "prompt_files": [
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.delta_anchor_mix_2026_03_26.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.delta_official_refresh_2026_03_26.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.coding_knowledge_2026_02_19.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.world_events_2026_02_19.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.quality_anchor_v2.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.mega_creative_250k_v2.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.mega_reasoning_creative_v25_75582.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.supermix_plus_v27_500k.jsonl",
+    "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v28_cloud_plus_runpod_budget/prepared_train_pairs.jsonl",
+    "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v29_delta_official_refresh_20260326/prepared_train_pairs.jsonl",
+    "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_train_pairs.jsonl",
+    "/workspace/supermix_runpod_budget/Supermix_29/datasets/conversation_data.reasoning_benchmix_v39_train.jsonl"
+  ],
+  "eval_files": [
+    "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v28_cloud_plus_runpod_budget/prepared_eval_pairs.jsonl",
+    "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v29_delta_official_refresh_20260326/prepared_eval_pairs.jsonl",
+    "/workspace/supermix_runpod_budget/persistent/artifacts/qwen_supermix_enhanced_v30_anchor_refresh_20260326/prepared_eval_pairs.jsonl"
+  ],
+  "rows_loaded": 439173,
+  "paper_rows": 52,
+  "paper_train_rows": 52,
+  "paper_eval_rows": 0,
+  "train_rows": 438697,
+  "stage2_reference_rows": 6400,
+  "eval_rows": 528,
+  "distill_rows": 1024,
+  "stage2_train_rows": 8192,
+  "stage2_eval_rows": 528,
+  "self_repair_rows": 768,
+  "stage3_polish_rows": 640,
+  "teacher_selection_counts": {
+    "v35_stage2": 137,
+    "v33_stage1": 17,
+    "v35_stage3": 41,
+    "v34_stage2_current": 97,
+    "v33_stage2_best": 479,
+    "v34_stage1": 34,
+    "qwen_base": 60,
+    "v32_latest": 33,
+    "v33_final": 20,
+    "v35_stage1": 42,
+    "reference": 33,
+    "v32_stage1": 1,
+    "v34_stage3_polish": 23,
+    "v31_stage1": 2,
+    "lite_v30": 3,
+    "qwen_v28": 2
+  },
+  "prompt_source_counts": {
+    "unknown": 900,
+    "v39_mmlu_aux_train_direct": 13,
+    "frontier_paper_tshirt_2025": 1,
+    "frontier_paper_spin_2024": 1,
+    "frontier_paper_limo_2025": 1,
+    "v39_boolq_train_direct": 7,
+    "v39_piqa_train_verify": 8,
+    "v39_mmlu_aux_train_verify": 13,
+    "v39_piqa_train_direct": 10,
+    "v39_hellaswag_train_direct": 10,
+    "v39_boolq_train_verify": 7,
+    "frontier_paper_moda_2026": 1,
+    "frontier_paper_ih_challenge_2026": 1,
+    "conversation_data.delta_anchor_mix_2026_03_26.jsonl": 1,
+    "frontier_paper_titans_2025": 1,
+    "https://apnews.com/article/7cd49e6b515f511a1e8eac1beaa4d598": 1,
+    "v39_hellaswag_train_verify": 9,
+    "v39_gsm8k_train_verify": 6,
+    "quality_anchor_ml": 1,
+    "https://apnews.com/article/450bcd7c820ce55efe6ea0aa53c213d1": 1,
+    "frontier_paper_agent_distill_2025": 1,
+    "frontier_paper_fast_quietstar_2025": 1,
+    "v39_arc_train_direct": 3,
+    "v39_arc_train_verify": 3,
+    "frontier_paper_quietstar_2024": 1,
+    "https://apnews.com/article/4e140876e5c2fe489655ad78089f9440": 1,
+    "frontier_paper_t1_2025": 1,
+    "https://apnews.com/article/c30aa604712e3c5d711f47722c79e539": 1,
+    "https://apnews.com/article/b5104d7ee02e35252560f38a4b016cb3": 1,
+    "frontier_paper_mod_2024": 1,
+    "https://apnews.com/article/c10dbc6b621e196606fc79caab0eaad5": 1,
+    "quality_anchor_math": 1,
+    "quality_anchor_format": 1,
+    "https://apnews.com/article/85b79539f9e4b18e25dd6ef82d5b53ee": 1,
+    "frontier_paper_intrinsic_self_correction_2024": 1,
+    "v39_gsm8k_train_direct": 6,
+    "frontier_paper_efficient_reasoners_2025": 1,
+    "https://apnews.com/article/90e731743c18d6d82c343314e07b1630": 1,
+    "https://apnews.com/article/9b16a0419f8d7cc67c7e95939a8a954d": 1,
+    "official_refresh_who_polio": 1,
+    "https://apnews.com/article/a3726ab659321430bf3ca73cae50936e": 1,
+    "https://apnews.com/article/22e587df67e27cd1e1d96e446cb88378": 1
+  },
+  "teacher_mean_composite": {
+    "v35_stage2": 0.5487591931477767,
+    "v33_stage1": 0.43044620039389503,
+    "v35_stage3": 0.5875579569525586,
+    "v34_stage2_current": 0.5311423987959745,
+    "v33_stage2_best": 0.5031121980194908,
+    "v34_stage1": 0.7221978609496182,
+    "qwen_base": 0.540521028296451,
+    "v32_latest": 0.6722721364260457,
+    "v33_final": 0.5953947657542107,
+    "v35_stage1": 0.6846549486881417,
+    "v32_stage1": 0.4448,
+    "v34_stage3_polish": 0.5703808215462395,
+    "v31_stage1": 0.5021565161430068,
+    "lite_v30": 0.8099969546613986,
+    "qwen_v28": 0.3873884540449906
+  },
+  "teacher_prior": {
+    "qwen_base": 0.015,
+    "qwen_v28": 0.06,
+    "v32_latest": 0.105,
+    "v33_stage1": 0.095,
+    "v33_stage2_best": 0.13,
+    "hybrid_v31": 0.04,
+    "lite_v30": 0.016,
+    "champion_v28": 0.024
+  },
+  "configured_qwen_teachers": [
+    "qwen_base",
+    "qwen_v28"
+  ],
+  "configured_champion_teachers": [
+    "v32_latest",
+    "hybrid_v31",
+    "lite_v30",
+    "v33_stage1",
+    "v33_stage2_best",
+    "v31_stage1",
+    "v32_stage1",
+    "v32_smoke",
+    "v33_stage1",
+    "v33_stage2_best",
+    "v33_final",
+    "v34_stage1",
+    "v34_stage2_current",
+    "v34_stage3_polish",
+    "v35_stage1",
+    "v35_stage2",
+    "v35_stage3"
+  ],
+  "paper_urls": [
+    {
+      "slug": "moda_2026",
+      "title": "Mixture-of-Depths Attention",
+      "url": "https://arxiv.org/abs/2603.15619"
+    },
+    {
+      "slug": "fast_quietstar_2025",
+      "title": "Fast Quiet-STaR: Thinking Without Thought Tokens",
+      "url": "https://aclanthology.org/2025.findings-emnlp.1020.pdf"
+    },
+    {
+      "slug": "titans_2025",
+      "title": "Titans: Learning to Memorize at Test Time",
+      "url": "https://www.kognition.info/wp-content/uploads/2025/02/2501.00663v1.pdf"
+    },
+    {
+      "slug": "spin_2024",
+      "title": "Self-Play Fine-Tuning Converts Weak Language Models to Strong Language Models",
+      "url": "https://arxiv.org/abs/2401.01335"
+    },
+    {
+      "slug": "mod_2024",
+      "title": "Mixture-of-Depths",
+      "url": "https://arxiv.org/abs/2404.02258"
+    },
+    {
+      "slug": "agent_distill_2025",
+      "title": "Distilling LLM Agent into Small Models with Retrieval and Code Tools",
+      "url": "https://arxiv.org/abs/2505.17612"
+    },
+    {
+      "slug": "tshirt_2025",
+      "title": "T-SHIRT: Token-Selective Hierarchical Data Selection for Instruction Tuning",
+      "url": "https://arxiv.org/abs/2506.01317"
+    },
+    {
+      "slug": "t1_2025",
+      "title": "T1: Tool-integrated Self-verification for Test-time Compute Scaling in Small Language Models",
+      "url": "https://arxiv.org/abs/2504.04718"
+    },
+    {
+      "slug": "efficient_reasoners_2025",
+      "title": "Making Small Language Models Efficient Reasoners: Intervention, Supervision, Reinforcement",
+      "url": "https://arxiv.org/abs/2505.07961"
+    },
+    {
+      "slug": "limo_2025",
+      "title": "LIMO: Less is More for Reasoning",
+      "url": "https://arxiv.org/abs/2502.03387"
+    },
+    {
+      "slug": "intrinsic_self_correction_2024",
+      "title": "Large Language Models have Intrinsic Self-Correction Ability",
+      "url": "https://arxiv.org/pdf/2406.15673"
+    },
+    {
+      "slug": "quietstar_2024",
+      "title": "Quiet-STaR: Language Models Can Teach Themselves to Think Before Speaking",
+      "url": "https://arxiv.org/abs/2403.09629"
+    },
+    {
+      "slug": "ih_challenge_2026",
+      "title": "IH-Challenge: A Training Dataset to Improve Instruction Hierarchy",
+      "url": "https://cdn.openai.com/pdf/14e541fa-7e48-4d79-9cbf-61c3cde3e263/ih-challenge-paper.pdf"
+    }
+  ],
+  "student_note": "v39 expands the training mix with benchmark-train reasoning and verification rows, keeps qwen_base in the teacher pool, and targets stronger problem solving with a verifier-guided frontier student.",
+  "recipe_tag": "v39_frontier_reasoning_plus",
+  "device": "cuda"
+}

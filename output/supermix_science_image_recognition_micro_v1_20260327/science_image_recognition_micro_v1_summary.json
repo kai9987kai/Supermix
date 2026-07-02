@@ -1,0 +1,138 @@
+{
+  "artifact": "supermix_science_image_recognition_micro_v1_20260327.zip",
+  "parameter_count": 115187,
+  "train_rows": 440,
+  "val_rows": 88,
+  "history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 1.7506213274869051,
+      "train_accuracy": 0.2772727272727273,
+      "val_accuracy": 0.2727272727272727
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 0.9838424888524142,
+      "train_accuracy": 0.75,
+      "val_accuracy": 0.8181818181818182
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 0.6424676700071855,
+      "train_accuracy": 0.9045454545454545,
+      "val_accuracy": 0.9090909090909091
+    },
+    {
+      "epoch": 4.0,
+      "train_loss": 0.5242321599613536,
+      "train_accuracy": 0.8704545454545455,
+      "val_accuracy": 0.9090909090909091
+    },
+    {
+      "epoch": 5.0,
+      "train_loss": 0.46653068336573517,
+      "train_accuracy": 0.9886363636363636,
+      "val_accuracy": 1.0
+    },
+    {
+      "epoch": 6.0,
+      "train_loss": 0.4201893183318051,
+      "train_accuracy": 0.9977272727272727,
+      "val_accuracy": 1.0
+    }
+  ],
+  "meta": {
+    "classes": [
+      "cell",
+      "magnet",
+      "circuit",
+      "water_cycle",
+      "moon_phases",
+      "photosynthesis",
+      "solar_system",
+      "dna",
+      "temperature",
+      "states_of_matter",
+      "light_dispersion"
+    ],
+    "class_info": {
+      "cell": {
+        "caption": "simple cell diagram with a large circular cell and a central nucleus",
+        "tags": "biology,cell,nucleus,diagram,green,purple",
+        "concept": "cell",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\cell_diagram.png"
+      },
+      "magnet": {
+        "caption": "horseshoe magnet diagram with red and blue poles labeled N and S",
+        "tags": "physics,magnet,magnetism,north,south,red,blue",
+        "concept": "magnet",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\magnet_poles.png"
+      },
+      "circuit": {
+        "caption": "simple circuit diagram with a battery and a bulb connected in one loop",
+        "tags": "physics,electricity,circuit,battery,bulb,series",
+        "concept": "circuit",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\simple_circuit.png"
+      },
+      "water_cycle": {
+        "caption": "water cycle icon with water, sun, cloud, rain, and curved arrows",
+        "tags": "earth_science,water_cycle,evaporation,condensation,precipitation",
+        "concept": "water cycle",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\water_cycle_icon.png"
+      },
+      "moon_phases": {
+        "caption": "moon phases strip with several moons showing different illuminated shapes",
+        "tags": "astronomy,moon,phases,crescent,full_moon",
+        "concept": "moon phases",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\moon_phases_strip.png"
+      },
+      "photosynthesis": {
+        "caption": "plant diagram with green leaves, sunlight, and soil",
+        "tags": "biology,plant,photosynthesis,leaf,sunlight",
+        "concept": "photosynthesis",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\plant_photosynthesis.png"
+      },
+      "solar_system": {
+        "caption": "simple solar system sketch with sun and several planets",
+        "tags": "astronomy,solar_system,sun,planet,space",
+        "concept": "solar system",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\solar_system_sketch.png"
+      },
+      "dna": {
+        "caption": "stylized DNA ladder with two curved strands and connecting rungs",
+        "tags": "biology,dna,genetics,helix,diagram",
+        "concept": "DNA",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\dna_ladder.png"
+      },
+      "temperature": {
+        "caption": "thermometer icon with red liquid column",
+        "tags": "science,measurement,temperature,thermometer",
+        "concept": "temperature",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\thermometer_icon.png"
+      },
+      "states_of_matter": {
+        "caption": "three-panel particle diagram showing solid, liquid, and gas particle spacing",
+        "tags": "chemistry,matter,solid,liquid,gas,particles",
+        "concept": "states of matter",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\states_of_matter_particles.png"
+      },
+      "light_dispersion": {
+        "caption": "prism diagram splitting a beam of light into several colors",
+        "tags": "physics,light,prism,dispersion,spectrum",
+        "concept": "light dispersion",
+        "source_image": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\science_vision_dataset\\images\\prism_dispersion.png"
+      }
+    },
+    "image_size": 64,
+    "base_channels": 24,
+    "hidden_dim": 96,
+    "parameter_count": 115187,
+    "train_accuracy": 0.9977,
+    "val_accuracy": 1.0,
+    "samples_per_class": 48,
+    "epochs": 6,
+    "batch_size": 16,
+    "learning_rate": 0.0015,
+    "seed": 27
+  }
+}

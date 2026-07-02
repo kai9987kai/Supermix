@@ -1,0 +1,90 @@
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:HF_HUB_OFFLINE = "1"
+$env:TRANSFORMERS_OFFLINE = "1"
+$env:PYTHONUNBUFFERED = "1"
+
+python -u source\qwen_supermix_pipeline.py `
+  --data datasets\conversation_data.quality_anchor_v2.jsonl datasets\conversation_data.coding_knowledge_2026_02_19.jsonl datasets\conversation_data.world_events_2026_02_19.jsonl datasets\conversation_data.supermix_plus_v27_500k.jsonl datasets\conversation_data.mega_reasoning_creative_v25_75582.jsonl datasets\conversation_data.mega_creative_250k_v2.jsonl `
+  --base_model "C:\Users\kai99\.cache\huggingface\hub\models--Qwen--Qwen2.5-0.5B-Instruct\snapshots\7ae557604adf67be50417f59c2c2f167def9a775" `
+  --output_dir artifacts\qwen_supermix_enhanced_v22_fullsmartcreative `
+  --init_adapter_dir artifacts\\qwen_supermix_enhanced_v22_fullsmartcreative\\checkpoints\\sft_step_00320\\adapter `
+  --init_adapter_match_lora `
+  --skip_sft `
+  --max_records 30000 `
+  --max_source_fraction 0.52 `
+  --max_synthetic_fraction 0.10 `
+  --max_prompt_signature_count 5 `
+  --prompt_signature_cap_exempt_sources "conversation_data.quality_anchor_v2.jsonl,conversation_data.mega_reasoning_creative_v25_75582.jsonl" `
+  --eval_size 400 `
+  --max_length 384 `
+  --batch_size 1 `
+  --grad_accum_steps 8 `
+  --epochs 5 `
+  --max_steps 320 `
+  --lr 1.6e-5 `
+  --sft_lr_schedule cosine `
+  --sft_warmup_steps 18 `
+  --sft_min_lr_ratio 0.25 `
+  --sft_max_grad_norm 0.9 `
+  --train_log_every_steps 1 `
+  --save_every_steps 20 `
+  --weight_decay 0.02 `
+  --lora_r 24 `
+  --lora_alpha 48 `
+  --lora_dropout 0.03 `
+  --use_rslora `
+  --use_dora `
+  --lora_init true `
+  --sft_weight_mode quality `
+  --sft_min_weight 0.60 `
+  --sft_max_weight 1.65 `
+  --sft_synthetic_prompt_weight 0.80 `
+  --sft_teacher_source_weight 0.88 `
+  --sft_quality_anchor_boost 1.11 `
+  --sft_coding_boost 1.14 `
+  --sft_events_boost 1.10 `
+  --sft_min_quality_score 0.90 `
+  --sft_quality_filter_exempt_sources "conversation_data.quality_anchor_v2.jsonl,conversation_data.world_events_2026_02_19.jsonl,conversation_data.mega_reasoning_creative_v25_75582.jsonl" `
+  --sft_auto_balance_sources `
+  --sft_source_balance_strength 0.62 `
+  --sft_source_balance_max_scale 1.75 `
+  --preference_objective simpo `
+  --preference_steps 80 `
+  --preference_pairs 1800 `
+  --preference_candidate_count 8 `
+  --preference_reject_similarity_min 0.16 `
+  --preference_beta 2.5 `
+  --preference_margin 0.26 `
+  --preference_sft_weight 0.32 `
+  --preference_length_weight 0.08 `
+  --preference_short_reject_boost 0.72 `
+  --preference_long_reject_boost 0.25 `
+  --preference_min_chosen_quality 0.90 `
+  --preference_min_chosen_words 6 `
+  --preference_min_quality_gap 0.05 `
+  --preference_allow_template_prompts `
+  --preference_max_pairs_per_user 2 `
+  --preference_max_pairs_per_source 220 `
+  --preference_lr 1.9e-5 `
+  --preference_lr_schedule cosine `
+  --preference_warmup_steps 10 `
+  --preference_min_lr_ratio 0.35 `
+  --preference_max_grad_norm 0.9 `
+  --preference_max_new_tokens 128 `
+  --preference_prompt_max_tokens 320 `
+  --supermix_distill_ratio 0.10 `
+  --supermix_distill_max 700 `
+  --supermix_distill_min_quality 0.92 `
+  --supermix_distill_allow_synthetic_prompts `
+  --seed 45 `
+  --device cpu `
+  --model_dtype float32 `
+  --sft_reasoning_boost 1.10 `
+  --sft_prompt_skill_boost 1.07 `
+  --preference_mining_mode dataset `
+  --preference_mining_progress_every 25 `
+  --preference_mining_max_seconds 1800 `
+  --preference_mining_max_attempt_factor 16 `
+  --preference_coding_focus_boost 1.18 `
+  --preference_reasoning_focus_boost 1.14 `
+  --preference_counterfactual_rejects_per_prompt 2

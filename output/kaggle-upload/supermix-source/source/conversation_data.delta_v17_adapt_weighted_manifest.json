@@ -1,0 +1,43 @@
+{
+  "name": "delta_v17_science_language_books_multimodal_adapt_weighted",
+  "format": "jsonl_shards",
+  "total_rows": 1635148,
+  "created_at_utc": "2026-02-22T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science essentials"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "extra english-heavy"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book extracts"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science images"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3D+video tests"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science images repeat for adaptation"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3D+video repeat for adaptation"
+    }
+  ]
+}

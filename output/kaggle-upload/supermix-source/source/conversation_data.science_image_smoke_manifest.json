@@ -1,0 +1,1 @@
+{"name": "science_image_smoke_manifest", "shards": [{"path": "conversation_data.science_essentials_smoke.jsonl", "rows": 500}, {"path": "conversation_data.science_image_tests_smoke.jsonl", "rows": 67}]}

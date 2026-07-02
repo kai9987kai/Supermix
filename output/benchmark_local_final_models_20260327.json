@@ -1,0 +1,308 @@
+{
+  "created_at": "2026-03-27T12:21:14.640447+00:00",
+  "models_dir": "C:\\Users\\kai99\\Desktop\\models",
+  "common_summary": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_all_models_common_plus_summary_20260327.json",
+  "row_count": 13,
+  "rows": [
+    {
+      "model_key": "v33_final",
+      "label": "v33_final",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v33_frontier_full_model_20260326.zip",
+      "zip_name": "champion_v33_frontier_full_model_20260326.zip",
+      "zip_size_bytes": 36659380,
+      "common_benchmark_model": "v33_final",
+      "common_overall_exact": 0.18666666666666668,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "",
+      "per_benchmark": {
+        "arc_challenge": 0.2,
+        "boolq": 0.08,
+        "gsm8k": 0.02,
+        "hellaswag": 0.26,
+        "mmlu": 0.14,
+        "piqa": 0.42
+      }
+    },
+    {
+      "model_key": "v34_final",
+      "label": "v34_final",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v34_frontier_plus_full_model_20260326.zip",
+      "zip_name": "champion_v34_frontier_plus_full_model_20260326.zip",
+      "zip_size_bytes": 39809657,
+      "common_benchmark_model": "v34_stage2",
+      "common_overall_exact": 0.16,
+      "recipe_eval_accuracy": null,
+      "score_source": "common_alias",
+      "note": "Official v34 artifact chosen from stage2.",
+      "per_benchmark": {
+        "arc_challenge": 0.12,
+        "boolq": 0.04,
+        "gsm8k": 0.0,
+        "hellaswag": 0.3,
+        "mmlu": 0.08,
+        "piqa": 0.42
+      }
+    },
+    {
+      "model_key": "v36_native",
+      "label": "v36_native",
+      "family": "native_image",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v36_native_image_single_checkpoint_model_20260327.zip",
+      "zip_name": "champion_v36_native_image_single_checkpoint_model_20260327.zip",
+      "zip_size_bytes": 72345211,
+      "common_benchmark_model": "v36_native",
+      "common_overall_exact": 0.15333333333333335,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "",
+      "per_benchmark": {
+        "arc_challenge": 0.12,
+        "boolq": 0.02,
+        "gsm8k": 0.04,
+        "hellaswag": 0.28,
+        "mmlu": 0.06,
+        "piqa": 0.4
+      }
+    },
+    {
+      "model_key": "v35_final",
+      "label": "v35_final",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v35_collective_allteachers_full_model_20260326.zip",
+      "zip_name": "champion_v35_collective_allteachers_full_model_20260326.zip",
+      "zip_size_bytes": 48785667,
+      "common_benchmark_model": "v35_stage2",
+      "common_overall_exact": 0.15333333333333335,
+      "recipe_eval_accuracy": null,
+      "score_source": "common_alias",
+      "note": "Mapped to the stronger v35_stage2 common-benchmark row.",
+      "per_benchmark": {
+        "arc_challenge": 0.12,
+        "boolq": 0.02,
+        "gsm8k": 0.04,
+        "hellaswag": 0.28,
+        "mmlu": 0.06,
+        "piqa": 0.4
+      }
+    },
+    {
+      "model_key": "v31_image_variant",
+      "label": "v31_image_variant",
+      "family": "wrapper",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v31_image_variant_bundle_20260326.zip",
+      "zip_name": "champion_v31_image_variant_bundle_20260326.zip",
+      "zip_size_bytes": 20446544,
+      "common_benchmark_model": "v31_final",
+      "common_overall_exact": 0.06666666666666667,
+      "recipe_eval_accuracy": null,
+      "score_source": "common_alias",
+      "note": "Wrapper artifact reusing the v31_final text checkpoint.",
+      "per_benchmark": {
+        "arc_challenge": 0.06,
+        "boolq": 0.02,
+        "gsm8k": 0.0,
+        "hellaswag": 0.08,
+        "mmlu": 0.04,
+        "piqa": 0.2
+      }
+    },
+    {
+      "model_key": "v31_final",
+      "label": "v31_final",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v31_hybrid_plus_refresh_final_model_20260326.zip",
+      "zip_name": "champion_v31_hybrid_plus_refresh_final_model_20260326.zip",
+      "zip_size_bytes": 20044285,
+      "common_benchmark_model": "v31_final",
+      "common_overall_exact": 0.06666666666666667,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "",
+      "per_benchmark": {
+        "arc_challenge": 0.06,
+        "boolq": 0.02,
+        "gsm8k": 0.0,
+        "hellaswag": 0.08,
+        "mmlu": 0.04,
+        "piqa": 0.2
+      }
+    },
+    {
+      "model_key": "v32_final",
+      "label": "v32_final",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v32_omnifuse_bundle_20260326.zip",
+      "zip_name": "champion_v32_omnifuse_bundle_20260326.zip",
+      "zip_size_bytes": 53521722,
+      "common_benchmark_model": "v32_final",
+      "common_overall_exact": 0.06333333333333334,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "",
+      "per_benchmark": {
+        "arc_challenge": 0.12,
+        "boolq": 0.06,
+        "gsm8k": 0.0,
+        "hellaswag": 0.1,
+        "mmlu": 0.08,
+        "piqa": 0.02
+      }
+    },
+    {
+      "model_key": "v39_final",
+      "label": "v39_final",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v39_frontier_reasoning_plus_full_model_20260327.zip",
+      "zip_name": "champion_v39_frontier_reasoning_plus_full_model_20260327.zip",
+      "zip_size_bytes": 78674889,
+      "common_benchmark_model": null,
+      "common_overall_exact": null,
+      "recipe_eval_accuracy": 0.0549,
+      "score_source": "recipe_eval_only",
+      "note": "No common-benchmark run was completed after the pod lost credit. This marker is the finished v39 recipe holdout score (29/528)."
+    },
+    {
+      "model_key": "qwen_v28",
+      "label": "qwen_v28",
+      "family": "qwen",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\qwen_supermix_enhanced_v28_cloud_plus_runpod_budget_final_adapter.zip",
+      "zip_name": "qwen_supermix_enhanced_v28_cloud_plus_runpod_budget_final_adapter.zip",
+      "zip_size_bytes": 68382272,
+      "common_benchmark_model": "qwen_v28",
+      "common_overall_exact": 0.02,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "LoRA adapter benchmarked with the Qwen base model.",
+      "per_benchmark": {
+        "arc_challenge": 0.02,
+        "boolq": 0.0,
+        "gsm8k": 0.0,
+        "hellaswag": 0.08,
+        "mmlu": 0.02,
+        "piqa": 0.0
+      }
+    },
+    {
+      "model_key": "v38_native_xlite",
+      "label": "v38_native_xlite",
+      "family": "native_image",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v38_native_image_xlite_single_checkpoint_model_20260327.zip",
+      "zip_name": "champion_v38_native_image_xlite_single_checkpoint_model_20260327.zip",
+      "zip_size_bytes": 20158956,
+      "common_benchmark_model": "v38_native_xlite",
+      "common_overall_exact": 0.013333333333333334,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "Represents the v38 native-image line; fp16 zip is the same model family.",
+      "per_benchmark": {
+        "arc_challenge": 0.0,
+        "boolq": 0.02,
+        "gsm8k": 0.0,
+        "hellaswag": 0.02,
+        "mmlu": 0.02,
+        "piqa": 0.02
+      }
+    },
+    {
+      "model_key": "v37_native_lite",
+      "label": "v37_native_lite",
+      "family": "native_image",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v37_native_image_lite_single_checkpoint_model_20260327.zip",
+      "zip_name": "champion_v37_native_image_lite_single_checkpoint_model_20260327.zip",
+      "zip_size_bytes": 25622496,
+      "common_benchmark_model": "v37_native_lite",
+      "common_overall_exact": 0.013333333333333334,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "",
+      "per_benchmark": {
+        "arc_challenge": 0.0,
+        "boolq": 0.02,
+        "gsm8k": 0.0,
+        "hellaswag": 0.02,
+        "mmlu": 0.02,
+        "piqa": 0.02
+      }
+    },
+    {
+      "model_key": "v30_lite",
+      "label": "v30_lite_fp16",
+      "family": "champion",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\champion_v30_lite_student_fp16_bundle_20260326.zip",
+      "zip_name": "champion_v30_lite_student_fp16_bundle_20260326.zip",
+      "zip_size_bytes": 8338150,
+      "common_benchmark_model": "v30_lite",
+      "common_overall_exact": 0.01,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "Mapped to the existing v30_lite common-benchmark row.",
+      "per_benchmark": {
+        "arc_challenge": 0.02,
+        "boolq": 0.0,
+        "gsm8k": 0.0,
+        "hellaswag": 0.02,
+        "mmlu": 0.0,
+        "piqa": 0.02
+      }
+    },
+    {
+      "model_key": "qwen_v30",
+      "label": "qwen_v30_experimental",
+      "family": "qwen",
+      "zip_path": "C:\\Users\\kai99\\Desktop\\models\\qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_adapter.zip",
+      "zip_name": "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_adapter.zip",
+      "zip_size_bytes": 68377426,
+      "common_benchmark_model": "qwen_v30",
+      "common_overall_exact": 0.0033333333333333335,
+      "recipe_eval_accuracy": null,
+      "score_source": "common",
+      "note": "Experimental adapter benchmarked with the Qwen base model.",
+      "per_benchmark": {
+        "arc_challenge": 0.02,
+        "boolq": 0.0,
+        "gsm8k": 0.0,
+        "hellaswag": 0.0,
+        "mmlu": 0.0,
+        "piqa": 0.0
+      }
+    }
+  ],
+  "zip_inventory": {
+    "selected_zip_files": [
+      "champion_v30_lite_student_fp16_bundle_20260326.zip",
+      "champion_v31_hybrid_plus_refresh_final_model_20260326.zip",
+      "champion_v31_image_variant_bundle_20260326.zip",
+      "champion_v32_omnifuse_bundle_20260326.zip",
+      "champion_v33_frontier_full_model_20260326.zip",
+      "champion_v34_frontier_plus_full_model_20260326.zip",
+      "champion_v35_collective_allteachers_full_model_20260326.zip",
+      "champion_v36_native_image_single_checkpoint_model_20260327.zip",
+      "champion_v37_native_image_lite_single_checkpoint_model_20260327.zip",
+      "champion_v38_native_image_xlite_single_checkpoint_model_20260327.zip",
+      "champion_v39_frontier_reasoning_plus_full_model_20260327.zip",
+      "qwen_supermix_enhanced_v28_cloud_plus_runpod_budget_final_adapter.zip",
+      "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_adapter.zip"
+    ],
+    "alternate_package_zip_files": [
+      "champion_v30_lite_student_fp16_bundle_20260326 (1).zip",
+      "champion_v31_hybrid_plus_refresh_bundle_20260326.zip",
+      "champion_v31_hybrid_plus_refresh_final_model_20260326 (1).zip",
+      "champion_v32_omnifuse_bundle_20260326 (1).zip",
+      "champion_v33_frontier_full_bundle_20260326.zip",
+      "champion_v38_native_image_xlite_single_checkpoint_model_fp16_20260327.zip",
+      "qwen_supermix_enhanced_v28_cloud_plus_runpod_budget_final_adapter (1).zip",
+      "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_adapter (1).zip",
+      "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_bundle (1).zip",
+      "qwen_supermix_enhanced_v30_anchor_refresh_20260326_experimental_bundle.zip"
+    ],
+    "unmatched_zip_files": []
+  },
+  "notes": [
+    "Scores in common_overall_exact come from the existing expanded common-benchmark sweep in the repo output directory.",
+    "Rows marked common_alias map a final artifact to the chosen or equivalent scored checkpoint.",
+    "v39_final only has recipe_eval_accuracy because its common-benchmark run never completed after the pod lost credit."
+  ]
+}

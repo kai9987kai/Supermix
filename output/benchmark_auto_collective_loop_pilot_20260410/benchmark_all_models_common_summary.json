@@ -1,0 +1,77 @@
+{
+  "created_at": "2026-04-10T09:29:16Z",
+  "models_dir": "C:\\Users\\kai99\\Desktop\\models",
+  "common_summary": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_all_models_common_plus_summary_20260410.json",
+  "output_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_pilot_20260410",
+  "device_preference": "cpu",
+  "sample_per_benchmark": 1,
+  "benchmarks": [
+    "arc_challenge",
+    "boolq",
+    "gsm8k",
+    "hellaswag",
+    "mmlu",
+    "piqa"
+  ],
+  "models_benchmarked": [
+    "auto_collective_loop"
+  ],
+  "summary_rows": [
+    {
+      "model": "auto_collective_loop",
+      "family": "router",
+      "overall_exact": 0.0,
+      "avg_token_f1": 0.030285604753689865,
+      "avg_char_similarity": 0.1400564407186694,
+      "avg_gen_seconds": 209.6233141819636,
+      "model_seconds": 1257.7524161338806,
+      "benchmarks": {
+        "arc_challenge": 0.0,
+        "boolq": 0.0,
+        "gsm8k": 0.0,
+        "hellaswag": 0.0,
+        "mmlu": 0.0,
+        "piqa": 0.0
+      },
+      "runtime_settings": {
+        "model_key": "auto",
+        "action_mode": "auto",
+        "agent_mode": "collective_loop",
+        "loop_max_steps": 3,
+        "collective_consultant_keys": [
+          "omni_collective_v41",
+          "v40_benchmax",
+          "omni_collective_v8",
+          "v33_final",
+          "qwen_v28",
+          "omni_collective_v7",
+          "math_equation_micro_v1"
+        ],
+        "collective_consultant_limit": 7,
+        "memory_enabled": false,
+        "web_search_enabled": false,
+        "cmd_open_enabled": false
+      },
+      "routed_model_counts": {
+        "omni_collective_v41": 4,
+        "math_equation_micro_v1": 1,
+        "v36_native": 1
+      },
+      "consultation_model_counts": {
+        "math_equation_micro_v1": 16,
+        "omni_collective_v41": 16,
+        "omni_collective_v7": 16,
+        "omni_collective_v8": 16,
+        "v33_final": 16,
+        "v40_benchmax": 16
+      },
+      "avg_loop_steps": 2.5
+    }
+  ],
+  "artifacts": {
+    "prompts_jsonl": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_pilot_20260410\\benchmark_items.jsonl",
+    "details_jsonl": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_pilot_20260410\\benchmark_all_models_common_details.jsonl",
+    "table_csv": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_pilot_20260410\\benchmark_all_models_common_table.csv",
+    "graph_png": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_auto_collective_loop_pilot_20260410\\benchmark_all_models_common_graph.png"
+  }
+}

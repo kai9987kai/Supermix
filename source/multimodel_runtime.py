@@ -4,7 +4,6 @@ import gc
 import hashlib
 import io
 import json
-import logging
 import re
 import threading
 import time
@@ -63,9 +62,6 @@ from omni_collective_v7_model import OmniCollectiveEngineV7
 from omni_collective_v8_model import OmniCollectiveEngineV8
 from omni_collective_v42_model import OmniCollectiveEngineV42
 from omni_collective_v41_model import OmniCollectiveEngineV41
-from omni_collective_v46_model import OmniCollectiveEngineV46
-from omni_collective_v47_model import OmniCollectiveEnginev47, OmniPredictionv47
-from omni_collective_v48_model import OmniCollectiveEnginev48, OmniPredictionv48
 from run import safe_load_state_dict
 
 
@@ -109,115 +105,6 @@ def _safe_slug(text: str) -> str:
 def _trim_text(text: str, limit: int = 320) -> str:
     cooked = " ".join(str(text or "").strip().split())
     return cooked[:limit]
-
-
-_CHAT_DRIFT_MARKERS = (
-    "choose omni collective",
-    "common benchmark score",
-    "latest fused multimodal frontier checkpoint",
-    "request matches its strongest local use case",
-    "use v40_benchmax",
-)
-
-
-def _looks_like_model_selection_prompt(prompt: str) -> bool:
-    lowered = str(prompt or "").lower()
-    return any(
-        marker in lowered
-        for marker in (
-            "which model",
-            "route to",
-            "should handle",
-        )
-    )
-
-
-def _looks_like_active_model_prompt(prompt: str) -> bool:
-    lowered = str(prompt or "").lower()
-    return any(marker in lowered for marker in ("what model", "active model", "model version"))
-
-
-def _looks_like_benchmark_prompt(prompt: str) -> bool:
-    lowered = str(prompt or "").lower()
-    return any(
-        marker in lowered
-        for marker in (
-            "final answer",
-            "gsm8k",
-            "mmlu",
-            "arc_challenge",
-            "hellaswag",
-            "boolq",
-            "piqa",
-            "benchmark",
-        )
-    )
-
-
-def _v46_response_is_obvious_chat_drift(prompt: str, response: str) -> bool:
-    lowered_prompt = str(prompt or "").lower()
-    lowered_response = str(response or "").lower()
-    if not lowered_response.strip():
-        return True
-    greeting_prompt = any(token in lowered_prompt for token in ("hello", "hi ", "hey", "greetings"))
-    if greeting_prompt and not any(
-        token in lowered_response
-        for token in ("hello", "hi", "greetings", "active local model", "how can i help")
-    ):
-        return not _looks_like_benchmark_prompt(lowered_prompt)
-    if "<thought>" in lowered_response or "finalizing synthesis" in lowered_response:
-        return not _looks_like_benchmark_prompt(lowered_prompt)
-    if re.search(r"\bthe answer is\s+-?\d+(?:\.\d+)?\b", lowered_response):
-        return not _looks_like_benchmark_prompt(lowered_prompt)
-    if "short-lived access tokens" in lowered_response and not any(
-        token in lowered_prompt for token in ("auth", "login", "oauth", "security", "token", "jwt")
-    ):
-        return not _looks_like_benchmark_prompt(lowered_prompt)
-    if lowered_response.startswith("recommended approach:") and not any(
-        token in lowered_prompt for token in ("approach", "recommend", "how should", "security", "token", "auth")
-    ):
-        return not _looks_like_benchmark_prompt(lowered_prompt)
-    if "choose omni collective" in lowered_response:
-        return not _looks_like_model_selection_prompt(lowered_prompt)
-    if "common benchmark score" in lowered_response:
-        return not ("benchmark score" in lowered_prompt or _looks_like_model_selection_prompt(lowered_prompt))
-    if any(marker in lowered_response for marker in _CHAT_DRIFT_MARKERS):
-        return not _looks_like_model_selection_prompt(lowered_prompt)
-    if "final answer:" in lowered_response and not _looks_like_benchmark_prompt(lowered_prompt):
-        return True
-    if lowered_response.strip() in {"yes", "no", "final answer: yes", "final answer: no"}:
-        return not _looks_like_benchmark_prompt(lowered_prompt)
-    return False
-
-
-def _v46_chat_guard_response(prompt: str, response: str, record: ModelRecord) -> Tuple[str, bool]:
-    if not _v46_response_is_obvious_chat_drift(prompt, response):
-        return response, False
-
-    lowered = str(prompt or "").lower()
-    model_label = record.label or "Omni Collective V46"
-    if any(token in lowered for token in ("hello", "hi ", "hey", "greetings")):
-        return f"Hello. The active local model is {model_label}, running through the Supermix chat interface.", True
-    if _looks_like_active_model_prompt(lowered) or _looks_like_model_selection_prompt(lowered):
-        score = record.common_overall_exact
-        score_text = f" with common benchmark score {score:.4f}" if score is not None else ""
-        return f"The active local model is {model_label}{score_text}.", True
-    if any(token in lowered for token in ("not making sense", "nonsense", "not normal", "off topic", "wrong response")):
-        return (
-            "The chat response drifted into a memorized response-bank entry. "
-            "The correct fix is to add chat-drift repair examples, preserve benchmark replay, "
-            "and retrain from the promoted v46 champion instead of accepting the off-topic answer."
-        ), True
-    if any(token in lowered for token in ("train", "training", "evolution", "evolve", "benchmark higher")):
-        return (
-            "The next improvement pass should train from the promoted v46 champion with two priorities: "
-            "normal-chat drift repair and weak-suite benchmark replay. It should reject off-topic canned answers "
-            "while keeping exact final-answer formatting for benchmarks."
-        ), True
-    return (
-        "I do not have a reliable grounded response for that prompt yet. "
-        "The previous candidate was off-topic, so I am rejecting it rather than returning a memorized answer."
-    ), True
 
 
 def _extract_labeled_section(text: str, label: str) -> str:
@@ -272,9 +159,6 @@ def _missing_zip_members(archive: zipfile.ZipFile, target: Path) -> List[str]:
 
 
 def _extract_zip_once(zip_path: Path, extraction_root: Path) -> Path:
-    # If the artifact is already a raw model file (.pth), skip extraction
-    if zip_path.suffix.lower() == ".pth":
-        return zip_path.parent
     extraction_root.mkdir(parents=True, exist_ok=True)
     stamp = f"{zip_path.name}|{zip_path.stat().st_size}|{zip_path.stat().st_mtime_ns}"
     digest = hashlib.sha1(stamp.encode("utf-8")).hexdigest()[:12]
@@ -332,19 +216,6 @@ def _find_matching_file(root: Path, preferred_names: Tuple[str, ...], suffix: st
             if matches:
                 return sorted(matches)[0]
     matches = sorted(root.rglob(f"*{suffix}"))
-    if suffix.lower() == ".json":
-        meta_matches = [
-            path
-            for path in matches
-            if path.name.lower().endswith("_meta.json") and not path.name.startswith(".")
-        ]
-        if meta_matches:
-            return meta_matches[0]
-        matches = [
-            path
-            for path in matches
-            if not path.name.startswith(".") and "summary" not in path.name.lower()
-        ]
     return matches[0] if matches else None
 
 
@@ -1256,182 +1127,6 @@ class OmniCollectiveV42Backend(BaseBackend):
         )
 
 
-class OmniCollectiveV46Backend(BaseBackend):
-    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
-        super().__init__(record, extracted_dir, generated_dir)
-        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
-        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
-        if weights_path is None or meta_path is None:
-            raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
-        self.weights_path = weights_path.resolve()
-        self.meta_path = meta_path.resolve()
-        self.engine = OmniCollectiveEngineV46(weights_path=self.weights_path, meta_path=self.meta_path)
-
-    def status(self) -> Dict[str, Any]:
-        return {
-            "backend": "omni_collective_v46",
-            "record": self.record.to_dict(),
-            "weights_path": str(self.weights_path),
-            "meta_path": str(self.meta_path),
-            "runtime": {
-                "device": str(self.engine.device),
-                "image_size": int(self.engine.image_size),
-                "vocab_size": len(self.engine.vocab),
-                "response_count": len(self.engine.responses),
-                "grounding_threshold": float(self.engine.grounding_threshold),
-            },
-        }
-
-    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
-        image_path = str(settings.get("uploaded_image_path") or "").strip()
-        effective_prompt = _compose_text_prompt(prompt, settings)
-        pred = self.engine.predict(effective_prompt, image_path=image_path or None)
-        timing = {
-            "reasoning_passes": pred.reasoning_passes,
-            "planned_budget": pred.planned_budget,
-            "difficulty_estimate": pred.difficulty_estimate,
-            "mixture_of_depths_skipped": pred.mixture_of_depths_skipped,
-            "graph_synthesis_applied": pred.graph_synthesis_applied,
-            "continuous_latent_active": pred.continuous_latent_active,
-        }
-        response, guard_repaired = _v46_chat_guard_response(effective_prompt, pred.response_text, self.record)
-        timing["chat_guard_repaired"] = guard_repaired
-        res = ChatResult(
-            kind="text",
-            model_key=self.record.key,
-            model_label=self.record.label,
-            route_reason=str(settings.get("route_reason") or ""),
-            response=response,
-            timing=timing,
-            prompt_used=effective_prompt,
-        )
-        res.agent_trace = {
-            "reasoning_mode": pred.reasoning_mode,
-            "speculative_accepted": pred.speculative_accepted,
-            "adversarial_verified": pred.adversarial_verified,
-            "grpo_group_size": pred.grpo_group_size,
-            "raw_response": pred.response_text if guard_repaired else "",
-        }
-        return res
-
-
-class OmniCollectiveV47Backend(BaseBackend):
-    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
-        super().__init__(record, extracted_dir, generated_dir)
-        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
-        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
-        if weights_path is None or meta_path is None:
-            raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
-        self.weights_path = weights_path.resolve()
-        self.meta_path = meta_path.resolve()
-        self.engine = OmniCollectiveEnginev47(weights_path=self.weights_path, meta_path=self.meta_path)
-
-    def status(self) -> Dict[str, Any]:
-        return {
-            "backend": "omni_collective_v47",
-            "record": self.record.to_dict(),
-            "weights_path": str(self.weights_path),
-            "meta_path": str(self.meta_path),
-            "runtime": {
-                "device": str(self.engine.device),
-                "image_size": int(self.engine.image_size),
-                "vocab_size": len(self.engine.vocab),
-                "response_count": len(self.engine.responses),
-                "grounding_threshold": float(self.engine.grounding_threshold),
-            },
-        }
-
-    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
-        image_path = str(settings.get("uploaded_image_path") or "").strip()
-        effective_prompt = _compose_text_prompt(prompt, settings)
-        pred = self.engine.predict(effective_prompt, image_path=image_path or None)
-        timing = {
-            "reasoning_passes": pred.reasoning_passes,
-            "planned_budget": pred.planned_budget,
-            "difficulty_estimate": pred.difficulty_estimate,
-            "mixture_of_depths_skipped": pred.mixture_of_depths_skipped,
-            "graph_synthesis_applied": pred.graph_synthesis_applied,
-            "continuous_latent_active": pred.continuous_latent_active,
-        }
-        res = ChatResult(
-            kind="text",
-            model_key=self.record.key,
-            model_label=self.record.label,
-            route_reason=str(settings.get("route_reason") or ""),
-            response=pred.response_text,
-            timing=timing,
-            prompt_used=effective_prompt,
-        )
-        res.agent_trace = {
-            "reasoning_mode": pred.reasoning_mode,
-            "speculative_accepted": pred.speculative_accepted,
-            "adversarial_verified": pred.adversarial_verified,
-            "grpo_group_size": pred.grpo_group_size,
-            "mixture_of_depths_skipped": pred.mixture_of_depths_skipped,
-            "graph_synthesis_applied": pred.graph_synthesis_applied,
-            "continuous_latent_active": pred.continuous_latent_active,
-        }
-        return res
-
-
-class OmniCollectiveV48Backend(BaseBackend):
-    def __init__(self, record: ModelRecord, extracted_dir: Path, generated_dir: Path) -> None:
-        super().__init__(record, extracted_dir, generated_dir)
-        weights_path = _find_matching_file(extracted_dir, record.preferred_weights, ".pth")
-        meta_path = _find_matching_file(extracted_dir, record.preferred_meta, ".json")
-        if weights_path is None or meta_path is None:
-            raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
-        self.weights_path = weights_path.resolve()
-        self.meta_path = meta_path.resolve()
-        self.engine = OmniCollectiveEnginev48(weights_path=self.weights_path, meta_path=self.meta_path)
-
-    def status(self) -> Dict[str, Any]:
-        return {
-            "backend": "omni_collective_v48",
-            "record": self.record.to_dict(),
-            "weights_path": str(self.weights_path),
-            "meta_path": str(self.meta_path),
-            "runtime": {
-                "device": str(self.engine.device),
-                "image_size": int(self.engine.image_size),
-                "vocab_size": len(self.engine.vocab),
-                "response_count": len(self.engine.responses),
-                "grounding_threshold": float(self.engine.grounding_threshold),
-            },
-        }
-
-    def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
-        image_path = str(settings.get("uploaded_image_path") or "").strip()
-        effective_prompt = _compose_text_prompt(prompt, settings)
-        pred = self.engine.predict(effective_prompt, image_path=image_path or None)
-        timing = {
-            "reasoning_passes": pred.reasoning_passes,
-            "planned_budget": pred.planned_budget,
-            "difficulty_estimate": pred.difficulty_estimate,
-            "mixture_of_depths_skipped": pred.mixture_of_depths_skipped,
-            "graph_synthesis_applied": pred.graph_synthesis_applied,
-            "continuous_latent_active": pred.continuous_latent_active,
-            "hierarchical_routing_applied": pred.hierarchical_routing_applied,
-            "agat_node_count": pred.agat_node_count,
-        }
-        res = ChatResult(
-            kind="text",
-            model_key=self.record.key,
-            model_label=self.record.label,
-            route_reason=str(settings.get("route_reason") or ""),
-            response=pred.response_text,
-            timing=timing,
-            prompt_used=effective_prompt,
-        )
-        res.agent_trace = {
-            "reasoning_mode": pred.reasoning_mode,
-            "speculative_accepted": pred.speculative_accepted,
-            "adversarial_verified": pred.adversarial_verified,
-            "dpo_alignment_score": pred.dpo_alignment_score,
-        }
-        return res
-
-
 class UnifiedModelManager:
     def __init__(
         self,
@@ -1472,7 +1167,6 @@ class UnifiedModelManager:
         self._backend_key = ""
         self._backend_cache: Dict[str, BaseBackend] = {}
         self._backend_lru: List[str] = []
-        self._backend_init_failures: Dict[str, str] = {}
         self._lock = threading.RLock()
         self._model_store_manifest_cache: Optional[Dict[str, Any]] = None
         self._model_store_manifest_ts = 0.0
@@ -1517,140 +1211,50 @@ class UnifiedModelManager:
             return OmniCollectiveV8Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "omni_collective_v42":
             return OmniCollectiveV42Backend(record, extracted_dir, self.generated_dir)
-        if record.kind == "omni_collective_v46":
-            return OmniCollectiveV46Backend(record, extracted_dir, self.generated_dir)
-        if record.kind == "omni_collective_v47":
-            return OmniCollectiveV47Backend(record, extracted_dir, self.generated_dir)
-        if record.kind == "omni_collective_v48":
-            return OmniCollectiveV48Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "omni_collective_v41":
             return OmniCollectiveV41Backend(record, extracted_dir, self.generated_dir)
         if record.kind == "qwen_adapter":
             return QwenBackend(record, extracted_dir, self.generated_dir)
         raise RuntimeError(f"Unsupported model kind: {record.kind}")
 
-    def _fallback_model_keys(self, failed_record: ModelRecord) -> List[str]:
-        ordered: List[str] = []
-        if failed_record.supports_image and not failed_record.supports_chat:
-            ordered.extend(("v36_native", "v37_native_lite", "v38_native_xlite", "v38_native_xlite_fp16"))
-        elif failed_record.supports_chat and failed_record.supports_vision:
-            ordered.extend((
-                "omni_collective_v47",
-                "omni_collective_v46",
-                "omni_collective_v42",
-                "omni_collective_v41",
-                "v40_benchmax",
-                "omni_collective_v8",
-                "omni_collective_v7",
-                "omni_collective_v6",
-                "omni_collective_v5",
-                "omni_collective_v4",
-                "omni_collective_v3",
-                "omni_collective_v2",
-                "omni_collective_v1",
-                "v33_final",
-                "v35_final",
-                "v34_final",
-                "qwen_v28",
-                "v31_final",
-                "v30_lite",
-            ))
-        else:
-            ordered.extend((
-                "omni_collective_v47",
-                "omni_collective_v46",
-                "omni_collective_v42",
-                "omni_collective_v41",
-                "v40_benchmax",
-                "v33_final",
-                "qwen_v28",
-                "v35_final",
-                "v34_final",
-                "v31_final",
-                "v30_lite",
-            ))
-        seen = {failed_record.key}
-        keys: List[str] = []
-        for key in ordered:
-            if key in seen or key not in self.record_map:
-                continue
-            seen.add(key)
-            keys.append(key)
-        for record in self.records:
-            if record.key in seen:
-                continue
-            if failed_record.supports_chat and not record.supports_chat:
-                continue
-            if failed_record.supports_vision and not record.supports_vision:
-                continue
-            if failed_record.supports_image and not record.supports_image and not record.supports_chat:
-                continue
-            seen.add(record.key)
-            keys.append(record.key)
-        return keys
-
-    def _ensure_backend_direct_locked(self, record: ModelRecord) -> Tuple[ModelRecord, BaseBackend]:
-        if self._backend_cache_size <= 1:
-            if self._backend is not None and self._backend_key == record.key:
-                return record, self._backend
-            if self._backend is not None:
-                self._backend.unload()
-            self._backend = self._build_backend(record)
-            self._backend_key = record.key
-            self._backend_init_failures.pop(record.key, None)
-            return record, self._backend
-
-        cached = self._backend_cache.get(record.key)
-        if cached is not None:
-            if record.key in self._backend_lru:
-                self._backend_lru.remove(record.key)
-            self._backend_lru.append(record.key)
-            self._backend = cached
-            self._backend_key = record.key
-            return record, cached
-
-        backend = self._build_backend(record)
-        self._backend_cache[record.key] = backend
-        if record.key in self._backend_lru:
-            self._backend_lru.remove(record.key)
-        self._backend_lru.append(record.key)
-        while len(self._backend_lru) > self._backend_cache_size:
-            evict_key = self._backend_lru.pop(0)
-            evicted = self._backend_cache.pop(evict_key, None)
-            if evicted is not None:
-                evicted.unload()
-            if self._backend_key == evict_key:
-                self._backend = None
-                self._backend_key = ""
-
-        self._backend = backend
-        self._backend_key = record.key
-        self._backend_init_failures.pop(record.key, None)
-        return record, backend
-
     def ensure_backend(self, model_key: str) -> Tuple[ModelRecord, BaseBackend]:
         with self._lock:
-            requested = self.record_map[model_key]
-            candidate_keys = [requested.key]
-            if requested.key in self._backend_init_failures:
-                candidate_keys = []
-            candidate_keys.extend(self._fallback_model_keys(requested))
-            attempts: List[str] = []
+            record = self.record_map[model_key]
+            if self._backend_cache_size <= 1:
+                if self._backend is not None and self._backend_key == model_key:
+                    return record, self._backend
+                if self._backend is not None:
+                    self._backend.unload()
+                self._backend = self._build_backend(record)
+                self._backend_key = model_key
+                return record, self._backend
 
-            for key in candidate_keys:
-                record = self.record_map.get(key)
-                if record is None:
-                    continue
-                try:
-                    return self._ensure_backend_direct_locked(record)
-                except Exception as exc:
-                    cooked = _trim_text(str(exc), limit=220)
-                    self._backend_init_failures[record.key] = cooked
-                    attempts.append(f"{record.key}: {cooked}")
-                    logging.exception("Failed to initialize backend for %s", record.key)
+            cached = self._backend_cache.get(model_key)
+            if cached is not None:
+                if model_key in self._backend_lru:
+                    self._backend_lru.remove(model_key)
+                self._backend_lru.append(model_key)
+                self._backend = cached
+                self._backend_key = model_key
+                return record, cached
 
-            summary = "; ".join(attempts[:3]) or f"{requested.key}: no fallback candidates were available"
-            raise RuntimeError(f"Failed to initialize a usable backend for {requested.label}. {summary}")
+            backend = self._build_backend(record)
+            self._backend_cache[model_key] = backend
+            if model_key in self._backend_lru:
+                self._backend_lru.remove(model_key)
+            self._backend_lru.append(model_key)
+            while len(self._backend_lru) > self._backend_cache_size:
+                evict_key = self._backend_lru.pop(0)
+                evicted = self._backend_cache.pop(evict_key, None)
+                if evicted is not None:
+                    evicted.unload()
+                if self._backend_key == evict_key:
+                    self._backend = None
+                    self._backend_key = ""
+
+            self._backend = backend
+            self._backend_key = model_key
+            return record, backend
 
     def _refresh_records_locked(self) -> None:
         refreshed = discover_model_records(
@@ -1659,9 +1263,6 @@ class UnifiedModelManager:
         )
         self.records = list(refreshed)
         self.record_map = {record.key: record for record in self.records}
-        self._backend_init_failures = {
-            key: value for key, value in self._backend_init_failures.items() if key in self.record_map
-        }
         valid_keys = set(self.record_map)
         for key in list(self._backend_cache):
             if key not in valid_keys:
@@ -1850,7 +1451,7 @@ class UnifiedModelManager:
         return f"{session_id}::{purpose}::{record_key}"
 
     def _default_text_record(self) -> ModelRecord:
-        for key in ("omni_collective_v46", "omni_collective_v42", "omni_collective_v41", "v40_benchmax", "omni_collective_v47", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
+        for key in ("omni_collective_v42", "omni_collective_v41", "v40_benchmax", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "omni_collective_v2", "v35_final", "v34_final", "qwen_v28", "v31_final", "v30_lite"):
             if key in self.record_map and self.record_map[key].supports_chat:
                 return self.record_map[key]
         for record in self.records:
@@ -1962,16 +1563,10 @@ class UnifiedModelManager:
         tool_cache: Dict[str, ToolEvent],
         allow_tool_calls: bool,
     ) -> Tuple[ChatResult, List[ToolEvent]]:
-        resolved_record, backend = self.ensure_backend(record.key)
+        _record, backend = self.ensure_backend(record.key)
         local_events: List[ToolEvent] = []
         run_settings = dict(settings)
-        effective_route_reason = route_reason
-        if resolved_record.key != record.key:
-            effective_route_reason = (
-                f"{route_reason} Requested {record.label} could not be initialized, so the system fell back to "
-                f"{resolved_record.label}."
-            )
-        run_settings["route_reason"] = effective_route_reason
+        run_settings["route_reason"] = route_reason
         if tool_cache:
             run_settings["tool_context"] = format_tool_results(list(tool_cache.values()))
         if allow_tool_calls and (bool(settings.get("web_search_enabled", False)) or bool(settings.get("cmd_open_enabled", True))):
@@ -2461,15 +2056,9 @@ class UnifiedModelManager:
         final_settings = dict(settings)
         final_settings["memory_context"] = memory_bundle.get("context_block") or ""
         final_settings["consultation_context"] = self._format_consultations(consult_rows)
-        effective_route_reason = (
+        final_settings["route_reason"] = (
             f"{route_reason} Agent mode consulted {len(consult_rows)} text models and refined the final image prompt."
         )
-        if _record.key != chosen_record.key:
-            effective_route_reason = (
-                f"{effective_route_reason} Requested {chosen_record.label} could not be initialized, so the system fell "
-                f"back to {_record.label}."
-            )
-        final_settings["route_reason"] = effective_route_reason
         image_result = backend.generate_image(session_id, planner_result.response or prompt, final_settings)
         image_result.agent_trace = {
             "agent_mode": "collective_panel",
@@ -2718,13 +2307,6 @@ class UnifiedModelManager:
                 if tool_cache:
                     base_settings["tool_context"] = format_tool_results(list(tool_cache.values()))
                 record, backend = self.ensure_backend(chosen_record.key)
-                effective_route_reason = route_reason
-                if record.key != chosen_record.key:
-                    effective_route_reason = (
-                        f"{route_reason} Requested {chosen_record.label} could not be initialized, so the system fell "
-                        f"back to {record.label}."
-                    )
-                base_settings["route_reason"] = effective_route_reason
                 if resolved_action == "image":
                     if not record.supports_image:
                         raise RuntimeError(f"{record.label} does not support image generation.")
@@ -2748,7 +2330,7 @@ class UnifiedModelManager:
                             session_id=self._session_scope(session_id, record.key, "model"),
                             prompt=prompt,
                             settings=base_settings,
-                            route_reason=effective_route_reason,
+                            route_reason=route_reason,
                             tool_cache=tool_cache,
                             allow_tool_calls=bool(settings.get("web_search_enabled", False)),
                         )

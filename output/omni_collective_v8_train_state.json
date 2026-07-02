@@ -1,0 +1,32 @@
+{
+  "status": "complete",
+  "stage": "done",
+  "resume_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\omni_v8_stage_resume\\seed_403_distill_160_teacherlimit_0",
+  "zip_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v8_frontier_20260408.zip",
+  "desktop_zip_path": "C:\\Users\\kai99\\Desktop\\models\\supermix_omni_collective_v8_frontier_20260408.zip",
+  "artifact_dir": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_omni_collective_v8_frontier_20260408",
+  "parameter_count": 112025979,
+  "stage1_best_score": 0.3722663237924866,
+  "stage2_best_score": 0.41835681276088255,
+  "runtime": {
+    "requested_device": "auto",
+    "resolved_device": "cpu",
+    "device_type": "cpu",
+    "amp_mode": "auto",
+    "amp_enabled": false,
+    "amp_dtype_name": "none",
+    "scaler_enabled": false,
+    "compile_requested": false,
+    "compile_enabled": false,
+    "compile_mode": "reduce-overhead",
+    "compile_error": null,
+    "grad_accum_steps": 1,
+    "ema_decay": 0.999,
+    "warmup_steps": 0,
+    "warmup_ratio": 0.05,
+    "min_lr_scale": 0.05,
+    "git_commit": "04dfa61bf34f3b75d525c717375aec02ad0fbe1f",
+    "effective_batch_size": 20
+  },
+  "updated_at": "2026-04-08T00:20:35.919472"
+}

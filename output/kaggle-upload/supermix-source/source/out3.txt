@@ -1,0 +1,21 @@
+Starting smoke test for Active Inference Expert (v27)...
+Using device: cpu
+Set layers.10.alpha to 1.0
+Dummy input shape: torch.Size([2, 1, 128])
+Running forward pass (train mode)...
+Output shape: torch.Size([2, 1, 10])
+Running global backward pass...
+Loss value: 3.609462261199951
+Checking gradients...
+  world_model.weight: CRITICAL: NO GRADIENT!
+  world_prior.weight: CRITICAL: NO GRADIENT!
+  precision_gate.weight: CRITICAL: NO GRADIENT!
+  experts_up.0.weight: CRITICAL: NO GRADIENT!
+  experts_down.0.weight: OK
+Traceback (most recent call last):
+  File "<string>", line 10, in <module>
+    test_active_inference_expert.smoke_test_active_inference()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\kai99\Desktop\New folder (9)\Supermix_27\source\test_active_inference_expert.py", line 63, in smoke_test_active_inference
+    raise AssertionError(f"Missing gradients in: {failed}")
+AssertionError: Missing gradients in: ['world_model.weight', 'world_prior.weight', 'precision_gate.weight', 'experts_up.0.weight']

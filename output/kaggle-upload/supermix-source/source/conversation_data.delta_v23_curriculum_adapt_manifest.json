@@ -1,0 +1,88 @@
+{
+  "name": "delta_v23_curriculum_adapt_10p94m_lexicon_science_novel_broad",
+  "format": "jsonl_shards",
+  "total_rows": 10937628,
+  "created_at_utc": "2026-02-23T00:00:00Z",
+  "shards": [
+    {
+      "path": "conversation_data.english_math_core_v1_4m.jsonl",
+      "rows": 4000000,
+      "description": "broad english+math fluency foundation"
+    },
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "dictionary meanings coverage and vocabulary grounding"
+    },
+    {
+      "path": "conversation_data.hybrid_v6_live_knowledge.jsonl",
+      "rows": 182034,
+      "description": "live knowledge grounding"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science reasoning core"
+    },
+    {
+      "path": "conversation_data.science_novel_examples_v1_2m.jsonl",
+      "rows": 2000000,
+      "description": "science narrative/analogy examples"
+    },
+    {
+      "path": "conversation_data.science_essentials_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "science reasoning reinforcement"
+    },
+    {
+      "path": "conversation_data.coding_knowledge_2026_02_19.jsonl",
+      "rows": 380,
+      "description": "coding knowledge micro-shard"
+    },
+    {
+      "path": "conversation_data.world_events_2026_02_19.jsonl",
+      "rows": 66,
+      "description": "world events micro-shard"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image multimodal bridge"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d/video multimodal bridge"
+    },
+    {
+      "path": "conversation_data.english_math_englishheavy_v2_500k.jsonl",
+      "rows": 500000,
+      "description": "english-heavy conversational refinement"
+    },
+    {
+      "path": "conversation_data.dictionary_wordnet_meanings_v1_1m.jsonl",
+      "rows": 1000000,
+      "description": "dictionary meanings refinement repeat"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book style refinement"
+    },
+    {
+      "path": "conversation_data.book_extracts_public_domain_v2_120k.jsonl",
+      "rows": 120000,
+      "description": "book dialogue reinforcement"
+    },
+    {
+      "path": "conversation_data.multimodal_3d_video_tests_v1_aug.jsonl",
+      "rows": 4080,
+      "description": "3d/video repeat"
+    },
+    {
+      "path": "conversation_data.science_image_tests_v1_aug.jsonl",
+      "rows": 3494,
+      "description": "science image repeat"
+    }
+  ]
+}

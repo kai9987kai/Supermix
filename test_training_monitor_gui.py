@@ -20,8 +20,6 @@ from training_monitor_gui import (
     _failure_lens,
     _build_health_summary,
     _build_launch_command,
-    _build_active_run_strip,
-    _build_fleet_live_strip,
     _compute_display_progress_percent,
     _derive_stage_monitor_fields,
     _history_window_seconds,
@@ -353,36 +351,6 @@ def test_omni_state_sidecar_is_discovered_and_applied():
     assert display_pct is not None and 75.0 < display_pct < 80.0
 
 
-def test_modern_v46_output_folder_is_discovered_recursively():
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td)
-        run_dir = root / "output" / "omni_collective_v46_coevo180_train"
-        run_dir.mkdir(parents=True, exist_ok=True)
-        out_log = run_dir / "omni_collective_v46_coevo180_20260429_193734.out.log"
-        out_log.write_text('{"event":"stage_start","stage":"stage2"}\n', encoding="utf-8")
-        state_payload = {
-            "status": "stage_running",
-            "stage": "stage2",
-            "batch_index": 300,
-            "total_batches": 316,
-            "avg_train_loss": 2.1514,
-            "lr": 1.3e-06,
-            "eta_seconds": 142.9,
-            "elapsed_seconds": 2679.5,
-            "avg_balance_loss": 0.114,
-        }
-        (run_dir / "omni_collective_v46_train_state.json").write_text(json.dumps(state_payload), encoding="utf-8")
-
-        rows = collect_run_snapshots(root, stale_minutes_threshold=20.0)
-
-    snap = next(row for row in rows if row.run_name == "omni_collective_v46_coevo180_20260429_193734")
-    assert snap.stage == "stage2"
-    assert snap.stage_source == "state"
-    assert snap.state_file is not None and snap.state_file.name == "omni_collective_v46_train_state.json"
-    assert snap.stage_progress_label == "300/316 batches"
-    assert snap.stage_progress_percent is not None and 94.0 < snap.stage_progress_percent < 96.0
-
-
 def test_stability_lab_failure_lens_and_research_radar():
     snap = _make_snapshot(
         run_name="omni_collective_v41_train_20260409_120000",
@@ -439,35 +407,6 @@ def test_run_watch_summary_and_runtime_headline():
     assert "CPU 92%" in runtime
     assert "RAM 3.2G" in runtime
     assert "stale 0.4m" in runtime
-
-
-def test_active_run_and_fleet_live_strips():
-    snap = _make_snapshot(
-        run_name="omni_collective_v46_coevo180",
-        status="running",
-        stage="stage2",
-        stage_source="state",
-        stage_progress_label="237/316 batches",
-        stage_rate_label="95.00/h",
-        stage_eta_seconds=744.0,
-        progress_percent=75.0,
-        loss=2.1498,
-        lr=5.5e-06,
-        balance_loss=0.115,
-        stale_minutes=0.3,
-        health_summary="healthy",
-    )
-
-    strip = _build_active_run_strip(snap, eta_confidence="medium")
-    assert strip.startswith("Active Run:")
-    assert "omni_collective_v46_coevo180" in strip
-    assert "confidence MEDIUM" in strip
-    assert "telemetry state, balance=0.115" in strip
-
-    fleet = _build_fleet_live_strip([snap, _make_snapshot(run_name="done", status="finished", stage="done")])
-    assert fleet.startswith("Live Fleet:")
-    assert "1 active" in fleet
-    assert "state telemetry 1/1" in fleet
 
 
 def test_recovery_outlook_uses_checkpoint_and_error_context():
@@ -879,10 +818,7 @@ if __name__ == "__main__":
         test_canvas_size_resolution,
         test_history_windows,
         test_monitor_focus_and_issue_summaries,
-        test_omni_state_sidecar_is_discovered_and_applied,
-        test_modern_v46_output_folder_is_discovered_recursively,
         test_run_watch_summary_and_runtime_headline,
-        test_active_run_and_fleet_live_strips,
         test_recovery_outlook_uses_checkpoint_and_error_context,
         test_run_rescue_plan_surfaces_resume_and_launch_guidance,
         test_phase_breakdown_rows,

@@ -1,0 +1,7 @@
+torch
+pillow
+nltk
+
+# Optional acceleration backends (install only if needed)
+# torch-directml
+

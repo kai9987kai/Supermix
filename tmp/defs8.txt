@@ -1,0 +1,366 @@
+﻿
+    def __init__(self, 
+in_dim: int = 256, 
+out_dim: int = 10, 
+expansion_dim: int = 512, 
+dropout: float = 0.1):
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+out_dim: int = 10, 
+n_branches: int = 6, 
+n_heads: int = 2):
+    def forward(self, 
+branch_stack):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def 
+_compute_aux_loss(self, 
+gate_probs, expert_mask):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+out_dim: int, n_branches: 
+int, n_heads: int = 2):
+    def forward(self, x):
+    def __init__(self, 
+dim: int = 256, 
+inner_dim: int = 512, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+n_experts: int = 8, 
+reasoning_steps: int = 3, 
+lora_rank: int = 32, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+n_experts: int = 4, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def compute_orthogonal
+ity_loss(self, 
+hypotheses):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(self, 
+dim: int, dropout: float 
+= 0.1):
+    def forward(self, t: 
+torch.Tensor, z: 
+torch.Tensor):
+    def __init__(
+    def 
+reset_parameters(self):
+    def circular_convoluti
+on(self, x: torch.Tensor, 
+y: torch.Tensor) -> 
+torch.Tensor:
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(self, 
+dim: int, grid_size: int 
+= 4, ca_steps: int = 3, 
+dropout: float = 0.1):
+    def forward(self, x: 
+torch.Tensor):
+    def __init__(
+    def 
+reset_parameters(self):
+    def 
+exp_map_zero(self, x: 
+torch.Tensor, c: 
+torch.Tensor) -> 
+torch.Tensor:
+    def 
+poincare_dist(self, x: 
+torch.Tensor, y: 
+torch.Tensor, c: 
+torch.Tensor) -> 
+torch.Tensor:
+    def 
+assemble_node(self, 
+node_state: torch.Tensor) 
+-> torch.Tensor:
+    def recursive_fractal_
+pass(self, node_state: 
+torch.Tensor, depth: int) 
+-> torch.Tensor:
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def forward(ctx, 
+input, threshold, alpha):
+    def backward(ctx, 
+grad_output):
+def 
+surrogate_spike(input, 
+threshold, 
+alpha=torch.tensor(2.0)):
+    def __init__(self, 
+in_features: int, decay: 
+float = 0.9, threshold: 
+float = 1.0):
+    def forward(self, x: 
+torch.Tensor, v_mem: 
+torch.Tensor):
+    def __init__(self, 
+dim: int, rank: int = 16):
+    def forward(self, x: 
+torch.Tensor, 
+liquid_state: 
+torch.Tensor, dt: float = 
+0.1):
+    def __init__(
+    def 
+reset_parameters(self):
+    def test_time_training
+_step(self, x: 
+torch.Tensor) -> 
+torch.Tensor:
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(self, 
+in_dim: int = 256, 
+out_dim: int = 10, 
+n_experts: int = 6, 
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+inference_steps: int = 3, 
+lr: float = 0.1, dropout: 
+float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+d_model: int, d_state: 
+int = 64, dt_min: float = 
+0.001, dt_max: float = 
+0.1):
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+in_dim: int = 256, 
+out_dim: int = 10, 
+n_experts: int = 4, 
+dropout: float = 0.1):
+    def 
+reset_parameters(self):
+    def _circular_convolut
+ion(self, a, b):
+    def forward(self, x):
+    def __init__(self, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+d_model: int, d_state: 
+int = 32):
+    def 
+reset_parameters(self):
+    def forward(self, x, 
+h=None):
+    def __init__(self, 
+in_dim: int, n_experts: 
+int, n_sub_routers: int = 
+3):
+    def 
+reset_parameters(self):
+    def forward(self, x):
+    def __init__(self, 
+in_dim: int = 256, 
+out_dim: int = 10, 
+n_experts: int = 6,
+    def 
+reset_parameters(self):
+    def _compute_manifold_
+alignment_loss(self, 
+x_flat, routing_weights):
+    def forward(self, x):
+    def __init__(self, 
+n_sub_routers: int = 3, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(self, 
+n_experts: int = 8, 
+top_k: int = 2, dropout: 
+float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+n_experts: int = 8, 
+capacity_factor: float = 
+2.0, dropout: float = 
+0.1):
+    def __init__(self, 
+n_experts: int = 8, 
+lora_rank: int = 32, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+n_experts: int = 8, 
+reasoning_steps: int = 3, 
+lora_rank: int = 32, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+n_experts: int = 6, 
+top_k: int = 2, dropout: 
+float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+expansion_dim: int = 512, 
+dropout: float = 0.1):
+    def forward(self, x):
+    def __init__(self, 
+expansion_dim: int = 768, 
+extra_expansion_dim: int 
+= 1024, dropout: float = 
+0.1):
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+    def __init__(
+    def forward(self, x):
+def build_model(
+def load_weights_for_model
+(model: nn.Module, 
+state_dict: dict, 
+model_size: str) -> 
+Tuple[List[str], 
+List[str]]:
+def detect_model_size_from
+_state_dict(state_dict: 
+dict) -> str:
+def detect_large_head_expa
+nsion_dim(state_dict: 
+dict, default: int = 512) 
+-> int:
+def detect_xlarge_aux_expa
+nsion_dim(state_dict: 
+dict, default: int = 
+1024) -> int:
+def detect_xxlarge_third_e
+xpansion_dim(state_dict: 
+dict, default: int = 
+3072) -> int:
+def detect_xxxlarge_fourth
+_expansion_dim(state_dict:
+ dict, default: int = 
+4096) -> int:
+def detect_ultralarge_fift
+h_expansion_dim(state_dict
+: dict, default: int = 
+6144) -> int:
+def detect_megalarge_sixth
+_expansion_dim(state_dict:
+ dict, default: int = 
+8192) -> int:
+def list_trainable_paramet
+er_names(model: 
+nn.Module) -> 
+Sequence[str]:
+
+

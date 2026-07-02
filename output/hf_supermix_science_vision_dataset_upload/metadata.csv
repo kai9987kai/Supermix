@@ -1,0 +1,12 @@
+file_name,label,concept,caption,tags
+images/cell_diagram.png,cell,cell,simple cell diagram with a large circular cell and a central nucleus,"biology,cell,nucleus,diagram,green,purple"
+images/magnet_poles.png,magnet,magnet,horseshoe magnet diagram with red and blue poles labeled N and S,"physics,magnet,magnetism,north,south,red,blue"
+images/simple_circuit.png,circuit,circuit,simple circuit diagram with a battery and a bulb connected in one loop,"physics,electricity,circuit,battery,bulb,series"
+images/water_cycle_icon.png,water_cycle,water cycle,"water cycle icon with water, sun, cloud, rain, and curved arrows","earth_science,water_cycle,evaporation,condensation,precipitation"
+images/moon_phases_strip.png,moon_phases,moon phases,moon phases strip with several moons showing different illuminated shapes,"astronomy,moon,phases,crescent,full_moon"
+images/plant_photosynthesis.png,photosynthesis,photosynthesis,"plant diagram with green leaves, sunlight, and soil","biology,plant,photosynthesis,leaf,sunlight"
+images/solar_system_sketch.png,solar_system,solar system,simple solar system sketch with sun and several planets,"astronomy,solar_system,sun,planet,space"
+images/dna_ladder.png,dna,DNA,stylized DNA ladder with two curved strands and connecting rungs,"biology,dna,genetics,helix,diagram"
+images/thermometer_icon.png,temperature,temperature,thermometer icon with red liquid column,"science,measurement,temperature,thermometer"
+images/states_of_matter_particles.png,states_of_matter,states of matter,"three-panel particle diagram showing solid, liquid, and gas particle spacing","chemistry,matter,solid,liquid,gas,particles"
+images/prism_dispersion.png,light_dispersion,light dispersion,prism diagram splitting a beam of light into several colors,"physics,light,prism,dispersion,spectrum"
