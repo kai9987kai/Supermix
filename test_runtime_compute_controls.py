@@ -39,7 +39,7 @@ class RuntimeAwareModel(nn.Module):
         self.last_ponder_cost = torch.tensor(float(used) + 0.25)
         self.last_consistency_loss = torch.tensor(float(exit_tol))
         logits = torch.zeros(x.shape[0], x.shape[1], chat_app.MODEL_CLASSES, device=x.device)
-        logits[..., 0] = 3.0
+        logits[..., 0] = float(cycles)
         return logits
 
 
@@ -92,6 +92,27 @@ def test_forward_with_runtime_compute_applies_supported_kwargs_only():
     )
     assert legacy.calls == 1
     assert chat_app.model_supports_runtime_compute(legacy) is False
+
+
+def test_runtime_compute_budget_helpers_select_earliest_confident_budget():
+    model = RuntimeAwareModel()
+    x = torch.zeros(1, 1, 128)
+
+    rows = chat_app.evaluate_runtime_compute_budgets(
+        model,
+        x,
+        list(range(chat_app.MODEL_CLASSES)),
+        cycles=[1, 3, 8],
+        adaptive_compute=False,
+        exit_tol=0.01,
+    )
+    plan = chat_app.select_auto_runtime_compute_budget(rows)
+
+    assert [row["requested_cycles"] for row in rows] == [1, 3, 8]
+    assert rows[0]["confidence"] < chat_app.DEFAULT_AUTO_COMPUTE_CONFIDENCE
+    assert rows[1]["confidence"] >= chat_app.DEFAULT_AUTO_COMPUTE_CONFIDENCE
+    assert plan["selected_reasoning_cycles"] == 3
+    assert plan["reason"] == "confidence_target"
 
 
 def test_web_engine_forwards_runtime_compute_controls_without_mutating_contract():
@@ -214,10 +235,65 @@ def test_api_compute_sweep_accepts_payload_without_mutating_session():
     assert engine.sessions["api-sweep"] == [("prior", "reply")]
 
 
+def test_chat_auto_compute_selects_confident_budget():
+    engine = chat_web_app.Engine(
+        torch.device("cpu"),
+        {"resolved": "cpu"},
+        {"pool_mode": "topk", "auto_compute": True, "adaptive_compute": False},
+    )
+    model = RuntimeAwareModel()
+    engine.model = model
+    engine.feature_mode = "legacy"
+    engine.buckets = {0: [_bucket_row("auto compute answer")]}
+    engine.available_labels = list(range(chat_app.MODEL_CLASSES))
+
+    result = engine.chat(
+        session_id="auto-session",
+        user_text="choose the right compute depth",
+        auto_compute=True,
+    )
+
+    plan = result["auto_compute_plan"]
+    assert plan["enabled"] is True
+    assert plan["selected_reasoning_cycles"] == 3
+    assert plan["reason"] == "confidence_target"
+    assert result["compute"]["requested_reasoning_cycles"] == 3
+    assert model.calls[-1]["reasoning_cycles"] == 3
+    assert engine.sessions["auto-session"], "Auto-compute chat should still append the final turn"
+
+
+def test_api_chat_accepts_auto_compute_payload():
+    engine = chat_web_app.Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "topk"})
+    model = RuntimeAwareModel()
+    engine.model = model
+    engine.feature_mode = "legacy"
+    engine.buckets = {0: [_bucket_row("api auto compute answer")]}
+    engine.available_labels = list(range(chat_app.MODEL_CLASSES))
+
+    app = chat_web_app.build_app(engine, "weights.pth", "meta.json")
+    client = app.test_client()
+    response = client.post(
+        "/api/chat",
+        json={
+            "session_id": "api-auto",
+            "message": "auto compute please",
+            "auto_compute": True,
+        },
+    )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["auto_compute_plan"]["selected_reasoning_cycles"] == 3
+    assert payload["compute"]["auto_compute_plan"]["selected_reasoning_cycles"] == 3
+
+
 if __name__ == "__main__":
     test_forward_with_runtime_compute_applies_supported_kwargs_only()
+    test_runtime_compute_budget_helpers_select_earliest_confident_budget()
     test_web_engine_forwards_runtime_compute_controls_without_mutating_contract()
     test_api_chat_accepts_runtime_compute_payload()
     test_compute_sweep_reports_budget_rows_without_mutating_session()
     test_api_compute_sweep_accepts_payload_without_mutating_session()
+    test_chat_auto_compute_selects_confident_budget()
+    test_api_chat_accepts_auto_compute_payload()
     print("runtime compute control tests passed")

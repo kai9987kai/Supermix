@@ -97,6 +97,7 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
     <div class='split'><div class='row'><label for='style'>Style</label><select id='style'><option>auto</option><option>balanced</option><option>creative</option><option>concise</option><option>analyst</option></select></div><div class='row'><label for='showTop'>Candidates</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div></div>
     <div class='row'><label for='rt'>Response temperature</label><input id='rt' type='number' min='0' max='1' step='0.01' value='0.08'></div>
     <div class='split'><div class='row'><label for='cycles'>Reasoning cycles</label><input id='cycles' type='number' min='1' max='64' step='1' placeholder='auto'></div><div class='row'><label for='adaptive'>Adaptive compute</label><select id='adaptive'><option value='off'>off</option><option value='on'>on</option></select></div></div>
+    <div class='row'><label for='autoCompute'>Auto compute budget</label><select id='autoCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
     <div class='row'><label for='exitTol'>Adaptive exit tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div>
     <div class='btns'><button id='loadBtn'>Load</button><button class='alt' id='statusBtn'>Refresh</button><button class='alt' id='clearBtn'>Clear</button><button class='alt' id='newSessionBtn'>New ID</button></div>
     <div class='status' id='statusBox'>Loading status...</div>
@@ -109,7 +110,7 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
 </div>
 <script>
 const el=(id)=>document.getElementById(id);
-const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),sweepBtn:el('sweepBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),cycles:el('cycles'),adaptive:el('adaptive'),exitTol:el('exitTol')};
+const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),sweepBtn:el('sweepBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),cycles:el('cycles'),adaptive:el('adaptive'),autoCompute:el('autoCompute'),exitTol:el('exitTol')};
 let sid=localStorage.getItem('champion-web-sid');if(!sid){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);}
 const draftKey='champion-web-draft-v2';const transcriptKey=()=>('champion-web-transcript-v2-'+sid);let transcript=[];let sending=false;
 function setSessionLabel(){els.session.textContent='session '+sid.slice(0,8);}
@@ -118,14 +119,14 @@ function saveTranscript(){localStorage.setItem(transcriptKey(),JSON.stringify(tr
 function autoSizePrompt(){els.prompt.style.height='auto';els.prompt.style.height=Math.min(els.prompt.scrollHeight,190)+'px';}
 function setBusy(active,label){sending=active;els.sendBtn.disabled=active;els.sweepBtn.disabled=active;els.loadBtn.disabled=active;els.runtimePill.textContent=label||(active?'working':'idle');}
 function timingText(t){if(!t)return'';return `${t.total??'?'} ms total - ${t.infer??'?'} ms infer - ${t.rank_pick??'?'} ms rank`;}
-function computeText(c){if(!c)return'';const requested=c.requested_reasoning_cycles??'default';const used=c.cycles_used??'n/a';return `compute: supported=${c.supported} requested=${requested} used=${used} adaptive=${c.adaptive_compute} applied=${c.applied}`;}
+function computeText(c){if(!c)return'';const requested=c.requested_reasoning_cycles??'default';const used=c.cycles_used??'n/a';const plan=c.auto_compute_plan?` auto=${c.auto_compute_plan.selected_reasoning_cycles} (${c.auto_compute_plan.reason})`:'';return `compute: supported=${c.supported} requested=${requested} used=${used} adaptive=${c.adaptive_compute} applied=${c.applied}${plan}`;}
 function add(kind,text,timing,top,persist=true,compute=null){const card=document.createElement('article');card.className='msg '+kind;const who=document.createElement('div');who.className='who';const label=document.createElement('span');label.textContent=kind==='user'?'You':'Champion';who.appendChild(label);if(kind==='bot'&&text){const copy=document.createElement('button');copy.className='copy';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';setTimeout(()=>{copy.textContent='Copy';},1200);}catch(_){copy.textContent='Failed';}};who.appendChild(copy);}const body=document.createElement('div');body.textContent=text;card.appendChild(who);card.appendChild(body);const tt=timingText(timing);if(tt){const node=document.createElement('div');node.className='tim';node.textContent=tt;card.appendChild(node);}const ct=computeText(compute);if(ct){const node=document.createElement('div');node.className='tim';node.textContent=ct;card.appendChild(node);}if(Array.isArray(top)&&top.length){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`Top candidates (${top.length})`;details.appendChild(summary);top.forEach((candidate,index)=>{const row=document.createElement('div');const score=Number(candidate.score);const scoreText=Number.isFinite(score)?score.toFixed(3):'n/a';row.textContent=`${index+1}. (${scoreText}) ${String(candidate.text||'').slice(0,220)}`;details.appendChild(row);});card.appendChild(details);}els.msgs.appendChild(card);els.msgs.scrollTo({top:els.msgs.scrollHeight,behavior:'smooth'});if(persist){transcript.push({kind,text,timing,top,compute,ts:Date.now()});saveTranscript();}return card;}
 async function jget(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
 async function jpost(path,payload){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
 function renderStatus(status){const lines=[status.loaded?'Model loaded':'No model loaded','Device: '+(status.device||'unknown'),'Size: '+(status.model_size||'unknown'),'Features: '+(status.feature_mode||'unknown'),'Labels: '+(status.available_labels??'unknown'),'Runtime compute: '+(status.runtime_compute_supported?'supported':'not supported'),'Sessions: '+(status.sessions??0)];els.statusBox.textContent=lines.join('\\n');els.metaLine.textContent=status.loaded?`${status.model_size} - ${status.feature_mode} - ${status.available_labels} labels`:'Choose model files and load them';els.runtimePill.textContent=status.loaded?'ready':'idle';if(!els.weights.value&&status.weights)els.weights.value=status.weights;if(!els.meta.value&&status.meta)els.meta.value=status.meta;}
 async function refresh(){try{const data=await jget('/api/status');renderStatus(data.status);}catch(err){els.statusBox.textContent='Status error: '+err.message;els.runtimePill.textContent='status error';}}
 async function loadModel(){setBusy(true,'loading');els.statusBox.textContent='Loading model...';try{const data=await jpost('/api/load',{weights:els.weights.value.trim(),meta:els.meta.value.trim()});renderStatus(data);}catch(err){els.statusBox.textContent='Load error: '+err.message;els.runtimePill.textContent='load failed';}finally{setBusy(false,els.runtimePill.textContent==='load failed'?'load failed':'ready');}}
-async function send(){const text=els.prompt.value.trim();if(!text||sending)return;const cycles=els.cycles.value.trim();add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value),reasoning_cycles:cycles?Number(cycles):null,adaptive_compute:els.adaptive.value==='on',adaptive_exit_tol:Number(els.exitTol.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates,true,data.compute);els.runtimePill.textContent=data.style_mode?'style '+data.style_mode:'ready';}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
+async function send(){const text=els.prompt.value.trim();if(!text||sending)return;const cycles=els.cycles.value.trim();add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value),reasoning_cycles:cycles?Number(cycles):null,adaptive_compute:els.adaptive.value==='on',auto_compute:els.autoCompute.value==='on',adaptive_exit_tol:Number(els.exitTol.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates,true,data.compute);els.runtimePill.textContent=data.auto_compute_plan?'auto '+data.auto_compute_plan.selected_reasoning_cycles:(data.style_mode?'style '+data.style_mode:'ready');}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
 async function sweep(){const text=els.prompt.value.trim();if(!text||sending)return;const requested=Number(els.cycles.value);const cycles=Number.isFinite(requested)&&requested>0?[1,requested,Math.min(64,Math.max(requested+1,requested*2))]:[1,3,8];setBusy(true,'sweeping');try{const data=await jpost('/api/compute_sweep',{session_id:sid,message:text,cycles,adaptive_compute:els.adaptive.value==='on',adaptive_exit_tol:Number(els.exitTol.value)});const lines=(data.rows||[]).map((row)=>`cycles ${row.requested_cycles}: ${row.latency_ms} ms, used ${row.cycles_used??'n/a'}, label ${row.predicted_label}, confidence ${Number(row.confidence).toFixed(3)}, entropy ${Number(row.entropy).toFixed(3)}`);add('bot','Compute sweep\\n'+(lines.join('\\n')||'No sweep rows returned.'),null,null,false);els.runtimePill.textContent='sweep ready';}catch(err){add('bot','Sweep error: '+err.message,null,null,false);els.runtimePill.textContent='sweep error';}finally{setBusy(false,els.runtimePill.textContent);}}
 async function clearSess(){try{await jpost('/api/clear',{session_id:sid});}catch(_){}transcript=[];localStorage.removeItem(transcriptKey());els.msgs.innerHTML='';add('bot','Session cleared.',null,null,false);}
 function newSession(){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);transcript=[];setSessionLabel();els.msgs.innerHTML='';add('bot','New session started.',null,null,false);}
@@ -242,31 +243,31 @@ class Engine:
             self.recent.pop(session_id, None)
 
     def _resolve_sweep_cycles(self, cycles: Any) -> List[int]:
-        raw_cycles: List[Any]
-        if cycles is None or cycles == "":
-            raw_cycles = [1, 3, 8]
-        elif isinstance(cycles, str):
-            raw_cycles = [part.strip() for part in cycles.split(",")]
-        elif isinstance(cycles, (list, tuple)):
-            raw_cycles = list(cycles)
-        else:
-            raw_cycles = [cycles]
+        return chat_app.resolve_runtime_compute_cycles(cycles)
 
-        resolved: List[int] = []
-        seen = set()
-        for value in raw_cycles:
-            parsed = chat_app._coerce_optional_positive_int(
-                value,
-                default=None,
-                max_value=chat_app.MAX_RUNTIME_REASONING_CYCLES,
-            )
-            if parsed is None or parsed in seen:
-                continue
-            seen.add(parsed)
-            resolved.append(parsed)
-            if len(resolved) >= 8:
-                break
-        return resolved or [1, 3, 8]
+    def _auto_compute_cycles(self, preferred_cycles: Any = None) -> List[int]:
+        return chat_app.runtime_auto_compute_cycles(preferred_cycles)
+
+    def _run_compute_sweep_rows(
+        self,
+        model,
+        x,
+        labels: List[int],
+        cycles: Any,
+        adaptive: bool,
+        exit_tol: Optional[float],
+    ) -> List[Dict[str, Any]]:
+        return chat_app.evaluate_runtime_compute_budgets(
+            model,
+            x,
+            labels,
+            cycles=cycles,
+            adaptive_compute=adaptive,
+            exit_tol=exit_tol,
+        )
+
+    def _select_auto_compute_budget(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return chat_app.select_auto_runtime_compute_budget(rows)
 
     def compute_sweep(
         self,
@@ -303,36 +304,14 @@ class Engine:
             default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
         )
 
-        rows: List[Dict[str, Any]] = []
-        idx = torch.tensor(labels, dtype=torch.long, device=self.device)
-        for requested_cycles in self._resolve_sweep_cycles(cycles):
-            t0 = time.perf_counter()
-            with torch.no_grad():
-                logits_tensor, compute_metrics = chat_app.forward_with_runtime_compute(
-                    model,
-                    x,
-                    reasoning_cycles=requested_cycles,
-                    adaptive_compute=adaptive,
-                    exit_tol=exit_tol,
-                    return_diagnostics=True,
-                )
-                logits = logits_tensor[0, 0]
-                avail_logits = logits.index_select(0, idx)
-                probs = torch.softmax(avail_logits, dim=0)
-                confidence_tensor, pred_pos_tensor = torch.max(probs, dim=0)
-                entropy = float(-(probs * torch.log(probs.clamp_min(1e-8))).sum().item())
-            pred_pos = int(pred_pos_tensor.item())
-            rows.append(
-                {
-                    "requested_cycles": int(requested_cycles),
-                    "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
-                    "cycles_used": compute_metrics.get("cycles_used"),
-                    "predicted_label": int(labels[pred_pos]),
-                    "confidence": round(float(confidence_tensor.item()), 6),
-                    "entropy": round(entropy, 6),
-                    "compute": compute_metrics,
-                }
-            )
+        rows = self._run_compute_sweep_rows(
+            model=model,
+            x=x,
+            labels=labels,
+            cycles=cycles,
+            adaptive=adaptive,
+            exit_tol=exit_tol,
+        )
 
         return {
             "ok": True,
@@ -351,6 +330,7 @@ class Engine:
         reasoning_cycles: Optional[int] = None,
         adaptive_compute: Optional[bool] = None,
         adaptive_exit_tol: Optional[float] = None,
+        auto_compute: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
@@ -370,28 +350,53 @@ class Engine:
         context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
         tt = time.perf_counter()
         x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
+        resolved_adaptive_compute = (
+            self.defaults.get("adaptive_compute", False)
+            if adaptive_compute is None
+            else adaptive_compute
+        )
+        resolved_exit_tol = (
+            self.defaults.get("adaptive_exit_tol")
+            if adaptive_exit_tol is None
+            else adaptive_exit_tol
+        )
+        effective_reasoning_cycles = (
+            self.defaults.get("reasoning_cycles")
+            if reasoning_cycles is None
+            else reasoning_cycles
+        )
+        compute_plan: Optional[Dict[str, Any]] = None
+        auto_enabled = (
+            chat_app._coerce_bool(self.defaults.get("auto_compute", False), default=False)
+            if auto_compute is None
+            else chat_app._coerce_bool(auto_compute, default=False)
+        )
+        if auto_enabled and chat_app.model_supports_runtime_compute(model):
+            sweep_rows = self._run_compute_sweep_rows(
+                model=model,
+                x=x,
+                labels=labels,
+                cycles=self._auto_compute_cycles(effective_reasoning_cycles),
+                adaptive=chat_app._coerce_bool(resolved_adaptive_compute, default=False),
+                exit_tol=chat_app._coerce_nonnegative_float(
+                    resolved_exit_tol,
+                    default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+                ),
+            )
+            compute_plan = self._select_auto_compute_budget(sweep_rows)
+            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
         with torch.no_grad():
             logits_tensor, compute_metrics = chat_app.forward_with_runtime_compute(
                 model,
                 x,
-                reasoning_cycles=(
-                    self.defaults.get("reasoning_cycles")
-                    if reasoning_cycles is None
-                    else reasoning_cycles
-                ),
-                adaptive_compute=(
-                    self.defaults.get("adaptive_compute", False)
-                    if adaptive_compute is None
-                    else adaptive_compute
-                ),
-                exit_tol=(
-                    self.defaults.get("adaptive_exit_tol")
-                    if adaptive_exit_tol is None
-                    else adaptive_exit_tol
-                ),
+                reasoning_cycles=effective_reasoning_cycles,
+                adaptive_compute=resolved_adaptive_compute,
+                exit_tol=resolved_exit_tol,
                 return_diagnostics=True,
             )
             logits = logits_tensor[0, 0]
+        if compute_plan is not None:
+            compute_metrics["auto_compute_plan"] = compute_plan
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
@@ -494,6 +499,7 @@ class Engine:
             "style_mode": resolved_style,
             "timing_ms": timing_ms,
             "compute": compute_metrics,
+            "auto_compute_plan": compute_plan,
             "top_candidates": top_candidates,
         }
 
@@ -542,6 +548,7 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 reasoning_cycles=p.get('reasoning_cycles'),
                 adaptive_compute=p.get('adaptive_compute'),
                 adaptive_exit_tol=p.get('adaptive_exit_tol'),
+                auto_compute=p.get('auto_compute'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -598,6 +605,7 @@ def main() -> None:
     ap.add_argument('--reasoning_cycles', type=int, default=None)
     ap.add_argument('--adaptive_compute', action='store_true')
     ap.add_argument('--adaptive_exit_tol', type=float, default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL)
+    ap.add_argument('--auto_compute', action='store_true')
     args = ap.parse_args()
 
     configure_torch_runtime(
@@ -626,6 +634,7 @@ def main() -> None:
             args.adaptive_exit_tol,
             default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
         ),
+        'auto_compute': bool(args.auto_compute),
     })
     if args.autoload:
         try:

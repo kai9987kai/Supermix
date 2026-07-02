@@ -72,6 +72,8 @@ def _int_or_default(value, default: int) -> int:
 
 MAX_RUNTIME_REASONING_CYCLES = 64
 DEFAULT_ADAPTIVE_EXIT_TOL = 1e-3
+DEFAULT_AUTO_COMPUTE_CONFIDENCE = 0.55
+DEFAULT_AUTO_COMPUTE_ENTROPY = 1.85
 
 
 def _coerce_optional_positive_int(value, default: Optional[int] = None, max_value: Optional[int] = None) -> Optional[int]:
@@ -234,6 +236,142 @@ def forward_with_runtime_compute(
     return out
 
 
+def resolve_runtime_compute_cycles(cycles, default: Optional[List[int]] = None, limit: int = 8) -> List[int]:
+    if default is None:
+        default = [1, 3, 8]
+    if cycles is None or cycles == "":
+        raw_values = list(default)
+    elif isinstance(cycles, str):
+        raw_values = [part.strip() for part in cycles.split(",")]
+    elif isinstance(cycles, (list, tuple)):
+        raw_values = list(cycles)
+    else:
+        raw_values = [cycles]
+
+    resolved: List[int] = []
+    seen = set()
+    for value in raw_values:
+        parsed = _coerce_optional_positive_int(
+            value,
+            default=None,
+            max_value=MAX_RUNTIME_REASONING_CYCLES,
+        )
+        if parsed is None or parsed in seen:
+            continue
+        seen.add(parsed)
+        resolved.append(parsed)
+        if len(resolved) >= max(1, int(limit)):
+            break
+    return resolved or list(default)
+
+
+def runtime_auto_compute_cycles(preferred_cycles: Optional[int] = None) -> List[int]:
+    preferred = _coerce_optional_positive_int(
+        preferred_cycles,
+        default=None,
+        max_value=MAX_RUNTIME_REASONING_CYCLES,
+    )
+    if preferred is None:
+        return [1, 3, 8]
+    return resolve_runtime_compute_cycles(
+        [1, preferred, min(MAX_RUNTIME_REASONING_CYCLES, max(preferred + 1, preferred * 2))]
+    )
+
+
+def evaluate_runtime_compute_budgets(
+    model,
+    x,
+    available_labels: List[int],
+    *,
+    cycles=None,
+    adaptive_compute: bool = False,
+    exit_tol: Optional[float] = None,
+) -> List[Dict[str, object]]:
+    labels = list(available_labels) or list(range(MODEL_CLASSES))
+    idx_device = x.device if isinstance(x, torch.Tensor) else None
+    idx = torch.tensor(labels, dtype=torch.long, device=idx_device)
+    resolved_exit_tol = _coerce_nonnegative_float(
+        DEFAULT_ADAPTIVE_EXIT_TOL if exit_tol is None else exit_tol,
+        default=DEFAULT_ADAPTIVE_EXIT_TOL,
+    )
+    rows: List[Dict[str, object]] = []
+    for requested_cycles in resolve_runtime_compute_cycles(cycles):
+        t0 = time.perf_counter()
+        logits_tensor, compute_metrics = forward_with_runtime_compute(
+            model,
+            x,
+            reasoning_cycles=requested_cycles,
+            adaptive_compute=adaptive_compute,
+            exit_tol=resolved_exit_tol,
+            return_diagnostics=True,
+        )
+        logits = logits_tensor[0, 0]
+        avail_logits = logits.index_select(0, idx.to(logits.device))
+        probs = torch.softmax(avail_logits, dim=0)
+        confidence_tensor, pred_pos_tensor = torch.max(probs, dim=0)
+        entropy = float(-(probs * torch.log(probs.clamp_min(1e-8))).sum().item())
+        pred_pos = int(pred_pos_tensor.item())
+        rows.append(
+            {
+                "requested_cycles": int(requested_cycles),
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+                "cycles_used": compute_metrics.get("cycles_used"),
+                "predicted_label": int(labels[pred_pos]),
+                "confidence": round(float(confidence_tensor.item()), 6),
+                "entropy": round(entropy, 6),
+                "compute": compute_metrics,
+            }
+        )
+    return rows
+
+
+def select_auto_runtime_compute_budget(
+    rows: List[Dict[str, object]],
+    *,
+    confidence_target: float = DEFAULT_AUTO_COMPUTE_CONFIDENCE,
+    entropy_target: float = DEFAULT_AUTO_COMPUTE_ENTROPY,
+) -> Dict[str, object]:
+    confidence_target = max(0.0, min(1.0, float(confidence_target)))
+    entropy_target = max(0.0, float(entropy_target))
+    if not rows:
+        return {
+            "enabled": True,
+            "selected_reasoning_cycles": None,
+            "reason": "no_rows",
+            "confidence_target": confidence_target,
+            "entropy_target": entropy_target,
+            "rows": [],
+        }
+    best = max(
+        rows,
+        key=lambda row: (
+            float(row.get("confidence", 0.0)),
+            -float(row.get("entropy", 999.0)),
+            -float(row.get("latency_ms", 0.0)),
+        ),
+    )
+    selected = best
+    reason = "best_confidence"
+    for row in rows:
+        if float(row.get("confidence", 0.0)) >= confidence_target:
+            selected = row
+            reason = "confidence_target"
+            break
+        if float(row.get("entropy", 999.0)) <= entropy_target:
+            selected = row
+            reason = "entropy_target"
+            break
+    return {
+        "enabled": True,
+        "selected_reasoning_cycles": int(selected["requested_cycles"]),
+        "selected_index": rows.index(selected),
+        "reason": reason,
+        "confidence_target": confidence_target,
+        "entropy_target": entropy_target,
+        "rows": rows,
+    }
+
+
 _FOLLOWUP_QUERY_RE = re.compile(r"\b(it|that|this|they|them|same|previous|above|more|continue|deeper|expand)\b", re.I)
 VALID_RUNTIME_MODEL_SIZES = SUPPORTED_MODEL_SIZES
 
@@ -350,6 +488,7 @@ def _print_chat_help() -> None:
     print("  /cycles <n|auto>    Set v50 reasoning cycles (auto uses model default)")
     print("  /adaptive on|off    Toggle adaptive early-exit compute")
     print("  /exit_tol <float>   Set adaptive exit tolerance")
+    print("  /auto_compute on|off Toggle confidence/entropy based cycle selection")
     print("  /memory on|off      Toggle memory retrieval/writes for this session")
     print("  /db on|off          Toggle local LLM DB retrieval for this session")
     print("  /config             Print current runtime config")
@@ -460,6 +599,23 @@ def main():
         type=float,
         default=DEFAULT_ADAPTIVE_EXIT_TOL,
         help="Latent-convergence tolerance for adaptive early exit.",
+    )
+    ap.add_argument(
+        "--auto_compute",
+        action="store_true",
+        help="Probe a small reasoning-cycle ladder and choose the first budget meeting confidence/entropy targets.",
+    )
+    ap.add_argument(
+        "--auto_compute_confidence",
+        type=float,
+        default=DEFAULT_AUTO_COMPUTE_CONFIDENCE,
+        help="Confidence target for --auto_compute early budget selection.",
+    )
+    ap.add_argument(
+        "--auto_compute_entropy",
+        type=float,
+        default=DEFAULT_AUTO_COMPUTE_ENTROPY,
+        help="Entropy target for --auto_compute early budget selection.",
     )
     ap.add_argument("--memory_db", default="chat_memory.db", help="Persistent memory SQLite DB.")
     ap.add_argument("--memory_top_k", type=int, default=4, help="Number of memory snippets to retrieve each turn.")
@@ -608,6 +764,9 @@ def main():
         args.adaptive_exit_tol,
         default=DEFAULT_ADAPTIVE_EXIT_TOL,
     )
+    args.auto_compute = bool(args.auto_compute)
+    args.auto_compute_confidence = max(0.0, min(1.0, float(args.auto_compute_confidence)))
+    args.auto_compute_entropy = max(0.0, float(args.auto_compute_entropy))
 
     print(f"\n{TerminalColors.SYSTEM}--- Session Info ---")
     print(f"Loaded: {Path(args.weights).name} [{resolved_model_size}] | Available labels: {len(available_labels)}")
@@ -618,7 +777,8 @@ def main():
         f"supported={'yes' if model_supports_runtime_compute(model) else 'no'} | "
         f"cycles={args.reasoning_cycles if args.reasoning_cycles is not None else 'model default'} | "
         f"adaptive={'on' if args.adaptive_compute else 'off'} | "
-        f"exit_tol={float(args.adaptive_exit_tol):.6g}"
+        f"exit_tol={float(args.adaptive_exit_tol):.6g} | "
+        f"auto={'on' if args.auto_compute else 'off'}"
     )
     
     if llm_db:
@@ -677,9 +837,14 @@ def main():
                             + ", ".join(f"{k}={_format_ms(v)}" for k, v in last_turn_timing.items())
                         )
                     if last_compute_metrics:
+                        compact_compute = dict(last_compute_metrics)
+                        plan = compact_compute.pop("auto_compute_plan", None)
+                        if isinstance(plan, dict):
+                            compact_compute["auto_selected"] = plan.get("selected_reasoning_cycles")
+                            compact_compute["auto_reason"] = plan.get("reason")
                         print(
                             "  last_compute="
-                            + ", ".join(f"{k}={v}" for k, v in last_compute_metrics.items())
+                            + ", ".join(f"{k}={v}" for k, v in compact_compute.items())
                         )
                 elif cmd == "config":
                     print(f"{TerminalColors.SYSTEM}Runtime config:{TerminalColors.RESET}")
@@ -703,7 +868,10 @@ def main():
                         f"  runtime_compute_supported={'yes' if model_supports_runtime_compute(model) else 'no'} "
                         f"cycles={args.reasoning_cycles if args.reasoning_cycles is not None else 'model default'} "
                         f"adaptive={'on' if args.adaptive_compute else 'off'} "
-                        f"exit_tol={float(args.adaptive_exit_tol):.6g}"
+                        f"exit_tol={float(args.adaptive_exit_tol):.6g} "
+                        f"auto={'on' if args.auto_compute else 'off'} "
+                        f"auto_conf={float(args.auto_compute_confidence):.3f} "
+                        f"auto_entropy={float(args.auto_compute_entropy):.3f}"
                     )
                 elif cmd == "style":
                     if arg not in {"auto", "balanced", "creative", "concise", "analyst"}:
@@ -763,6 +931,28 @@ def main():
                         continue
                     args.adaptive_exit_tol = parsed_tol
                     print(f"{TerminalColors.SYSTEM}Adaptive exit tolerance set to {float(args.adaptive_exit_tol):.6g}.{TerminalColors.RESET}")
+                elif cmd in {"auto_compute", "auto"}:
+                    if arg.lower() in {"on", "1", "true", "yes"}:
+                        args.auto_compute = True
+                    elif arg.lower() in {"off", "0", "false", "no"}:
+                        args.auto_compute = False
+                    else:
+                        print(f"{TerminalColors.SYSTEM}Usage: /auto_compute on|off{TerminalColors.RESET}")
+                        continue
+                    print(f"{TerminalColors.SYSTEM}Auto compute {'enabled' if args.auto_compute else 'disabled'}.{TerminalColors.RESET}")
+                elif cmd in {"auto_targets", "compute_targets"}:
+                    try:
+                        if len(parts) < 3:
+                            raise ValueError
+                        args.auto_compute_confidence = max(0.0, min(1.0, float(parts[1])))
+                        args.auto_compute_entropy = max(0.0, float(parts[2]))
+                        print(
+                            f"{TerminalColors.SYSTEM}Auto compute targets set to "
+                            f"confidence={float(args.auto_compute_confidence):.3f}, "
+                            f"entropy={float(args.auto_compute_entropy):.3f}.{TerminalColors.RESET}"
+                        )
+                    except Exception:
+                        print(f"{TerminalColors.SYSTEM}Usage: /auto_targets <confidence 0-1> <entropy>{TerminalColors.RESET}")
                 elif cmd == "memory":
                     if memory_db is None and arg.lower() in {"on", "1", "true"}:
                         print(f"{TerminalColors.SYSTEM}Memory DB is not available in this session.{TerminalColors.RESET}")
@@ -829,16 +1019,35 @@ def main():
                     context = memory_block + "\n" + context
                     
             x = text_to_model_input(context, feature_mode=feature_mode).to(device)
+            effective_reasoning_cycles = args.reasoning_cycles
+            auto_compute_plan = None
+            if args.auto_compute and model_supports_runtime_compute(model):
+                auto_rows = evaluate_runtime_compute_budgets(
+                    model,
+                    x,
+                    available_labels,
+                    cycles=runtime_auto_compute_cycles(args.reasoning_cycles),
+                    adaptive_compute=args.adaptive_compute,
+                    exit_tol=args.adaptive_exit_tol,
+                )
+                auto_compute_plan = select_auto_runtime_compute_budget(
+                    auto_rows,
+                    confidence_target=args.auto_compute_confidence,
+                    entropy_target=args.auto_compute_entropy,
+                )
+                effective_reasoning_cycles = auto_compute_plan.get("selected_reasoning_cycles")
             with torch.no_grad():
                 logits_tensor, last_compute_metrics = forward_with_runtime_compute(
                     model,
                     x,
-                    reasoning_cycles=args.reasoning_cycles,
+                    reasoning_cycles=effective_reasoning_cycles,
                     adaptive_compute=args.adaptive_compute,
                     exit_tol=args.adaptive_exit_tol,
                     return_diagnostics=True,
                 )
                 logits = logits_tensor[0, 0]  # (10,)
+            if auto_compute_plan is not None:
+                last_compute_metrics["auto_compute_plan"] = auto_compute_plan
             t_infer += max(0.0, time.perf_counter() - _t)
 
             idx = torch.tensor(available_labels, dtype=torch.long, device=logits.device)
@@ -987,12 +1196,19 @@ def main():
                 )
                 if last_compute_metrics:
                     requested = last_compute_metrics.get("requested_reasoning_cycles") or "model default"
+                    plan = last_compute_metrics.get("auto_compute_plan") if isinstance(last_compute_metrics, dict) else None
+                    plan_suffix = ""
+                    if isinstance(plan, dict):
+                        plan_suffix = (
+                            f" auto_selected={plan.get('selected_reasoning_cycles')} "
+                            f"reason={plan.get('reason')}"
+                        )
                     print(
                         f"{TerminalColors.SYSTEM}Compute:{TerminalColors.RESET} "
                         f"supported={last_compute_metrics.get('supported')} "
                         f"requested={requested} cycles_used={last_compute_metrics.get('cycles_used', 'n/a')} "
                         f"adaptive={last_compute_metrics.get('adaptive_compute')} "
-                        f"applied={last_compute_metrics.get('applied')}"
+                        f"applied={last_compute_metrics.get('applied')}{plan_suffix}"
                     )
                 
     finally:
