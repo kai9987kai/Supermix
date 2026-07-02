@@ -227,6 +227,7 @@ select, input {
     <div class='comp'>
       <textarea id='prompt' placeholder='Quantum prompt input...' rows="1"></textarea>
       <button id='sendBtn'>SEND</button>
+      <button id='sweepBtn' class='alt'>SWEEP</button>
     </div>
   </div>
 </div>
@@ -328,6 +329,16 @@ async function send(){
         add('bot',d.response,d.timing_ms,d.top_candidates,d.compute);
     }catch(e){ add('bot','CORE ERROR: '+e.message); }
 }
+async function sweep(){
+    const text=promptEl.value.trim(); if(!text) return;
+    const requested=Number(el('cycles').value);
+    const cycles=Number.isFinite(requested)&&requested>0?[1,requested,Math.min(64,Math.max(requested+1,requested*2))]:[1,3,8];
+    try{
+        const d=await jpost('/api/compute_sweep',{session_id:sid,message:text,cycles,adaptive_compute:el('adaptive').value==='on',adaptive_exit_tol:Number(el('exitTol').value)});
+        const lines=(d.rows||[]).map((row)=>`cycles ${row.requested_cycles}: ${row.latency_ms} ms, used ${row.cycles_used??'n/a'}, label ${row.predicted_label}, confidence ${Number(row.confidence).toFixed(3)}, entropy ${Number(row.entropy).toFixed(3)}`);
+        add('bot','COMPUTE SWEEP\\n'+(lines.join('\\n')||'No sweep rows returned.'));
+    }catch(e){ add('bot','SWEEP ERROR: '+e.message); }
+}
 async function clearSess(){
     try{
         await jpost('/api/clear',{session_id:sid}); 
@@ -335,7 +346,7 @@ async function clearSess(){
         add('bot','Neural cache purged. Ready for fresh session.');
     }catch(e){ add('bot','PURGE ERROR: '+e.message); }
 }
-el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; 
+el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; el('sweepBtn').onclick=sweep;
 promptEl.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault();send(); } }); 
 refresh();
 </script></body></html>"""
@@ -446,6 +457,106 @@ class Engine:
         with self.lock:
             self.sessions.pop(session_id, None)
             self.recent.pop(session_id, None)
+
+    def _resolve_sweep_cycles(self, cycles: Any) -> List[int]:
+        raw_cycles: List[Any]
+        if cycles is None or cycles == "":
+            raw_cycles = [1, 3, 8]
+        elif isinstance(cycles, str):
+            raw_cycles = [part.strip() for part in cycles.split(",")]
+        elif isinstance(cycles, (list, tuple)):
+            raw_cycles = list(cycles)
+        else:
+            raw_cycles = [cycles]
+
+        resolved: List[int] = []
+        seen = set()
+        for value in raw_cycles:
+            parsed = chat_app._coerce_optional_positive_int(
+                value,
+                default=None,
+                max_value=chat_app.MAX_RUNTIME_REASONING_CYCLES,
+            )
+            if parsed is None or parsed in seen:
+                continue
+            seen.add(parsed)
+            resolved.append(parsed)
+            if len(resolved) >= 8:
+                break
+        return resolved or [1, 3, 8]
+
+    def compute_sweep(
+        self,
+        session_id: str,
+        user_text: str,
+        cycles: Any = None,
+        adaptive_compute: Optional[bool] = None,
+        adaptive_exit_tol: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        if not user_text.strip():
+            raise ValueError("Empty message")
+        with self.lock:
+            if self.model is None:
+                raise RuntimeError("No model loaded")
+            model = self.model
+            feature_mode = self.feature_mode
+            labels = list(self.available_labels)
+            history = list(self.sessions.get(session_id, []))
+
+        context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
+        x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
+        adaptive = (
+            chat_app._coerce_bool(self.defaults.get("adaptive_compute", False), default=False)
+            if adaptive_compute is None
+            else chat_app._coerce_bool(adaptive_compute, default=False)
+        )
+        exit_tol = (
+            self.defaults.get("adaptive_exit_tol")
+            if adaptive_exit_tol is None
+            else adaptive_exit_tol
+        )
+        exit_tol = chat_app._coerce_nonnegative_float(
+            exit_tol,
+            default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+        )
+
+        rows: List[Dict[str, Any]] = []
+        idx = torch.tensor(labels, dtype=torch.long, device=self.device)
+        for requested_cycles in self._resolve_sweep_cycles(cycles):
+            t0 = time.perf_counter()
+            with torch.no_grad():
+                logits_tensor, compute_metrics = chat_app.forward_with_runtime_compute(
+                    model,
+                    x,
+                    reasoning_cycles=requested_cycles,
+                    adaptive_compute=adaptive,
+                    exit_tol=exit_tol,
+                    return_diagnostics=True,
+                )
+                logits = logits_tensor[0, 0]
+                avail_logits = logits.index_select(0, idx)
+                probs = torch.softmax(avail_logits, dim=0)
+                confidence_tensor, pred_pos_tensor = torch.max(probs, dim=0)
+                entropy = float(-(probs * torch.log(probs.clamp_min(1e-8))).sum().item())
+            pred_pos = int(pred_pos_tensor.item())
+            rows.append(
+                {
+                    "requested_cycles": int(requested_cycles),
+                    "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+                    "cycles_used": compute_metrics.get("cycles_used"),
+                    "predicted_label": int(labels[pred_pos]),
+                    "confidence": round(float(confidence_tensor.item()), 6),
+                    "entropy": round(entropy, 6),
+                    "compute": compute_metrics,
+                }
+            )
+
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "history_turns": len(history),
+            "rows": rows,
+        }
 
     def chat(
         self,
@@ -640,6 +751,22 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 response_temperature=p.get('response_temperature'),
                 show_top_responses=int(p.get('show_top_responses') or 0),
                 reasoning_cycles=p.get('reasoning_cycles'),
+                adaptive_compute=p.get('adaptive_compute'),
+                adaptive_exit_tol=p.get('adaptive_exit_tol'),
+            ))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+    @app.post('/api/compute_sweep')
+    def api_compute_sweep():
+        p = request.get_json(force=True, silent=True) or {}
+        sid = str(p.get('session_id') or '').strip() or str(uuid.uuid4())
+        msg = str(p.get('message') or '').strip()
+        try:
+            return jsonify(engine.compute_sweep(
+                session_id=sid,
+                user_text=msg,
+                cycles=p.get('cycles'),
                 adaptive_compute=p.get('adaptive_compute'),
                 adaptive_exit_tol=p.get('adaptive_exit_tol'),
             ))

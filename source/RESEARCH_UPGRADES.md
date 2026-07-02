@@ -482,5 +482,6 @@ Repo changes:
 - Added `forward_with_runtime_compute(...)` to `source/chat_app.py` and the packaged `runtime_python/chat_app.py`. The helper introspects `model.forward(...)`, forwards only supported v50 kwargs, and caps user-supplied `reasoning_cycles` at 64 for predictable latency.
 - Exposed `--reasoning_cycles`, `--adaptive_compute`, and `--adaptive_exit_tol` in terminal chat, plus interactive `/cycles`, `/adaptive`, and `/exit_tol` commands.
 - Added source and packaged web controls for reasoning cycles and adaptive compute; `/api/chat` now returns a `compute` diagnostics object with support/applied flags, `cycles_used`, and available v50 head metrics.
+- Added `/api/compute_sweep` and a browser `Sweep` button that compare multiple test-time compute budgets for the draft prompt without mutating chat history. Each row reports latency, realized cycles, predicted label, confidence, entropy, and compute diagnostics.
 - Hardened the packaged runtime web renderer to use DOM/textContent for chat and candidate text instead of injecting raw response HTML.
 - Added `test_runtime_compute_controls.py` to verify backward compatibility with legacy models, supported-kwarg forwarding, diagnostics, and the Flask API path.

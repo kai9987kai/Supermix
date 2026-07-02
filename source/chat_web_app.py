@@ -85,7 +85,7 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
 .msgs{padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,#f8fafb,#eef3f5)}.msg{position:relative;border:1px solid var(--line);border-radius:8px;padding:12px 13px;max-width:min(78%,820px);white-space:pre-wrap;line-height:1.45;background:var(--bot);box-shadow:0 6px 18px rgba(23,32,38,.06)}
 .msg.user{align-self:flex-end;background:var(--user);border-color:#a8d2f2}.msg.bot{align-self:flex-start}.msg.pending{color:var(--muted);font-style:italic}.who{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:6px;color:#4b5b65;font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em}
 .copy{padding:4px 7px;border-radius:6px;background:#eef3f5;color:#31414c;border:1px solid var(--line);font-size:.72rem}.tim{margin-top:8px;color:#63717d;font-size:.76rem}details{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;color:#63717d;font-size:.76rem}summary{cursor:pointer;font-weight:800;color:#40505c}
-.comp{padding:13px 16px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end;background:#fff}textarea{min-height:54px;max-height:190px;resize:none;line-height:1.42}.hint{grid-column:1/-1;color:var(--muted);font-size:.76rem}
+.comp{padding:13px 16px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;background:#fff}textarea{min-height:54px;max-height:190px;resize:none;line-height:1.42}.hint{grid-column:1/-1;color:var(--muted);font-size:.76rem}
 .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}.quick button{background:#f6f8f9;color:#31414c;border:1px solid var(--line);font-weight:700;padding:7px 9px;font-size:.78rem}
 @media (max-width:900px){.wrap{grid-template-columns:1fr;padding:10px}.chat{height:72vh;min-height:560px}.msg{max-width:94%}.split,.btns{grid-template-columns:1fr}}
 </style></head><body>
@@ -104,19 +104,19 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
   <main class='chat'>
     <header class='head'><div><div class='head-title'>Web Chat</div><small id='metaLine'>No model loaded</small></div><div class='pillrow'><span class='pill' id='session'></span><span class='pill' id='runtimePill'>idle</span></div></header>
     <section class='msgs' id='msgs' aria-live='polite'></section>
-    <section class='comp'><textarea id='prompt' placeholder='Type a message. Enter sends, Shift+Enter adds a line.'></textarea><button id='sendBtn'>Send</button><div class='hint'>Drafts and the local transcript are kept in this browser session.</div><div class='quick'><button type='button' data-fill='Summarize the latest benchmark result and explain the weakest benchmark.'>Benchmark readout</button><button type='button' data-fill='Give a concise debugging checklist for this model response.'>Debug checklist</button><button type='button' data-fill='Answer as a concise analyst and include uncertainty when needed.'>Analyst mode</button></div></section>
+    <section class='comp'><textarea id='prompt' placeholder='Type a message. Enter sends, Shift+Enter adds a line.'></textarea><button id='sendBtn'>Send</button><button class='alt' id='sweepBtn'>Sweep</button><div class='hint'>Drafts and the local transcript are kept in this browser session.</div><div class='quick'><button type='button' data-fill='Summarize the latest benchmark result and explain the weakest benchmark.'>Benchmark readout</button><button type='button' data-fill='Give a concise debugging checklist for this model response.'>Debug checklist</button><button type='button' data-fill='Answer as a concise analyst and include uncertainty when needed.'>Analyst mode</button></div></section>
   </main>
 </div>
 <script>
 const el=(id)=>document.getElementById(id);
-const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),cycles:el('cycles'),adaptive:el('adaptive'),exitTol:el('exitTol')};
+const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),sweepBtn:el('sweepBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),cycles:el('cycles'),adaptive:el('adaptive'),exitTol:el('exitTol')};
 let sid=localStorage.getItem('champion-web-sid');if(!sid){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);}
 const draftKey='champion-web-draft-v2';const transcriptKey=()=>('champion-web-transcript-v2-'+sid);let transcript=[];let sending=false;
 function setSessionLabel(){els.session.textContent='session '+sid.slice(0,8);}
 function loadTranscript(){try{transcript=JSON.parse(localStorage.getItem(transcriptKey())||'[]');}catch(_){transcript=[];}}
 function saveTranscript(){localStorage.setItem(transcriptKey(),JSON.stringify(transcript.slice(-80)));}
 function autoSizePrompt(){els.prompt.style.height='auto';els.prompt.style.height=Math.min(els.prompt.scrollHeight,190)+'px';}
-function setBusy(active,label){sending=active;els.sendBtn.disabled=active;els.loadBtn.disabled=active;els.runtimePill.textContent=label||(active?'working':'idle');}
+function setBusy(active,label){sending=active;els.sendBtn.disabled=active;els.sweepBtn.disabled=active;els.loadBtn.disabled=active;els.runtimePill.textContent=label||(active?'working':'idle');}
 function timingText(t){if(!t)return'';return `${t.total??'?'} ms total - ${t.infer??'?'} ms infer - ${t.rank_pick??'?'} ms rank`;}
 function computeText(c){if(!c)return'';const requested=c.requested_reasoning_cycles??'default';const used=c.cycles_used??'n/a';return `compute: supported=${c.supported} requested=${requested} used=${used} adaptive=${c.adaptive_compute} applied=${c.applied}`;}
 function add(kind,text,timing,top,persist=true,compute=null){const card=document.createElement('article');card.className='msg '+kind;const who=document.createElement('div');who.className='who';const label=document.createElement('span');label.textContent=kind==='user'?'You':'Champion';who.appendChild(label);if(kind==='bot'&&text){const copy=document.createElement('button');copy.className='copy';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';setTimeout(()=>{copy.textContent='Copy';},1200);}catch(_){copy.textContent='Failed';}};who.appendChild(copy);}const body=document.createElement('div');body.textContent=text;card.appendChild(who);card.appendChild(body);const tt=timingText(timing);if(tt){const node=document.createElement('div');node.className='tim';node.textContent=tt;card.appendChild(node);}const ct=computeText(compute);if(ct){const node=document.createElement('div');node.className='tim';node.textContent=ct;card.appendChild(node);}if(Array.isArray(top)&&top.length){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`Top candidates (${top.length})`;details.appendChild(summary);top.forEach((candidate,index)=>{const row=document.createElement('div');const score=Number(candidate.score);const scoreText=Number.isFinite(score)?score.toFixed(3):'n/a';row.textContent=`${index+1}. (${scoreText}) ${String(candidate.text||'').slice(0,220)}`;details.appendChild(row);});card.appendChild(details);}els.msgs.appendChild(card);els.msgs.scrollTo({top:els.msgs.scrollHeight,behavior:'smooth'});if(persist){transcript.push({kind,text,timing,top,compute,ts:Date.now()});saveTranscript();}return card;}
@@ -126,9 +126,10 @@ function renderStatus(status){const lines=[status.loaded?'Model loaded':'No mode
 async function refresh(){try{const data=await jget('/api/status');renderStatus(data.status);}catch(err){els.statusBox.textContent='Status error: '+err.message;els.runtimePill.textContent='status error';}}
 async function loadModel(){setBusy(true,'loading');els.statusBox.textContent='Loading model...';try{const data=await jpost('/api/load',{weights:els.weights.value.trim(),meta:els.meta.value.trim()});renderStatus(data);}catch(err){els.statusBox.textContent='Load error: '+err.message;els.runtimePill.textContent='load failed';}finally{setBusy(false,els.runtimePill.textContent==='load failed'?'load failed':'ready');}}
 async function send(){const text=els.prompt.value.trim();if(!text||sending)return;const cycles=els.cycles.value.trim();add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value),reasoning_cycles:cycles?Number(cycles):null,adaptive_compute:els.adaptive.value==='on',adaptive_exit_tol:Number(els.exitTol.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates,true,data.compute);els.runtimePill.textContent=data.style_mode?'style '+data.style_mode:'ready';}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
+async function sweep(){const text=els.prompt.value.trim();if(!text||sending)return;const requested=Number(els.cycles.value);const cycles=Number.isFinite(requested)&&requested>0?[1,requested,Math.min(64,Math.max(requested+1,requested*2))]:[1,3,8];setBusy(true,'sweeping');try{const data=await jpost('/api/compute_sweep',{session_id:sid,message:text,cycles,adaptive_compute:els.adaptive.value==='on',adaptive_exit_tol:Number(els.exitTol.value)});const lines=(data.rows||[]).map((row)=>`cycles ${row.requested_cycles}: ${row.latency_ms} ms, used ${row.cycles_used??'n/a'}, label ${row.predicted_label}, confidence ${Number(row.confidence).toFixed(3)}, entropy ${Number(row.entropy).toFixed(3)}`);add('bot','Compute sweep\\n'+(lines.join('\\n')||'No sweep rows returned.'),null,null,false);els.runtimePill.textContent='sweep ready';}catch(err){add('bot','Sweep error: '+err.message,null,null,false);els.runtimePill.textContent='sweep error';}finally{setBusy(false,els.runtimePill.textContent);}}
 async function clearSess(){try{await jpost('/api/clear',{session_id:sid});}catch(_){}transcript=[];localStorage.removeItem(transcriptKey());els.msgs.innerHTML='';add('bot','Session cleared.',null,null,false);}
 function newSession(){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);transcript=[];setSessionLabel();els.msgs.innerHTML='';add('bot','New session started.',null,null,false);}
-els.loadBtn.onclick=loadModel;els.statusBtn.onclick=refresh;els.clearBtn.onclick=clearSess;els.newSessionBtn.onclick=newSession;els.sendBtn.onclick=send;els.prompt.value=localStorage.getItem(draftKey)||'';els.prompt.addEventListener('input',()=>{localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();});els.prompt.addEventListener('keydown',(event)=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send();}});
+els.loadBtn.onclick=loadModel;els.statusBtn.onclick=refresh;els.clearBtn.onclick=clearSess;els.newSessionBtn.onclick=newSession;els.sendBtn.onclick=send;els.sweepBtn.onclick=sweep;els.prompt.value=localStorage.getItem(draftKey)||'';els.prompt.addEventListener('input',()=>{localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();});els.prompt.addEventListener('keydown',(event)=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send();}});
 document.querySelectorAll('[data-fill]').forEach((button)=>{button.addEventListener('click',()=>{els.prompt.value=button.dataset.fill||'';localStorage.setItem(draftKey,els.prompt.value);autoSizePrompt();els.prompt.focus();});});
 setSessionLabel();loadTranscript();if(transcript.length){transcript.forEach((item)=>add(item.kind,item.text,item.timing,item.top,false,item.compute));}else{add('bot','Session ready. Load a model to begin.',null,null,false);}autoSizePrompt();refresh();
 </script></body></html>"""
@@ -239,6 +240,106 @@ class Engine:
         with self.lock:
             self.sessions.pop(session_id, None)
             self.recent.pop(session_id, None)
+
+    def _resolve_sweep_cycles(self, cycles: Any) -> List[int]:
+        raw_cycles: List[Any]
+        if cycles is None or cycles == "":
+            raw_cycles = [1, 3, 8]
+        elif isinstance(cycles, str):
+            raw_cycles = [part.strip() for part in cycles.split(",")]
+        elif isinstance(cycles, (list, tuple)):
+            raw_cycles = list(cycles)
+        else:
+            raw_cycles = [cycles]
+
+        resolved: List[int] = []
+        seen = set()
+        for value in raw_cycles:
+            parsed = chat_app._coerce_optional_positive_int(
+                value,
+                default=None,
+                max_value=chat_app.MAX_RUNTIME_REASONING_CYCLES,
+            )
+            if parsed is None or parsed in seen:
+                continue
+            seen.add(parsed)
+            resolved.append(parsed)
+            if len(resolved) >= 8:
+                break
+        return resolved or [1, 3, 8]
+
+    def compute_sweep(
+        self,
+        session_id: str,
+        user_text: str,
+        cycles: Any = None,
+        adaptive_compute: Optional[bool] = None,
+        adaptive_exit_tol: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        if not user_text.strip():
+            raise ValueError("Empty message")
+        with self.lock:
+            if self.model is None:
+                raise RuntimeError("No model loaded")
+            model = self.model
+            feature_mode = self.feature_mode
+            labels = list(self.available_labels)
+            history = list(self.sessions.get(session_id, []))
+
+        context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
+        x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
+        adaptive = (
+            chat_app._coerce_bool(self.defaults.get("adaptive_compute", False), default=False)
+            if adaptive_compute is None
+            else chat_app._coerce_bool(adaptive_compute, default=False)
+        )
+        exit_tol = (
+            self.defaults.get("adaptive_exit_tol")
+            if adaptive_exit_tol is None
+            else adaptive_exit_tol
+        )
+        exit_tol = chat_app._coerce_nonnegative_float(
+            exit_tol,
+            default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+        )
+
+        rows: List[Dict[str, Any]] = []
+        idx = torch.tensor(labels, dtype=torch.long, device=self.device)
+        for requested_cycles in self._resolve_sweep_cycles(cycles):
+            t0 = time.perf_counter()
+            with torch.no_grad():
+                logits_tensor, compute_metrics = chat_app.forward_with_runtime_compute(
+                    model,
+                    x,
+                    reasoning_cycles=requested_cycles,
+                    adaptive_compute=adaptive,
+                    exit_tol=exit_tol,
+                    return_diagnostics=True,
+                )
+                logits = logits_tensor[0, 0]
+                avail_logits = logits.index_select(0, idx)
+                probs = torch.softmax(avail_logits, dim=0)
+                confidence_tensor, pred_pos_tensor = torch.max(probs, dim=0)
+                entropy = float(-(probs * torch.log(probs.clamp_min(1e-8))).sum().item())
+            pred_pos = int(pred_pos_tensor.item())
+            rows.append(
+                {
+                    "requested_cycles": int(requested_cycles),
+                    "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+                    "cycles_used": compute_metrics.get("cycles_used"),
+                    "predicted_label": int(labels[pred_pos]),
+                    "confidence": round(float(confidence_tensor.item()), 6),
+                    "entropy": round(entropy, 6),
+                    "compute": compute_metrics,
+                }
+            )
+
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "history_turns": len(history),
+            "rows": rows,
+        }
 
     def chat(
         self,
@@ -439,6 +540,22 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 response_temperature=p.get('response_temperature'),
                 show_top_responses=int(p.get('show_top_responses') or 0),
                 reasoning_cycles=p.get('reasoning_cycles'),
+                adaptive_compute=p.get('adaptive_compute'),
+                adaptive_exit_tol=p.get('adaptive_exit_tol'),
+            ))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+    @app.post('/api/compute_sweep')
+    def api_compute_sweep():
+        p = request.get_json(force=True, silent=True) or {}
+        sid = str(p.get('session_id') or '').strip() or str(uuid.uuid4())
+        msg = str(p.get('message') or '').strip()
+        try:
+            return jsonify(engine.compute_sweep(
+                session_id=sid,
+                user_text=msg,
+                cycles=p.get('cycles'),
                 adaptive_compute=p.get('adaptive_compute'),
                 adaptive_exit_tol=p.get('adaptive_exit_tol'),
             ))

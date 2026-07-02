@@ -159,8 +159,65 @@ def test_api_chat_accepts_runtime_compute_payload():
     assert model.calls[-1]["reasoning_cycles"] == 5
 
 
+def test_compute_sweep_reports_budget_rows_without_mutating_session():
+    engine = chat_web_app.Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "topk", "max_turns": 2})
+    model = RuntimeAwareModel()
+    engine.model = model
+    engine.feature_mode = "legacy"
+    engine.buckets = {0: [_bucket_row("sweep answer")]}
+    engine.available_labels = [0]
+    engine.sessions["sweep-session"] = [("previous", "answer")]
+
+    result = engine.compute_sweep(
+        session_id="sweep-session",
+        user_text="compare compute budgets",
+        cycles=[1, 3, 8],
+        adaptive_compute=True,
+        adaptive_exit_tol=0.01,
+    )
+
+    assert result["ok"] is True
+    assert result["history_turns"] == 1
+    assert [row["requested_cycles"] for row in result["rows"]] == [1, 3, 8]
+    assert [row["cycles_used"] for row in result["rows"]] == [1.0, 2.0, 2.0]
+    assert all(row["predicted_label"] == 0 for row in result["rows"])
+    assert engine.sessions["sweep-session"] == [("previous", "answer")]
+
+
+def test_api_compute_sweep_accepts_payload_without_mutating_session():
+    engine = chat_web_app.Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "topk"})
+    model = RuntimeAwareModel()
+    engine.model = model
+    engine.feature_mode = "legacy"
+    engine.buckets = {0: [_bucket_row("api sweep answer")]}
+    engine.available_labels = [0]
+    engine.sessions["api-sweep"] = [("prior", "reply")]
+
+    app = chat_web_app.build_app(engine, "weights.pth", "meta.json")
+    client = app.test_client()
+    response = client.post(
+        "/api/compute_sweep",
+        json={
+            "session_id": "api-sweep",
+            "message": "try sweep",
+            "cycles": [2, 4],
+            "adaptive_compute": True,
+            "adaptive_exit_tol": 0.05,
+        },
+    )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+    assert [row["requested_cycles"] for row in payload["rows"]] == [2, 4]
+    assert payload["rows"][0]["compute"]["adaptive_compute"] is True
+    assert model.calls[-1]["reasoning_cycles"] == 4
+    assert engine.sessions["api-sweep"] == [("prior", "reply")]
+
+
 if __name__ == "__main__":
     test_forward_with_runtime_compute_applies_supported_kwargs_only()
     test_web_engine_forwards_runtime_compute_controls_without_mutating_contract()
     test_api_chat_accepts_runtime_compute_payload()
+    test_compute_sweep_reports_budget_rows_without_mutating_session()
+    test_api_compute_sweep_accepts_payload_without_mutating_session()
     print("runtime compute control tests passed")
