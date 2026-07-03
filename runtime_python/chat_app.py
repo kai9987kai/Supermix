@@ -297,19 +297,20 @@ def evaluate_runtime_compute_budgets(
     rows: List[Dict[str, object]] = []
     for requested_cycles in resolve_runtime_compute_cycles(cycles):
         t0 = time.perf_counter()
-        logits_tensor, compute_metrics = forward_with_runtime_compute(
-            model,
-            x,
-            reasoning_cycles=requested_cycles,
-            adaptive_compute=adaptive_compute,
-            exit_tol=resolved_exit_tol,
-            return_diagnostics=True,
-        )
-        logits = logits_tensor[0, 0]
-        avail_logits = logits.index_select(0, idx.to(logits.device))
-        probs = torch.softmax(avail_logits, dim=0)
-        confidence_tensor, pred_pos_tensor = torch.max(probs, dim=0)
-        entropy = float(-(probs * torch.log(probs.clamp_min(1e-8))).sum().item())
+        with torch.no_grad():
+            logits_tensor, compute_metrics = forward_with_runtime_compute(
+                model,
+                x,
+                reasoning_cycles=requested_cycles,
+                adaptive_compute=adaptive_compute,
+                exit_tol=resolved_exit_tol,
+                return_diagnostics=True,
+            )
+            logits = logits_tensor[0, 0]
+            avail_logits = logits.index_select(0, idx.to(logits.device))
+            probs = torch.softmax(avail_logits, dim=0)
+            confidence_tensor, pred_pos_tensor = torch.max(probs, dim=0)
+            entropy = float(-(probs * torch.log(probs.clamp_min(1e-8))).sum().item())
         pred_pos = int(pred_pos_tensor.item())
         rows.append(
             {
