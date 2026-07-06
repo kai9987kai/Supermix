@@ -1,0 +1,19 @@
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:8027
+Press CTRL+C to quit
+127.0.0.1 - - [02/Jul/2026 22:28:23] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:28:29] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:28:29] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:53:34] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:53:34] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:53:37] "POST /api/chat HTTP/1.1" 400 -
+127.0.0.1 - - [02/Jul/2026 22:54:31] "POST /api/load HTTP/1.1" 404 -
+127.0.0.1 - - [02/Jul/2026 22:54:34] "POST /api/chat HTTP/1.1" 400 -
+127.0.0.1 - - [02/Jul/2026 22:55:49] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:55:49] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [02/Jul/2026 22:55:51] "POST /api/chat HTTP/1.1" 400 -
+127.0.0.1 - - [03/Jul/2026 12:19:28] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [03/Jul/2026 14:37:09] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [03/Jul/2026 14:37:10] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [03/Jul/2026 14:37:10] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [03/Jul/2026 14:37:15] "POST /api/chat HTTP/1.1" 400 -
