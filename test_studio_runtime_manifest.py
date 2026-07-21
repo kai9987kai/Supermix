@@ -146,3 +146,26 @@ def test_manifest_check_rejects_tampered_or_syntax_broken_runtime_module(
     runtime.write_text("def syntax_broken(:\n", encoding="utf-8")
     assert main([*args, "--check"]) == 2
     assert "is not valid Python" in capsys.readouterr().err
+
+
+def test_manifest_module_hashes_are_portable_across_lf_and_crlf_checkouts(
+    tmp_path, monkeypatch
+):
+    runtime = tmp_path / "source/chat_web_app.py"
+    runtime.parent.mkdir(parents=True)
+    lf_payload = b"RUNTIME_SENTINEL = 1\n"
+    runtime.write_bytes(lf_payload)
+
+    monkeypatch.setattr(
+        manifest_generator,
+        "RUNTIME_MODULES",
+        ("source/chat_web_app.py",),
+    )
+    monkeypatch.setattr(manifest_generator, "CONTRACT_CONSTANTS", {})
+
+    lf_manifest = build_manifest(tmp_path)
+    runtime.write_bytes(lf_payload.replace(b"\n", b"\r\n"))
+    crlf_manifest = build_manifest(tmp_path)
+
+    assert crlf_manifest == lf_manifest
+    assert lf_manifest["modules"][0]["size_bytes"] == len(lf_payload)

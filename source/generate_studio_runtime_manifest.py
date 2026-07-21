@@ -94,12 +94,18 @@ CONTRACT_CONSTANTS = {
 }
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _canonical_module_bytes(path: Path) -> bytes:
+    """Return the Git-canonical text payload for a runtime module.
+
+    Every declared runtime module is a Python text file covered by the
+    repository's ``text=auto`` policy.  Git stores those files with LF line
+    endings but may materialize CRLF in a Windows worktree.  Hashing the raw
+    checkout made the supposedly deterministic manifest depend on the
+    developer's ``core.autocrlf`` setting, so mirror Git's CRLF-to-LF clean
+    conversion before recording the digest and size.
+    """
+
+    return path.read_bytes().replace(b"\r\n", b"\n")
 
 
 def _validate_python_source(path: Path) -> None:
@@ -159,11 +165,12 @@ def build_manifest(repo_root: Path, *, include_git: bool = False) -> Dict[str, A
         if not path.is_file():
             raise FileNotFoundError(f"required Studio runtime module is missing: {relative}")
         _validate_python_source(path)
+        canonical_payload = _canonical_module_bytes(path)
         modules.append(
             {
                 "path": relative,
-                "sha256": _sha256(path),
-                "size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(canonical_payload).hexdigest(),
+                "size_bytes": len(canonical_payload),
             }
         )
 
