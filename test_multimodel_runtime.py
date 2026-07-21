@@ -103,6 +103,7 @@ def _auto_route_records() -> tuple[ModelRecord, ...]:
 
 
 def test_manager_exposes_only_read_only_shadow_registry_status(tmp_path: Path) -> None:
+    from source.route_policy_ledger import hash_session_identity
     from source.route_policy_protocol import build_route_study_review_bundle_from_input
     from source.route_policy_protocol_cli import _example_bundle_input
     from source.route_policy_shadow_registry import RouteShadowAssignmentRegistry
@@ -125,7 +126,7 @@ def test_manager_exposes_only_read_only_shadow_registry_status(tmp_path: Path) -
     registry.append_assignment_commitment(
         campaign_id=campaign_id,
         seed_capsule=sealed["private_seed_capsule"],
-        cluster_identifier="runtime-status-private-cluster",
+        cluster_identifier=hash_session_identity("runtime-status-private-cluster"),
     )
     before_database = manager.route_shadow_registry_path.read_bytes()
 

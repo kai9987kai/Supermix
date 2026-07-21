@@ -15,7 +15,7 @@
     },
     "source/route_policy_ledger.py": {
       "EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION": "route-execution-assignment-v1",
-      "LEDGER_SCHEMA_VERSION": 3,
+      "LEDGER_SCHEMA_VERSION": 4,
       "OUTCOME_CONTRACT_SCHEMA_VERSION": "route-outcome-contract-v1",
       "OUTCOME_MATURITY_SCHEMA_VERSION": "route-outcome-maturity-v1",
       "SUPPORT_SCHEMA_VERSION": "route-support-v1"
@@ -30,7 +30,7 @@
       "REVIEW_BUNDLE_VERSION": "1.0.0",
       "STATEFUL_DESIGN_SCHEMA_VERSION": "route-stateful-design-screen-v1",
       "STOPPING_SCHEMA_VERSION": "route-study-stopping-v1",
-      "TARGET_POLICY_CLASS_SCHEMA_VERSION": "route-target-policy-class-v1"
+      "TARGET_POLICY_CLASS_SCHEMA_VERSION": "route-target-policy-class-v2"
     },
     "source/route_policy_shadow_registry.py": {
       "SHADOW_ASSIGNMENT_ALGORITHM": "hkdf-sha256-hmac-sha256-whole-policy-bps-v1",
@@ -69,9 +69,24 @@
   "legacy_compatibility_tree": "runtime_python",
   "modules": [
     {
+      "path": "source/chat_app.py",
+      "sha256": "893858310ecf275d1477bfb3e224ab846423c7e1e33bc6e6c32c703c3ef355c9",
+      "size_bytes": 65262
+    },
+    {
+      "path": "source/chat_web_app.py",
+      "sha256": "9ebb11a8ed0aa6bee81a4651c4e5302c353e61dcc7c5a10bcc2bf171642404e2",
+      "size_bytes": 63388
+    },
+    {
+      "path": "source/model_variants.py",
+      "sha256": "18a3d336bb5952239b9fdc02977db71c89d3961a6311c38b439079761584c727",
+      "size_bytes": 374917
+    },
+    {
       "path": "source/route_policy_ledger.py",
-      "sha256": "d7fe4b95922448484fde62c5f0889ea9cd6d292871aa8d22de4355274492dcf9",
-      "size_bytes": 111375
+      "sha256": "d433e901fd3d4b25307faf68f2d2e2d59ae12064c6322ad8efccd126dcfd53c7",
+      "size_bytes": 133796
     },
     {
       "path": "source/route_policy_lab.py",
@@ -85,13 +100,13 @@
     },
     {
       "path": "source/route_policy_protocol.py",
-      "sha256": "8fc25b420e549ba5755e75e4de630d19102f629f80b774e481916641f45654ff",
-      "size_bytes": 61648
+      "sha256": "f476aba6587ec80344da6ad5e6f3c284f47d4f2a2648401ae16dc545851dc939",
+      "size_bytes": 65121
     },
     {
       "path": "source/route_policy_shadow_registry.py",
-      "sha256": "6208e89a1495417c9f22b01aef6a5328fa92746e6a44e09d9eafa997bdb3e670",
-      "size_bytes": 103163
+      "sha256": "478c66ec7e9e4fb7d9d7c1f24627d7675f6d344047558b7531836787fb9f54d8",
+      "size_bytes": 103654
     },
     {
       "path": "source/route_policy_study_cli.py",
@@ -105,8 +120,8 @@
     },
     {
       "path": "source/route_policy_shadow_cli.py",
-      "sha256": "48f9157e28b66553a5e6857f97f51d9d8abba3fe20ef01c650d0a45e5607fc0a",
-      "size_bytes": 13330
+      "sha256": "ab1a99b7d029c9378a784c462d6e9ef64c0dff7f3b329e4bec89e994e9c17c90",
+      "size_bytes": 26782
     },
     {
       "path": "source/multimodel_runtime.py",
@@ -122,11 +137,52 @@
       "path": "source/supermix_multimodel_desktop_app.py",
       "sha256": "f3e679df20096ee170ec9fcacaaf65119c57137c52bba6a8fb0700c3823e1be9",
       "size_bytes": 11632
+    },
+    {
+      "path": "runtime_python/chat_app.py",
+      "sha256": "893858310ecf275d1477bfb3e224ab846423c7e1e33bc6e6c32c703c3ef355c9",
+      "size_bytes": 65262
+    },
+    {
+      "path": "runtime_python/chat_web_app.py",
+      "sha256": "1c9bd78a33237daf7322babe5b8bd68ab410db025bc6459847f044ea3befd444",
+      "size_bytes": 55607
+    },
+    {
+      "path": "runtime_python/chat_pipeline.py",
+      "sha256": "599c5a7575422a63281b36bd94e7ca4a21ec649cb53ed6153596e1d13c91f4e3",
+      "size_bytes": 112162
+    },
+    {
+      "path": "runtime_python/chat_memory.py",
+      "sha256": "420e542deb3d0b058c26c91a89796263c0d63c7b673b83b95b6b8eaee05fd30a",
+      "size_bytes": 5855
+    },
+    {
+      "path": "runtime_python/device_utils.py",
+      "sha256": "9d73274026a373c7255a28e4f909ea66da050cfa3044dd686d178e74fe48a785",
+      "size_bytes": 3828
+    },
+    {
+      "path": "runtime_python/llm_database.py",
+      "sha256": "78727f0f97eb91be544ce8accda5546d558104fd4949b70fcbf37f4a906da949",
+      "size_bytes": 10552
+    },
+    {
+      "path": "runtime_python/model_variants.py",
+      "sha256": "18a3d336bb5952239b9fdc02977db71c89d3961a6311c38b439079761584c727",
+      "size_bytes": 374917
+    },
+    {
+      "path": "runtime_python/run.py",
+      "sha256": "a70c53e19d3513c4a1137c84a388c27dad57e33752b647d496502027e859f7d4",
+      "size_bytes": 20936
     }
   ],
   "package_guards": {
     "automatic_policy_promotion_available": false,
     "route_ledger_requires_executed_assignment_namespace": true,
+    "route_ledger_requires_issued_execution_assignment_record": true,
     "route_protocol_activation_available": false,
     "route_protocol_assignment_implementation_available": false,
     "route_rehearsal_writes_ledger": false,

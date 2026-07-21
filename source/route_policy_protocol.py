@@ -55,7 +55,11 @@ PROTOCOL_BUILD_INPUT_SCHEMA_VERSION = "route-study-protocol-build-input-v1"
 REVIEW_BUNDLE_SCHEMA_VERSION = "route-study-review-bundle-v1"
 REVIEW_BUNDLE_VERSION = "1.0.0"
 REVIEW_BUNDLE_LABEL = "Route Protocol Review Bundle v1"
-TARGET_POLICY_CLASS_SCHEMA_VERSION = "route-target-policy-class-v1"
+TARGET_POLICY_CLASS_SCHEMA_VERSION = "route-target-policy-class-v2"
+TARGET_POLICY_FEATURE_EXTRACTION_SCHEMA_VERSION = (
+    "route-target-policy-feature-extraction-v1"
+)
+TARGET_POLICY_DECISION_RULE_SCHEMA_VERSION = "route-target-policy-decision-rule-v1"
 POPULATION_SCHEMA_VERSION = "route-study-population-v1"
 STATEFUL_DESIGN_SCHEMA_VERSION = "route-stateful-design-screen-v1"
 STOPPING_SCHEMA_VERSION = "route-study-stopping-v1"
@@ -369,18 +373,96 @@ def _normalize_study_plans(value: Any) -> list[Dict[str, Any]]:
     return validated
 
 
-def _target_policy_class(profile_name: str) -> Dict[str, Any]:
+def _target_policy_class(
+    profile_name: str,
+    source_feature_schema_version: str,
+) -> Dict[str, Any]:
+    """Freeze the complete replayable target-policy semantics.
+
+    The source feature-schema identity is part of the class rather than only
+    the surrounding protocol.  This prevents the same thresholds from being
+    treated as the same treatment when the upstream score extractor changes.
+    The closed manifests also bind the normalization and tie-break behavior
+    used by ``route_policy_lab`` instead of relying on mutable implementation
+    details.
+
+    The historical v1 hash domain is intentionally retained: existing shadow
+    registry verifiers recompute the hash over the *full* manifest.  The nested
+    v2 schema version makes under-specified v1 classes fail closed while keeping
+    that verification interface compatible.
+    """
+
     profile = get_policy_profile(profile_name)
+    feature_schema = _identifier(
+        source_feature_schema_version,
+        "target policy source_feature_schema_version",
+    )
     payload = {
         "schema_version": TARGET_POLICY_CLASS_SCHEMA_VERSION,
         "profile_name": profile.name,
         "thresholds": dict(profile.thresholds),
         "supported_actions": list(AUTO_AGENT_MODE_ORDER),
+        "feature_extraction": {
+            "schema_version": TARGET_POLICY_FEATURE_EXTRACTION_SCHEMA_VERSION,
+            "source_feature_schema_version": feature_schema,
+            "score": {
+                "source_precedence": ["auto_agent_policy.score", "score"],
+                "normalization_steps": [
+                    "reject_boolean",
+                    "coerce_with_base10_integer_conversion",
+                    "reject_negative",
+                    "reject_nonfinite_or_fractional_float",
+                ],
+                "invalid_or_missing_result": "route_unevaluable",
+            },
+            "action_eligibility": {
+                "source_precedence": [
+                    "auto_agent_policy.allowed_agent_modes",
+                    "allowed_agent_modes",
+                ],
+                "missing_or_invalid_container_result": "all_supported_actions",
+                "normalization": (
+                    "retain_known_actions_in_supported_order_deduplicate_and_inject_off"
+                ),
+            },
+        },
+        "decision_rule": {
+            "schema_version": TARGET_POLICY_DECISION_RULE_SCHEMA_VERSION,
+            "threshold_comparator": "score_greater_than_or_equal_to_threshold",
+            "priority_order": list(reversed(AUTO_AGENT_MODE_ORDER)),
+            "selection": "first_eligible_action_in_priority_order_meeting_threshold",
+            "fallback_action": "off",
+            "deterministic": True,
+        },
         "frozen_in_draft": True,
         "externally_validated": False,
         "optimality_claim": False,
     }
     return {**payload, "class_hash": _domain_hash(_TARGET_CLASS_HASH_DOMAIN, payload)}
+
+
+def _validate_target_policy_class(
+    value: Any,
+    *,
+    source_feature_schema_version: str,
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("protocol target-policy class is missing")
+    if value.get("schema_version") != TARGET_POLICY_CLASS_SCHEMA_VERSION:
+        raise ValueError(
+            "protocol target-policy class schema_version is unsupported; "
+            "rebuild legacy drafts to bind feature and decision-rule semantics"
+        )
+    expected = _target_policy_class(
+        str(value.get("profile_name") or ""),
+        source_feature_schema_version,
+    )
+    if dict(value) != expected:
+        raise ValueError(
+            "protocol target-policy class does not match a frozen profile and "
+            "normative feature/decision manifest"
+        )
+    return value
 
 
 def _design_reasons(
@@ -712,7 +794,10 @@ def build_route_study_protocol(
         for row in validated
     ]
 
-    target_class = _target_policy_class(options["target_policy_profile"])
+    target_class = _target_policy_class(
+        options["target_policy_profile"],
+        common_source_contract["feature_schema_version"],
+    )
     outcome_contracts = build_route_outcome_contracts(
         precommitted=True,
         commitment_source="protocol_draft",
@@ -1066,12 +1151,13 @@ def _validate_design_screen(value: Any) -> Mapping[str, Any]:
 def _validate_protocol_semantics(charter: Mapping[str, Any]) -> Tuple[Mapping[str, Any], int]:
     source, design_hashes = _validate_source_studies(charter.get("source_studies"))
 
-    target_class = charter.get("target_policy_class")
-    if not isinstance(target_class, Mapping):
-        raise ValueError("protocol target-policy class is missing")
-    expected_target = _target_policy_class(str(target_class.get("profile_name") or ""))
-    if dict(target_class) != expected_target:
-        raise ValueError("protocol target-policy class does not match a frozen profile")
+    common_source_contract = source["common_source_contract"]
+    _validate_target_policy_class(
+        charter.get("target_policy_class"),
+        source_feature_schema_version=str(
+            common_source_contract["feature_schema_version"]
+        ),
+    )
 
     design = _validate_design_screen(charter.get("stateful_design"))
     population = _require_exact_keys(
@@ -1297,12 +1383,17 @@ def audit_route_study_protocol(protocol: Any) -> Dict[str, Any]:
     ):
         raise ValueError("protocol blocker register must retain every blocking gate")
 
-    target_class = charter.get("target_policy_class")
-    if not isinstance(target_class, Mapping):
-        raise ValueError("protocol target-policy class is missing")
-    expected_target = _target_policy_class(str(target_class.get("profile_name") or ""))
-    if dict(target_class) != expected_target:
-        raise ValueError("protocol target-policy class does not match a frozen profile")
+    source_studies = charter.get("source_studies")
+    if not isinstance(source_studies, Mapping) or not isinstance(
+        source_studies.get("common_source_contract"), Mapping
+    ):
+        raise ValueError("protocol common source contract is missing")
+    _validate_target_policy_class(
+        charter.get("target_policy_class"),
+        source_feature_schema_version=str(
+            source_studies["common_source_contract"].get("feature_schema_version") or ""
+        ),
+    )
 
     design = charter.get("stateful_design")
     if not isinstance(design, Mapping):

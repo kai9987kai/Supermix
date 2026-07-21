@@ -63,8 +63,7 @@ def _reject_non_finite(value: str) -> None:
     raise ValueError(f"input JSON contains non-finite number: {value}")
 
 
-def _read_json(path: str, *, name: str) -> Any:
-    raw = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8-sig")
+def _parse_json(raw: str, *, name: str) -> Any:
     try:
         return json.loads(
             raw,
@@ -73,6 +72,11 @@ def _read_json(path: str, *, name: str) -> Any:
         )
     except json.JSONDecodeError as exc:
         raise ValueError(f"{name} is not valid JSON: {exc.msg}") from exc
+
+
+def _read_json(path: str, *, name: str) -> Any:
+    raw = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8-sig")
+    return _parse_json(raw, name=name)
 
 
 def _read_json_object(path: str, *, name: str) -> Dict[str, Any]:
@@ -103,6 +107,372 @@ def _render(value: Any, *, compact: bool) -> str:
     )
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _windows_acl_runtime():
+    """Load the small Win32 ACL surface lazily for source and frozen builds."""
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class Acl(ctypes.Structure):
+        _fields_ = [
+            ("AclRevision", ctypes.c_ubyte),
+            ("Sbz1", ctypes.c_ubyte),
+            ("AclSize", wintypes.WORD),
+            ("AceCount", wintypes.WORD),
+            ("Sbz2", wintypes.WORD),
+        ]
+
+    class AceHeader(ctypes.Structure):
+        _fields_ = [
+            ("AceType", ctypes.c_ubyte),
+            ("AceFlags", ctypes.c_ubyte),
+            ("AceSize", wintypes.WORD),
+        ]
+
+    class AccessAllowedAce(ctypes.Structure):
+        _fields_ = [
+            ("Header", AceHeader),
+            ("Mask", wintypes.DWORD),
+            ("SidStart", wintypes.DWORD),
+        ]
+
+    class AclSizeInformation(ctypes.Structure):
+        _fields_ = [
+            ("AceCount", wintypes.DWORD),
+            ("AclBytesInUse", wintypes.DWORD),
+            ("AclBytesFree", wintypes.DWORD),
+        ]
+
+    class SidAndAttributes(ctypes.Structure):
+        _fields_ = [("Sid", wintypes.LPVOID), ("Attributes", wintypes.DWORD)]
+
+    class TokenUser(ctypes.Structure):
+        _fields_ = [("User", SidAndAttributes)]
+
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.GetLengthSid.argtypes = [wintypes.LPVOID]
+    advapi32.GetLengthSid.restype = wintypes.DWORD
+    advapi32.CopySid.argtypes = [wintypes.DWORD, wintypes.LPVOID, wintypes.LPVOID]
+    advapi32.CopySid.restype = wintypes.BOOL
+    advapi32.InitializeAcl.argtypes = [wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD]
+    advapi32.InitializeAcl.restype = wintypes.BOOL
+    advapi32.AddAccessAllowedAceEx.argtypes = [
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+    ]
+    advapi32.AddAccessAllowedAceEx.restype = wintypes.BOOL
+    advapi32.SetSecurityInfo.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+    ]
+    advapi32.SetSecurityInfo.restype = wintypes.DWORD
+    advapi32.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR,
+        ctypes.c_int,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+    ]
+    advapi32.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi32.GetSecurityInfo.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.LPVOID),
+    ]
+    advapi32.GetSecurityInfo.restype = wintypes.DWORD
+    advapi32.GetSecurityDescriptorDacl.argtypes = [
+        wintypes.LPVOID,
+        ctypes.POINTER(wintypes.BOOL),
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    advapi32.GetSecurityDescriptorDacl.restype = wintypes.BOOL
+    advapi32.GetSecurityDescriptorControl.argtypes = [
+        wintypes.LPVOID,
+        ctypes.POINTER(wintypes.WORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetSecurityDescriptorControl.restype = wintypes.BOOL
+    advapi32.GetAclInformation.argtypes = [
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.c_int,
+    ]
+    advapi32.GetAclInformation.restype = wintypes.BOOL
+    advapi32.GetAce.argtypes = [
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.LPVOID),
+    ]
+    advapi32.GetAce.restype = wintypes.BOOL
+    advapi32.EqualSid.argtypes = [wintypes.LPVOID, wintypes.LPVOID]
+    advapi32.EqualSid.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [wintypes.LPVOID]
+    kernel32.LocalFree.restype = wintypes.LPVOID
+
+    return {
+        "ctypes": ctypes,
+        "wintypes": wintypes,
+        "msvcrt": msvcrt,
+        "advapi32": advapi32,
+        "kernel32": kernel32,
+        "Acl": Acl,
+        "AceHeader": AceHeader,
+        "AccessAllowedAce": AccessAllowedAce,
+        "AclSizeInformation": AclSizeInformation,
+        "TokenUser": TokenUser,
+    }
+
+
+def _windows_api_failure(runtime: Dict[str, Any], action: str) -> OSError:
+    code = runtime["ctypes"].get_last_error() or 1
+    return OSError(code, f"Windows refused to {action} the private seed capsule ACL")
+
+
+def _windows_current_user_sid(runtime: Dict[str, Any]):
+    """Return a stable copy of the process token's user SID."""
+
+    ctypes = runtime["ctypes"]
+    wintypes = runtime["wintypes"]
+    advapi32 = runtime["advapi32"]
+    kernel32 = runtime["kernel32"]
+    token = wintypes.HANDLE()
+    token_query = 0x0008
+    token_user_class = 1
+    error_insufficient_buffer = 122
+    if not advapi32.OpenProcessToken(
+        kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)
+    ):
+        raise _windows_api_failure(runtime, "query")
+    try:
+        required = wintypes.DWORD()
+        ctypes.set_last_error(0)
+        advapi32.GetTokenInformation(
+            token, token_user_class, None, 0, ctypes.byref(required)
+        )
+        if ctypes.get_last_error() != error_insufficient_buffer or required.value == 0:
+            raise _windows_api_failure(runtime, "query")
+        token_buffer = ctypes.create_string_buffer(required.value)
+        if not advapi32.GetTokenInformation(
+            token,
+            token_user_class,
+            token_buffer,
+            required.value,
+            ctypes.byref(required),
+        ):
+            raise _windows_api_failure(runtime, "query")
+        token_user = ctypes.cast(
+            token_buffer, ctypes.POINTER(runtime["TokenUser"])
+        ).contents
+        sid_length = advapi32.GetLengthSid(token_user.User.Sid)
+        if sid_length == 0:
+            raise _windows_api_failure(runtime, "query")
+        sid = ctypes.create_string_buffer(sid_length)
+        if not advapi32.CopySid(sid_length, sid, token_user.User.Sid):
+            raise _windows_api_failure(runtime, "copy")
+        return sid
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def _windows_os_handle(runtime: Dict[str, Any], descriptor: int):
+    raw_handle = runtime["msvcrt"].get_osfhandle(descriptor)
+    if raw_handle == -1:
+        raise OSError("Windows refused to resolve the private seed capsule handle")
+    return runtime["wintypes"].HANDLE(raw_handle)
+
+
+def _apply_windows_private_capsule_acl(path: Path) -> None:
+    """Install a protected, current-user-only DACL on an empty capsule file."""
+
+    runtime = _windows_acl_runtime()
+    ctypes = runtime["ctypes"]
+    wintypes = runtime["wintypes"]
+    advapi32 = runtime["advapi32"]
+    sid = _windows_current_user_sid(runtime)
+    sid_length = advapi32.GetLengthSid(sid)
+    if sid_length == 0:
+        raise _windows_api_failure(runtime, "query")
+
+    # FILE_ALL_ACCESS is deliberate: the creator remains able to rotate or
+    # delete the capsule, while the protected DACL contains no other trustee.
+    file_all_access = 0x001F01FF
+    acl_revision = 2
+    acl_size = (
+        ctypes.sizeof(runtime["Acl"])
+        + ctypes.sizeof(runtime["AccessAllowedAce"])
+        - ctypes.sizeof(wintypes.DWORD)
+        + sid_length
+    )
+    acl = ctypes.create_string_buffer(acl_size)
+    if not advapi32.InitializeAcl(acl, acl_size, acl_revision):
+        raise _windows_api_failure(runtime, "initialize")
+    if not advapi32.AddAccessAllowedAceEx(
+        acl, acl_revision, 0, file_all_access, sid
+    ):
+        raise _windows_api_failure(runtime, "populate")
+
+    se_file_object = 1
+    dacl_security_information = 0x00000004
+    protected_dacl_security_information = 0x80000000
+    # SetNamedSecurityInfo opens the newly-created empty file with WRITE_DAC,
+    # which the CRT data handle intentionally does not request.  The still-open
+    # CRT handle prevents replacement, and verification below uses that handle.
+    result = advapi32.SetNamedSecurityInfoW(
+        str(path),
+        se_file_object,
+        dacl_security_information | protected_dacl_security_information,
+        None,
+        None,
+        acl,
+        None,
+    )
+    if result != 0:
+        raise OSError(result, "Windows refused to restrict the private seed capsule ACL")
+
+
+def _verify_windows_private_capsule_acl(descriptor: int) -> None:
+    """Verify the capsule has exactly one protected full-control user ACE."""
+
+    runtime = _windows_acl_runtime()
+    ctypes = runtime["ctypes"]
+    wintypes = runtime["wintypes"]
+    advapi32 = runtime["advapi32"]
+    kernel32 = runtime["kernel32"]
+    expected_sid = _windows_current_user_sid(runtime)
+
+    se_file_object = 1
+    dacl_security_information = 0x00000004
+    security_descriptor = wintypes.LPVOID()
+    dacl = wintypes.LPVOID()
+    result = advapi32.GetSecurityInfo(
+        _windows_os_handle(runtime, descriptor),
+        se_file_object,
+        dacl_security_information,
+        None,
+        None,
+        ctypes.byref(dacl),
+        None,
+        ctypes.byref(security_descriptor),
+    )
+    if result != 0:
+        raise OSError(result, "Windows refused to read the private seed capsule ACL")
+    try:
+        dacl_present = wintypes.BOOL()
+        dacl_defaulted = wintypes.BOOL()
+        descriptor_dacl = wintypes.LPVOID()
+        if not advapi32.GetSecurityDescriptorDacl(
+            security_descriptor,
+            ctypes.byref(dacl_present),
+            ctypes.byref(descriptor_dacl),
+            ctypes.byref(dacl_defaulted),
+        ):
+            raise _windows_api_failure(runtime, "verify")
+        if (
+            not dacl_present.value
+            or not descriptor_dacl.value
+            or descriptor_dacl.value != dacl.value
+        ):
+            raise OSError("private seed capsule does not have an explicit Windows DACL")
+
+        control = wintypes.WORD()
+        revision = wintypes.DWORD()
+        if not advapi32.GetSecurityDescriptorControl(
+            security_descriptor, ctypes.byref(control), ctypes.byref(revision)
+        ):
+            raise _windows_api_failure(runtime, "verify")
+        se_dacl_protected = 0x1000
+        if not control.value & se_dacl_protected:
+            raise OSError("private seed capsule Windows DACL still inherits permissions")
+
+        acl_info = runtime["AclSizeInformation"]()
+        acl_size_information_class = 2
+        if not advapi32.GetAclInformation(
+            dacl,
+            ctypes.byref(acl_info),
+            ctypes.sizeof(acl_info),
+            acl_size_information_class,
+        ):
+            raise _windows_api_failure(runtime, "verify")
+        if acl_info.AceCount != 1:
+            raise OSError("private seed capsule Windows DACL is not current-user-only")
+
+        ace_pointer = wintypes.LPVOID()
+        if not advapi32.GetAce(dacl, 0, ctypes.byref(ace_pointer)):
+            raise _windows_api_failure(runtime, "verify")
+        ace = ctypes.cast(
+            ace_pointer, ctypes.POINTER(runtime["AccessAllowedAce"])
+        ).contents
+        access_allowed_ace_type = 0
+        file_all_access = 0x001F01FF
+        if (
+            ace.Header.AceType != access_allowed_ace_type
+            or ace.Header.AceFlags != 0
+            or ace.Mask != file_all_access
+        ):
+            raise OSError("private seed capsule Windows DACL has unexpected access rights")
+        sid_address = ace_pointer.value + runtime["AccessAllowedAce"].SidStart.offset
+        if not advapi32.EqualSid(wintypes.LPVOID(sid_address), expected_sid):
+            raise OSError("private seed capsule Windows DACL trustee is not the current user")
+    finally:
+        if security_descriptor.value:
+            kernel32.LocalFree(security_descriptor)
+
+
+def _read_private_capsule(path: Path) -> Dict[str, Any]:
+    """Read a capsule only after validating its Windows access boundary."""
+
+    with path.open("r", encoding="utf-8-sig") as handle:
+        if _is_windows():
+            _verify_windows_private_capsule_acl(handle.fileno())
+        raw = handle.read()
+    value = _parse_json(raw, name="private seed capsule")
+    if not isinstance(value, dict):
+        raise ValueError("private seed capsule must be a JSON object")
+    return value
+
+
 def _decode_capsule_seed(capsule: Dict[str, Any]) -> bytes:
     if set(capsule) != _SEED_CAPSULE_KEYS:
         raise ValueError("private seed capsule has an unsupported field set")
@@ -121,7 +491,7 @@ def _decode_capsule_seed(capsule: Dict[str, Any]) -> bytes:
 
 
 def _load_recovery_capsule(path: Path, review_bundle: Dict[str, Any]) -> Tuple[Dict[str, Any], bytes]:
-    capsule = _read_json_object(str(path), name="private seed capsule")
+    capsule = _read_private_capsule(path)
     seed = _decode_capsule_seed(capsule)
     artifacts = create_shadow_campaign_artifacts(review_bundle, seed)
     audit_shadow_seed_capsule(artifacts["public_package"], capsule)
@@ -133,19 +503,24 @@ def _load_recovery_capsule(path: Path, review_bundle: Dict[str, Any]) -> Tuple[D
 
 def _write_private_capsule(path: Path, capsule: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    # O_RDWR gives the verifier READ_CONTROL through GENERIC_READ on Windows.
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
     descriptor = os.open(str(path), flags, stat.S_IRUSR | stat.S_IWUSR)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             descriptor = -1
+            if _is_windows():
+                # The inherited DACL may be broad, so lock and verify the still
+                # empty file before any private seed bytes are written.
+                _apply_windows_private_capsule_acl(path)
+                _verify_windows_private_capsule_acl(handle.fileno())
             handle.write(_render(capsule, compact=False) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
-        try:
+            if _is_windows():
+                _verify_windows_private_capsule_acl(handle.fileno())
+        if not _is_windows():
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
-        except OSError:
-            # Windows ACLs, rather than POSIX mode bits, are authoritative.
-            pass
     except BaseException:
         if descriptor >= 0:
             os.close(descriptor)
@@ -214,7 +589,7 @@ def _seal(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _commit(args: argparse.Namespace) -> Dict[str, Any]:
-    capsule = _read_json_object(str(args.seed_input), name="private seed capsule")
+    capsule = _read_private_capsule(Path(args.seed_input).expanduser())
     cluster = _read_json_object(str(args.cluster_input), name="cluster input")
     if set(cluster) != {"cluster_identifier"}:
         raise ValueError("cluster input must contain exactly one field: cluster_identifier")
@@ -233,7 +608,7 @@ def _close(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _reveal(args: argparse.Namespace) -> Dict[str, Any]:
-    capsule = _read_json_object(str(args.seed_input), name="private seed capsule")
+    capsule = _read_private_capsule(Path(args.seed_input).expanduser())
     artifact = RouteShadowAssignmentRegistry(args.registry).reveal_seed(
         campaign_id=args.campaign,
         seed_capsule=capsule,

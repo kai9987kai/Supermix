@@ -101,6 +101,7 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
     <div class='split'><div class='row'><label for='reasoningCycles'>Reasoning cycles</label><input id='reasoningCycles' type='text' placeholder='default or auto'></div><div class='row'><label for='exitTol'>Exit tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div></div>
     <div class='split'><div class='row'><label for='exitEntropy'>Exit entropy</label><input id='exitEntropy' type='number' min='0' step='0.01' value='0.2'></div><div class='row'><label for='stabilityTol'>Stability tolerance</label><input id='stabilityTol' type='number' min='0' step='0.001' value='0.005'></div></div>
     <div class='split'><div class='row'><label for='stabilityPatience'>Stability patience</label><input id='stabilityPatience' type='number' min='0' max='64' step='1' value='2'></div><div class='row'><label for='adaptiveCompute'>Adaptive compute</label><select id='adaptiveCompute'><option value='off'>off</option><option value='on'>on</option></select></div></div>
+    <div class='row'><label for='autoCompute'>Auto compute budget</label><select id='autoCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
     <div class='btns'><button id='loadBtn'>Load</button><button class='alt' id='statusBtn'>Refresh</button><button class='alt' id='clearBtn'>Clear</button><button class='alt' id='newSessionBtn'>New ID</button></div>
     <div class='status' id='statusBox'>Loading status...</div>
     <div class='shadow-status'><div class='shadow-head'><span>Shadow registry - read only</span><button class='alt' id='shadowBtn' type='button'>Refresh</button></div><div id='shadowBox'>Not loaded. Execution, activation, and promotion are unavailable.</div></div>
@@ -113,7 +114,7 @@ button.alt{background:#e7edf0;color:#1e2a31;border:1px solid var(--line)}.status
 </div>
 <script>
 const el=(id)=>document.getElementById(id);
-const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),sweepBtn:el('sweepBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),shadowBtn:el('shadowBtn'),shadowBox:el('shadowBox'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),reasoningCycles:el('reasoningCycles'),adaptiveCompute:el('adaptiveCompute'),exitTol:el('exitTol'),exitEntropy:el('exitEntropy'),stabilityPatience:el('stabilityPatience'),stabilityTol:el('stabilityTol')};
+const els={msgs:el('msgs'),prompt:el('prompt'),sendBtn:el('sendBtn'),sweepBtn:el('sweepBtn'),loadBtn:el('loadBtn'),statusBtn:el('statusBtn'),clearBtn:el('clearBtn'),newSessionBtn:el('newSessionBtn'),shadowBtn:el('shadowBtn'),shadowBox:el('shadowBox'),statusBox:el('statusBox'),metaLine:el('metaLine'),session:el('session'),runtimePill:el('runtimePill'),weights:el('weights'),meta:el('meta'),style:el('style'),rt:el('rt'),showTop:el('showTop'),reasoningCycles:el('reasoningCycles'),adaptiveCompute:el('adaptiveCompute'),autoCompute:el('autoCompute'),exitTol:el('exitTol'),exitEntropy:el('exitEntropy'),stabilityPatience:el('stabilityPatience'),stabilityTol:el('stabilityTol')};
 let sid=localStorage.getItem('champion-web-sid');if(!sid){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);}
 const draftKey='champion-web-draft-v2';const transcriptKey=()=>('champion-web-transcript-v2-'+sid);let transcript=[];let sending=false;
 function setSessionLabel(){els.session.textContent='session '+sid.slice(0,8);}
@@ -124,16 +125,16 @@ function setBusy(active,label){sending=active;els.sendBtn.disabled=active;els.sw
 function fmtNum(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):null;}
 function timingText(t){if(!t)return'';let s=`${t.total??'?'} ms total - ${t.infer??'?'} ms infer - ${t.rank_pick??'?'} ms rank`;if(t.cycles_used!==undefined&&t.cycles_used!==null){s+=` - cycles ${t.cycles_used}`;}return s;}
 function reasoningCyclesValue(){const raw=els.reasoningCycles.value.trim();if(!raw)return null;const low=raw.toLowerCase();if(['auto','adaptive','smart'].includes(low))return 'auto';const n=Number(raw);return Number.isFinite(n)?n:raw;}
-function computeText(compute){if(!compute||!compute.applied)return'';const parts=[];if(compute.reasoning_budget_mode==='auto'){parts.push('mode auto');}if(compute.requested_reasoning_cycles!==undefined&&compute.requested_reasoning_cycles!==null){parts.push(`requested ${compute.requested_reasoning_cycles}`);}if(compute.cycles_used!==undefined&&compute.cycles_used!==null){parts.push(`used ${compute.cycles_used}`);}if(compute.exit_reason){parts.push(`exit ${compute.exit_reason}`);}const streak=fmtNum(compute.prediction_streak);if(streak){parts.push(`stable ${streak}`);}const drift=fmtNum(compute.prediction_confidence_delta);if(drift){parts.push(`drift ${drift}`);}const ponder=fmtNum(compute.ponder_cost);if(ponder){parts.push(`ponder ${ponder}`);}const consistency=fmtNum(compute.consistency_loss);if(consistency){parts.push(`consistency ${consistency}`);}const entropy=fmtNum(compute.gating_entropy);if(entropy){parts.push(`gate entropy ${entropy}`);}const exitEntropy=fmtNum(compute.exit_entropy_threshold);if(exitEntropy){parts.push(`exit entropy ${exitEntropy}`);}if(compute.auto_reasoning_policy&&Array.isArray(compute.auto_reasoning_policy.reasons)){parts.push(`policy ${compute.auto_reasoning_policy.reasons.slice(0,3).join(',')}`);}return parts.length?`Compute: ${parts.join(' - ')}`:'';}
+function computeText(compute){if(!compute||!compute.applied)return'';const parts=[];if(compute.reasoning_budget_mode==='auto'){parts.push('mode auto');}if(compute.requested_reasoning_cycles!==undefined&&compute.requested_reasoning_cycles!==null){parts.push(`requested ${compute.requested_reasoning_cycles}`);}if(compute.cycles_used!==undefined&&compute.cycles_used!==null){parts.push(`used ${compute.cycles_used}`);}if(compute.exit_reason){parts.push(`exit ${compute.exit_reason}`);}const streak=fmtNum(compute.prediction_streak);if(streak){parts.push(`stable ${streak}`);}const drift=fmtNum(compute.prediction_confidence_delta);if(drift){parts.push(`drift ${drift}`);}const ponder=fmtNum(compute.ponder_cost);if(ponder){parts.push(`ponder ${ponder}`);}const consistency=fmtNum(compute.consistency_loss);if(consistency){parts.push(`consistency ${consistency}`);}const entropy=fmtNum(compute.gating_entropy);if(entropy){parts.push(`gate entropy ${entropy}`);}const exitEntropy=fmtNum(compute.exit_entropy_threshold);if(exitEntropy){parts.push(`exit entropy ${exitEntropy}`);}if(compute.auto_reasoning_policy&&Array.isArray(compute.auto_reasoning_policy.reasons)){parts.push(`policy ${compute.auto_reasoning_policy.reasons.slice(0,3).join(',')}`);}if(compute.auto_compute_plan){parts.push(`budget ${compute.auto_compute_plan.selected_reasoning_cycles} (${compute.auto_compute_plan.reason})`);}return parts.length?`Compute: ${parts.join(' - ')}`:'';}
 function add(kind,text,timing,top,persist=true,compute=null){const card=document.createElement('article');card.className='msg '+kind;const who=document.createElement('div');who.className='who';const label=document.createElement('span');label.textContent=kind==='user'?'You':'Champion';who.appendChild(label);if(kind==='bot'&&text){const copy=document.createElement('button');copy.className='copy';copy.type='button';copy.textContent='Copy';copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';setTimeout(()=>{copy.textContent='Copy';},1200);}catch(_){copy.textContent='Failed';}};who.appendChild(copy);}const body=document.createElement('div');body.textContent=text;card.appendChild(who);card.appendChild(body);const tt=timingText(timing);if(tt){const node=document.createElement('div');node.className='tim';node.textContent=tt;card.appendChild(node);}const ct=computeText(compute);if(ct){const node=document.createElement('div');node.className='tim';node.textContent=ct;card.appendChild(node);}if(Array.isArray(top)&&top.length){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`Top candidates (${top.length})`;details.appendChild(summary);top.forEach((candidate,index)=>{const row=document.createElement('div');const score=Number(candidate.score);const scoreText=Number.isFinite(score)?score.toFixed(3):'n/a';row.textContent=`${index+1}. (${scoreText}) ${String(candidate.text||'').slice(0,220)}`;details.appendChild(row);});card.appendChild(details);}els.msgs.appendChild(card);els.msgs.scrollTo({top:els.msgs.scrollHeight,behavior:'smooth'});if(persist){transcript.push({kind,text,timing,top,compute,ts:Date.now()});saveTranscript();}return card;}
 async function jget(path){const r=await fetch(path);const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
 async function jpost(path,payload){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${r.status}`);return d;}
-function renderStatus(status){const lines=[status.loaded?'Model loaded':'No model loaded','Device: '+(status.device||'unknown'),'Size: '+(status.model_size||'unknown'),'Features: '+(status.feature_mode||'unknown'),'Labels: '+(status.available_labels??'unknown'),'Sessions: '+(status.sessions??0),'Runtime compute: '+(status.runtime_compute_supported?'supported':'not supported'),'Default cycles: '+(status.reasoning_cycles??'default'),'Adaptive: '+(status.adaptive_compute?'on':'off'),'Exit entropy: '+(status.adaptive_exit_entropy??'default'),'Stability: '+(status.prediction_stability_patience??'off')+' cycles / '+(status.prediction_stability_tol??'default')+' drift'];els.statusBox.textContent=lines.join('\\n');els.metaLine.textContent=status.loaded?`${status.model_size} - ${status.feature_mode} - ${status.available_labels} labels`:'Choose model files and load them';els.runtimePill.textContent=status.loaded?'ready':'idle';if(!els.weights.value&&status.weights)els.weights.value=status.weights;if(!els.meta.value&&status.meta)els.meta.value=status.meta;if(els.reasoningCycles&&!els.reasoningCycles.value&&status.reasoning_cycles){els.reasoningCycles.value=status.reasoning_cycles;}if(els.adaptiveCompute){els.adaptiveCompute.value=status.adaptive_compute?'on':'off';}if(els.exitTol&&status.adaptive_exit_tol!==undefined){els.exitTol.value=status.adaptive_exit_tol;}if(els.exitEntropy&&status.adaptive_exit_entropy!==undefined){els.exitEntropy.value=status.adaptive_exit_entropy;}if(els.stabilityPatience&&status.prediction_stability_patience!==undefined){els.stabilityPatience.value=status.prediction_stability_patience;}if(els.stabilityTol&&status.prediction_stability_tol!==undefined){els.stabilityTol.value=status.prediction_stability_tol;}}
+function renderStatus(status){const lines=[status.loaded?'Model loaded':'No model loaded','Device: '+(status.device||'unknown'),'Size: '+(status.model_size||'unknown'),'Features: '+(status.feature_mode||'unknown'),'Labels: '+(status.available_labels??'unknown'),'Sessions: '+(status.sessions??0),'Runtime compute: '+(status.runtime_compute_supported?'supported':'not supported'),'Default cycles: '+(status.reasoning_cycles??'default'),'Adaptive: '+(status.adaptive_compute?'on':'off'),'Auto budget: '+(status.auto_compute?'on':'off'),'Exit entropy: '+(status.adaptive_exit_entropy??'default'),'Stability: '+(status.prediction_stability_patience??'off')+' cycles / '+(status.prediction_stability_tol??'default')+' drift'];els.statusBox.textContent=lines.join('\\n');els.metaLine.textContent=status.loaded?`${status.model_size} - ${status.feature_mode} - ${status.available_labels} labels`:'Choose model files and load them';els.runtimePill.textContent=status.loaded?'ready':'idle';if(!els.weights.value&&status.weights)els.weights.value=status.weights;if(!els.meta.value&&status.meta)els.meta.value=status.meta;if(els.reasoningCycles&&!els.reasoningCycles.value&&status.reasoning_cycles){els.reasoningCycles.value=status.reasoning_cycles;}if(els.adaptiveCompute){els.adaptiveCompute.value=status.adaptive_compute?'on':'off';}if(els.autoCompute){els.autoCompute.value=status.auto_compute?'on':'off';}if(els.exitTol&&status.adaptive_exit_tol!==undefined){els.exitTol.value=status.adaptive_exit_tol;}if(els.exitEntropy&&status.adaptive_exit_entropy!==undefined){els.exitEntropy.value=status.adaptive_exit_entropy;}if(els.stabilityPatience&&status.prediction_stability_patience!==undefined){els.stabilityPatience.value=status.prediction_stability_patience;}if(els.stabilityTol&&status.prediction_stability_tol!==undefined){els.stabilityTol.value=status.prediction_stability_tol;}}
 async function refresh(){try{const data=await jget('/api/status');renderStatus(data.status);}catch(err){els.statusBox.textContent='Status error: '+err.message;els.runtimePill.textContent='status error';}}
 function renderShadow(snapshot){const campaigns=Array.isArray(snapshot&&snapshot.campaigns)?snapshot.campaigns:[];const committed=campaigns.reduce((n,row)=>n+(Number(row.commitment_count)||0),0);const matched=campaigns.reduce((n,row)=>n+(Number(row.matched_assignment_count)||0),0);const processed=campaigns.reduce((n,row)=>n+(Number(row.processed_reveal_count)||0),0);const mismatched=campaigns.reduce((n,row)=>n+(Number(row.mismatched_assignment_count)||0),0);const chain=snapshot&&snapshot.event_chain;if(!snapshot||snapshot.available!==true){els.shadowBox.textContent=`Not initialized at ${(snapshot&&snapshot.registry_location)||'the canonical memory path'}.\nRead only - execution, activation, and promotion unavailable.`;return;}els.shadowBox.textContent=`${snapshot.ok?'Verified':'Verification failed'} - ${campaigns.length} campaigns - ${matched}/${committed} assignments matched - ${processed} reveals processed - ${mismatched} mismatches\nChain ${chain&&chain.ok?'verified':'failed'} (${Number(chain&&chain.verified_events)||0} events). Local chain only; browser access is read-only.`;}
 async function refreshShadow(){els.shadowBtn.disabled=true;els.shadowBox.textContent='Reading local registry...';try{const data=await jget('/api/route_shadow_registry/status');renderShadow(data.route_shadow_registry||{});}catch(err){els.shadowBox.textContent='Registry status error: '+err.message;}finally{els.shadowBtn.disabled=false;}}
 async function loadModel(){setBusy(true,'loading');els.statusBox.textContent='Loading model...';try{const data=await jpost('/api/load',{weights:els.weights.value.trim(),meta:els.meta.value.trim()});renderStatus(data);}catch(err){els.statusBox.textContent='Load error: '+err.message;els.runtimePill.textContent='load failed';}finally{setBusy(false,els.runtimePill.textContent==='load failed'?'load failed':'ready');}}
-async function send(){const text=els.prompt.value.trim();if(!text||sending)return;add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const cycles=reasoningCyclesValue();const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value),reasoning_cycles:cycles,adaptive_compute:els.adaptiveCompute.value==='on',adaptive_exit_tol:Number(els.exitTol.value),adaptive_exit_entropy:Number(els.exitEntropy.value),prediction_stability_patience:Number(els.stabilityPatience.value),prediction_stability_tol:Number(els.stabilityTol.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates,true,data.compute);els.runtimePill.textContent=data.compute&&data.compute.applied?'compute active':'ready';}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
+async function send(){const text=els.prompt.value.trim();if(!text||sending)return;add('user',text);els.prompt.value='';localStorage.removeItem(draftKey);autoSizePrompt();setBusy(true,'generating');const pending=add('bot','Generating response...',null,null,false);pending.classList.add('pending');try{const cycles=reasoningCyclesValue();const data=await jpost('/api/chat',{session_id:sid,message:text,style_mode:els.style.value,response_temperature:Number(els.rt.value),show_top_responses:Number(els.showTop.value),reasoning_cycles:cycles,adaptive_compute:els.adaptiveCompute.value==='on',auto_compute:els.autoCompute.value==='on',adaptive_exit_tol:Number(els.exitTol.value),adaptive_exit_entropy:Number(els.exitEntropy.value),prediction_stability_patience:Number(els.stabilityPatience.value),prediction_stability_tol:Number(els.stabilityTol.value)});pending.remove();add('bot',data.response,data.timing_ms,data.top_candidates,true,data.compute);els.runtimePill.textContent=data.auto_compute_plan?`auto ${data.auto_compute_plan.selected_reasoning_cycles}`:(data.compute&&data.compute.applied?'compute active':'ready');}catch(err){pending.remove();add('bot','Error: '+err.message);els.runtimePill.textContent='chat error';}finally{setBusy(false,els.runtimePill.textContent);}}
 async function sweepCompute(){const text=els.prompt.value.trim();if(!text||sending)return;setBusy(true,'sweeping');const pending=add('bot','Running compute sweep...',null,null,false);pending.classList.add('pending');try{const data=await jpost('/api/compute_sweep',{session_id:sid,message:text,cycles:[1,3,8],adaptive_compute:els.adaptiveCompute.value==='on',adaptive_exit_tol:Number(els.exitTol.value),adaptive_exit_entropy:Number(els.exitEntropy.value),prediction_stability_patience:Number(els.stabilityPatience.value),prediction_stability_tol:Number(els.stabilityTol.value)});pending.remove();const lines=['Compute sweep for draft prompt:'];data.rows.forEach((row)=>{const entropy=fmtNum(row.entropy);const conf=fmtNum(row.confidence);const reason=row.compute&&row.compute.exit_reason?` - exit ${row.compute.exit_reason}`:'';lines.push(`cycles ${row.requested_cycles}: ${row.latency_ms} ms - used ${row.cycles_used} - label ${row.predicted_label} - conf ${conf??'n/a'} - entropy ${entropy??'n/a'}${reason}`);});add('bot',lines.join('\\n'),null,null,true,data.rows[data.rows.length-1]?.compute||null);els.runtimePill.textContent='sweep done';}catch(err){pending.remove();add('bot','Sweep error: '+err.message);els.runtimePill.textContent='sweep error';}finally{setBusy(false,els.runtimePill.textContent);}}
 async function clearSess(){try{await jpost('/api/clear',{session_id:sid});}catch(_){}transcript=[];localStorage.removeItem(transcriptKey());els.msgs.innerHTML='';add('bot','Session cleared.',null,null,false);}
 function newSession(){sid=crypto.randomUUID?crypto.randomUUID():String(Date.now());localStorage.setItem('champion-web-sid',sid);transcript=[];setSessionLabel();els.msgs.innerHTML='';add('bot','New session started.',null,null,false);}
@@ -150,6 +151,7 @@ _RUNTIME_COMPUTE_DEFAULT_KEYS = (
     "adaptive_exit_entropy",
     "prediction_stability_patience",
     "prediction_stability_tol",
+    "auto_compute",
 )
 
 
@@ -161,6 +163,7 @@ def _library_runtime_compute_defaults() -> Dict[str, Any]:
         "adaptive_exit_entropy": chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY,
         "prediction_stability_patience": chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE,
         "prediction_stability_tol": chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
+        "auto_compute": False,
     }
 
 
@@ -194,6 +197,7 @@ def _normalize_runtime_compute_defaults(values: Dict[str, Any]) -> Dict[str, Any
             values.get("prediction_stability_tol"),
             chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
         ),
+        "auto_compute": chat_app._coerce_bool(values.get("auto_compute")),
     }
 
 
@@ -206,6 +210,7 @@ def _runtime_compute_cli_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         "adaptive_exit_entropy": getattr(args, "adaptive_exit_entropy", None),
         "prediction_stability_patience": getattr(args, "prediction_stability_patience", None),
         "prediction_stability_tol": getattr(args, "prediction_stability_tol", None),
+        "auto_compute": getattr(args, "auto_compute", None),
     }
     return {key: value for key, value in values.items() if value is not None}
 
@@ -271,6 +276,7 @@ class Engine:
                 "adaptive_exit_entropy": chat_app._coerce_nonnegative_float(self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY), chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
                 "prediction_stability_patience": chat_app._coerce_nonnegative_int(self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE), chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE, chat_app.MAX_RUNTIME_REASONING_CYCLES),
                 "prediction_stability_tol": chat_app._coerce_nonnegative_float(self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL), chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                "auto_compute": chat_app._coerce_bool(self.defaults.get("auto_compute", False)),
             }
 
     def route_shadow_registry_snapshot(self) -> Dict[str, Any]:
@@ -376,6 +382,33 @@ class Engine:
             self.sessions.pop(session_id, None)
             self.recent.pop(session_id, None)
 
+    def _resolve_sweep_cycles(self, cycles: Any) -> List[int]:
+        return chat_app.resolve_runtime_compute_cycles(cycles)
+
+    def _auto_compute_cycles(self, preferred_cycles: Any = None) -> List[int]:
+        return chat_app.runtime_auto_compute_cycles(preferred_cycles)
+
+    def _run_compute_sweep_rows(
+        self,
+        model,
+        x,
+        labels: List[int],
+        cycles: Any,
+        adaptive: bool,
+        exit_tol: Optional[float],
+    ) -> List[Dict[str, Any]]:
+        return chat_app.evaluate_runtime_compute_budgets(
+            model,
+            x,
+            labels,
+            cycles=cycles,
+            adaptive_compute=adaptive,
+            exit_tol=exit_tol,
+        )
+
+    def _select_auto_compute_budget(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return chat_app.select_auto_runtime_compute_budget(rows)
+
     def compute_sweep(
         self,
         session_id: str,
@@ -440,7 +473,12 @@ class Engine:
                     "compute": compute_diag,
                 })
 
-        return {"ok": True, "session_id": session_id, "rows": rows}
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "history_turns": len(history),
+            "rows": rows,
+        }
 
     def chat(
         self,
@@ -455,6 +493,7 @@ class Engine:
         adaptive_exit_entropy: Any = None,
         prediction_stability_patience: Any = None,
         prediction_stability_tol: Any = None,
+        auto_compute: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
@@ -474,19 +513,56 @@ class Engine:
         context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
         tt = time.perf_counter()
         x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
+        resolved_adaptive_compute = (
+            self.defaults.get("adaptive_compute", False)
+            if adaptive_compute is None
+            else adaptive_compute
+        )
+        resolved_exit_tol = (
+            self.defaults.get("adaptive_exit_tol")
+            if adaptive_exit_tol is None
+            else adaptive_exit_tol
+        )
+        effective_reasoning_cycles = (
+            self.defaults.get("reasoning_cycles")
+            if reasoning_cycles is None
+            else reasoning_cycles
+        )
+        compute_plan: Optional[Dict[str, Any]] = None
+        auto_enabled = (
+            chat_app._coerce_bool(self.defaults.get("auto_compute", False), default=False)
+            if auto_compute is None
+            else chat_app._coerce_bool(auto_compute, default=False)
+        )
+        if auto_enabled and chat_app.model_supports_runtime_compute(model):
+            sweep_rows = self._run_compute_sweep_rows(
+                model=model,
+                x=x,
+                labels=labels,
+                cycles=self._auto_compute_cycles(effective_reasoning_cycles),
+                adaptive=chat_app._coerce_bool(resolved_adaptive_compute, default=False),
+                exit_tol=chat_app._coerce_nonnegative_float(
+                    resolved_exit_tol,
+                    default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+                ),
+            )
+            compute_plan = self._select_auto_compute_budget(sweep_rows)
+            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
         with torch.no_grad():
-            model_out, compute_diag = chat_app.forward_with_runtime_compute(
+            model_out, compute_metrics = chat_app.forward_with_runtime_compute(
                 model,
                 x,
-                reasoning_cycles=reasoning_cycles if reasoning_cycles is not None else self.defaults.get("reasoning_cycles"),
-                adaptive_compute=adaptive_compute if adaptive_compute is not None else self.defaults.get("adaptive_compute", False),
-                exit_tol=adaptive_exit_tol if adaptive_exit_tol is not None else self.defaults.get("adaptive_exit_tol", 1e-3),
+                reasoning_cycles=effective_reasoning_cycles,
+                adaptive_compute=resolved_adaptive_compute,
+                exit_tol=resolved_exit_tol,
                 exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
                 prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
                 prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
                 auto_reasoning_context=context,
             )
             logits = model_out[0, 0]
+        if compute_plan is not None:
+            compute_metrics["auto_compute_plan"] = compute_plan
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
@@ -574,18 +650,22 @@ class Engine:
             if len(recent) > 24:
                 del recent[:-24]
 
+        timing_ms = {
+            "infer": round(t_infer * 1000, 1),
+            "rank_pick": round(t_rank * 1000, 1),
+            "total": round((time.perf_counter() - t0) * 1000, 1),
+        }
+        if "cycles_used" in compute_metrics:
+            timing_ms["cycles_used"] = compute_metrics["cycles_used"]
+
         return {
             "ok": True,
             "session_id": session_id,
             "response": resp,
             "style_mode": resolved_style,
-            "timing_ms": {
-                "infer": round(t_infer * 1000, 1),
-                "rank_pick": round(t_rank * 1000, 1),
-                "total": round((time.perf_counter() - t0) * 1000, 1),
-                "cycles_used": compute_diag.get("cycles_used"),
-            },
-            "compute": compute_diag,
+            "timing_ms": timing_ms,
+            "compute": compute_metrics,
+            "auto_compute_plan": compute_plan,
             "top_candidates": top_candidates,
         }
 
@@ -646,6 +726,7 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 adaptive_exit_entropy=p.get('adaptive_exit_entropy'),
                 prediction_stability_patience=p.get('prediction_stability_patience'),
                 prediction_stability_tol=p.get('prediction_stability_tol'),
+                auto_compute=p.get('auto_compute'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -721,6 +802,20 @@ def main() -> None:
     ap.add_argument('--adaptive_exit_entropy', type=float, default=None)
     ap.add_argument('--prediction_stability_patience', type=int, default=None)
     ap.add_argument('--prediction_stability_tol', type=float, default=None)
+    auto_compute_group = ap.add_mutually_exclusive_group()
+    auto_compute_group.add_argument(
+        '--auto_compute',
+        dest='auto_compute',
+        action='store_true',
+        help='enable automatic compute-budget selection, overriding checkpoint metadata',
+    )
+    auto_compute_group.add_argument(
+        '--no_auto_compute',
+        dest='auto_compute',
+        action='store_false',
+        help='disable automatic compute-budget selection, overriding checkpoint metadata',
+    )
+    ap.set_defaults(auto_compute=None)
     args = ap.parse_args()
 
     configure_torch_runtime(

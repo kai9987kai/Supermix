@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import source.generate_studio_runtime_manifest as manifest_generator
 from source.generate_studio_runtime_manifest import (
     MANIFEST_SCHEMA_VERSION,
     RUNTIME_MODULES,
@@ -12,6 +13,20 @@ from source.generate_studio_runtime_manifest import (
 
 ROOT = Path(__file__).resolve().parent
 
+EXPECTED_CHAT_RUNTIME_MODULES = {
+    "source/chat_app.py",
+    "source/chat_web_app.py",
+    "source/model_variants.py",
+    "runtime_python/chat_app.py",
+    "runtime_python/chat_web_app.py",
+    "runtime_python/chat_pipeline.py",
+    "runtime_python/chat_memory.py",
+    "runtime_python/device_utils.py",
+    "runtime_python/llm_database.py",
+    "runtime_python/model_variants.py",
+    "runtime_python/run.py",
+}
+
 
 def test_checked_runtime_manifest_is_current_and_complete():
     assert main(["--repo-root", str(ROOT), "--check"]) == 0
@@ -21,6 +36,9 @@ def test_checked_runtime_manifest_is_current_and_complete():
     assert checked["schema_version"] == MANIFEST_SCHEMA_VERSION
     assert checked["app_version"] == STUDIO_APP_VERSION
     assert [row["path"] for row in checked["modules"]] == list(RUNTIME_MODULES)
+    assert EXPECTED_CHAT_RUNTIME_MODULES.issubset(
+        {row["path"] for row in checked["modules"]}
+    )
     assert all(len(row["sha256"]) == 64 and row["size_bytes"] > 0 for row in checked["modules"])
     assert checked["entrypoints"]["route_study_console"] == "source/route_policy_protocol_cli.py"
     assert checked["expected_windows_artifacts"]["route_study_console"] == "SupermixRouteStudy.exe"
@@ -31,6 +49,7 @@ def test_checked_runtime_manifest_is_current_and_complete():
         "route_protocol_assignment_implementation_available": False,
         "route_rehearsal_writes_ledger": False,
         "route_ledger_requires_executed_assignment_namespace": True,
+        "route_ledger_requires_issued_execution_assignment_record": True,
         "route_review_bundle_full_source_reconstruction": True,
         "route_review_bundle_authenticity_proof_available": False,
         "route_review_bundle_trusted_timestamp_available": False,
@@ -100,3 +119,30 @@ def test_studio_packaging_sources_are_machine_portable_and_include_console_contr
     assert f'#define MyAppVersion "{STUDIO_APP_VERSION}"' in installer
     assert "DefaultDirName={localappdata}\\Programs\\Supermix Studio" in installer
     assert "PrivilegesRequired=lowest" in installer
+
+
+def test_manifest_check_rejects_tampered_or_syntax_broken_runtime_module(
+    tmp_path, monkeypatch, capsys
+):
+    runtime = tmp_path / "source/chat_web_app.py"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("RUNTIME_SENTINEL = 1\n", encoding="utf-8")
+    output = tmp_path / "source/studio_runtime_manifest.json"
+
+    monkeypatch.setattr(
+        manifest_generator,
+        "RUNTIME_MODULES",
+        ("source/chat_web_app.py",),
+    )
+    monkeypatch.setattr(manifest_generator, "CONTRACT_CONSTANTS", {})
+
+    args = ["--repo-root", str(tmp_path), "--output", str(output)]
+    assert main(args) == 0
+
+    runtime.write_text("RUNTIME_SENTINEL = 2\n", encoding="utf-8")
+    assert main([*args, "--check"]) == 1
+    assert "manifest is stale" in capsys.readouterr().err
+
+    runtime.write_text("def syntax_broken(:\n", encoding="utf-8")
+    assert main([*args, "--check"]) == 2
+    assert "is not valid Python" in capsys.readouterr().err

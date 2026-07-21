@@ -14,6 +14,7 @@ from source.route_policy_ledger import (
     OUTCOME_NAMES,
     DecisionNotFoundError,
     EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION,
+    EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION,
     LedgerConflictError,
     RoutePolicyLedger,
     build_route_outcome_contracts,
@@ -27,6 +28,7 @@ EXECUTED_ASSIGNMENT_COMMITMENT = (
 
 
 def _begin(ledger, session_id="session-secret", **overrides):
+    force_issue = overrides.pop("_issue_assignment", None)
     values = {
         "session_id": session_id,
         "policy_name": "auto-route",
@@ -45,14 +47,31 @@ def _begin(ledger, session_id="session-secret", **overrides):
                 "version": "1",
                 "exploration_rate": 0.2,
                 "assignment_unit": "route",
-                "assignment_commitment": EXECUTED_ASSIGNMENT_COMMITMENT,
+                "assignment_commitment": None,
             },
             "candidates": [{"action": "off"}, {"action": "collective"}],
             "exclusions": [],
         },
         "estimated_economics": {"estimated_model_calls": 3, "estimated_cost_units": 3.0},
     }
+    logging_support_overridden = "logging_support" in overrides
     values.update(overrides)
+    should_issue = not logging_support_overridden if force_issue is None else bool(force_issue)
+    if should_issue:
+        issued = ledger.issue_execution_assignment(
+            session_id=values["session_id"],
+            policy_name=values["policy_name"],
+            policy_version=values["policy_version"],
+            policy_schema_version=values["policy_schema_version"],
+            decision_context=values["decision_context"],
+            eligible_modes=values["eligible_modes"],
+            chosen_mode=values["chosen_mode"],
+            action_probabilities=values["action_probabilities"],
+            logging_support=values["logging_support"],
+            route_id=values.get("route_id"),
+        )
+        values["route_id"] = issued["route_id"]
+        values["logging_support"] = issued["logging_support"]
     return ledger.begin_decision(**values)
 
 
@@ -171,6 +190,13 @@ def test_begin_decision_persists_provenance_json_and_hashed_session(tmp_path) ->
     assert len(row["decision_record_fingerprint"]) == 64
     assert row["decision_record_fingerprint_valid"] is True
     assert row["decision_record_fingerprint_reason"] == "verified"
+    assert row["execution_assignment_provenance_valid"] is True
+    assert row["execution_assignment_provenance_reason"] == "verified"
+    provenance = row["execution_assignment_provenance"]
+    assert provenance["required"] is True
+    assert provenance["record"]["schema_version"] == EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION
+    assert provenance["record"]["route_id"] == row["route_id"]
+    assert provenance["record"]["session_hash"] == row["session_hash"]
     assert (
         row["logging_support"]["decision_record_fingerprint_schema_version"]
         == DECISION_FINGERPRINT_SCHEMA_VERSION
@@ -550,7 +576,7 @@ def test_support_hashes_are_canonical_and_mapping_order_independent(tmp_path) ->
         "exclusions": [],
         "candidates": [{"action": "off"}, {"action": "collective"}],
         "sampler": {
-            "assignment_commitment": EXECUTED_ASSIGNMENT_COMMITMENT,
+            "assignment_commitment": None,
             "assignment_unit": "route",
             "exploration_rate": 0.2,
             "version": "1",
@@ -565,11 +591,19 @@ def test_support_hashes_are_canonical_and_mapping_order_independent(tmp_path) ->
         decision_context={"budget": "balanced", "action_mode": "chat"},
         action_probabilities={"collective": 0.8, "off": 0.2},
         logging_support=second_support,
+        _issue_assignment=True,
     )
 
     assert second["candidate_set_hash"] == first["candidate_set_hash"]
-    assert second["distribution_hash"] == first["distribution_hash"]
-    assert second["decision_record_fingerprint"] == first["decision_record_fingerprint"]
+    assert (
+        second["execution_assignment_provenance"]["record"][
+            "logging_support_without_commitment"
+        ]["distribution_hash"]
+        == first["execution_assignment_provenance"]["record"][
+            "logging_support_without_commitment"
+        ]["distribution_hash"]
+    )
+    assert second["distribution_hash"] != first["distribution_hash"]
 
 
 @pytest.mark.parametrize(
@@ -692,6 +726,73 @@ def test_randomized_label_requires_assignment_commitment_and_v2_requires_vector(
     assert ledger.report()["counts"]["started"] == 0
 
 
+def test_randomized_commitment_must_be_issued_and_bound_by_same_ledger(tmp_path) -> None:
+    first = RoutePolicyLedger(tmp_path / "issuer.sqlite3")
+    second = RoutePolicyLedger(tmp_path / "other-ledger.sqlite3")
+    support = {
+        "schema_version": "route-support-v1",
+        "decision_type": "randomized",
+        "probability_stage": "post_filter",
+        "sampler": {
+            "name": "rng",
+            "version": "1",
+            "exploration_rate": 0.2,
+            "assignment_unit": "route",
+            "assignment_commitment": None,
+        },
+        "candidates": [{"action": "off"}, {"action": "collective"}],
+        "exclusions": [],
+    }
+    issued = first.issue_execution_assignment(
+        session_id="session-secret",
+        policy_name="auto-route",
+        policy_version="auto-route-v2",
+        policy_schema_version="2",
+        decision_context={"action_mode": "chat", "budget": "balanced"},
+        eligible_modes=["off", "collective"],
+        chosen_mode="collective",
+        action_probabilities={"off": 0.2, "collective": 0.8},
+        logging_support=support,
+    )
+
+    assert issued["provenance"] == "ledger_issued"
+    assert issued["assignment_commitment"].startswith(
+        f"{EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION}:"
+    )
+    with pytest.raises(ValueError, match="not issued by this ledger"):
+        _begin(
+            second,
+            route_id=issued["route_id"],
+            logging_support=issued["logging_support"],
+        )
+    assert second.report()["counts"]["started"] == 0
+
+
+def test_execution_assignment_records_and_bindings_are_append_only(tmp_path) -> None:
+    database = tmp_path / "append-only-assignments.sqlite3"
+    decision = _begin(RoutePolicyLedger(database))
+
+    connection = sqlite3.connect(database)
+    assert connection.execute(
+        "SELECT COUNT(*) FROM route_execution_assignment_records"
+    ).fetchone()[0] == 1
+    assert connection.execute(
+        "SELECT COUNT(*) FROM route_execution_assignment_bindings"
+    ).fetchone()[0] == 1
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        connection.execute(
+            "UPDATE route_execution_assignment_records SET nonce_hex = ? WHERE route_id = ?",
+            ("00" * 32, decision["route_id"]),
+        )
+    connection.rollback()
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        connection.execute(
+            "DELETE FROM route_execution_assignment_bindings WHERE route_id = ?",
+            (decision["route_id"],),
+        )
+    connection.close()
+
+
 @pytest.mark.parametrize(
     ("location", "key", "value", "message"),
     [
@@ -773,7 +874,7 @@ def test_executed_ledger_rejects_real_bare_shadow_commitment_hash(tmp_path) -> N
     shadow_commitment = prepare_shadow_assignment_commitment(
         artifacts["public_package"],
         artifacts["private_seed_capsule"],
-        "ledger-boundary-cluster",
+        hash_session_identity("ledger-boundary-cluster"),
     )["commitment"]["commitment_hash"]
     support = {
         "schema_version": "route-support-v1",
@@ -791,6 +892,47 @@ def test_executed_ledger_rejects_real_bare_shadow_commitment_hash(tmp_path) -> N
     }
     with pytest.raises(ValueError, match="route-execution-assignment-v1"):
         _begin(RoutePolicyLedger(tmp_path / "bare-shadow-hash.sqlite3"), logging_support=support)
+
+
+def test_executed_ledger_rejects_real_shadow_hash_wrapped_as_execution_commitment(
+    tmp_path,
+) -> None:
+    from source.route_policy_protocol import build_route_study_review_bundle_from_input
+    from source.route_policy_protocol_cli import _example_bundle_input
+    from source.route_policy_shadow_registry import (
+        create_shadow_campaign_artifacts,
+        prepare_shadow_assignment_commitment,
+    )
+
+    bundle = build_route_study_review_bundle_from_input(_example_bundle_input())
+    artifacts = create_shadow_campaign_artifacts(bundle, bytes(range(32)))
+    shadow_hash = prepare_shadow_assignment_commitment(
+        artifacts["public_package"],
+        artifacts["private_seed_capsule"],
+        hash_session_identity("ledger-boundary-cluster"),
+    )["commitment"]["commitment_hash"]
+    wrapped_shadow_hash = (
+        f"{EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION}:{shadow_hash}"
+    )
+    support = {
+        "schema_version": "route-support-v1",
+        "decision_type": "randomized",
+        "probability_stage": "post_filter",
+        "sampler": {
+            "name": "rng",
+            "version": "1",
+            "exploration_rate": 0.2,
+            "assignment_unit": "route",
+            "assignment_commitment": wrapped_shadow_hash,
+        },
+        "candidates": [{"action": "off"}, {"action": "collective"}],
+        "exclusions": [],
+    }
+    ledger = RoutePolicyLedger(tmp_path / "wrapped-shadow-hash.sqlite3")
+
+    with pytest.raises(ValueError, match="not issued by this ledger"):
+        _begin(ledger, logging_support=support)
+    assert ledger.report()["counts"]["started"] == 0
 
 
 def test_executed_ledger_rejects_unknown_support_schema(tmp_path) -> None:
@@ -1056,7 +1198,7 @@ def test_v1_v2_migration_backfills_posthoc_contracts_and_descriptive_events(
     reopened = RoutePolicyLedger(database)
     assert len(reopened.get_decision(route_id)["outcome_events"]) == 4
     connection = sqlite3.connect(database)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == LEDGER_SCHEMA_VERSION
     assert connection.execute("SELECT COUNT(*) FROM route_outcome_contracts").fetchone()[0] == 4
     assert connection.execute("SELECT COUNT(*) FROM route_outcome_observation_events").fetchone()[0] == 4
     connection.close()

@@ -49,6 +49,7 @@ SHADOW_REGISTRY_EVENT_SCHEMA_VERSION = "route-study-shadow-registry-event-v1"
 SHADOW_REGISTRY_SNAPSHOT_SCHEMA_VERSION = "route-study-shadow-registry-snapshot-v1"
 
 SHADOW_ASSIGNMENT_ALGORITHM = "hkdf-sha256-hmac-sha256-whole-policy-bps-v1"
+SHADOW_CLUSTER_KEY_SCHEMA_VERSION = "session-hash-v1"
 SHADOW_CANONICALIZATION = "rfc8785-jcs-restricted-ijson-integer-v1"
 SHADOW_LEGACY_BUNDLE_ENCODING = "route-review-bundle-v1-python-sorted-compact-utf8"
 SHADOW_SCHEMA_OBJECTS_SHA256 = "fe12a50841e5f983adce9ef1eb4ebf6635ab079f8c0043f4ca68500b38f9a04c"
@@ -500,6 +501,10 @@ def build_shadow_design_binding(review_bundle: Any) -> Dict[str, Any]:
         raise ValueError("shadow registry v1 supports sticky_session_cluster only")
     if design.get("assignment_unit") != "session_hash":
         raise ValueError("shadow registry v1 requires the session_hash assignment unit")
+    if population.get("cluster_key_schema_version") != SHADOW_CLUSTER_KEY_SCHEMA_VERSION:
+        raise ValueError(
+            "shadow registry v1 requires the session-hash-v1 cluster key schema"
+        )
     binding = {
         "schema_version": SHADOW_DESIGN_BINDING_SCHEMA_VERSION,
         "origin_review_bundle_hash": _sha256(
@@ -515,9 +520,7 @@ def build_shadow_design_binding(review_bundle: Any) -> Dict[str, Any]:
         "legacy_review_bundle_encoding": SHADOW_LEGACY_BUNDLE_ENCODING,
         "design_mode": "sticky_session_cluster",
         "assignment_unit": "study_scoped_session_cluster",
-        "cluster_key_schema_version": _identifier(
-            population.get("cluster_key_schema_version"), "cluster_key_schema_version"
-        ),
+        "cluster_key_schema_version": SHADOW_CLUSTER_KEY_SCHEMA_VERSION,
         "population_rule_id": _identifier(
             population.get("population_rule_id"), "population_rule_id"
         ),
@@ -840,15 +843,20 @@ def audit_shadow_seed_capsule(public_package: Any, capsule: Any) -> Dict[str, An
 
 def _cluster_identifier(value: Any) -> str:
     if not isinstance(value, str):
-        raise ValueError("cluster identifier must be a string")
-    cooked = value
-    try:
-        encoded = cooked.encode("utf-8")
-    except UnicodeEncodeError as exc:
-        raise ValueError("cluster identifier must be valid UTF-8 text") from exc
-    if not cooked or len(encoded) > 1024:
-        raise ValueError("cluster identifier must contain between 1 and 1024 UTF-8 bytes")
-    return cooked
+        raise ValueError(
+            "cluster identifier must be a canonical session_hash string"
+        )
+    # The sealed v1 design binds ``assignment_unit=session_hash`` and
+    # ``cluster_key_schema_version=session-hash-v1``.  Accept the exact wire
+    # representation produced by ``route_policy_ledger.hash_session_identity``
+    # rather than trimming, case-folding, or accepting a caller-defined alias.
+    # The hash is HMAC-pseudonymized below and is never persisted directly.
+    if not _SHA256_RE.fullmatch(value):
+        raise ValueError(
+            "cluster identifier must be a canonical session_hash: "
+            "exactly 64 lowercase hexadecimal characters"
+        )
+    return value
 
 
 def _assignment_from_pseudonym(

@@ -563,6 +563,16 @@ def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
         "adaptive_compute": False,
     }
 
+    explicit_auto_disabled = Namespace(auto_compute=False)
+    assert chat_web_app._runtime_compute_cli_overrides(explicit_auto_disabled) == {
+        "auto_compute": False,
+    }
+
+    explicit_auto_enabled = Namespace(auto_compute=True)
+    assert chat_web_app._runtime_compute_cli_overrides(explicit_auto_enabled) == {
+        "auto_compute": True,
+    }
+
 
 def test_runtime_compute_smoke_suite():
     smoke_test_runtime_compute_helper_applies_only_supported_kwargs()

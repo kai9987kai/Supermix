@@ -9,6 +9,7 @@ from threading import Barrier
 import pytest
 
 from source.route_policy_explorer import plan_adjacent_route_study
+from source.route_policy_ledger import hash_session_identity
 from source.route_policy_protocol import build_route_study_review_bundle
 from source.route_policy_shadow_registry import (
     SHADOW_ASSIGNMENT_ALGORITHM,
@@ -33,7 +34,17 @@ OTHER_SEED = bytes.fromhex(
 )
 
 
-def _review_bundle(*, candidate="a", distribution="b", planned_clusters=8):
+def _session_hash(label: str) -> str:
+    return hash_session_identity(label)
+
+
+def _review_bundle(
+    *,
+    candidate="a",
+    distribution="b",
+    planned_clusters=8,
+    cluster_key_schema_version="session-hash-v1",
+):
     payload = _example_payload()
     payload["source_contract"] = {
         **payload["source_contract"],
@@ -55,6 +66,7 @@ def _review_bundle(*, candidate="a", distribution="b", planned_clusters=8):
         study,
         planned_clusters=planned_clusters,
         analysis_every_clusters=max(1, planned_clusters // 2),
+        cluster_key_schema_version=cluster_key_schema_version,
     )
 
 
@@ -114,12 +126,12 @@ def test_valid_lifecycle_is_batch_reconstructable_and_stays_shadow_only(tmp_path
     first = registry.append_assignment_commitment(
         campaign_id=campaign_id,
         seed_capsule=capsule,
-        cluster_identifier="raw-session-alpha",
+        cluster_identifier=_session_hash("raw-session-alpha"),
     )
     second = registry.append_assignment_commitment(
         campaign_id=campaign_id,
         seed_capsule=capsule,
-        cluster_identifier="raw-session-beta",
+        cluster_identifier=_session_hash("raw-session-beta"),
     )
     for result in (first, second):
         assert result["created"] is True
@@ -210,7 +222,7 @@ def test_read_only_snapshot_does_not_mutate_registry_and_rejects_writes(tmp_path
     sealed["registry"].append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="read-only-cluster",
+        cluster_identifier=_session_hash("read-only-cluster"),
     )
     before_database = sealed["db_path"].read_bytes()
 
@@ -263,13 +275,16 @@ def test_manifest_has_two_explicit_whole_policy_arms_not_route_actions(tmp_path)
     assert "rehearsed_action_probabilities" not in arm_json
 
 
-def test_seed_and_raw_cluster_identity_are_absent_from_db_and_wal_before_reveal(tmp_path):
+def test_seed_raw_session_and_session_hash_are_absent_from_db_and_wal_before_reveal(
+    tmp_path,
+):
     sealed = _sealed(tmp_path)
-    raw_cluster = "private-raw-session-identity-never-persisted"
+    raw_session = "private-raw-session-identity-never-persisted"
+    session_hash = _session_hash(raw_session)
     sealed["registry"].append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier=raw_cluster,
+        cluster_identifier=session_hash,
     )
 
     with sqlite3.connect(sealed["db_path"]) as connection:
@@ -277,8 +292,9 @@ def test_seed_and_raw_cluster_identity_are_absent_from_db_and_wal_before_reveal(
         stored = connection.execute(
             "SELECT commitment_json, cluster_pseudonym FROM shadow_assignment_commitments"
         ).fetchone()
-        assert raw_cluster not in stored[0]
-        assert raw_cluster != stored[1]
+        assert raw_session not in stored[0]
+        assert session_hash not in stored[0]
+        assert session_hash != stored[1]
 
     encoded_seed = base64.urlsafe_b64encode(SEED).decode("ascii").rstrip("=").encode("ascii")
     assert encoded_seed.decode("ascii") not in json.dumps(sealed["package"], sort_keys=True)
@@ -286,7 +302,8 @@ def test_seed_and_raw_cluster_identity_are_absent_from_db_and_wal_before_reveal(
         contents = path.read_bytes()
         assert SEED not in contents
         assert encoded_seed not in contents
-        assert raw_cluster.encode("utf-8") not in contents
+        assert raw_session.encode("utf-8") not in contents
+        assert session_hash.encode("ascii") not in contents
 
 
 def test_wrong_seed_or_campaign_capsule_is_rejected(tmp_path):
@@ -301,7 +318,7 @@ def test_wrong_seed_or_campaign_capsule_is_rejected(tmp_path):
         first["registry"].append_assignment_commitment(
             campaign_id=first["campaign_id"],
             seed_capsule=second["capsule"],
-            cluster_identifier="cluster-one",
+            cluster_identifier=_session_hash("cluster-one"),
         )
 
     wrong_seed = copy.deepcopy(first["capsule"])
@@ -312,7 +329,7 @@ def test_wrong_seed_or_campaign_capsule_is_rejected(tmp_path):
         prepare_shadow_assignment_commitment(
             first["package"],
             wrong_seed,
-            "cluster-one",
+            _session_hash("cluster-one"),
         )
 
     noncanonical = copy.deepcopy(first["capsule"])
@@ -329,7 +346,7 @@ def test_wrong_seed_or_campaign_capsule_is_rejected(tmp_path):
 
 def test_assignment_pseudonym_is_derived_internally_and_commitment_is_deterministic(tmp_path):
     sealed = _sealed(tmp_path)
-    caller_supplied_hash_shaped_identifier = "a" * 64
+    caller_supplied_hash_shaped_identifier = _session_hash("cluster-one")
     first = prepare_shadow_assignment_commitment(
         sealed["package"],
         sealed["capsule"],
@@ -357,6 +374,56 @@ def test_assignment_pseudonym_is_derived_internally_and_commitment_is_determinis
     assert reveal["arm_hash"] == arms[reveal["arm_id"]]["arm_hash"]
 
 
+def test_cluster_identity_accepts_only_the_exact_canonical_session_hash(tmp_path):
+    sealed = _sealed(tmp_path)
+    canonical = _session_hash("cluster-alias-regression")
+    assert len(canonical) == 64
+    assert canonical == canonical.lower()
+
+    prepared = prepare_shadow_assignment_commitment(
+        sealed["package"],
+        sealed["capsule"],
+        canonical,
+    )
+    assert prepared["commitment"]["commitment"]["cluster_pseudonym"] != canonical
+
+    aliases = [
+        "cluster-alias-regression",
+        canonical.upper(),
+        f" {canonical}",
+        f"{canonical}\n",
+        f"sha256:{canonical}",
+        canonical[:-1],
+        f"{canonical}0",
+        "ａ" * 64,
+    ]
+    assert canonical.upper() != canonical
+    before = sealed["registry"].snapshot(sealed["campaign_id"])
+    for alias in aliases:
+        with pytest.raises(ValueError, match="canonical session_hash"):
+            sealed["registry"].append_assignment_commitment(
+                campaign_id=sealed["campaign_id"],
+                seed_capsule=sealed["capsule"],
+                cluster_identifier=alias,
+            )
+    after = sealed["registry"].snapshot(sealed["campaign_id"])
+    assert after["campaigns"][0]["commitment_count"] == 0
+    assert after["event_chain"] == before["event_chain"]
+
+
+def test_shadow_registry_rejects_alternate_cluster_key_schema(tmp_path):
+    with pytest.raises(
+        ValueError,
+        match="requires the session-hash-v1 cluster key schema",
+    ):
+        _sealed(
+            tmp_path,
+            bundle=_review_bundle(
+                cluster_key_schema_version="study-scoped-session-hash-v2"
+            ),
+        )
+
+
 def test_illegal_state_transitions_fail_closed(tmp_path):
     sealed = _sealed(tmp_path)
     registry = sealed["registry"]
@@ -372,7 +439,7 @@ def test_illegal_state_transitions_fail_closed(tmp_path):
         registry.append_assignment_commitment(
             campaign_id=campaign_id,
             seed_capsule=sealed["capsule"],
-            cluster_identifier="cluster-two",
+            cluster_identifier=_session_hash("cluster-two"),
         )
     with pytest.raises(RouteShadowRegistryError, match="before assignment verification"):
         registry.verify_assignment_reveals(campaign_id)
@@ -394,12 +461,12 @@ def test_seal_commit_close_reveal_and_verify_are_idempotent(tmp_path):
     first = registry.append_assignment_commitment(
         campaign_id=campaign_id,
         seed_capsule=sealed["capsule"],
-        cluster_identifier="cluster-one",
+        cluster_identifier=_session_hash("cluster-one"),
     )
     same = registry.append_assignment_commitment(
         campaign_id=campaign_id,
         seed_capsule=sealed["capsule"],
-        cluster_identifier="cluster-one",
+        cluster_identifier=_session_hash("cluster-one"),
     )
     assert first["created"] is True
     assert same["created"] is False
@@ -418,7 +485,7 @@ def test_seal_commit_close_reveal_and_verify_are_idempotent(tmp_path):
 def test_planned_cluster_ceiling_is_enforced_before_any_extra_event(tmp_path):
     sealed = _sealed(tmp_path, bundle=_review_bundle(planned_clusters=2))
     registry = sealed["registry"]
-    for cluster in ("cluster-one", "cluster-two"):
+    for cluster in (_session_hash("cluster-one"), _session_hash("cluster-two")):
         registry.append_assignment_commitment(
             campaign_id=sealed["campaign_id"],
             seed_capsule=sealed["capsule"],
@@ -429,7 +496,7 @@ def test_planned_cluster_ceiling_is_enforced_before_any_extra_event(tmp_path):
         registry.append_assignment_commitment(
             campaign_id=sealed["campaign_id"],
             seed_capsule=sealed["capsule"],
-            cluster_identifier="cluster-three",
+            cluster_identifier=_session_hash("cluster-three"),
         )
     after = registry.snapshot(sealed["campaign_id"])
     assert after["campaigns"][0]["commitment_count"] == 2
@@ -463,7 +530,7 @@ def test_shadow_native_canonicalization_rejects_floats_and_noncanonical_inputs(t
         _canonical_json({"probability": 0.5})
 
     sealed = _sealed(tmp_path)
-    with pytest.raises(ValueError, match="cluster identifier must be a string"):
+    with pytest.raises(ValueError, match="canonical session_hash string"):
         sealed["registry"].append_assignment_commitment(
             campaign_id=sealed["campaign_id"],
             seed_capsule=sealed["capsule"],
@@ -482,7 +549,7 @@ def test_artifact_tables_and_event_log_are_append_only(tmp_path):
     registry.append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="cluster-one",
+        cluster_identifier=_session_hash("cluster-one"),
     )
     registry.close_campaign(sealed["campaign_id"])
     registry.reveal_seed(campaign_id=sealed["campaign_id"], seed_capsule=sealed["capsule"])
@@ -512,7 +579,7 @@ def test_schema_indexes_and_cross_campaign_reveal_guard_are_enforced(tmp_path):
     registry.append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="first-campaign-cluster",
+        cluster_identifier=_session_hash("first-campaign-cluster"),
     )
     registry.close_campaign(sealed["campaign_id"])
     registry.reveal_seed(
@@ -608,7 +675,7 @@ def test_mismatched_reveal_is_never_reported_as_verified_or_complete(tmp_path):
     registry.append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="mismatch-cluster",
+        cluster_identifier=_session_hash("mismatch-cluster"),
     )
     registry.close_campaign(sealed["campaign_id"])
     registry.reveal_seed(
@@ -654,7 +721,7 @@ def test_verify_marks_isolated_commitment_json_corruption_as_mismatch(tmp_path):
     registry.append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="corrupt-json-cluster",
+        cluster_identifier=_session_hash("corrupt-json-cluster"),
     )
     registry.close_campaign(sealed["campaign_id"])
     registry.reveal_seed(
@@ -700,7 +767,7 @@ def test_verify_fails_closed_on_closure_or_seed_artifact_corruption(
     registry.append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="preflight-cluster",
+        cluster_identifier=_session_hash("preflight-cluster"),
     )
     registry.close_campaign(sealed["campaign_id"])
     registry.reveal_seed(
@@ -735,7 +802,7 @@ def test_snapshot_reconstructs_artifacts_and_matches_events_to_evidence_rows(tmp
     second["registry"].append_assignment_commitment(
         campaign_id=second["campaign_id"],
         seed_capsule=second["capsule"],
-        cluster_identifier="cluster-to-remove",
+        cluster_identifier=_session_hash("cluster-to-remove"),
     )
     with sqlite3.connect(second["db_path"]) as connection:
         connection.execute("DROP TRIGGER shadow_commitments_no_delete")
@@ -763,7 +830,7 @@ def test_duplicate_cluster_commit_is_linearizable_under_concurrency(tmp_path):
         return registry.append_assignment_commitment(
             campaign_id=sealed["campaign_id"],
             seed_capsule=sealed["capsule"],
-            cluster_identifier="same-cluster",
+            cluster_identifier=_session_hash("same-cluster"),
         )
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -781,7 +848,7 @@ def test_close_vs_commit_race_freezes_exactly_the_linearized_count(tmp_path):
     sealed["registry"].append_assignment_commitment(
         campaign_id=sealed["campaign_id"],
         seed_capsule=sealed["capsule"],
-        cluster_identifier="existing-cluster",
+        cluster_identifier=_session_hash("existing-cluster"),
     )
     barrier = Barrier(2)
 
@@ -792,7 +859,7 @@ def test_close_vs_commit_race_freezes_exactly_the_linearized_count(tmp_path):
             return ("append", registry.append_assignment_commitment(
                 campaign_id=sealed["campaign_id"],
                 seed_capsule=sealed["capsule"],
-                cluster_identifier="racing-cluster",
+                cluster_identifier=_session_hash("racing-cluster"),
             ))
         except RouteShadowRegistryError as exc:
             return ("append_error", str(exc))

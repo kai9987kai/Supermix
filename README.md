@@ -272,9 +272,12 @@ only a fully reconstructable review bundle and freezes exactly two 50/50 arms:
 prompt-specific route plan's `eligible_actions` remain support-stratum evidence;
 they are never reinterpreted as campaign treatment arms.
 These arms bind declarative policy-class manifests, not executable code or a
-runtime code digest. Cluster identifiers are treated as opaque private inputs;
-v1 does not validate membership in an external cluster map or canonicalize
-aliases. Both checks remain external prerequisites for any future experiment.
+runtime code digest. Each cluster input must be the exact canonical
+`session-hash-v1` value: 64 lowercase hexadecimal characters, matching
+`source.route_policy_ledger.hash_session_identity(...)`. Raw identifiers and
+alternate spellings (including uppercase, whitespace, or digest prefixes) fail
+closed instead of being normalized. Membership in an external cluster map
+remains an external prerequisite for any future experiment.
 
 The mutating workflow is CLI-only:
 
@@ -289,12 +292,18 @@ SupermixRouteShadow.exe status --registry route-policy-shadow-registry.sqlite3 -
 ```
 
 `cluster.private.json` must contain exactly
-`{"cluster_identifier":"..."}`. The CLI derives and stores a study-scoped
-pseudonym, not that raw identifier. Keep both the cluster input and the
+`{"cluster_identifier":"<canonical-lowercase-session-hash>"}`. The CLI derives
+and stores a study-scoped pseudonym, not that session hash or the underlying raw
+identifier. Keep both the cluster input and the
 separately created seed capsule private; pseudonymity is not anonymity, and
-post-reveal unlinkability is not guaranteed. Before closure the registry stores
-only an opaque assignment commitment. After closure, `reveal` opens the seed and
-`verify` reconstructs each frozen assignment. The browser exposes only a GET
+post-reveal unlinkability is not guaranteed. POSIX capsules are created as
+`0600`. On Windows, the CLI installs a protected, non-inheriting DACL containing
+only the current-user full-control ACE, verifies it before writing seed bytes,
+re-verifies it after `fsync`, and rejects later reads if that boundary changes.
+ACL setup or verification failure deletes a newly created capsule and fails the
+command closed. Before closure the registry stores only an opaque assignment
+commitment. After closure, `reveal` opens the seed and `verify` reconstructs each
+frozen assignment. The browser exposes only a GET
 status view of the canonical Studio registry; it has no seal, commit, close,
 reveal, or verify mutation endpoint. CLI `status` also opens SQLite in read-only
 mode and audits required tables, append-only/state-transition triggers,

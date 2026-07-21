@@ -1,6 +1,11 @@
 import json
+import os
 from pathlib import Path
 
+import pytest
+
+from source import route_policy_shadow_cli as shadow_cli
+from source.route_policy_ledger import hash_session_identity
 from source.route_policy_protocol import build_route_study_review_bundle_from_input
 from source.route_policy_protocol_cli import _example_bundle_input
 from source.route_policy_shadow_cli import main
@@ -56,7 +61,8 @@ def test_cli_runs_sealed_commit_close_reveal_verify_flow_without_secret_or_raw_i
     assert '"private_seed_capsule":{' not in seal_stdout
     assert private_seed not in seal_stdout
 
-    cluster_identifier = "tenant-raw-id-that-must-not-be-exported"
+    raw_session_identifier = "tenant-raw-id-that-must-not-be-exported"
+    cluster_identifier = hash_session_identity(raw_session_identifier)
     cluster_path = tmp_path / "cluster.json"
     _write_json(cluster_path, {"cluster_identifier": cluster_identifier})
     committed, commit_stdout = _run_success(
@@ -76,6 +82,7 @@ def test_cli_runs_sealed_commit_close_reveal_verify_flow_without_secret_or_raw_i
     )
     assert committed["created"] is True
     assert committed["chosen_arm_revealed"] is False
+    assert raw_session_identifier not in commit_stdout
     assert cluster_identifier not in commit_stdout
     assert private_seed not in commit_stdout
     assert "arm_id" not in commit_stdout
@@ -159,7 +166,7 @@ def test_seal_recovers_exclusive_capsule_and_is_idempotent(tmp_path, capsys):
     capsule_path = tmp_path / "private-seed.json"
     registry_path = tmp_path / "shadow.sqlite3"
     artifacts = create_shadow_campaign_artifacts(bundle, generate_shadow_seed())
-    _write_json(capsule_path, artifacts["private_seed_capsule"])
+    shadow_cli._write_private_capsule(capsule_path, artifacts["private_seed_capsule"])
 
     first, first_stdout = _run_success(
         capsys,
@@ -308,3 +315,78 @@ def test_commit_rejects_ambiguous_cluster_input_without_echoing_identifier(tmp_p
     assert "duplicate object key: cluster_identifier" in captured.err
     assert "secret-a" not in captured.err
     assert "secret-b" not in captured.err
+
+
+def test_windows_capsule_acl_is_verified_before_and_after_seed_write(
+    tmp_path, monkeypatch
+):
+    capsule_path = tmp_path / "private-seed.json"
+    events = []
+
+    def apply_acl(path):
+        events.append(("apply", path.stat().st_size))
+
+    def verify_acl(descriptor):
+        events.append(("verify", os.fstat(descriptor).st_size))
+
+    monkeypatch.setattr(shadow_cli, "_is_windows", lambda: True)
+    monkeypatch.setattr(shadow_cli, "_apply_windows_private_capsule_acl", apply_acl)
+    monkeypatch.setattr(shadow_cli, "_verify_windows_private_capsule_acl", verify_acl)
+
+    shadow_cli._write_private_capsule(capsule_path, {"secret": "seed-material"})
+
+    assert events[0] == ("apply", 0)
+    assert events[1] == ("verify", 0)
+    assert events[2][0] == "verify"
+    assert events[2][1] > 0
+    assert json.loads(capsule_path.read_text(encoding="utf-8")) == {
+        "secret": "seed-material"
+    }
+
+
+@pytest.mark.parametrize("failure_stage", ["apply", "prewrite_verify", "postwrite_verify"])
+def test_windows_capsule_acl_failure_removes_capsule(
+    tmp_path, monkeypatch, failure_stage
+):
+    capsule_path = tmp_path / "private-seed.json"
+    verify_calls = 0
+
+    def apply_acl(_path):
+        if failure_stage == "apply":
+            raise OSError("mock Windows ACL apply failure")
+
+    def verify_acl(_descriptor):
+        nonlocal verify_calls
+        verify_calls += 1
+        if failure_stage == "prewrite_verify" and verify_calls == 1:
+            raise OSError("mock Windows ACL prewrite verification failure")
+        if failure_stage == "postwrite_verify" and verify_calls == 2:
+            raise OSError("mock Windows ACL postwrite verification failure")
+
+    monkeypatch.setattr(shadow_cli, "_is_windows", lambda: True)
+    monkeypatch.setattr(shadow_cli, "_apply_windows_private_capsule_acl", apply_acl)
+    monkeypatch.setattr(shadow_cli, "_verify_windows_private_capsule_acl", verify_acl)
+
+    with pytest.raises(OSError, match="mock Windows ACL"):
+        shadow_cli._write_private_capsule(capsule_path, {"secret": "seed-material"})
+
+    assert not capsule_path.exists()
+
+
+def test_windows_capsule_read_fails_closed_before_reading_broad_acl(
+    tmp_path, monkeypatch
+):
+    capsule_path = tmp_path / "private-seed.json"
+    capsule_path.write_text('{"secret":"seed-material"}', encoding="utf-8")
+
+    monkeypatch.setattr(shadow_cli, "_is_windows", lambda: True)
+
+    def reject_acl(_descriptor):
+        raise OSError("mock broad Windows ACL")
+
+    monkeypatch.setattr(shadow_cli, "_verify_windows_private_capsule_acl", reject_acl)
+
+    with pytest.raises(OSError, match="mock broad Windows ACL"):
+        shadow_cli._read_private_capsule(capsule_path)
+
+    assert capsule_path.exists()

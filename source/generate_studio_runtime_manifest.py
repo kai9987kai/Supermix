@@ -17,6 +17,9 @@ STUDIO_APP_VERSION = "2026.07.18"
 DEFAULT_MANIFEST_PATH = Path("source/studio_runtime_manifest.json")
 
 RUNTIME_MODULES = (
+    "source/chat_app.py",
+    "source/chat_web_app.py",
+    "source/model_variants.py",
     "source/route_policy_ledger.py",
     "source/route_policy_lab.py",
     "source/route_policy_explorer.py",
@@ -28,6 +31,14 @@ RUNTIME_MODULES = (
     "source/multimodel_runtime.py",
     "source/supermix_multimodel_web_app.py",
     "source/supermix_multimodel_desktop_app.py",
+    "runtime_python/chat_app.py",
+    "runtime_python/chat_web_app.py",
+    "runtime_python/chat_pipeline.py",
+    "runtime_python/chat_memory.py",
+    "runtime_python/device_utils.py",
+    "runtime_python/llm_database.py",
+    "runtime_python/model_variants.py",
+    "runtime_python/run.py",
 )
 
 CONTRACT_CONSTANTS = {
@@ -91,6 +102,16 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _validate_python_source(path: Path) -> None:
+    try:
+        # ``compile`` accepts bytes, so Python's normal source encoding rules
+        # (including an UTF-8 BOM) apply exactly as they do at runtime.
+        compile(path.read_bytes(), str(path), "exec", ast.PyCF_ONLY_AST, dont_inherit=True)
+    except (SyntaxError, UnicodeError) as exc:
+        detail = str(exc).strip() or exc.__class__.__name__
+        raise ValueError(f"required Studio runtime module is not valid Python: {path}: {detail}") from exc
+
+
 def _literal_constants(path: Path, names: Iterable[str]) -> Dict[str, Any]:
     wanted = set(names)
     found: Dict[str, Any] = {}
@@ -137,6 +158,7 @@ def build_manifest(repo_root: Path, *, include_git: bool = False) -> Dict[str, A
         path = root / relative
         if not path.is_file():
             raise FileNotFoundError(f"required Studio runtime module is missing: {relative}")
+        _validate_python_source(path)
         modules.append(
             {
                 "path": relative,
@@ -173,6 +195,7 @@ def build_manifest(repo_root: Path, *, include_git: bool = False) -> Dict[str, A
             "route_protocol_assignment_implementation_available": False,
             "route_rehearsal_writes_ledger": False,
             "route_ledger_requires_executed_assignment_namespace": True,
+            "route_ledger_requires_issued_execution_assignment_record": True,
             "route_review_bundle_full_source_reconstruction": True,
             "route_review_bundle_authenticity_proof_available": False,
             "route_review_bundle_trusted_timestamp_available": False,

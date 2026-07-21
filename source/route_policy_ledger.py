@@ -8,6 +8,9 @@ the attempted route.  SQLite WAL mode plus short per-operation connections and
 
 Only a domain-separated SHA-256 digest of the session identifier is stored.
 Missing feedback is reported as unknown; it is never interpreted as negative.
+Randomized execution commitments are accepted only when this ledger previously
+appended and sealed the corresponding typed assignment record; namespace-shaped
+caller strings are not provenance.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import hmac
 import json
 import math
 import re
+import secrets
 import sqlite3
 import time
 import uuid
@@ -26,10 +30,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 
-LEDGER_SCHEMA_VERSION = 3
+LEDGER_SCHEMA_VERSION = 4
 DECISION_STATUSES: Tuple[str, ...] = ("inflight", "completed", "failed")
 SUPPORT_SCHEMA_VERSION = "route-support-v1"
 EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION = "route-execution-assignment-v1"
+EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION = "route-execution-assignment-record-v1"
 DECISION_FINGERPRINT_SCHEMA_VERSION = "route-decision-fingerprint-v1"
 DECISION_TYPES: Tuple[str, ...] = ("deterministic", "randomized", "legacy_unknown")
 OUTCOME_CONTRACT_SCHEMA_VERSION = "route-outcome-contract-v1"
@@ -45,6 +50,8 @@ _CANDIDATE_HASH_DOMAIN = b"supermix-route-candidate-set-v1\x00"
 _DISTRIBUTION_HASH_DOMAIN = b"supermix-route-distribution-v1\x00"
 _DECISION_FINGERPRINT_DOMAIN = b"supermix-route-decision-record-v1\x00"
 _OUTCOME_CONTRACT_HASH_DOMAIN = b"supermix-route-outcome-contract-v1\x00"
+_EXECUTED_ASSIGNMENT_CONTEXT_DOMAIN = b"supermix-route-execution-assignment-context-v1\x00"
+_EXECUTED_ASSIGNMENT_COMMITMENT_DOMAIN = b"supermix-route-execution-assignment-record-v1\x00"
 _EXECUTED_ASSIGNMENT_COMMITMENT_RE = re.compile(
     rf"^{EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION}:[0-9a-f]{{64}}$"
 )
@@ -301,6 +308,7 @@ def _normalize_logging_support(
     eligible_modes: Sequence[str],
     probabilities: Mapping[str, float],
     chosen_mode: str,
+    require_assignment_commitment: bool = True,
 ) -> Dict[str, Any]:
     """Validate and fingerprint the immutable post-filter logging envelope."""
 
@@ -434,7 +442,7 @@ def _normalize_logging_support(
             raise ValueError("randomized logging_support requires at least two positive actions")
         if exploration_rate <= 0.0:
             raise ValueError("randomized logging_support requires positive exploration_rate")
-        if assignment_commitment is None:
+        if require_assignment_commitment and assignment_commitment is None:
             raise ValueError("randomized logging_support requires an assignment commitment")
 
     sampler = {
@@ -475,6 +483,86 @@ def _normalize_logging_support(
     return envelope
 
 
+def _support_without_assignment_commitment(
+    logging_support: Mapping[str, Any],
+    *,
+    eligible_modes: Sequence[str],
+    probabilities: Mapping[str, float],
+    chosen_mode: str,
+) -> Dict[str, Any]:
+    """Canonicalize assignment support with the ledger-issued token removed."""
+
+    try:
+        raw = json.loads(_canonical_json(logging_support, "logging_support"))
+    except json.JSONDecodeError as exc:  # pragma: no cover - canonical JSON is valid JSON
+        raise ValueError("logging_support must be valid JSON") from exc
+    sampler = raw.get("sampler") if isinstance(raw, Mapping) else None
+    if not isinstance(sampler, Mapping):
+        raise ValueError("logging_support sampler must be a JSON object")
+    sampler = dict(sampler)
+    sampler["assignment_commitment"] = None
+    raw["sampler"] = sampler
+    return _normalize_logging_support(
+        raw,
+        eligible_modes=eligible_modes,
+        probabilities=probabilities,
+        chosen_mode=chosen_mode,
+        require_assignment_commitment=False,
+    )
+
+
+def _execution_assignment_record_payload(
+    *,
+    route_id: str,
+    session_hash: str,
+    policy_name: str,
+    policy_version: str,
+    policy_schema_version: str,
+    decision_context: Mapping[str, Any],
+    eligible_modes: Sequence[str],
+    action_probabilities: Mapping[str, float],
+    chosen_mode: str,
+    support_without_commitment: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Build the immutable, prompt-minimizing record sealed by the ledger."""
+
+    return {
+        "schema_version": EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION,
+        "commitment_schema_version": EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION,
+        "route_id": route_id,
+        "session_hash": session_hash,
+        "policy": {
+            "name": policy_name,
+            "version": policy_version,
+            "schema_version": policy_schema_version,
+        },
+        "decision_context_hash": _domain_hash(
+            _EXECUTED_ASSIGNMENT_CONTEXT_DOMAIN,
+            decision_context,
+            "execution assignment decision context",
+        ),
+        "eligible_modes": list(eligible_modes),
+        "action_probabilities": dict(action_probabilities),
+        "chosen_mode": chosen_mode,
+        "logging_support_without_commitment": dict(support_without_commitment),
+    }
+
+
+def _execution_assignment_commitment(nonce_hex: str, record_json: str) -> str:
+    """Return the typed digest for one ledger-issued assignment record."""
+
+    try:
+        nonce = bytes.fromhex(nonce_hex)
+    except ValueError as exc:
+        raise RoutePolicyLedgerError("execution assignment record has an invalid nonce") from exc
+    if len(nonce) != 32:
+        raise RoutePolicyLedgerError("execution assignment record has an invalid nonce")
+    digest = hashlib.sha256(
+        _EXECUTED_ASSIGNMENT_COMMITMENT_DOMAIN + nonce + record_json.encode("utf-8")
+    ).hexdigest()
+    return f"{EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION}:{digest}"
+
+
 def _utc(timestamp: Optional[float]) -> Optional[str]:
     if timestamp is None:
         return None
@@ -488,7 +576,12 @@ def build_logging_support_envelope(
     action_probabilities: Mapping[str, Any],
     chosen_mode: str,
 ) -> Dict[str, Any]:
-    """Build the same canonical support envelope used by durable writes."""
+    """Build the canonical support envelope used by durable writes.
+
+    This pure builder validates the commitment's wire shape only.  A randomized
+    durable write additionally requires ``RoutePolicyLedger`` to have issued and
+    persisted the matching assignment record.
+    """
 
     modes = _eligible_modes(eligible_modes)
     cooked_chosen = _text(chosen_mode, "chosen_mode", limit=80)
@@ -792,9 +885,9 @@ class RoutePolicyLedger:
         try:
             connection.execute("PRAGMA journal_mode = WAL")
             current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if current_version not in (0, 1, 2, LEDGER_SCHEMA_VERSION):
+            if current_version not in (0, 1, 2, 3, LEDGER_SCHEMA_VERSION):
                 raise RoutePolicyLedgerError(
-                    f"unsupported route ledger schema {current_version}; expected 1, 2, or {LEDGER_SCHEMA_VERSION}"
+                    f"unsupported route ledger schema {current_version}; expected 1, 2, 3, or {LEDGER_SCHEMA_VERSION}"
                 )
             connection.executescript(
                 """
@@ -870,6 +963,50 @@ class RoutePolicyLedger:
 
                 CREATE INDEX IF NOT EXISTS idx_route_support_decision_type
                     ON route_decision_support(decision_type, probability_stage);
+
+                CREATE TABLE IF NOT EXISTS route_execution_assignment_records (
+                    assignment_commitment TEXT PRIMARY KEY,
+                    commitment_schema_version TEXT NOT NULL
+                        CHECK (commitment_schema_version = 'route-execution-assignment-v1'),
+                    record_schema_version TEXT NOT NULL
+                        CHECK (record_schema_version = 'route-execution-assignment-record-v1'),
+                    route_id TEXT NOT NULL UNIQUE,
+                    nonce_hex TEXT NOT NULL,
+                    assignment_record_json TEXT NOT NULL,
+                    issued_at REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS route_execution_assignment_bindings (
+                    assignment_commitment TEXT PRIMARY KEY
+                        REFERENCES route_execution_assignment_records(assignment_commitment),
+                    route_id TEXT NOT NULL UNIQUE
+                        REFERENCES route_decisions(route_id) ON DELETE RESTRICT,
+                    bound_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_route_execution_assignment_records_issued
+                    ON route_execution_assignment_records(issued_at, assignment_commitment);
+
+                CREATE TRIGGER IF NOT EXISTS route_execution_assignment_records_no_update
+                BEFORE UPDATE ON route_execution_assignment_records
+                BEGIN
+                    SELECT RAISE(ABORT, 'execution assignment records are append-only');
+                END;
+                CREATE TRIGGER IF NOT EXISTS route_execution_assignment_records_no_delete
+                BEFORE DELETE ON route_execution_assignment_records
+                BEGIN
+                    SELECT RAISE(ABORT, 'execution assignment records are append-only');
+                END;
+                CREATE TRIGGER IF NOT EXISTS route_execution_assignment_bindings_no_update
+                BEFORE UPDATE ON route_execution_assignment_bindings
+                BEGIN
+                    SELECT RAISE(ABORT, 'execution assignment bindings are append-only');
+                END;
+                CREATE TRIGGER IF NOT EXISTS route_execution_assignment_bindings_no_delete
+                BEFORE DELETE ON route_execution_assignment_bindings
+                BEGIN
+                    SELECT RAISE(ABORT, 'execution assignment bindings are append-only');
+                END;
 
                 CREATE TABLE IF NOT EXISTS route_outcome_contracts (
                     route_id TEXT NOT NULL
@@ -1305,6 +1442,306 @@ class RoutePolicyLedger:
         finally:
             connection.close()
 
+    def issue_execution_assignment(
+        self,
+        *,
+        session_id: str,
+        policy_name: str,
+        policy_version: str,
+        policy_schema_version: str,
+        decision_context: Mapping[str, Any],
+        eligible_modes: Sequence[str],
+        chosen_mode: str,
+        action_probabilities: Mapping[str, Any],
+        logging_support: Mapping[str, Any],
+        route_id: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Append and return a ledger-issued randomized assignment record.
+
+        The caller supplies the sampler design and realized action but cannot
+        supply its own execution commitment.  The ledger generates a CSPRNG
+        nonce, seals a route- and session-bound canonical record, and persists
+        that record before ``begin_decision`` may bind it.  This is a provenance
+        boundary, not proof that the caller's randomizer was statistically
+        honest.
+        """
+
+        cooked_route_id = _route_id(route_id)
+        session_hash = hash_session_identity(session_id)
+        cooked_policy_name = _text(policy_name, "policy_name", limit=120)
+        cooked_policy_version = _text(policy_version, "policy_version", limit=120)
+        cooked_policy_schema = _text(
+            policy_schema_version, "policy_schema_version", limit=120
+        )
+        context_json = _json_mapping(decision_context, "decision_context")
+        context = json.loads(context_json)
+        modes = _eligible_modes(eligible_modes)
+        cooked_chosen = _text(chosen_mode, "chosen_mode", limit=80)
+        if cooked_chosen not in modes:
+            raise ValueError("chosen_mode must be present in eligible_modes")
+        probabilities = _probabilities(action_probabilities, modes, cooked_chosen)
+        if not isinstance(logging_support, Mapping):
+            raise ValueError("logging_support must be a JSON object")
+        sampler_raw = logging_support.get("sampler")
+        if not isinstance(sampler_raw, Mapping):
+            raise ValueError("logging_support sampler must be a JSON object")
+        if str(sampler_raw.get("assignment_commitment") or "").strip():
+            raise ValueError(
+                "execution assignment issuance requires assignment_commitment to be omitted"
+            )
+        support_without_commitment = _normalize_logging_support(
+            logging_support,
+            eligible_modes=modes,
+            probabilities=probabilities,
+            chosen_mode=cooked_chosen,
+            require_assignment_commitment=False,
+        )
+        if support_without_commitment.get("decision_type") != "randomized":
+            raise ValueError("execution assignment issuance is only valid for randomized support")
+
+        record = _execution_assignment_record_payload(
+            route_id=cooked_route_id,
+            session_hash=session_hash,
+            policy_name=cooked_policy_name,
+            policy_version=cooked_policy_version,
+            policy_schema_version=cooked_policy_schema,
+            decision_context=context,
+            eligible_modes=modes,
+            action_probabilities=probabilities,
+            chosen_mode=cooked_chosen,
+            support_without_commitment=support_without_commitment,
+        )
+        record_json = _canonical_json(record, "execution assignment record")
+        nonce_hex = secrets.token_hex(32)
+        assignment_commitment = _execution_assignment_commitment(
+            nonce_hex, record_json
+        )
+        issued_at = float(time.time())
+
+        try:
+            with self._write_transaction() as connection:
+                if connection.execute(
+                    "SELECT 1 FROM route_decisions WHERE route_id = ?", (cooked_route_id,)
+                ).fetchone() is not None:
+                    raise LedgerConflictError(
+                        f"route_id already exists: {cooked_route_id}"
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO route_execution_assignment_records(
+                        assignment_commitment, commitment_schema_version,
+                        record_schema_version, route_id, nonce_hex,
+                        assignment_record_json, issued_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        assignment_commitment,
+                        EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION,
+                        EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION,
+                        cooked_route_id,
+                        nonce_hex,
+                        record_json,
+                        issued_at,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerConflictError(
+                f"execution assignment already exists for route_id: {cooked_route_id}"
+            ) from exc
+
+        final_support_raw = json.loads(
+            _canonical_json(support_without_commitment, "logging_support")
+        )
+        final_support_raw["sampler"]["assignment_commitment"] = assignment_commitment
+        final_support = _normalize_logging_support(
+            final_support_raw,
+            eligible_modes=modes,
+            probabilities=probabilities,
+            chosen_mode=cooked_chosen,
+        )
+        return {
+            "schema_version": EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION,
+            "route_id": cooked_route_id,
+            "assignment_commitment": assignment_commitment,
+            "assignment_record": record,
+            "logging_support": final_support,
+            "issued_at": issued_at,
+            "issued_at_utc": _utc(issued_at),
+            "provenance": "ledger_issued",
+        }
+
+    @staticmethod
+    def _verify_execution_assignment_record(
+        connection: sqlite3.Connection,
+        *,
+        assignment_commitment: str,
+        route_id: str,
+        expected_record_json: str,
+    ) -> sqlite3.Row:
+        record_row = connection.execute(
+            """
+            SELECT * FROM route_execution_assignment_records
+            WHERE assignment_commitment = ?
+            """,
+            (assignment_commitment,),
+        ).fetchone()
+        if record_row is None:
+            raise ValueError(
+                "randomized execution assignment_commitment was not issued by this ledger"
+            )
+        if (
+            str(record_row["commitment_schema_version"])
+            != EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION
+            or str(record_row["record_schema_version"])
+            != EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION
+            or str(record_row["route_id"]) != route_id
+            or str(record_row["assignment_record_json"]) != expected_record_json
+        ):
+            raise RoutePolicyLedgerError(
+                "execution assignment record does not match the pending decision"
+            )
+        expected_commitment = _execution_assignment_commitment(
+            str(record_row["nonce_hex"]),
+            str(record_row["assignment_record_json"]),
+        )
+        if not hmac.compare_digest(assignment_commitment, expected_commitment):
+            raise RoutePolicyLedgerError("execution assignment record commitment mismatch")
+        if connection.execute(
+            """
+            SELECT 1 FROM route_execution_assignment_bindings
+            WHERE assignment_commitment = ? OR route_id = ?
+            """,
+            (assignment_commitment, route_id),
+        ).fetchone() is not None:
+            raise LedgerConflictError(
+                f"execution assignment already bound for route_id: {route_id}"
+            )
+        return record_row
+
+    @staticmethod
+    def _execution_assignment_provenance(
+        connection: sqlite3.Connection,
+        *,
+        route_id: str,
+        session_hash: str,
+        policy_name: str,
+        policy_version: str,
+        policy_schema_version: str,
+        decision_context: Mapping[str, Any],
+        eligible_modes: Sequence[str],
+        action_probabilities: Mapping[str, float],
+        chosen_mode: str,
+        logging_support: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        decision_type = str(logging_support.get("decision_type") or "")
+        sampler = logging_support.get("sampler")
+        commitment = (
+            str(sampler.get("assignment_commitment") or "").strip()
+            if isinstance(sampler, Mapping)
+            else ""
+        )
+        if decision_type != "randomized":
+            return {
+                "required": False,
+                "assignment_commitment": commitment or None,
+                "record": None,
+                "issued_at": None,
+                "issued_at_utc": None,
+                "bound_at": None,
+                "bound_at_utc": None,
+                "valid": commitment == "",
+                "reason": "not_applicable" if commitment == "" else "unexpected_commitment",
+            }
+        if not commitment:
+            return {
+                "required": True,
+                "assignment_commitment": None,
+                "record": None,
+                "issued_at": None,
+                "issued_at_utc": None,
+                "bound_at": None,
+                "bound_at_utc": None,
+                "valid": False,
+                "reason": "missing_commitment",
+            }
+        record_row = connection.execute(
+            """
+            SELECT r.*, b.route_id AS bound_route_id, b.bound_at
+            FROM route_execution_assignment_records r
+            JOIN route_execution_assignment_bindings b
+              ON b.assignment_commitment = r.assignment_commitment
+            WHERE r.assignment_commitment = ? AND b.route_id = ?
+            """,
+            (commitment, route_id),
+        ).fetchone()
+        if record_row is None:
+            return {
+                "required": True,
+                "assignment_commitment": commitment,
+                "record": None,
+                "issued_at": None,
+                "issued_at_utc": None,
+                "bound_at": None,
+                "bound_at_utc": None,
+                "valid": False,
+                "reason": "not_ledger_issued",
+            }
+        try:
+            support_without_commitment = _support_without_assignment_commitment(
+                logging_support,
+                eligible_modes=eligible_modes,
+                probabilities=action_probabilities,
+                chosen_mode=chosen_mode,
+            )
+            expected_record_json = _canonical_json(
+                _execution_assignment_record_payload(
+                    route_id=route_id,
+                    session_hash=session_hash,
+                    policy_name=policy_name,
+                    policy_version=policy_version,
+                    policy_schema_version=policy_schema_version,
+                    decision_context=decision_context,
+                    eligible_modes=eligible_modes,
+                    action_probabilities=action_probabilities,
+                    chosen_mode=chosen_mode,
+                    support_without_commitment=support_without_commitment,
+                ),
+                "execution assignment record",
+            )
+            stored_record_json = str(record_row["assignment_record_json"])
+            expected_commitment = _execution_assignment_commitment(
+                str(record_row["nonce_hex"]), stored_record_json
+            )
+            record = json.loads(stored_record_json)
+            valid = (
+                str(record_row["commitment_schema_version"])
+                == EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION
+                and str(record_row["record_schema_version"])
+                == EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION
+                and str(record_row["route_id"]) == route_id
+                and str(record_row["bound_route_id"]) == route_id
+                and stored_record_json == expected_record_json
+                and hmac.compare_digest(commitment, expected_commitment)
+            )
+            reason = "verified" if valid else "record_mismatch"
+        except (KeyError, TypeError, ValueError, RoutePolicyLedgerError, json.JSONDecodeError):
+            record = None
+            valid = False
+            reason = "invalid_record"
+        issued_at = float(record_row["issued_at"])
+        bound_at = float(record_row["bound_at"])
+        return {
+            "required": True,
+            "assignment_commitment": commitment,
+            "record": record,
+            "issued_at": issued_at,
+            "issued_at_utc": _utc(issued_at),
+            "bound_at": bound_at,
+            "bound_at_utc": _utc(bound_at),
+            "valid": valid,
+            "reason": reason,
+        }
+
     def begin_decision(
         self,
         *,
@@ -1340,6 +1777,34 @@ class RoutePolicyLedger:
             probabilities=probabilities,
             chosen_mode=cooked_chosen,
         )
+        assignment_commitment = support["sampler"].get("assignment_commitment")
+        expected_assignment_record_json: Optional[str] = None
+        if support.get("decision_type") == "randomized":
+            support_without_commitment = _support_without_assignment_commitment(
+                support,
+                eligible_modes=modes,
+                probabilities=probabilities,
+                chosen_mode=cooked_chosen,
+            )
+            expected_assignment_record_json = _canonical_json(
+                _execution_assignment_record_payload(
+                    route_id=cooked_route_id,
+                    session_hash=session_hash,
+                    policy_name=cooked_policy_name,
+                    policy_version=cooked_policy_version,
+                    policy_schema_version=cooked_policy_schema,
+                    decision_context=json.loads(context_json),
+                    eligible_modes=modes,
+                    action_probabilities=probabilities,
+                    chosen_mode=cooked_chosen,
+                    support_without_commitment=support_without_commitment,
+                ),
+                "execution assignment record",
+            )
+        elif assignment_commitment is not None:
+            raise ValueError(
+                "deterministic logging_support cannot carry an assignment commitment"
+            )
         support["decision_record_fingerprint_schema_version"] = (
             DECISION_FINGERPRINT_SCHEMA_VERSION
         )
@@ -1366,6 +1831,13 @@ class RoutePolicyLedger:
 
         try:
             with self._write_transaction() as connection:
+                if expected_assignment_record_json is not None:
+                    self._verify_execution_assignment_record(
+                        connection,
+                        assignment_commitment=str(assignment_commitment),
+                        route_id=cooked_route_id,
+                        expected_record_json=expected_assignment_record_json,
+                    )
                 connection.execute(
                     "INSERT OR IGNORE INTO session_counters(session_hash, next_sequence) VALUES (?, 1)",
                     (session_hash,),
@@ -1434,6 +1906,15 @@ class RoutePolicyLedger:
                     contracts,
                     committed_at=started_at,
                 )
+                if expected_assignment_record_json is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO route_execution_assignment_bindings(
+                            assignment_commitment, route_id, bound_at
+                        ) VALUES (?, ?, ?)
+                        """,
+                        (assignment_commitment, cooked_route_id, started_at),
+                    )
         except sqlite3.IntegrityError as exc:
             raise LedgerConflictError(f"route_id already exists: {cooked_route_id}") from exc
         return self.get_decision(cooked_route_id)
@@ -1878,6 +2359,19 @@ class RoutePolicyLedger:
             support_candidate_set_hash=support_candidate_set_hash,
             support_distribution_hash=support_distribution_hash,
         )
+        execution_assignment_provenance = self._execution_assignment_provenance(
+            connection,
+            route_id=route_id,
+            session_hash=str(row["session_hash"]),
+            policy_name=str(row["policy_name"]),
+            policy_version=str(row["policy_version"]),
+            policy_schema_version=str(row["policy_schema_version"]),
+            decision_context=decision_context,
+            eligible_modes=eligible_modes,
+            action_probabilities=action_probabilities,
+            chosen_mode=str(row["chosen_mode"]),
+            logging_support=logging_support,
+        )
         started_at = float(row["started_at"])
         completed_at = float(row["completed_at"]) if row["completed_at"] is not None else None
         historical_inflight = (
@@ -1931,6 +2425,13 @@ class RoutePolicyLedger:
             "decision_record_fingerprint": decision_record_fingerprint,
             "decision_record_fingerprint_valid": decision_record_fingerprint_valid,
             "decision_record_fingerprint_reason": decision_record_fingerprint_reason,
+            "execution_assignment_provenance": execution_assignment_provenance,
+            "execution_assignment_provenance_valid": bool(
+                execution_assignment_provenance.get("valid")
+            ),
+            "execution_assignment_provenance_reason": execution_assignment_provenance.get(
+                "reason"
+            ),
             "chosen_mode": str(row["chosen_mode"]),
             "executed_mode": (
                 str(row["executed_mode"])
@@ -2317,6 +2818,12 @@ class RoutePolicyLedger:
                 "decision_record_fingerprint_reason": decision.get(
                     "decision_record_fingerprint_reason"
                 ),
+                "execution_assignment_provenance_valid": bool(
+                    decision.get("execution_assignment_provenance_valid")
+                ),
+                "execution_assignment_provenance_reason": decision.get(
+                    "execution_assignment_provenance_reason"
+                ),
                 "outcome_contracts_precommitted_at_begin": bool(
                     decision.get("outcome_contracts_precommitted_at_begin")
                 ),
@@ -2496,6 +3003,8 @@ __all__ = [
     "DECISION_TYPES",
     "DECISION_STATUSES",
     "DECISION_FINGERPRINT_SCHEMA_VERSION",
+    "EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION",
+    "EXECUTED_ASSIGNMENT_RECORD_SCHEMA_VERSION",
     "LEDGER_SCHEMA_VERSION",
     "OUTCOME_CONTRACT_SCHEMA_VERSION",
     "OUTCOME_MATURITY_SCHEMA_VERSION",

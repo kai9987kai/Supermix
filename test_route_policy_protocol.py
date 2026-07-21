@@ -11,6 +11,7 @@ from source.route_policy_protocol import (
     REVIEW_BUNDLE_SCHEMA_VERSION,
     _PROTOCOL_HASH_DOMAIN,
     _REVIEW_BUNDLE_HASH_DOMAIN,
+    _TARGET_CLASS_HASH_DOMAIN,
     _domain_hash,
     audit_route_study_review_bundle,
     audit_route_study_protocol,
@@ -20,13 +21,20 @@ from source.route_policy_protocol import (
 from source.route_policy_study_cli import _example_payload
 
 
-def _study(*, candidate_hash="a", distribution_hash="b"):
+def _study(
+    *,
+    candidate_hash="a",
+    distribution_hash="b",
+    feature_schema_version=None,
+):
     payload = _example_payload()
     payload["source_contract"] = {
         **payload["source_contract"],
         "candidate_set_hash": candidate_hash * 64,
         "distribution_hash": distribution_hash * 64,
     }
+    if feature_schema_version is not None:
+        payload["source_contract"]["feature_schema_version"] = feature_schema_version
     return plan_adjacent_route_study(
         payload["baseline_mode"],
         payload["post_filter_candidates"],
@@ -90,6 +98,20 @@ def test_default_protocol_is_prompt_free_canonical_and_fail_closed():
         "loop": 4,
         "collective_loop": 5,
     }
+    target_class = charter["target_policy_class"]
+    assert target_class["schema_version"] == "route-target-policy-class-v2"
+    assert target_class["feature_extraction"]["source_feature_schema_version"] == (
+        charter["source_studies"]["common_source_contract"]["feature_schema_version"]
+    )
+    assert target_class["decision_rule"]["priority_order"] == [
+        "collective_loop",
+        "loop",
+        "collective",
+        "off",
+    ]
+    assert target_class["decision_rule"]["threshold_comparator"] == (
+        "score_greater_than_or_equal_to_threshold"
+    )
     assert charter["target_policy_class"]["optimality_claim"] is False
     assert charter["population"]["one_study_policy_per_cluster"] is True
     assert charter["population"]["population_precommitted"] is False
@@ -218,6 +240,55 @@ def test_profile_population_resources_and_seed_commitment_are_bound_but_unsealed
     )
     assert seed_blocker["status"] == "drafted_unsealed"
     assert changed["charter"]["external_evaluation"]["validated"] is False
+
+
+def test_target_class_identity_binds_source_features_and_normative_decision_rule():
+    first = build_route_study_protocol(
+        _study(feature_schema_version="route-features-v1")
+    )
+    second = build_route_study_protocol(
+        _study(feature_schema_version="route-features-v2")
+    )
+    first_class = first["charter"]["target_policy_class"]
+    second_class = second["charter"]["target_policy_class"]
+
+    assert first_class["profile_name"] == second_class["profile_name"] == "balanced"
+    assert first_class["thresholds"] == second_class["thresholds"]
+    assert first_class["class_hash"] != second_class["class_hash"]
+
+    tampered = copy.deepcopy(first)
+    target = tampered["charter"]["target_policy_class"]
+    target["decision_rule"]["priority_order"] = [
+        "off",
+        "collective",
+        "loop",
+        "collective_loop",
+    ]
+    target_payload = {key: value for key, value in target.items() if key != "class_hash"}
+    target["class_hash"] = _domain_hash(_TARGET_CLASS_HASH_DOMAIN, target_payload)
+    _rehash_protocol(tampered)
+
+    with pytest.raises(ValueError, match="normative feature/decision manifest"):
+        audit_route_study_protocol(tampered)
+
+
+def test_legacy_underbound_target_class_fails_closed_with_rebuild_guidance():
+    legacy = build_route_study_protocol(_study())
+    target = legacy["charter"]["target_policy_class"]
+    legacy_payload = {
+        key: copy.deepcopy(value)
+        for key, value in target.items()
+        if key not in {"class_hash", "feature_extraction", "decision_rule"}
+    }
+    legacy_payload["schema_version"] = "route-target-policy-class-v1"
+    legacy["charter"]["target_policy_class"] = {
+        **legacy_payload,
+        "class_hash": _domain_hash(_TARGET_CLASS_HASH_DOMAIN, legacy_payload),
+    }
+    _rehash_protocol(legacy)
+
+    with pytest.raises(ValueError, match="rebuild legacy drafts"):
+        audit_route_study_protocol(legacy)
 
 
 def test_multiple_strata_are_deduplicated_order_invariant_and_share_source_cohort():

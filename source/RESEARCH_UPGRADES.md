@@ -496,7 +496,18 @@ Repo changes:
 - Added a compute-sweep experiment path in `source/chat_web_app.py` and
   `runtime_python/chat_web_app.py`: `/api/compute_sweep` compares multiple
   reasoning-cycle budgets for the same draft prompt without mutating chat
-  history, and both browser UIs expose it through a `Sweep` button.
+  history, and both browser UIs expose it through a `Sweep` button. Each row
+  reports latency, realized cycles, predicted label, confidence, entropy, and
+  compute diagnostics.
+- Added `auto_compute` for web chat: the runtime can probe a small cycle ladder,
+  choose the earliest budget that meets confidence/entropy targets, then run the
+  normal response path at that selected budget.
+- Promoted compute-budget evaluation into shared `chat_app.py` helpers and
+  exposed terminal `--auto_compute`, `/auto_compute`, and `/auto_targets` so
+  browser and terminal runtimes can both use confidence/entropy-based budget
+  selection.
+- Hardened the packaged runtime web renderer to use DOM/textContent for chat and
+  candidate text instead of injecting raw response HTML.
 
 Rationale:
 
@@ -1199,14 +1210,19 @@ Implementation contract:
 - `SupermixRouteShadow.exe seal` obtains 256 bits from the operating-system
   CSPRNG, commits the seed to the design, and writes the seed capsule as a
   separate exclusively-created file before the public package enters SQLite.
-  The registry contains no seed material before explicit post-closure reveal;
-  command output never prints the seed. Capsule access control, backup, transfer,
-  and independent custody remain operator responsibilities and are not verified.
-- `commit` accepts one raw cluster identifier through a private input file,
-  derives a study-scoped HMAC pseudonym internally, and persists neither the raw
-  identifier nor the chosen arm. It appends only the pseudonym and an opaque
+  POSIX writes enforce mode `0600`; Windows installs a protected single-user
+  DACL on the empty file and verifies it before writing, after `fsync`, and on
+  later reads. Any Windows ACL failure deletes the new capsule without writing
+  seed bytes. The registry contains no seed material before explicit
+  post-closure reveal, and command output never prints the seed. Backup,
+  transfer, and independent custody remain operator responsibilities.
+- `commit` accepts only the exact canonical `session-hash-v1` digest: 64
+  lowercase hexadecimal characters produced by `hash_session_identity`. It
+  rejects raw identifiers and alternate spellings without normalization,
+  derives a study-scoped HMAC pseudonym internally, and persists neither the
+  session hash nor the chosen arm. It appends only the pseudonym and an opaque
   assignment-reveal commitment. Pseudonymity is not anonymity, especially once
-  the seed is public and an observer can test candidate identifiers.
+  the seed is public and an observer can test candidate session hashes.
 - `close` atomically freezes the enrolled commitment count and blocks later
   commitments. `reveal` is rejected until closure, verifies the seed opening,
   and then persists it. Bounded `verify` batches reconstruct each whole-policy
@@ -1230,8 +1246,14 @@ Implementation contract:
   ledger independently rejects shadow/rehearsal flags,
   `ledger_eligible=false`, non-`route-support-v1` envelopes, reserved shadow
   assignment-commitment namespaces, and every non-null commitment outside the
-  closed `route-execution-assignment-v1:<sha256>` namespace. The namespace is a
-  type boundary, not authenticated provenance against a hostile local caller.
+  closed `route-execution-assignment-v1:<sha256>` namespace. For randomized
+  execution, schema v4 additionally requires `issue_execution_assignment()` to
+  append a nonce-sealed, route/session/policy/context/support-bound record in
+  the same ledger before `begin_decision()` can verify and bind it exactly once.
+  A namespace-shaped caller string or wrapped shadow hash therefore fails
+  closed. This establishes local append-only provenance, not proof that the
+  upstream sampler was statistically honest or that a host administrator did
+  not replace the ledger.
 - All mutations are local-console operations. The Studio browser has only the
   read-only `GET /api/route_shadow_registry/status` endpoint and can refresh
   campaign state, commitment/reveal counts, and chain verification. It has no
@@ -1267,11 +1289,13 @@ Research and deployment boundary:
   outcome collection, OPE, causal or policy-value estimation, winner selection,
   activation, or automatic promotion. All existing review and activation
   blockers remain in force after a clean verification.
-- The two arm bindings freeze declarative policy-class manifests, not
-  executable runtime code or a code-artifact digest. Raw cluster identifiers
-  are private opaque inputs; v1 does not validate an external cluster-map
-  membership rule or canonicalize identifier aliases. Those controls remain
-  external prerequisites, not properties implied by a verified registry.
+- The target arm's v2 policy-class manifest binds its source feature schema,
+  closed extraction rules, thresholds, action order, tie-breaking, and fallback
+  semantics. It still does not bind executable runtime code or a code-artifact
+  digest. Canonical session hashes remain private inputs; v1 validates their
+  syntax and schema but not external cluster-map membership or independence.
+  Those controls remain external prerequisites, not properties implied by a
+  verified registry.
 
 ## July 2026: v51 prediction-stability pilot and distribution-drift shadow metric
 
