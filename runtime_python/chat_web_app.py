@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import uuid
+from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,6 +12,14 @@ import torch
 
 import chat_app
 from device_utils import configure_torch_runtime, resolve_device
+
+try:
+    from route_policy_shadow_registry import RouteShadowAssignmentRegistry
+except ImportError:  # repository compatibility when only runtime_python is first on sys.path
+    try:
+        from source.route_policy_shadow_registry import RouteShadowAssignmentRegistry
+    except ImportError:  # standalone legacy bundles may omit the shadow console modules
+        RouteShadowAssignmentRegistry = None  # type: ignore[assignment,misc]
 
 
 HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -179,6 +188,10 @@ select, input {
 }
 .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .btn-full { grid-column: span 2; }
+.shadow-registry { margin-top:12px; padding:12px; border:1px solid rgba(45,212,191,.2); border-radius:12px; background:rgba(0,0,0,.16); }
+.shadow-registry-head { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--text); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+.shadow-registry-head button { padding:7px 10px; font-size:.7rem; }
+.shadow-registry-status { margin-top:8px; color:var(--text-dim); font:11px/1.45 'Courier New',monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
 
 @media (max-width: 900px) {
   .wrap { grid-template-columns: 1fr; height: auto; overflow: visible; }
@@ -203,6 +216,18 @@ select, input {
     </div>
     
     <div class='row'><label>Inference Width</label><input id='showTop' type='number' min='0' max='10' step='1' value='0'></div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class='row'><label>Reasoning Cycles</label><input id='reasoningCycles' type='text' placeholder='default or auto'></div>
+        <div class='row'><label>Exit Tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class='row'><label>Exit Entropy</label><input id='exitEntropy' type='number' min='0' step='0.01' value='0.2'></div>
+        <div class='row'><label>Stability Tolerance</label><input id='stabilityTol' type='number' min='0' step='0.001' value='0.005'></div>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class='row'><label>Stability Patience</label><input id='stabilityPatience' type='number' min='0' max='64' step='1' value='2'></div>
+        <div class='row'><label>Adaptive Compute</label><select id='adaptiveCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
+    </div>
     
     <div class='btns'>
         <button id='loadBtn' class="btn-full">INITIALIZE ENGINE</button>
@@ -211,6 +236,10 @@ select, input {
     </div>
     
     <div class='status' id='statusBox'>System idle.</div>
+    <div class='shadow-registry'>
+      <div class='shadow-registry-head'><span>Shadow registry - read only</span><button class='alt' id='routeShadowRefresh' type='button'>REFRESH</button></div>
+      <div class='shadow-registry-status' id='routeShadowStatus'>Not loaded. Browser mutation, execution, activation, and promotion are unavailable.</div>
+    </div>
   </div>
   
   <div class='card chat'>
@@ -222,6 +251,7 @@ select, input {
     <div class='comp'>
       <textarea id='prompt' placeholder='Quantum prompt input...' rows="1"></textarea>
       <button id='sendBtn'>SEND</button>
+      <button id='sweepBtn' class='alt'>SWEEP</button>
     </div>
   </div>
 </div>
@@ -236,22 +266,67 @@ promptEl.addEventListener('input', () => {
     promptEl.style.height = (promptEl.scrollHeight) + 'px';
 });
 
-function add(kind,text,timing,top){
-    const d=document.createElement('div'); 
-    d.className='msg '+kind; 
-    let html = `<div class='who'>${kind==='user'?'Human':'Supermix'}</div><div style="white-space:pre-wrap;">${text}</div>`;
-    
+function fmtNum(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):null;}
+function reasoningCyclesValue(){const raw=el('reasoningCycles').value.trim();if(!raw)return null;const low=raw.toLowerCase();if(['auto','adaptive','smart'].includes(low))return 'auto';const n=Number(raw);return Number.isFinite(n)?n:raw;}
+function add(kind,text,timing,top,compute){
+    const d=document.createElement('div');
+    d.className='msg '+kind;
+    const who=document.createElement('div');
+    who.className='who';
+    who.textContent=kind==='user'?'Human':'Supermix';
+    const body=document.createElement('div');
+    body.style.whiteSpace='pre-wrap';
+    body.textContent=text;
+    d.appendChild(who);
+    d.appendChild(body);
+
     if(timing){
-        html += `<div class='tim'>Engine Latency: ${timing.total}ms | Infer: ${timing.infer}ms</div>`;
+        const cycles = timing.cycles_used !== undefined && timing.cycles_used !== null ? ` | Cycles: ${timing.cycles_used}` : '';
+        const t=document.createElement('div');
+        t.className='tim';
+        t.textContent=`Engine Latency: ${timing.total}ms | Infer: ${timing.infer}ms${cycles}`;
+        d.appendChild(t);
+    }
+    if(compute&&compute.applied){
+        const parts=[];
+        if(compute.reasoning_budget_mode==='auto') parts.push('mode auto');
+        if(compute.requested_reasoning_cycles!==undefined&&compute.requested_reasoning_cycles!==null) parts.push(`requested ${compute.requested_reasoning_cycles}`);
+        if(compute.cycles_used!==undefined&&compute.cycles_used!==null) parts.push(`used ${compute.cycles_used}`);
+        if(compute.exit_reason) parts.push(`exit ${compute.exit_reason}`);
+        const streak=fmtNum(compute.prediction_streak); if(streak) parts.push(`stable ${streak}`);
+        const drift=fmtNum(compute.prediction_confidence_delta); if(drift) parts.push(`drift ${drift}`);
+        const ponder=fmtNum(compute.ponder_cost); if(ponder) parts.push(`ponder ${ponder}`);
+        const consistency=fmtNum(compute.consistency_loss); if(consistency) parts.push(`consistency ${consistency}`);
+        const entropy=fmtNum(compute.gating_entropy); if(entropy) parts.push(`gate entropy ${entropy}`);
+        const exitEntropy=fmtNum(compute.exit_entropy_threshold); if(exitEntropy) parts.push(`exit entropy ${exitEntropy}`);
+        if(compute.auto_reasoning_policy&&Array.isArray(compute.auto_reasoning_policy.reasons)) parts.push(`policy ${compute.auto_reasoning_policy.reasons.slice(0,3).join(',')}`);
+        if(parts.length){
+            const c=document.createElement('div');
+            c.className='tim';
+            c.textContent='Compute: '+parts.join(' | ');
+            d.appendChild(c);
+        }
     }
     if(top&&top.length){
-        html += `<div class='tim' style="border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; margin-top:8px;">
-            <b>Neural Probabilities:</b><br>${top.map((c,i)=>`${i+1}. ${c.text.slice(0,100)}... (${(c.score*100).toFixed(1)}%)`).join('<br>')}
-        </div>`;
+        const x=document.createElement('div');
+        x.className='tim';
+        x.style.borderTop='1px solid rgba(255,255,255,0.05)';
+        x.style.paddingTop='8px';
+        x.style.marginTop='8px';
+        const title=document.createElement('b');
+        title.textContent='Neural Probabilities:';
+        x.appendChild(title);
+        top.forEach((c,i)=>{
+            const row=document.createElement('div');
+            const score=Number(c.score);
+            const scoreText=Number.isFinite(score)?(score*100).toFixed(1):'n/a';
+            row.textContent=`${i+1}. ${String(c.text||'').slice(0,100)}... (${scoreText}%)`;
+            x.appendChild(row);
+        });
+        d.appendChild(x);
     }
-    d.innerHTML = html;
-    msgs.appendChild(d); 
-    msgs.scrollTop=msgs.scrollHeight; 
+    msgs.appendChild(d);
+    msgs.scrollTop=msgs.scrollHeight;
 }
 
 async function jget(path){
@@ -273,7 +348,36 @@ async function refresh(){
         el('metaLine').textContent = d.status.loaded ? `${d.status.model_size.toUpperCase()} CORE | ${d.status.device.toUpperCase()}` : 'ENGINE OFFLINE'; 
         if(!el('weights').value&&d.status.weights) el('weights').value=d.status.weights; 
         if(!el('meta').value&&d.status.meta) el('meta').value=d.status.meta; 
+        if(!el('reasoningCycles').value&&d.status.reasoning_cycles) el('reasoningCycles').value=d.status.reasoning_cycles;
+        el('adaptiveCompute').value = d.status.adaptive_compute ? 'on' : 'off';
+        if(d.status.adaptive_exit_tol !== undefined) el('exitTol').value = d.status.adaptive_exit_tol;
+        if(d.status.adaptive_exit_entropy !== undefined) el('exitEntropy').value = d.status.adaptive_exit_entropy;
+        if(d.status.prediction_stability_patience !== undefined) el('stabilityPatience').value = d.status.prediction_stability_patience;
+        if(d.status.prediction_stability_tol !== undefined) el('stabilityTol').value = d.status.prediction_stability_tol;
     }catch(e){ el('statusBox').textContent='TELEMETRY ERROR: '+e.message; }
+}
+function renderRouteShadowRegistry(snapshot){
+    const campaigns=Array.isArray(snapshot&&snapshot.campaigns)?snapshot.campaigns:[];
+    const committed=campaigns.reduce((n,row)=>n+(Number(row.commitment_count)||0),0);
+    const matched=campaigns.reduce((n,row)=>n+(Number(row.matched_assignment_count)||0),0);
+    const processed=campaigns.reduce((n,row)=>n+(Number(row.processed_reveal_count)||0),0);
+    const mismatched=campaigns.reduce((n,row)=>n+(Number(row.mismatched_assignment_count)||0),0);
+    const chain=snapshot&&snapshot.event_chain;
+    if(!snapshot||snapshot.available!==true){
+        el('routeShadowStatus').textContent=`Not initialized at ${(snapshot&&snapshot.registry_location)||'the canonical memory path'}.\nRead only - execution, activation, and promotion unavailable.`;
+        return;
+    }
+    const states=[...new Set(campaigns.map(row=>String(row.state||'unknown').replaceAll('_',' ')))];
+    el('routeShadowStatus').textContent=
+        `${snapshot.ok?'VERIFIED':'VERIFICATION FAILED'} | campaigns ${campaigns.length} | assignments ${matched}/${committed} matched | reveals ${processed} processed | mismatches ${mismatched}\n`+
+        `chain ${chain&&chain.ok?'verified':'failed'} (${Number(chain&&chain.verified_events)||0} events) | states ${states.join(', ')||'none'}\n`+
+        'Local chain only; no external anchor. Read only - execution, activation, and promotion unavailable.';
+}
+async function refreshRouteShadowRegistry(){
+    const button=el('routeShadowRefresh');button.disabled=true;el('routeShadowStatus').textContent='Reading local registry...';
+    try{const d=await jget('/api/route_shadow_registry/status');renderRouteShadowRegistry(d.route_shadow_registry||{});}
+    catch(e){el('routeShadowStatus').textContent='REGISTRY STATUS ERROR: '+e.message;}
+    finally{button.disabled=false;}
 }
 async function loadModel(){
     el('statusBox').textContent='SYNCING NEURAL WEIGHTS...'; 
@@ -289,9 +393,24 @@ async function send(){
     promptEl.value=''; 
     promptEl.style.height = 'auto';
     try{
-        const d=await jpost('/api/chat',{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value)}); 
-        add('bot',d.response,d.timing_ms,d.top_candidates);
+        const cycles = reasoningCyclesValue();
+        const d=await jpost('/api/chat',{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value),reasoning_cycles:cycles,adaptive_compute:el('adaptiveCompute').value==='on',adaptive_exit_tol:Number(el('exitTol').value),adaptive_exit_entropy:Number(el('exitEntropy').value),prediction_stability_patience:Number(el('stabilityPatience').value),prediction_stability_tol:Number(el('stabilityTol').value)});
+        add('bot',d.response,d.timing_ms,d.top_candidates,d.compute);
     }catch(e){ add('bot','CORE ERROR: '+e.message); }
+}
+async function sweepCompute(){
+    const text=promptEl.value.trim(); if(!text) return;
+    try{
+        const d=await jpost('/api/compute_sweep',{session_id:sid,message:text,cycles:[1,3,8],adaptive_compute:el('adaptiveCompute').value==='on',adaptive_exit_tol:Number(el('exitTol').value),adaptive_exit_entropy:Number(el('exitEntropy').value),prediction_stability_patience:Number(el('stabilityPatience').value),prediction_stability_tol:Number(el('stabilityTol').value)});
+        const lines=['Compute sweep for draft prompt:'];
+        d.rows.forEach((row)=>{
+            const conf=fmtNum(row.confidence);
+            const entropy=fmtNum(row.entropy);
+            const reason=row.compute&&row.compute.exit_reason?` | exit ${row.compute.exit_reason}`:'';
+            lines.push(`cycles ${row.requested_cycles}: ${row.latency_ms}ms | used ${row.cycles_used} | label ${row.predicted_label} | conf ${conf||'n/a'} | entropy ${entropy||'n/a'}${reason}`);
+        });
+        add('bot',lines.join('\\n'),null,null,d.rows[d.rows.length-1]?.compute||null);
+    }catch(e){ add('bot','SWEEP ERROR: '+e.message); }
 }
 async function clearSess(){
     try{
@@ -300,17 +419,85 @@ async function clearSess(){
         add('bot','Neural cache purged. Ready for fresh session.');
     }catch(e){ add('bot','PURGE ERROR: '+e.message); }
 }
-el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; 
+el('loadBtn').onclick=loadModel; el('statusBtn').onclick=refresh; el('clearBtn').onclick=clearSess; el('sendBtn').onclick=send; el('sweepBtn').onclick=sweepCompute; el('routeShadowRefresh').onclick=refreshRouteShadowRegistry;
 promptEl.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault();send(); } }); 
-refresh();
+refresh(); refreshRouteShadowRegistry();
 </script></body></html>"""
+
+
+_RUNTIME_COMPUTE_DEFAULT_KEYS = (
+    "reasoning_cycles",
+    "adaptive_compute",
+    "adaptive_exit_tol",
+    "adaptive_exit_entropy",
+    "prediction_stability_patience",
+    "prediction_stability_tol",
+)
+
+
+def _library_runtime_compute_defaults() -> Dict[str, Any]:
+    return {
+        "reasoning_cycles": None,
+        "adaptive_compute": False,
+        "adaptive_exit_tol": 1e-3,
+        "adaptive_exit_entropy": chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+        "prediction_stability_patience": chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE,
+        "prediction_stability_tol": chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
+    }
+
+
+def _normalize_runtime_compute_defaults(values: Dict[str, Any]) -> Dict[str, Any]:
+    raw_cycles = values.get("reasoning_cycles")
+    reasoning_cycles: Any
+    if chat_app._is_auto_reasoning_cycles(raw_cycles):
+        reasoning_cycles = "auto"
+    else:
+        reasoning_cycles = chat_app._coerce_optional_positive_int(
+            raw_cycles,
+            chat_app.MAX_RUNTIME_REASONING_CYCLES,
+        )
+    return {
+        "reasoning_cycles": reasoning_cycles,
+        "adaptive_compute": chat_app._coerce_bool(values.get("adaptive_compute")),
+        "adaptive_exit_tol": chat_app._coerce_nonnegative_float(
+            values.get("adaptive_exit_tol"),
+            1e-3,
+        ),
+        "adaptive_exit_entropy": chat_app._coerce_nonnegative_float(
+            values.get("adaptive_exit_entropy"),
+            chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+        ),
+        "prediction_stability_patience": chat_app._coerce_nonnegative_int(
+            values.get("prediction_stability_patience"),
+            chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE,
+            chat_app.MAX_RUNTIME_REASONING_CYCLES,
+        ),
+        "prediction_stability_tol": chat_app._coerce_nonnegative_float(
+            values.get("prediction_stability_tol"),
+            chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
+        ),
+    }
+
+
+def _runtime_compute_cli_overrides(args: argparse.Namespace) -> Dict[str, Any]:
+    """Return only compute options the CLI user actually supplied."""
+    values = {
+        "reasoning_cycles": getattr(args, "reasoning_cycles", None),
+        "adaptive_compute": getattr(args, "adaptive_compute", None),
+        "adaptive_exit_tol": getattr(args, "adaptive_exit_tol", None),
+        "adaptive_exit_entropy": getattr(args, "adaptive_exit_entropy", None),
+        "prediction_stability_patience": getattr(args, "prediction_stability_patience", None),
+        "prediction_stability_tol": getattr(args, "prediction_stability_tol", None),
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 class Engine:
     def __init__(self, device: Any, device_info: Dict[str, Any], defaults: Dict[str, Any]):
         self.device = device
         self.device_info = dict(device_info or {})
-        self.defaults = dict(defaults)
+        self._constructor_defaults = dict(defaults or {})
+        self.defaults = self._build_effective_defaults({})
         self.lock = threading.RLock()
         self.model = None
         self.weights_path: Optional[str] = None
@@ -321,6 +508,32 @@ class Engine:
         self.available_labels: List[int] = list(range(chat_app.MODEL_CLASSES))
         self.sessions: Dict[str, List[Tuple[str, str]]] = {}
         self.recent: Dict[str, List[str]] = {}
+        registry_path = self._constructor_defaults.get("route_shadow_registry_path")
+        self.route_shadow_registry_path = Path(
+            registry_path or Path("tmp") / "memory" / "route-policy-shadow-registry.sqlite3"
+        ).expanduser().resolve()
+
+    def _build_effective_defaults(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        runtime_defaults = _library_runtime_compute_defaults()
+        metadata_defaults = meta.get("runtime_defaults")
+        if isinstance(metadata_defaults, dict):
+            runtime_defaults.update(
+                {
+                    key: metadata_defaults[key]
+                    for key in _RUNTIME_COMPUTE_DEFAULT_KEYS
+                    if key in metadata_defaults
+                }
+            )
+        runtime_defaults.update(
+            {
+                key: self._constructor_defaults[key]
+                for key in _RUNTIME_COMPUTE_DEFAULT_KEYS
+                if key in self._constructor_defaults
+            }
+        )
+        effective = dict(self._constructor_defaults)
+        effective.update(_normalize_runtime_compute_defaults(runtime_defaults))
+        return effective
 
     def status(self) -> Dict[str, Any]:
         with self.lock:
@@ -333,7 +546,55 @@ class Engine:
                 "available_labels": len(self.available_labels),
                 "device": self.device_info.get("resolved", str(self.device)),
                 "sessions": len(self.sessions),
+                "runtime_compute_supported": chat_app.model_supports_runtime_compute(self.model) if self.model is not None else False,
+                "reasoning_cycles": chat_app._format_reasoning_cycles_setting(self.defaults.get("reasoning_cycles")),
+                "adaptive_compute": bool(self.defaults.get("adaptive_compute", False)),
+                "adaptive_exit_tol": chat_app._coerce_nonnegative_float(self.defaults.get("adaptive_exit_tol", 1e-3), 1e-3),
+                "adaptive_exit_entropy": chat_app._coerce_nonnegative_float(self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY), chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                "prediction_stability_patience": chat_app._coerce_nonnegative_int(self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE), chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE, chat_app.MAX_RUNTIME_REASONING_CYCLES),
+                "prediction_stability_tol": chat_app._coerce_nonnegative_float(self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL), chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
             }
+
+    def route_shadow_registry_snapshot(self) -> Dict[str, Any]:
+        """Return compatible shadow-registry status without exposing mutations."""
+
+        registry_path = self.route_shadow_registry_path
+        if not registry_path.is_file():
+            return {
+                "ok": True,
+                "available": False,
+                "status": "not_initialized",
+                "registry_location": f"memory/{registry_path.name}",
+                "read_only": True,
+                "campaign_count": 0,
+                "campaigns": [],
+                "event_chain": None,
+                "execution_enabled": False,
+                "activation_available": False,
+                "automatic_promotion_allowed": False,
+            }
+        if RouteShadowAssignmentRegistry is None:
+            return {
+                "ok": False,
+                "available": True,
+                "status": "reader_unavailable",
+                "registry_location": f"memory/{registry_path.name}",
+                "read_only": True,
+                "campaign_count": 0,
+                "campaigns": [],
+                "event_chain": None,
+                "execution_enabled": False,
+                "activation_available": False,
+                "automatic_promotion_allowed": False,
+            }
+        snapshot = RouteShadowAssignmentRegistry(registry_path, read_only=True).snapshot()
+        return {
+            **snapshot,
+            "available": True,
+            "status": "verified" if snapshot.get("ok") else "verification_failed",
+            "registry_location": f"memory/{registry_path.name}",
+            "read_only": True,
+        }
 
     def _parse_buckets(self, meta: Dict[str, Any]) -> None:
         buckets: Dict[int, List[Dict[str, Any]]] = {}
@@ -359,13 +620,14 @@ class Engine:
             raise FileNotFoundError(f"Metadata not found: {meta_path}")
 
         meta = chat_app.load_metadata(meta_path)
+        effective_defaults = self._build_effective_defaults(meta)
         raw_feature_mode = str(meta.get("feature_mode", "legacy")).strip().lower()
         feature_mode = chat_app.resolve_feature_mode(raw_feature_mode, smarter_auto=True)
 
         sd = chat_app.safe_load_state_dict(weights)
         inferred = chat_app.detect_model_size_from_state_dict(sd)
         resolved_model_size, _ = chat_app.resolve_runtime_model_size(
-            str(self.defaults.get("model_size", "auto")),
+            str(effective_defaults.get("model_size", "auto")),
             str(meta.get("model_size", "")),
             inferred,
         )
@@ -398,6 +660,7 @@ class Engine:
             self.meta_path = meta_path
             self.feature_mode = feature_mode
             self.model_size = resolved_model_size
+            self.defaults = effective_defaults
             self._parse_buckets(meta)
             self.sessions.clear()
             self.recent.clear()
@@ -409,7 +672,86 @@ class Engine:
             self.sessions.pop(session_id, None)
             self.recent.pop(session_id, None)
 
-    def chat(self, session_id: str, user_text: str, style_mode: Optional[str] = None, response_temperature: Optional[float] = None, show_top_responses: int = 0) -> Dict[str, Any]:
+    def compute_sweep(
+        self,
+        session_id: str,
+        user_text: str,
+        cycles: Any = None,
+        adaptive_compute: Any = None,
+        adaptive_exit_tol: Any = None,
+        adaptive_exit_entropy: Any = None,
+        prediction_stability_patience: Any = None,
+        prediction_stability_tol: Any = None,
+    ) -> Dict[str, Any]:
+        if not user_text.strip():
+            raise ValueError("Empty message")
+        requested_cycles: List[int] = []
+        raw_cycles = cycles if isinstance(cycles, list) and cycles else [1, 3, 8]
+        for raw in raw_cycles:
+            parsed = chat_app._coerce_optional_positive_int(raw, chat_app.MAX_RUNTIME_REASONING_CYCLES)
+            if parsed is not None and parsed not in requested_cycles:
+                requested_cycles.append(parsed)
+        if not requested_cycles:
+            requested_cycles = [1, 3, 8]
+
+        with self.lock:
+            if self.model is None:
+                raise RuntimeError("No model loaded")
+            model = self.model
+            feature_mode = self.feature_mode
+            labels = list(self.available_labels)
+            history = list(self.sessions.get(session_id, []))
+
+        context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
+        x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
+        idx = torch.tensor(labels, dtype=torch.long, device=self.device)
+        rows: List[Dict[str, Any]] = []
+
+        with torch.no_grad():
+            for cycle_count in requested_cycles:
+                t0 = time.perf_counter()
+                model_out, compute_diag = chat_app.forward_with_runtime_compute(
+                    model,
+                    x,
+                    reasoning_cycles=cycle_count,
+                    adaptive_compute=adaptive_compute if adaptive_compute is not None else self.defaults.get("adaptive_compute", False),
+                    exit_tol=adaptive_exit_tol if adaptive_exit_tol is not None else self.defaults.get("adaptive_exit_tol", 1e-3),
+                    exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                    prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
+                    prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                )
+                latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                logits = model_out[0, 0]
+                avail_logits = logits.index_select(0, idx)
+                probs = torch.softmax(avail_logits, dim=0)
+                top_pos = int(torch.argmax(probs).item())
+                entropy = -torch.sum(probs * torch.log(probs + 1e-9))
+                rows.append({
+                    "requested_cycles": cycle_count,
+                    "latency_ms": latency_ms,
+                    "cycles_used": compute_diag.get("cycles_used"),
+                    "predicted_label": int(labels[top_pos]),
+                    "confidence": float(probs[top_pos].item()),
+                    "entropy": float(entropy.item()),
+                    "compute": compute_diag,
+                })
+
+        return {"ok": True, "session_id": session_id, "rows": rows}
+
+    def chat(
+        self,
+        session_id: str,
+        user_text: str,
+        style_mode: Optional[str] = None,
+        response_temperature: Optional[float] = None,
+        show_top_responses: int = 0,
+        reasoning_cycles: Any = None,
+        adaptive_compute: Any = None,
+        adaptive_exit_tol: Any = None,
+        adaptive_exit_entropy: Any = None,
+        prediction_stability_patience: Any = None,
+        prediction_stability_tol: Any = None,
+    ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
         with self.lock:
@@ -429,7 +771,18 @@ class Engine:
         tt = time.perf_counter()
         x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
         with torch.no_grad():
-            logits = model(x)[0, 0]
+            model_out, compute_diag = chat_app.forward_with_runtime_compute(
+                model,
+                x,
+                reasoning_cycles=reasoning_cycles if reasoning_cycles is not None else self.defaults.get("reasoning_cycles"),
+                adaptive_compute=adaptive_compute if adaptive_compute is not None else self.defaults.get("adaptive_compute", False),
+                exit_tol=adaptive_exit_tol if adaptive_exit_tol is not None else self.defaults.get("adaptive_exit_tol", 1e-3),
+                exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
+                prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                auto_reasoning_context=context,
+            )
+            logits = model_out[0, 0]
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
@@ -526,7 +879,9 @@ class Engine:
                 "infer": round(t_infer * 1000, 1),
                 "rank_pick": round(t_rank * 1000, 1),
                 "total": round((time.perf_counter() - t0) * 1000, 1),
+                "cycles_used": compute_diag.get("cycles_used"),
             },
+            "compute": compute_diag,
             "top_candidates": top_candidates,
         }
 
@@ -536,13 +891,28 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
 
     @app.get('/')
     def index():
-        html = HTML.replace("<input id='weights'></div>", f"<input id='weights' value='{default_weights}'></div>")
-        html = html.replace("<input id='meta'></div>", f"<input id='meta' value='{default_meta}'></div>")
+        html = HTML.replace(
+            "<input id='weights'></div>",
+            f"<input id='weights' value='{escape(default_weights, quote=True)}'></div>",
+        )
+        html = html.replace(
+            "<input id='meta'></div>",
+            f"<input id='meta' value='{escape(default_meta, quote=True)}'></div>",
+        )
         return html
 
     @app.get('/api/status')
     def api_status():
         return jsonify({"ok": True, "status": engine.status()})
+
+    @app.get('/api/route_shadow_registry/status')
+    def api_route_shadow_registry_status():
+        try:
+            response = jsonify({"ok": True, "route_shadow_registry": engine.route_shadow_registry_snapshot()})
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     @app.post('/api/load')
     def api_load():
@@ -566,6 +936,31 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 style_mode=p.get('style_mode'),
                 response_temperature=p.get('response_temperature'),
                 show_top_responses=int(p.get('show_top_responses') or 0),
+                reasoning_cycles=p.get('reasoning_cycles'),
+                adaptive_compute=p.get('adaptive_compute'),
+                adaptive_exit_tol=p.get('adaptive_exit_tol'),
+                adaptive_exit_entropy=p.get('adaptive_exit_entropy'),
+                prediction_stability_patience=p.get('prediction_stability_patience'),
+                prediction_stability_tol=p.get('prediction_stability_tol'),
+            ))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+    @app.post('/api/compute_sweep')
+    def api_compute_sweep():
+        p = request.get_json(force=True, silent=True) or {}
+        sid = str(p.get('session_id') or '').strip() or str(uuid.uuid4())
+        msg = str(p.get('message') or '').strip()
+        try:
+            return jsonify(engine.compute_sweep(
+                session_id=sid,
+                user_text=msg,
+                cycles=p.get('cycles'),
+                adaptive_compute=p.get('adaptive_compute'),
+                adaptive_exit_tol=p.get('adaptive_exit_tol'),
+                adaptive_exit_entropy=p.get('adaptive_exit_entropy'),
+                prediction_stability_patience=p.get('prediction_stability_patience'),
+                prediction_stability_tol=p.get('prediction_stability_tol'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -603,6 +998,25 @@ def main() -> None:
     ap.add_argument('--temperature', type=float, default=0.0)
     ap.add_argument('--style_mode', choices=['auto','balanced','creative','concise','analyst'], default='auto')
     ap.add_argument('--creativity', type=float, default=0.2)
+    ap.add_argument('--reasoning_cycles', type=str, default=None)
+    adaptive_compute_group = ap.add_mutually_exclusive_group()
+    adaptive_compute_group.add_argument(
+        '--adaptive_compute',
+        dest='adaptive_compute',
+        action='store_true',
+        help='enable adaptive compute, overriding checkpoint metadata',
+    )
+    adaptive_compute_group.add_argument(
+        '--no_adaptive_compute',
+        dest='adaptive_compute',
+        action='store_false',
+        help='disable adaptive compute, overriding checkpoint metadata',
+    )
+    ap.set_defaults(adaptive_compute=None)
+    ap.add_argument('--adaptive_exit_tol', type=float, default=None)
+    ap.add_argument('--adaptive_exit_entropy', type=float, default=None)
+    ap.add_argument('--prediction_stability_patience', type=int, default=None)
+    ap.add_argument('--prediction_stability_tol', type=float, default=None)
     args = ap.parse_args()
 
     configure_torch_runtime(
@@ -612,7 +1026,7 @@ def main() -> None:
         matmul_precision=str(args.matmul_precision),
     )
     device, device_info = resolve_device(args.device, preference=args.device_preference)
-    engine = Engine(device, device_info, {
+    engine_defaults = {
         'model_size': args.model_size,
         'max_turns': int(args.max_turns),
         'top_labels': int(args.top_labels),
@@ -621,7 +1035,9 @@ def main() -> None:
         'temperature': float(args.temperature),
         'style_mode': str(args.style_mode),
         'creativity': float(args.creativity),
-    })
+    }
+    engine_defaults.update(_runtime_compute_cli_overrides(args))
+    engine = Engine(device, device_info, engine_defaults)
     if args.autoload:
         try:
             print(engine.load(args.weights, args.meta))

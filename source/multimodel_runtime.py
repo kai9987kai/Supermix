@@ -1,23 +1,27 @@
 from __future__ import annotations
 
+import copy
 import gc
 import hashlib
 import io
 import json
 import logging
+import math
 import re
 import threading
 import time
+import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 from urllib.request import urlopen
 
 import torch
 from PIL import Image
 
+import chat_app
 import chat_web_app
 from chat_export import copy_generated_image, render_chat_transcript_image
 from chat_image_variant_app import (
@@ -35,6 +39,23 @@ from multimodel_catalog import (
     discover_model_records,
 )
 from multimodel_memory import ConversationMemoryStore
+from route_policy_ledger import (
+    OUTCOME_CONTRACT_SCHEMA_VERSION,
+    SUPPORT_SCHEMA_VERSION,
+    DecisionNotFoundError,
+    RoutePolicyLedger,
+    build_logging_support_envelope,
+    build_route_outcome_contracts,
+    hash_session_identity,
+)
+from route_policy_lab import POLICY_PROFILES, analyze_route_policy
+from route_policy_explorer import plan_adjacent_route_study
+from route_policy_protocol import (
+    audit_route_study_review_bundle,
+    build_route_study_protocol,
+    build_route_study_review_bundle_from_input,
+)
+from route_policy_shadow_registry import RouteShadowAssignmentRegistry
 from multimodel_tools import (
     CmdOpenTool,
     ToolEvent,
@@ -61,11 +82,31 @@ from omni_collective_v5_model import OmniCollectiveEngineV5
 from omni_collective_v6_model import OmniCollectiveEngineV6
 from omni_collective_v7_model import OmniCollectiveEngineV7
 from omni_collective_v8_model import OmniCollectiveEngineV8
-from omni_collective_v42_model import OmniCollectiveEngineV42
-from omni_collective_v41_model import OmniCollectiveEngineV41
-from omni_collective_v46_model import OmniCollectiveEngineV46
-from omni_collective_v47_model import OmniCollectiveEnginev47, OmniPredictionv47
-from omni_collective_v48_model import OmniCollectiveEnginev48, OmniPredictionv48
+try:
+    from omni_collective_v42_model import OmniCollectiveEngineV42
+except ImportError:
+    OmniCollectiveEngineV42 = None
+
+try:
+    from omni_collective_v41_model import OmniCollectiveEngineV41
+except ImportError:
+    OmniCollectiveEngineV41 = None
+
+try:
+    from omni_collective_v46_model import OmniCollectiveEngineV46
+except ImportError:
+    OmniCollectiveEngineV46 = None
+
+try:
+    from omni_collective_v47_model import OmniCollectiveEnginev47, OmniPredictionv47
+except ImportError:
+    OmniCollectiveEnginev47, OmniPredictionv47 = None, None
+
+try:
+    from omni_collective_v48_model import OmniCollectiveEnginev48, OmniPredictionv48
+except ImportError:
+    OmniCollectiveEnginev48, OmniPredictionv48 = None, None
+
 from run import safe_load_state_dict
 
 
@@ -77,6 +118,7 @@ class ChatResult:
     route_reason: str
     response: str = ""
     timing: Optional[Dict[str, Any]] = None
+    compute: Optional[Dict[str, Any]] = None
     image_url: str = ""
     output_path: str = ""
     prompt_used: str = ""
@@ -92,6 +134,7 @@ class ChatResult:
             "route_reason": self.route_reason,
             "response": self.response,
             "timing": self.timing or {},
+            "compute": self.compute or {},
             "image_url": self.image_url,
             "output_path": self.output_path,
             "prompt_used": self.prompt_used,
@@ -109,6 +152,22 @@ def _safe_slug(text: str) -> str:
 def _trim_text(text: str, limit: int = 320) -> str:
     cooked = " ".join(str(text or "").strip().split())
     return cooked[:limit]
+
+
+def _coerce_int_setting(value: Any, default: int, *, minimum: int = 0, maximum: int = 100_000) -> int:
+    try:
+        cooked = int(float(value))
+    except (TypeError, ValueError):
+        cooked = int(default)
+    return max(int(minimum), min(int(maximum), cooked))
+
+
+def _record_route_model_call(settings: Dict[str, Any], count: int = 1) -> None:
+    """Increment the request-local model invocation counter when one is active."""
+    counter = settings.get("_route_model_call_counter")
+    if not isinstance(counter, dict):
+        return
+    counter["count"] = max(0, int(counter.get("count") or 0)) + max(0, int(count))
 
 
 _CHAT_DRIFT_MARKERS = (
@@ -245,6 +304,84 @@ def _parse_yes_no_section(text: str, label: str) -> Optional[bool]:
     return None
 
 
+def _normalize_score_0_1(value: float) -> float:
+    cooked = float(value)
+    if cooked > 1.0:
+        cooked = cooked / (10.0 if cooked <= 10.0 else 100.0)
+    return max(0.0, min(1.0, cooked))
+
+
+def _parse_labeled_score_0_1(text: str, label: str) -> Optional[float]:
+    section = _extract_labeled_section(text, label)
+    if not section:
+        return None
+    fraction = re.search(r"([-+]?\d+(?:\.\d+)?)\s*/\s*([-+]?\d+(?:\.\d+)?)", section)
+    if fraction:
+        denominator = float(fraction.group(2))
+        if denominator:
+            return round(_normalize_score_0_1(float(fraction.group(1)) / denominator), 4)
+    match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*%?", section)
+    if not match:
+        return None
+    value = float(match.group(1))
+    if "%" in match.group(0):
+        value /= 100.0
+    return round(_normalize_score_0_1(value), 4)
+
+
+def _first_labeled_score_0_1(text: str, labels: Sequence[str]) -> Optional[float]:
+    for label in labels:
+        value = _parse_labeled_score_0_1(text, label)
+        if value is not None:
+            return value
+    return None
+
+
+def _loop_score_threshold(raw_value: Any) -> float:
+    if raw_value is None or raw_value == "":
+        return LOOP_AGENT_DEFAULT_SCORE_THRESHOLD
+    try:
+        return max(0.55, min(0.98, _normalize_score_0_1(float(raw_value))))
+    except (TypeError, ValueError):
+        return LOOP_AGENT_DEFAULT_SCORE_THRESHOLD
+
+
+def _loop_review_metrics(reviewer_text: str, review_complete: Optional[bool]) -> Dict[str, Any]:
+    explicit_score = _first_labeled_score_0_1(
+        reviewer_text,
+        ("SCORE", "VERIFIER_SCORE", "COMPLETION_SCORE", "QUALITY_SCORE"),
+    )
+    progress = _first_labeled_score_0_1(
+        reviewer_text,
+        ("PROGRESS_SCORE", "COMPLETION_SCORE", "COMPLETENESS", "QUALITY_SCORE", "SCORE"),
+    )
+    confidence = _first_labeled_score_0_1(reviewer_text, ("CONFIDENCE", "READY_CONFIDENCE", "CERTAINTY"))
+    risk = _first_labeled_score_0_1(reviewer_text, ("RISK_SCORE", "RISK", "ERROR_RISK"))
+
+    if progress is None:
+        progress = 1.0 if review_complete is True else 0.35 if review_complete is False else 0.5
+    if confidence is None:
+        confidence = 0.9 if review_complete is True else 0.45 if review_complete is False else 0.55
+    if risk is None:
+        risk = 0.05 if review_complete is True else 0.45 if review_complete is False else 0.3
+
+    verifier_score = round((progress * 0.50) + (confidence * 0.30) + ((1.0 - risk) * 0.20), 4)
+    review_score = round(explicit_score if explicit_score is not None else verifier_score, 4)
+    evidence = (
+        _extract_labeled_section(reviewer_text, "EVIDENCE")
+        or _extract_labeled_section(reviewer_text, "COMPLETION_EVIDENCE")
+        or _extract_labeled_section(reviewer_text, "REASON")
+    )
+    return {
+        "progress_score": round(progress, 4),
+        "confidence_score": round(confidence, 4),
+        "risk_score": round(risk, 4),
+        "review_score": review_score,
+        "verifier_score": verifier_score,
+        "completion_evidence": _trim_text(evidence, limit=220),
+    }
+
+
 def _safe_upload_name(filename: str) -> str:
     cooked = re.sub(r"[^A-Za-z0-9._-]+", "-", str(filename or "").strip()).strip(".-")
     return cooked[:96] or "upload.png"
@@ -254,10 +391,150 @@ DEFAULT_MODEL_STORE_REPO_ID = "Kai9987kai/supermix-model-zoo"
 MODEL_STORE_CACHE_TTL_SECONDS = 300.0
 LOOP_AGENT_DEFAULT_MAX_STEPS = 4
 LOOP_AGENT_HARD_MAX_STEPS = 8
+LOOP_AGENT_DEFAULT_SCORE_THRESHOLD = 0.88
+MODEL_STORE_ARTIFACT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,180}\.zip$", re.IGNORECASE)
+AUTO_AGENT_MODE_ORDER = ("off", "collective", "loop", "collective_loop")
+AUTO_ROUTE_POLICY_ID = "auto-route-v2"
+AUTO_ROUTE_POLICY_VERSION = "2.0.0"
+AUTO_ROUTE_FEATURE_SCHEMA_VERSION = "route-context-v1"
+AUTO_AGENT_POSITIVE_THRESHOLDS = {
+    "collective": 1,
+    "loop": 3,
+    "collective_loop": 4,
+}
+AUTO_AGENT_ADAPTIVE_MIN_WEIGHTED_COUNT = 1.2
+AUTO_AGENT_ADAPTIVE_QUALITY_FLOOR = 0.7
+AUTO_AGENT_ADAPTIVE_QUALITY_DELTA = 0.08
+AUTO_AGENT_ADAPTIVE_QUALITY_COST_DELTA = 0.08
+AUTO_AGENT_SELECTION_THRESHOLDS = {
+    "collective": 2,
+    "loop": 4,
+    "collective_loop": 5,
+}
+
+
+def _stamp_auto_route_policy(
+    policy: Dict[str, Any],
+    *,
+    selected_agent_mode: str,
+    action_mode: str,
+    logging_support: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    support_candidates = (
+        logging_support.get("candidates")
+        if isinstance(logging_support, dict) and isinstance(logging_support.get("candidates"), list)
+        else []
+    )
+    allowed_modes = [
+        str(candidate.get("action"))
+        for candidate in support_candidates
+        if isinstance(candidate, dict) and str(candidate.get("action")) in AUTO_AGENT_MODE_ORDER
+    ]
+    if not allowed_modes:
+        allowed_modes = [
+            str(mode)
+            for mode in list(policy.get("allowed_agent_modes") or [])
+            if str(mode) in AUTO_AGENT_MODE_ORDER
+        ]
+    if selected_agent_mode not in allowed_modes:
+        allowed_modes.append(selected_agent_mode)
+    policy["policy_id"] = AUTO_ROUTE_POLICY_ID
+    policy["policy_version"] = AUTO_ROUTE_POLICY_VERSION
+    policy["feature_schema_version"] = AUTO_ROUTE_FEATURE_SCHEMA_VERSION
+    policy["decision_type"] = "deterministic"
+    policy["action_mode"] = action_mode
+    policy["eligible_agent_modes"] = list(allowed_modes)
+    policy["eligible_actions"] = list(allowed_modes)
+    policy["selected_agent_mode"] = selected_agent_mode
+    probabilities = {
+        mode: 1.0 if mode == selected_agent_mode else 0.0
+        for mode in AUTO_AGENT_MODE_ORDER
+        if mode in allowed_modes
+    }
+    policy["action_probabilities"] = dict(probabilities)
+    policy["post_filter_action_probabilities"] = dict(probabilities)
+    policy["probability_stage"] = "post_filter"
+    policy["logging_propensity"] = 1.0
+    policy["selection_thresholds"] = dict(AUTO_AGENT_SELECTION_THRESHOLDS)
+    policy["counterfactual_support"] = "none_deterministic_logging"
+    if isinstance(logging_support, dict):
+        policy["logging_support"] = dict(logging_support)
+        policy["candidate_set_hash"] = logging_support.get("candidate_set_hash")
+        policy["distribution_hash"] = logging_support.get("distribution_hash")
+    policy["decision_context"] = {
+        "action_mode": action_mode,
+        "budget_profile": str(policy.get("budget_profile") or "balanced"),
+        "score": int(policy.get("score") or 0),
+        "allowed_agent_modes": list(allowed_modes),
+    }
+    return policy
+
+
+AUTO_AGENT_UNCERTAINTY_SIGNAL_PATTERNS = (
+    ("audit", re.compile(r"\baudit(?:ing)?\b", re.IGNORECASE)),
+    ("verification", re.compile(r"\b(verif(?:y|ies|ied|ication)|validat(?:e|es|ed|ion))\b", re.IGNORECASE)),
+    ("risk", re.compile(r"\b(risk|safety|high[- ]stakes|production)\b", re.IGNORECASE)),
+    ("correctness", re.compile(r"\b(correctness|correct|accuracy|accurate)\b", re.IGNORECASE)),
+    ("edge_cases", re.compile(r"\bedge[- ]cases?\b", re.IGNORECASE)),
+    ("proof", re.compile(r"\b(proof|prove|formal)\b", re.IGNORECASE)),
+    ("review", re.compile(r"\breview\b", re.IGNORECASE)),
+    ("regression", re.compile(r"\bregression\b", re.IGNORECASE)),
+    ("evidence", re.compile(r"\b(source|cite|citation|evidence)\b", re.IGNORECASE)),
+)
+AUTO_AGENT_BUDGET_PROFILES = {
+    "fast": {
+        "label": "Fast",
+        "cost_preference": "low_latency",
+        "score_bias": -1,
+        "max_agent_mode": "collective",
+    },
+    "balanced": {
+        "label": "Balanced",
+        "cost_preference": "balanced",
+        "score_bias": 0,
+        "max_agent_mode": "collective_loop",
+    },
+    "deep": {
+        "label": "Deep",
+        "cost_preference": "quality",
+        "score_bias": 1,
+        "max_agent_mode": "collective_loop",
+    },
+    "max": {
+        "label": "Max",
+        "cost_preference": "frontier",
+        "score_bias": 2,
+        "max_agent_mode": "collective_loop",
+    },
+}
+
+
+def _validate_model_store_file_name(file_name: str) -> str:
+    cooked = str(file_name or "").strip()
+    if not cooked:
+        raise ValueError("file_name is required")
+    if (
+        cooked in {".", ".."}
+        or "/" in cooked
+        or "\\" in cooked
+        or ":" in cooked
+        or Path(cooked).name != cooked
+        or not MODEL_STORE_ARTIFACT_RE.fullmatch(cooked)
+    ):
+        raise ValueError(f"Unsafe model store artifact name: {cooked!r}")
+    return cooked
+
+
+def _is_safe_model_store_manifest_item(item: Dict[str, Any]) -> bool:
+    try:
+        _validate_model_store_file_name(item.get("file_name") or "")
+        return True
+    except ValueError:
+        return False
 
 
 def _hf_dataset_file_url(repo_id: str, filename: str) -> str:
-    return f"https://huggingface.co/datasets/{repo_id}/resolve/main/{quote(filename)}?download=true"
+    return f"https://huggingface.co/datasets/{repo_id}/resolve/main/{quote(filename, safe='')}?download=true"
 
 
 def _missing_zip_members(archive: zipfile.ZipFile, target: Path) -> List[str]:
@@ -460,6 +737,12 @@ class ChampionChatBackend(BaseBackend):
             style_mode=str(settings.get("style_mode") or "auto"),
             response_temperature=float(settings.get("response_temperature") or 0.08),
             show_top_responses=int(settings.get("show_top_responses") or 0),
+            reasoning_cycles=settings.get("reasoning_cycles"),
+            adaptive_compute=settings.get("adaptive_compute"),
+            adaptive_exit_tol=settings.get("adaptive_exit_tol"),
+            adaptive_exit_entropy=settings.get("adaptive_exit_entropy"),
+            prediction_stability_patience=settings.get("prediction_stability_patience"),
+            prediction_stability_tol=settings.get("prediction_stability_tol"),
         )
         return ChatResult(
             kind="text",
@@ -468,6 +751,7 @@ class ChampionChatBackend(BaseBackend):
             route_reason=str(settings.get("route_reason") or ""),
             response=str(payload.get("response") or ""),
             timing=dict(payload.get("timing_ms") or {}),
+            compute=dict(payload.get("compute") or {}),
             prompt_used=effective_prompt,
         )
 
@@ -524,7 +808,11 @@ class ImageWrapperBackend(ChampionChatBackend):
             model_key=self.record.key,
             model_label=self.record.label,
             route_reason=str(settings.get("route_reason") or ""),
-            timing={"total_ms": result.get("timing_ms")},
+            timing={
+                "total_ms": result.get("timing_ms"),
+                "model_calls": max(1, int(result.get("model_calls") or 1)),
+                "refiner_model_calls": max(0, int(result.get("refiner_model_calls") or 0)),
+            },
             image_url=str(result.get("image_url") or ""),
             output_path=str(result.get("output_path") or ""),
             prompt_used=str(result.get("prompt_used") or effective_prompt),
@@ -1179,6 +1467,8 @@ class OmniCollectiveV41Backend(BaseBackend):
             raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
+        if OmniCollectiveEngineV41 is None:
+            raise ImportError(f"OmniCollectiveEngineV41 is not available. Please ensure omni_collective_v41_model.py exists.")
         self.engine = OmniCollectiveEngineV41(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1222,6 +1512,8 @@ class OmniCollectiveV42Backend(BaseBackend):
             raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
+        if OmniCollectiveEngineV42 is None:
+            raise ImportError(f"OmniCollectiveEngineV42 is not available. Please ensure omni_collective_v42_model.py exists.")
         self.engine = OmniCollectiveEngineV42(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1265,6 +1557,8 @@ class OmniCollectiveV46Backend(BaseBackend):
             raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
+        if OmniCollectiveEngineV46 is None:
+            raise ImportError(f"OmniCollectiveEngineV46 is not available. Please ensure omni_collective_v46_model.py exists.")
         self.engine = OmniCollectiveEngineV46(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1324,6 +1618,8 @@ class OmniCollectiveV47Backend(BaseBackend):
             raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
+        if OmniCollectiveEnginev47 is None:
+            raise ImportError(f"OmniCollectiveEnginev47 is not available. Please ensure omni_collective_v47_model.py exists.")
         self.engine = OmniCollectiveEnginev47(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1383,6 +1679,8 @@ class OmniCollectiveV48Backend(BaseBackend):
             raise FileNotFoundError(f"Missing omnibus weights/meta for {record.label} in {extracted_dir}")
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
+        if OmniCollectiveEnginev48 is None:
+            raise ImportError(f"OmniCollectiveEnginev48 is not available. Please ensure omni_collective_v48_model.py exists.")
         self.engine = OmniCollectiveEnginev48(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1477,7 +1775,15 @@ class UnifiedModelManager:
         self._model_store_manifest_cache: Optional[Dict[str, Any]] = None
         self._model_store_manifest_ts = 0.0
         self._model_store_jobs: Dict[str, Dict[str, Any]] = {}
-        self.memory_store = ConversationMemoryStore(self.extraction_root.parent / "memory")
+        memory_dir = self.extraction_root.parent / "memory"
+        self.memory_store = ConversationMemoryStore(memory_dir)
+        self.route_policy_ledger = RoutePolicyLedger(memory_dir / "route-policy-ledger.sqlite3")
+        self.route_shadow_registry_path = memory_dir / "route-policy-shadow-registry.sqlite3"
+        self._route_shadow_registry_cache_signature: Optional[
+            Tuple[Tuple[Any, ...], ...]
+        ] = None
+        self._route_shadow_registry_cache_snapshot: Optional[Dict[str, Any]] = None
+        self._route_execution = threading.local()
         self.web_search = WebSearchTool()
         self.cmd_open = CmdOpenTool()
 
@@ -1701,8 +2007,9 @@ class UnifiedModelManager:
             for item in manifest.get("models") or []:
                 if not isinstance(item, dict):
                     continue
-                file_name = str(item.get("file_name") or "").strip()
-                if not file_name:
+                try:
+                    file_name = _validate_model_store_file_name(item.get("file_name") or "")
+                except ValueError:
                     continue
                 details = describe_model_artifact_name(file_name)
                 local_path = self.models_dir / file_name
@@ -1749,6 +2056,7 @@ class UnifiedModelManager:
             self._model_store_jobs[job_id] = payload
 
     def _install_model_store_worker(self, job_id: str, file_name: str, expected_size: int) -> None:
+        file_name = _validate_model_store_file_name(file_name)
         target = self.models_dir / file_name
         temp_target = self.models_dir / f"{file_name}.{job_id}.part"
         try:
@@ -1794,15 +2102,14 @@ class UnifiedModelManager:
             )
 
     def install_model_store_artifact(self, file_name: str) -> Dict[str, Any]:
-        cooked = str(file_name or "").strip()
-        if not cooked:
-            raise ValueError("file_name is required")
+        cooked = _validate_model_store_file_name(file_name)
         with self._lock:
             manifest = self._fetch_model_store_manifest_locked(force_refresh=False)
             manifest_rows = {
-                str(item.get("file_name") or "").strip(): item
+                _validate_model_store_file_name(item.get("file_name") or ""): item
                 for item in (manifest.get("models") or [])
                 if isinstance(item, dict)
+                and _is_safe_model_store_manifest_item(item)
             }
             if cooked not in manifest_rows:
                 raise FileNotFoundError(f"{cooked} is not present in {self.model_store_repo_id}")
@@ -1905,7 +2212,12 @@ class UnifiedModelManager:
         events: List[ToolEvent] = []
         if bool(settings.get("web_search_enabled", False)) and should_offer_web_search(prompt):
             try:
-                events.append(self.web_search.search(prompt, max_results=int(settings.get("web_search_results") or 5)))
+                events.append(
+                    self.web_search.search(
+                        prompt,
+                        max_results=_coerce_int_setting(settings.get("web_search_results"), 5, minimum=1, maximum=20),
+                    )
+                )
             except Exception:
                 pass
         if bool(settings.get("cmd_open_enabled", True)) and should_offer_open_cmd(prompt):
@@ -1926,10 +2238,13 @@ class UnifiedModelManager:
             return None
         if key in tool_cache:
             return tool_cache[key]
-        if len(tool_cache) >= int(settings.get("web_search_budget") or 3):
+        if len(tool_cache) >= _coerce_int_setting(settings.get("web_search_budget"), 3, minimum=0, maximum=100):
             return None
         try:
-            event = self.web_search.search(query, max_results=int(settings.get("web_search_results") or 5))
+            event = self.web_search.search(
+                query,
+                max_results=_coerce_int_setting(settings.get("web_search_results"), 5, minimum=1, maximum=20),
+            )
         except Exception:
             return None
         tool_cache[key] = event
@@ -1965,6 +2280,7 @@ class UnifiedModelManager:
         resolved_record, backend = self.ensure_backend(record.key)
         local_events: List[ToolEvent] = []
         run_settings = dict(settings)
+        run_settings.pop("_route_model_call_counter", None)
         effective_route_reason = route_reason
         if resolved_record.key != record.key:
             effective_route_reason = (
@@ -1981,6 +2297,7 @@ class UnifiedModelManager:
                 "TOOL:open_cmd: <optional working directory>\n"
                 "Use a tool line only when it is explicitly needed, otherwise answer normally."
             )
+        _record_route_model_call(settings)
         result = backend.chat(session_id, prompt, run_settings)
         raw_response = str(result.response or "")
         requests = parse_tool_requests(raw_response) if allow_tool_calls else []
@@ -1997,11 +2314,13 @@ class UnifiedModelManager:
                     local_events.append(tool_event)
             if local_events:
                 follow_settings = dict(settings)
+                follow_settings.pop("_route_model_call_counter", None)
                 follow_settings["route_reason"] = route_reason
                 follow_settings["memory_context"] = str(settings.get("memory_context") or "")
                 follow_settings["consultation_context"] = str(settings.get("consultation_context") or "")
                 follow_settings["tool_context"] = format_tool_results(list(tool_cache.values()))
                 follow_settings["tool_instruction"] = "Tool results are already available below. Use them and answer directly."
+                _record_route_model_call(settings)
                 follow = backend.chat(session_id, prompt, follow_settings)
                 follow.response = strip_tool_calls(follow.response)
                 result = follow
@@ -2046,17 +2365,1584 @@ class UnifiedModelManager:
     def _normalized_agent_mode(self, raw_mode: Any) -> str:
         cooked = str(raw_mode or "off").strip().lower()
         aliases = {
+            "adaptive": "auto",
+            "smart": "auto",
             "collective_all": "collective",
             "panel": "collective",
             "loop_agent": "loop",
             "collective_loop_agent": "collective_loop",
         }
         normalized = aliases.get(cooked, cooked)
-        if normalized in {"off", "collective", "loop", "collective_loop"}:
+        if normalized in {"off", "auto", "collective", "loop", "collective_loop"}:
             return normalized
         return "off"
 
-    def _format_loop_history(self, steps: Sequence[Dict[str, str]]) -> str:
+    def _normalized_auto_budget_profile(self, raw_profile: Any) -> str:
+        cooked = str(raw_profile or "balanced").strip().lower()
+        aliases = {
+            "default": "balanced",
+            "normal": "balanced",
+            "standard": "balanced",
+            "cheap": "fast",
+            "economy": "fast",
+            "latency": "fast",
+            "quality": "deep",
+            "thorough": "deep",
+            "frontier": "max",
+            "maximum": "max",
+            "unbounded": "max",
+        }
+        normalized = aliases.get(cooked, cooked)
+        if normalized in AUTO_AGENT_BUDGET_PROFILES:
+            return normalized
+        return "balanced"
+
+    def _allowed_auto_agent_modes(
+        self,
+        *,
+        action_mode: str,
+        allow_collective: bool,
+        collective_available: bool,
+        allow_loop: bool,
+    ) -> List[str]:
+        modes = ["off"]
+        if allow_collective and collective_available:
+            modes.append("collective")
+        if action_mode != "image" and allow_loop:
+            modes.append("loop")
+        if action_mode != "image" and allow_loop and allow_collective and collective_available:
+            modes.append("collective_loop")
+        return modes
+
+    def _budget_allowed_auto_agent_modes(self, allowed_modes: Sequence[str], max_agent_mode: str) -> List[str]:
+        if max_agent_mode not in AUTO_AGENT_MODE_ORDER:
+            max_agent_mode = "collective_loop"
+        max_idx = AUTO_AGENT_MODE_ORDER.index(max_agent_mode)
+        allowed = set(allowed_modes)
+        return [mode for mode in AUTO_AGENT_MODE_ORDER[: max_idx + 1] if mode in allowed]
+
+    def _effective_agent_mode_for_action(self, agent_mode: str, action_mode: str) -> str:
+        if action_mode != "image":
+            return agent_mode
+        if agent_mode == "loop":
+            return "off"
+        if agent_mode == "collective_loop":
+            return "collective"
+        return agent_mode
+
+    def _route_latency_tier(self, cost_units: float) -> str:
+        if cost_units <= 1.5:
+            return "low"
+        if cost_units <= 4.0:
+            return "moderate"
+        if cost_units <= 10.0:
+            return "high"
+        return "frontier"
+
+    def _estimate_route_economics(
+        self,
+        *,
+        selected_agent_mode: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+        auto_agent_policy: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        loop_budget = _coerce_int_setting(
+            settings.get("loop_max_steps") or settings.get("loop_budget"),
+            LOOP_AGENT_DEFAULT_MAX_STEPS,
+            minimum=2,
+            maximum=LOOP_AGENT_HARD_MAX_STEPS,
+        )
+        collective_count = int((auto_agent_policy or {}).get("collective_model_count") or 0)
+        if selected_agent_mode in {"collective", "collective_loop"}:
+            collective_count = max(2, collective_count)
+        tool_budget = (
+            _coerce_int_setting(settings.get("web_search_budget"), 0, minimum=0, maximum=100)
+            if bool(settings.get("web_search_enabled", False))
+            else 0
+        )
+
+        if selected_agent_mode == "collective":
+            estimated_model_calls = max(2, collective_count + 1)
+            planned_steps = 0
+        elif selected_agent_mode == "loop":
+            estimated_model_calls = loop_budget * 3
+            planned_steps = loop_budget
+        elif selected_agent_mode == "collective_loop":
+            estimated_model_calls = loop_budget * (3 + max(0, collective_count - 1))
+            planned_steps = loop_budget
+        else:
+            estimated_model_calls = 1
+            planned_steps = 0
+
+        if action_mode == "image":
+            estimated_model_calls += 1
+
+        estimated_cost_units = round(float(estimated_model_calls) + (float(tool_budget) * 0.25), 2)
+        budget_profile = str((auto_agent_policy or {}).get("budget_profile") or "manual")
+        budget_policy = (auto_agent_policy or {}).get("budget_policy")
+        cost_preference = ""
+        if isinstance(budget_policy, dict):
+            cost_preference = _trim_text(budget_policy.get("cost_preference") or "", limit=80)
+        return {
+            "selected_agent_mode": selected_agent_mode,
+            "action_mode": action_mode,
+            "budget_profile": budget_profile,
+            "cost_preference": cost_preference,
+            "estimated_model_calls": estimated_model_calls,
+            "estimated_tool_calls": tool_budget,
+            "estimated_cost_units": estimated_cost_units,
+            "latency_tier": self._route_latency_tier(estimated_cost_units),
+            "planned_loop_steps": planned_steps,
+            "collective_model_count": collective_count,
+            "requested_reasoning_cycles": settings.get("reasoning_cycles"),
+            "adaptive_compute": bool(settings.get("adaptive_compute")) if settings.get("adaptive_compute") is not None else None,
+        }
+
+    def _finalize_route_economics(
+        self,
+        *,
+        estimate: Dict[str, Any],
+        trace: Dict[str, Any],
+        elapsed_ms: float,
+        actual_model_calls: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        loop_steps = list(trace.get("loop_steps") or [])
+        consultation_rows = list(trace.get("consultation_rows") or [])
+        consulted_models = list(trace.get("consulted_models") or [])
+        tool_events = list(trace.get("tool_events") or [])
+        compute = trace.get("compute") if isinstance(trace.get("compute"), dict) else {}
+        mode = str(estimate.get("selected_agent_mode") or trace.get("resolved_agent_mode") or trace.get("agent_mode") or "off")
+
+        if mode == "collective_loop":
+            inferred_model_calls = max(1, len(loop_steps) * 3 + len(consultation_rows))
+        elif mode == "loop":
+            inferred_model_calls = max(1, len(loop_steps) * 3)
+        elif mode == "collective":
+            inferred_model_calls = max(1, 1 + max(len(consultation_rows), len(consulted_models)))
+        else:
+            inferred_model_calls = 1
+        tracked_model_calls = int(actual_model_calls or 0)
+        resolved_model_calls = tracked_model_calls if tracked_model_calls > 0 else inferred_model_calls
+        actual_cost_units = round(float(resolved_model_calls) + (float(len(tool_events)) * 0.25), 2)
+        return {
+            "estimate": estimate,
+            "actual": {
+                "elapsed_ms": round(float(elapsed_ms), 2),
+                "model_calls": int(resolved_model_calls),
+                "tool_calls": len(tool_events),
+                "loop_steps": len(loop_steps),
+                "consultation_count": max(len(consultation_rows), len(consulted_models)),
+                "cost_units": actual_cost_units,
+                "latency_tier": self._route_latency_tier(actual_cost_units),
+                "compute_applied": bool(compute.get("applied")),
+                "reasoning_cycles_used": compute.get("cycles_used"),
+                "compute_exit_reason": compute.get("exit_reason"),
+                "prediction_confidence_delta": compute.get("prediction_confidence_delta"),
+            },
+        }
+
+    def _auto_session_budget_limit(self, settings: Dict[str, Any]) -> Optional[float]:
+        for key in ("auto_session_budget_units", "session_route_budget_units", "route_budget_units"):
+            raw = settings.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0.0:
+                return round(min(value, 100_000.0), 3)
+        return None
+
+    def _auto_session_budget_target_routes(self, settings: Dict[str, Any]) -> Optional[int]:
+        for key in ("auto_session_budget_target_routes", "session_route_budget_target_routes", "route_budget_target_routes"):
+            raw = settings.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                value = int(float(raw))
+            except (TypeError, ValueError):
+                continue
+            if value > 1:
+                return min(value, 10_000)
+        return None
+
+    def _session_route_budget_snapshot(self, session_id: str, budget_limit: Optional[float]) -> Optional[Dict[str, Any]]:
+        if budget_limit is None:
+            return None
+        usage = self.memory_store.route_usage_summary(session_id)
+        economics = usage.get("economics") if isinstance(usage.get("economics"), dict) else {}
+        used = float(economics.get("total_cost_units") or 0.0)
+        remaining = round(max(0.0, float(budget_limit) - used), 3)
+        return {
+            "limit_cost_units": round(float(budget_limit), 3),
+            "used_cost_units": round(used, 3),
+            "remaining_cost_units": remaining,
+            "route_count": int(usage.get("total_routes") or 0),
+            "recent_route_count": int(usage.get("recent_routes") or 0),
+        }
+
+    def _apply_auto_session_budget(
+        self,
+        *,
+        selected: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+        auto_agent_policy: Dict[str, Any],
+        budget_snapshot: Optional[Dict[str, Any]],
+    ) -> tuple[str, Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        estimate = self._estimate_route_economics(
+            selected_agent_mode=selected,
+            action_mode=action_mode,
+            settings=settings,
+            auto_agent_policy=auto_agent_policy,
+        )
+        if not budget_snapshot:
+            return selected, estimate, None, None
+
+        remaining = float(budget_snapshot.get("remaining_cost_units") or 0.0)
+        target_routes = self._auto_session_budget_target_routes(settings)
+        route_count = int(budget_snapshot.get("route_count") or 0)
+        target_remaining_routes: Optional[int] = None
+        pacing_cap: Optional[float] = None
+        target_pacing_active = False
+        if target_routes is not None:
+            target_remaining_routes = max(1, int(target_routes) - route_count)
+            pacing_cap = round(max(0.0, remaining) / float(target_remaining_routes), 3)
+            target_pacing_active = target_remaining_routes > 1
+        allowed_modes = list(auto_agent_policy.get("allowed_agent_modes") or AUTO_AGENT_MODE_ORDER)
+        original = selected
+        original_estimated_cost = float(estimate.get("estimated_cost_units") or 0.0)
+        effective_cap = remaining if not target_pacing_active else min(remaining, float(pacing_cap or 0.0))
+        estimates = [
+            {
+                "selected_agent_mode": selected,
+                "estimated_cost_units": estimate.get("estimated_cost_units"),
+                "cap_cost_units": round(effective_cap, 3),
+            }
+        ]
+
+        while selected != "off" and float(estimate.get("estimated_cost_units") or 0.0) > effective_cap:
+            next_selected = self._neighbor_auto_agent_mode(selected, allowed_modes, -1)
+            if next_selected == selected:
+                break
+            selected = next_selected
+            estimate = self._estimate_route_economics(
+                selected_agent_mode=selected,
+                action_mode=action_mode,
+                settings=settings,
+                auto_agent_policy=auto_agent_policy,
+            )
+            estimates.append(
+                {
+                    "selected_agent_mode": selected,
+                    "estimated_cost_units": estimate.get("estimated_cost_units"),
+                    "cap_cost_units": round(effective_cap, 3),
+                }
+            )
+
+        estimated_cost = float(estimate.get("estimated_cost_units") or 0.0)
+        budget_state = dict(budget_snapshot)
+        if target_routes is not None:
+            budget_state.update(
+                {
+                    "target_route_count": int(target_routes),
+                    "target_remaining_routes": int(target_remaining_routes or 1),
+                    "pacing_cap_cost_units": round(float(pacing_cap or 0.0), 3),
+                    "effective_cap_cost_units": round(float(effective_cap), 3),
+                    "pacing_cap_applied": bool(target_pacing_active),
+                }
+            )
+        budget_state.update(
+            {
+                "selected_agent_mode": selected,
+                "estimated_cost_units": round(estimated_cost, 3),
+                "would_exceed_remaining": bool(estimated_cost > remaining),
+                "would_exceed_pacing_cap": bool(
+                    target_pacing_active and estimated_cost > float(pacing_cap or 0.0)
+                ),
+            }
+        )
+        if selected == original == "off" and estimated_cost > remaining:
+            adjustment = {
+                "direction": "floor",
+                "from": "off",
+                "to": "off",
+                "reason": "session_route_budget_exhausted_single_pass_floor",
+                "remaining_cost_units": round(remaining, 3),
+                "limit_cost_units": budget_state["limit_cost_units"],
+                "used_cost_units": budget_state["used_cost_units"],
+                "estimated_cost_units": round(estimated_cost, 3),
+                "candidate_estimates": estimates,
+            }
+            return selected, estimate, adjustment, budget_state
+        if selected == original:
+            return selected, estimate, None, budget_state
+
+        target_pacing_triggered = (
+            target_pacing_active
+            and original_estimated_cost > float(pacing_cap or 0.0)
+            and estimated_cost <= remaining
+        )
+        adjustment = {
+            "direction": "downgrade",
+            "from": original,
+            "to": selected,
+            "reason": (
+                "session_route_budget_target_pacing"
+                if target_pacing_triggered
+                else "session_route_budget_would_exceed_remaining"
+            ),
+            "remaining_cost_units": round(remaining, 3),
+            "limit_cost_units": budget_state["limit_cost_units"],
+            "used_cost_units": budget_state["used_cost_units"],
+            "estimated_cost_units": round(estimated_cost, 3),
+            "candidate_estimates": estimates,
+        }
+        if target_routes is not None:
+            adjustment.update(
+                {
+                    "target_route_count": int(target_routes),
+                    "target_remaining_routes": int(target_remaining_routes or 1),
+                    "pacing_cap_cost_units": round(float(pacing_cap or 0.0), 3),
+                    "effective_cap_cost_units": round(float(effective_cap), 3),
+                }
+            )
+        return selected, estimate, adjustment, budget_state
+
+    def _build_post_filter_logging_support(
+        self,
+        *,
+        selected: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+        auto_agent_policy: Dict[str, Any],
+        selected_estimate: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Freeze the final feasible action set after capability and budget filters."""
+
+        allowed = {
+            str(mode)
+            for mode in list(auto_agent_policy.get("allowed_agent_modes") or AUTO_AGENT_MODE_ORDER)
+            if str(mode) in AUTO_AGENT_MODE_ORDER
+        }
+        allowed.add(selected)
+        budget_state = (
+            auto_agent_policy.get("session_budget")
+            if isinstance(auto_agent_policy.get("session_budget"), dict)
+            else {}
+        )
+        cap_raw = budget_state.get("effective_cap_cost_units")
+        if cap_raw is None:
+            cap_raw = budget_state.get("remaining_cost_units")
+        try:
+            effective_cap = float(cap_raw) if cap_raw is not None else None
+        except (TypeError, ValueError, OverflowError):
+            effective_cap = None
+        if effective_cap is not None and (not math.isfinite(effective_cap) or effective_cap < 0.0):
+            effective_cap = None
+
+        candidates: List[Dict[str, Any]] = []
+        exclusions: List[Dict[str, Any]] = []
+        for mode in AUTO_AGENT_MODE_ORDER:
+            reasons: List[str] = []
+            if mode not in allowed:
+                reasons.append(
+                    "action_mode_unsupported"
+                    if action_mode == "image" and mode in {"loop", "collective_loop"}
+                    else "capability_or_policy_filter"
+                )
+            estimate = (
+                dict(selected_estimate)
+                if mode == selected
+                else self._estimate_route_economics(
+                    selected_agent_mode=mode,
+                    action_mode=action_mode,
+                    settings=settings,
+                    auto_agent_policy=auto_agent_policy,
+                )
+            )
+            estimated_cost = float(estimate.get("estimated_cost_units") or 0.0)
+            if (
+                not reasons
+                and effective_cap is not None
+                and mode != "off"
+                and estimated_cost > effective_cap
+            ):
+                reasons.append("session_budget_post_filter")
+
+            if mode == selected:
+                if reasons:
+                    raise RuntimeError("selected route was excluded from its post-filter logging support")
+                candidates.append(
+                    {
+                        "action": mode,
+                        "selected": True,
+                        "estimated_cost_units": round(estimated_cost, 3),
+                        "estimated_model_calls": int(estimate.get("estimated_model_calls") or 1),
+                        "planned_loop_steps": int(estimate.get("planned_loop_steps") or 0),
+                        "latency_tier": str(estimate.get("latency_tier") or "unknown"),
+                    }
+                )
+            elif reasons:
+                exclusions.append({"action": mode, "reasons": reasons})
+            else:
+                candidates.append(
+                    {
+                        "action": mode,
+                        "selected": False,
+                        "estimated_cost_units": round(estimated_cost, 3),
+                        "estimated_model_calls": int(estimate.get("estimated_model_calls") or 1),
+                        "planned_loop_steps": int(estimate.get("planned_loop_steps") or 0),
+                        "latency_tier": str(estimate.get("latency_tier") or "unknown"),
+                    }
+                )
+
+        candidates.sort(key=lambda row: AUTO_AGENT_MODE_ORDER.index(str(row["action"])))
+        exclusions.sort(key=lambda row: AUTO_AGENT_MODE_ORDER.index(str(row["action"])))
+        eligible = [str(row["action"]) for row in candidates]
+        probabilities = {mode: 1.0 if mode == selected else 0.0 for mode in eligible}
+        raw_support = {
+            "schema_version": SUPPORT_SCHEMA_VERSION,
+            "decision_type": "deterministic",
+            "probability_stage": "post_filter",
+            "sampler": {
+                "name": "threshold_budget_argmax",
+                "version": "1",
+                "exploration_rate": 0.0,
+                "assignment_unit": "route",
+                "assignment_commitment": None,
+            },
+            "candidates": candidates,
+            "exclusions": exclusions,
+        }
+        return build_logging_support_envelope(
+            raw_support,
+            eligible_modes=eligible,
+            action_probabilities=probabilities,
+            chosen_mode=selected,
+        )
+
+    def _preview_route_alternatives(
+        self,
+        *,
+        selected: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+        auto_agent_policy: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if auto_agent_policy is not None:
+            allowed_agent_modes = auto_agent_policy.get("allowed_agent_modes")
+            raw_candidate_modes = allowed_agent_modes if allowed_agent_modes is not None else AUTO_AGENT_MODE_ORDER
+            candidate_modes = [
+                str(mode)
+                for mode in list(raw_candidate_modes)
+                if str(mode) in AUTO_AGENT_MODE_ORDER
+            ]
+        else:
+            candidate_modes = [selected] if selected in AUTO_AGENT_MODE_ORDER else ["off"]
+        if selected in AUTO_AGENT_MODE_ORDER and selected not in candidate_modes:
+            candidate_modes.append(selected)
+
+        rows: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for mode in sorted(set(candidate_modes), key=lambda item: AUTO_AGENT_MODE_ORDER.index(item)):
+            if mode in seen:
+                continue
+            seen.add(mode)
+            estimate = self._estimate_route_economics(
+                selected_agent_mode=mode,
+                action_mode=action_mode,
+                settings=settings,
+                auto_agent_policy=auto_agent_policy,
+            )
+            rows.append(
+                {
+                    "selected_agent_mode": mode,
+                    "is_selected": mode == selected,
+                    "estimate": estimate,
+                    "estimated_cost_units": estimate.get("estimated_cost_units"),
+                    "estimated_model_calls": estimate.get("estimated_model_calls"),
+                    "planned_loop_steps": estimate.get("planned_loop_steps"),
+                    "latency_tier": estimate.get("latency_tier"),
+                }
+            )
+        return rows
+
+    def _estimated_route_quality(
+        self,
+        *,
+        mode: str,
+        action_mode: str,
+        estimated_cost_units: Optional[float] = None,
+        auto_agent_policy: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        feedback_summary = (
+            auto_agent_policy.get("feedback_summary")
+            if isinstance(auto_agent_policy, dict) and isinstance(auto_agent_policy.get("feedback_summary"), dict)
+            else {}
+        )
+        mode_scores = feedback_summary.get("mode_scores") if isinstance(feedback_summary.get("mode_scores"), dict) else {}
+        stats = mode_scores.get(mode) if isinstance(mode_scores.get(mode), dict) else {}
+        evidence = self._adaptive_route_evidence(stats)
+        if evidence is not None:
+            return {
+                "estimated_quality_score": round(float(evidence["quality_score"]), 3),
+                "estimated_quality_cost_score": round(float(evidence["quality_cost_score"]), 3),
+                "estimated_quality_lower_bound": evidence.get("quality_lower_bound"),
+                "estimated_quality_upper_bound": evidence.get("quality_upper_bound"),
+                "risk_adjusted_quality_cost_score": evidence.get("risk_adjusted_quality_cost_score"),
+                "effective_sample_size": evidence.get("effective_sample_size"),
+                "confidence_level": evidence.get("confidence_level"),
+                "confidence_status": evidence.get("confidence_status"),
+                "quality_source": "adaptive_feedback",
+                "quality_cost_source": "adaptive_feedback",
+                "quality_evidence_status": "adaptive_complete",
+                "quality_evidence": evidence,
+            }
+        quality_evidence_status = self._adaptive_route_evidence_status(stats)
+
+        score = int((auto_agent_policy or {}).get("score") or 0)
+        if mode == "off":
+            quality = max(0.25, 0.62 - (0.055 * float(score)))
+        else:
+            thresholds = {"collective": 2, "loop": 4, "collective_loop": 5}
+            bases = {"collective": 0.62, "loop": 0.72, "collective_loop": 0.88}
+            threshold = int(thresholds.get(mode, 99))
+            base = float(bases.get(mode, 0.5))
+            if action_mode == "image" and mode == "collective":
+                threshold = 3
+            if score >= threshold:
+                quality = base + (0.04 * float(min(score - threshold, 4)))
+            else:
+                quality = base - (0.06 * float(threshold - score))
+        estimated_quality_score = round(max(0.0, min(0.99, quality)), 3)
+        try:
+            cost = float(estimated_cost_units or 0.0)
+        except (TypeError, ValueError):
+            cost = 0.0
+        if not math.isfinite(cost):
+            cost = 0.0
+        cost = max(0.0, cost)
+        return {
+            "estimated_quality_score": estimated_quality_score,
+            "estimated_quality_cost_score": round(estimated_quality_score / (1.0 + (cost / 10.0)), 3),
+            "estimated_quality_lower_bound": None,
+            "estimated_quality_upper_bound": None,
+            "risk_adjusted_quality_cost_score": None,
+            "effective_sample_size": 0.0,
+            "confidence_level": None,
+            "confidence_status": "heuristic_prior",
+            "quality_source": "heuristic_policy",
+            "quality_cost_source": "heuristic_cost_adjusted",
+            "quality_evidence_status": quality_evidence_status,
+            "quality_evidence": None,
+        }
+
+    def _route_frontier_budget_state(self, auto_agent_policy: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        session_budget = (
+            auto_agent_policy.get("session_budget")
+            if isinstance(auto_agent_policy, dict) and isinstance(auto_agent_policy.get("session_budget"), dict)
+            else None
+        )
+        if not session_budget:
+            return {
+                "remaining_cost_units": None,
+                "pacing_cap_cost_units": None,
+                "effective_cap_cost_units": None,
+                "pacing_cap_applied": False,
+                "limit_cost_units": None,
+                "used_cost_units": None,
+                "route_count": None,
+                "target_route_count": None,
+                "target_remaining_routes": None,
+            }
+
+        def optional_float(key: str) -> Optional[float]:
+            raw = session_budget.get(key)
+            if raw in (None, ""):
+                return None
+            try:
+                return round(max(0.0, float(raw)), 3)
+            except (TypeError, ValueError):
+                return None
+
+        def optional_int(key: str) -> Optional[int]:
+            raw = session_budget.get(key)
+            if raw in (None, ""):
+                return None
+            try:
+                return int(float(raw))
+            except (TypeError, ValueError):
+                return None
+
+        remaining = optional_float("remaining_cost_units")
+        pacing_cap_applied = bool(session_budget.get("pacing_cap_applied"))
+        pacing_cap = optional_float("pacing_cap_cost_units") if pacing_cap_applied else None
+        effective_cap = optional_float("effective_cap_cost_units")
+        if effective_cap is None:
+            if remaining is not None and pacing_cap is not None:
+                effective_cap = min(remaining, pacing_cap)
+            elif remaining is not None:
+                effective_cap = remaining
+            elif pacing_cap is not None:
+                effective_cap = pacing_cap
+        return {
+            "remaining_cost_units": remaining,
+            "pacing_cap_cost_units": pacing_cap,
+            "effective_cap_cost_units": effective_cap,
+            "pacing_cap_applied": pacing_cap is not None,
+            "limit_cost_units": optional_float("limit_cost_units"),
+            "used_cost_units": optional_float("used_cost_units"),
+            "route_count": optional_int("route_count"),
+            "target_route_count": optional_int("target_route_count"),
+            "target_remaining_routes": optional_int("target_remaining_routes"),
+        }
+
+    def _annotate_route_frontier(
+        self,
+        *,
+        alternatives: List[Dict[str, Any]],
+        selected: str,
+        action_mode: str,
+        auto_agent_policy: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not alternatives:
+            return {
+                "recommended_agent_mode": selected,
+                "recommended_reason": "no_alternatives_available",
+                "recommended_budget_blocker": None,
+                "ranked_modes": [],
+                "pareto_modes": [],
+                "budget_feasible_pareto_modes": [],
+                "budget_fit_count": 0,
+                "budget_blockers": {"remaining_budget": 0, "pacing_cap": 0, "effective_cap": 0, "none": 0},
+                "budget_cap_cost_units": None,
+                "remaining_cost_units": None,
+                "pacing_cap_cost_units": None,
+                "effective_cap_cost_units": None,
+                "pacing_cap_applied": False,
+                "recommended_estimated_quality_cost_score": None,
+                "selected_estimated_quality_cost_score": None,
+                "minimum_route_floor": False,
+                "selected_budget_fit": None,
+                "selected_budget_blocker": None,
+                "selected_fits_remaining_budget": None,
+                "selected_fits_pacing_cap": None,
+                "selected_frontier_rank": None,
+                "selected_matches_recommendation": False,
+                "selected_agent_mode": selected,
+            }
+
+        budget_profile = str((auto_agent_policy or {}).get("budget_profile") or "manual")
+        cost_penalty = {
+            "fast": 0.35,
+            "balanced": 0.06,
+            "deep": 0.025,
+            "max": 0.0,
+            "manual": 0.03,
+        }.get(budget_profile, 0.06)
+        budget_state = self._route_frontier_budget_state(auto_agent_policy)
+        effective_cap = budget_state["effective_cap_cost_units"]
+        remaining_cap = budget_state["remaining_cost_units"]
+        pacing_cap = budget_state["pacing_cap_cost_units"]
+        session_budget_adjustment = (
+            auto_agent_policy.get("session_budget_adjustment")
+            if isinstance(auto_agent_policy, dict) and isinstance(auto_agent_policy.get("session_budget_adjustment"), dict)
+            else {}
+        )
+        minimum_route_floor = (
+            selected == "off"
+            and session_budget_adjustment.get("reason") == "session_route_budget_exhausted_single_pass_floor"
+        )
+        max_cost = max(float(row.get("estimated_cost_units") or 0.0) for row in alternatives) or 1.0
+
+        adaptive_quality_cost_available = False
+        for row in alternatives:
+            mode = str(row.get("selected_agent_mode") or "off")
+            cost = max(0.0, float(row.get("estimated_cost_units") or 0.0))
+            quality = self._estimated_route_quality(
+                mode=mode,
+                action_mode=action_mode,
+                estimated_cost_units=cost,
+                auto_agent_policy=auto_agent_policy,
+            )
+            adaptive_quality_cost_available = (
+                adaptive_quality_cost_available or quality.get("quality_source") == "adaptive_feedback"
+            )
+            fits_remaining = True if remaining_cap is None else cost <= (float(remaining_cap) + 1e-9)
+            fits_pacing = None if pacing_cap is None else cost <= (float(pacing_cap) + 1e-9)
+            budget_fit = True if effective_cap is None else cost <= (float(effective_cap) + 1e-9)
+            budget_overage = 0.0 if effective_cap is None else max(0.0, cost - float(effective_cap))
+            if not fits_remaining:
+                budget_blocker = "remaining_budget"
+            elif fits_pacing is False:
+                budget_blocker = "pacing_cap"
+            elif not budget_fit:
+                budget_blocker = "effective_cap"
+            else:
+                budget_blocker = None
+            row.update(
+                {
+                    "estimated_quality_score": quality["estimated_quality_score"],
+                    "estimated_quality_cost_score": quality["estimated_quality_cost_score"],
+                    "estimated_quality_lower_bound": quality["estimated_quality_lower_bound"],
+                    "estimated_quality_upper_bound": quality["estimated_quality_upper_bound"],
+                    "risk_adjusted_quality_cost_score": quality["risk_adjusted_quality_cost_score"],
+                    "effective_sample_size": quality["effective_sample_size"],
+                    "confidence_level": quality["confidence_level"],
+                    "confidence_status": quality["confidence_status"],
+                    "quality_source": quality["quality_source"],
+                    "quality_cost_source": quality["quality_cost_source"],
+                    "quality_evidence_status": quality["quality_evidence_status"],
+                    "quality_evidence": quality["quality_evidence"],
+                    "budget_fit": bool(budget_fit),
+                    "fits_remaining_budget": bool(fits_remaining),
+                    "fits_pacing_cap": fits_pacing,
+                    "effective_cap_cost_units": effective_cap,
+                    "minimum_route_floor": bool(minimum_route_floor and mode == "off"),
+                    "budget_blocker": budget_blocker,
+                    "budget_overage_units": round(budget_overage, 3),
+                }
+            )
+
+        for row in alternatives:
+            cost = max(0.0, float(row.get("estimated_cost_units") or 0.0))
+            budget_fit = bool(row.get("budget_fit"))
+            budget_overage = float(row.get("budget_overage_units") or 0.0)
+            quality_score = float(row.get("estimated_quality_score") or 0.0)
+            if adaptive_quality_cost_available and budget_profile != "max":
+                adaptive_utility = row.get("risk_adjusted_quality_cost_score")
+                frontier_score = float(
+                    adaptive_utility
+                    if isinstance(adaptive_utility, (int, float))
+                    else row.get("estimated_quality_cost_score") or 0.0
+                ) + (0.02 * quality_score)
+            else:
+                frontier_score = quality_score - (cost_penalty * (cost / max_cost))
+            if not budget_fit:
+                frontier_score -= 0.5 + min(0.5, budget_overage / max_cost)
+            row["frontier_score"] = round(frontier_score, 4)
+
+        for row in alternatives:
+            row_quality = float(row.get("estimated_quality_score") or 0.0)
+            row_cost = float(row.get("estimated_cost_units") or 0.0)
+            dominated = False
+            for other in alternatives:
+                if other is row:
+                    continue
+                other_quality = float(other.get("estimated_quality_score") or 0.0)
+                other_cost = float(other.get("estimated_cost_units") or 0.0)
+                if (
+                    other_quality >= row_quality
+                    and other_cost <= row_cost
+                    and (other_quality > row_quality or other_cost < row_cost)
+                ):
+                    dominated = True
+                    break
+            row["pareto_frontier"] = not dominated
+
+        feasible_for_pareto = [row for row in alternatives if bool(row.get("budget_fit"))]
+        for row in alternatives:
+            if not bool(row.get("budget_fit")):
+                row["budget_feasible_pareto_frontier"] = False
+                continue
+            row_quality = float(row.get("estimated_quality_score") or 0.0)
+            row_cost = float(row.get("estimated_cost_units") or 0.0)
+            dominated = False
+            for other in feasible_for_pareto:
+                if other is row:
+                    continue
+                other_quality = float(other.get("estimated_quality_score") or 0.0)
+                other_cost = float(other.get("estimated_cost_units") or 0.0)
+                if (
+                    other_quality >= row_quality
+                    and other_cost <= row_cost
+                    and (other_quality > row_quality or other_cost < row_cost)
+                ):
+                    dominated = True
+                    break
+            row["budget_feasible_pareto_frontier"] = not dominated
+
+        ranked = sorted(
+            alternatives,
+            key=lambda row: (
+                bool(row.get("budget_fit")),
+                float(row.get("frontier_score") or 0.0),
+                float(row.get("estimated_quality_score") or 0.0),
+                -float(row.get("estimated_cost_units") or 0.0),
+                -AUTO_AGENT_MODE_ORDER.index(str(row.get("selected_agent_mode") or "off")),
+            ),
+            reverse=True,
+        )
+        for idx, row in enumerate(ranked, start=1):
+            row["frontier_rank"] = idx
+
+        feasible = [row for row in ranked if bool(row.get("budget_fit"))]
+        if feasible:
+            recommended = feasible[0]
+        else:
+            recommended = min(
+                ranked,
+                key=lambda row: (
+                    float(row.get("budget_overage_units") or 0.0),
+                    float(row.get("estimated_cost_units") or 0.0),
+                    -float(row.get("estimated_quality_score") or 0.0),
+                    AUTO_AGENT_MODE_ORDER.index(str(row.get("selected_agent_mode") or "off")),
+                ),
+            )
+        recommended_mode = str(recommended.get("selected_agent_mode") or selected)
+        selected_row = next((row for row in alternatives if row.get("selected_agent_mode") == selected), None)
+        cheapest_feasible = min(feasible, key=lambda row: float(row.get("estimated_cost_units") or 0.0)) if feasible else None
+        highest_quality_feasible = (
+            max(feasible, key=lambda row: float(row.get("estimated_quality_score") or 0.0)) if feasible else None
+        )
+        if not feasible:
+            remaining_fit_count = sum(1 for row in alternatives if bool(row.get("fits_remaining_budget")))
+            reason = (
+                "no_pacing_feasible_route"
+                if remaining_fit_count > 0 and pacing_cap is not None
+                else "no_budget_feasible_route"
+            )
+        elif recommended_mode == selected:
+            reason = "selected_route_is_frontier_recommended"
+        elif adaptive_quality_cost_available and recommended.get("quality_source") == "adaptive_feedback":
+            reason = "adaptive_quality_cost_frontier_recommended"
+        elif float(recommended.get("estimated_cost_units") or 0.0) < float((selected_row or {}).get("estimated_cost_units") or 0.0):
+            reason = "cheaper_feasible_quality_cost_tradeoff"
+        else:
+            reason = "higher_quality_feasible_tradeoff"
+        budget_blockers = {
+            "remaining_budget": sum(1 for row in alternatives if row.get("budget_blocker") == "remaining_budget"),
+            "pacing_cap": sum(1 for row in alternatives if row.get("budget_blocker") == "pacing_cap"),
+            "effective_cap": sum(1 for row in alternatives if row.get("budget_blocker") == "effective_cap"),
+            "none": sum(1 for row in alternatives if row.get("budget_blocker") is None),
+        }
+
+        return {
+            "selected_agent_mode": selected,
+            "recommended_agent_mode": recommended_mode,
+            "recommended_reason": reason,
+            "recommended_budget_blocker": recommended.get("budget_blocker"),
+            "recommended_estimated_cost_units": recommended.get("estimated_cost_units"),
+            "recommended_estimated_quality_score": recommended.get("estimated_quality_score"),
+            "recommended_estimated_quality_cost_score": recommended.get("estimated_quality_cost_score"),
+            "recommended_risk_adjusted_quality_cost_score": recommended.get("risk_adjusted_quality_cost_score"),
+            "recommended_quality_lower_bound": recommended.get("estimated_quality_lower_bound"),
+            "recommended_quality_upper_bound": recommended.get("estimated_quality_upper_bound"),
+            "budget_profile": budget_profile,
+            "budget_blockers": budget_blockers,
+            "budget_cap_cost_units": effective_cap,
+            "remaining_cost_units": remaining_cap,
+            "pacing_cap_cost_units": pacing_cap,
+            "effective_cap_cost_units": effective_cap,
+            "pacing_cap_applied": bool(budget_state["pacing_cap_applied"]),
+            "limit_cost_units": budget_state["limit_cost_units"],
+            "used_cost_units": budget_state["used_cost_units"],
+            "route_count": budget_state["route_count"],
+            "target_route_count": budget_state["target_route_count"],
+            "target_remaining_routes": budget_state["target_remaining_routes"],
+            "minimum_route_floor": bool(minimum_route_floor),
+            "budget_fit_count": len(feasible),
+            "selected_budget_fit": bool(selected_row.get("budget_fit")) if selected_row else None,
+            "selected_budget_blocker": selected_row.get("budget_blocker") if selected_row else None,
+            "selected_estimated_quality_cost_score": (
+                selected_row.get("estimated_quality_cost_score") if selected_row else None
+            ),
+            "selected_risk_adjusted_quality_cost_score": (
+                selected_row.get("risk_adjusted_quality_cost_score") if selected_row else None
+            ),
+            "selected_quality_lower_bound": (
+                selected_row.get("estimated_quality_lower_bound") if selected_row else None
+            ),
+            "selected_quality_upper_bound": (
+                selected_row.get("estimated_quality_upper_bound") if selected_row else None
+            ),
+            "selected_fits_remaining_budget": (
+                bool(selected_row.get("fits_remaining_budget")) if selected_row else None
+            ),
+            "selected_fits_pacing_cap": selected_row.get("fits_pacing_cap") if selected_row else None,
+            "selected_frontier_rank": selected_row.get("frontier_rank") if selected_row else None,
+            "selected_matches_recommendation": recommended_mode == selected,
+            "cheapest_feasible_agent_mode": (
+                cheapest_feasible.get("selected_agent_mode") if cheapest_feasible else None
+            ),
+            "highest_quality_feasible_agent_mode": (
+                highest_quality_feasible.get("selected_agent_mode") if highest_quality_feasible else None
+            ),
+            "pareto_modes": [
+                str(row.get("selected_agent_mode"))
+                for row in alternatives
+                if bool(row.get("pareto_frontier"))
+            ],
+            "budget_feasible_pareto_modes": [
+                str(row.get("selected_agent_mode"))
+                for row in alternatives
+                if bool(row.get("budget_feasible_pareto_frontier"))
+            ],
+            "ranked_modes": [
+                {
+                    "selected_agent_mode": str(row.get("selected_agent_mode") or "off"),
+                    "frontier_rank": int(row.get("frontier_rank") or 0),
+                    "frontier_score": row.get("frontier_score"),
+                    "estimated_quality_score": row.get("estimated_quality_score"),
+                    "estimated_quality_cost_score": row.get("estimated_quality_cost_score"),
+                    "estimated_quality_lower_bound": row.get("estimated_quality_lower_bound"),
+                    "estimated_quality_upper_bound": row.get("estimated_quality_upper_bound"),
+                    "risk_adjusted_quality_cost_score": row.get("risk_adjusted_quality_cost_score"),
+                    "effective_sample_size": row.get("effective_sample_size"),
+                    "confidence_level": row.get("confidence_level"),
+                    "confidence_status": row.get("confidence_status"),
+                    "quality_source": row.get("quality_source"),
+                    "quality_cost_source": row.get("quality_cost_source"),
+                    "quality_evidence_status": row.get("quality_evidence_status"),
+                    "estimated_cost_units": row.get("estimated_cost_units"),
+                    "budget_fit": bool(row.get("budget_fit")),
+                    "fits_remaining_budget": bool(row.get("fits_remaining_budget")),
+                    "fits_pacing_cap": row.get("fits_pacing_cap"),
+                    "budget_blocker": row.get("budget_blocker"),
+                    "budget_overage_units": row.get("budget_overage_units"),
+                    "pareto_frontier": bool(row.get("pareto_frontier")),
+                    "budget_feasible_pareto_frontier": bool(row.get("budget_feasible_pareto_frontier")),
+                }
+                for row in ranked
+            ],
+        }
+
+    def _neighbor_auto_agent_mode(self, selected: str, allowed_modes: Sequence[str], direction: int) -> str:
+        ordered = [mode for mode in AUTO_AGENT_MODE_ORDER if mode in set(allowed_modes)]
+        if selected not in ordered:
+            return selected
+        idx = ordered.index(selected)
+        next_idx = idx + direction
+        if next_idx < 0 or next_idx >= len(ordered):
+            return selected
+        return ordered[next_idx]
+
+    def _auto_route_uncertainty_signals(self, prompt: str) -> List[str]:
+        signals: List[str] = []
+        raw_prompt = str(prompt or "")
+        for name, pattern in AUTO_AGENT_UNCERTAINTY_SIGNAL_PATTERNS:
+            if pattern.search(raw_prompt):
+                signals.append(name)
+        return signals
+
+    def _auto_route_score_to_mode(self, mode: str, action_mode: str) -> Optional[int]:
+        if action_mode == "image" and mode == "collective":
+            return 3
+        return AUTO_AGENT_SELECTION_THRESHOLDS.get(mode)
+
+    def _auto_route_confidence(
+        self,
+        *,
+        selected: str,
+        score: int,
+        allowed_modes: Sequence[str],
+        action_mode: str,
+        uncertainty_signals: Sequence[str],
+    ) -> Dict[str, Any]:
+        next_mode = self._neighbor_auto_agent_mode(selected, allowed_modes, 1)
+        next_threshold = self._auto_route_score_to_mode(next_mode, action_mode) if next_mode != selected else None
+        score_to_next_mode: Optional[int] = None
+        if next_threshold is not None:
+            score_to_next_mode = max(0, int(next_threshold) - int(score))
+
+        level = "high"
+        if score_to_next_mode == 1 and uncertainty_signals:
+            level = "low"
+        elif score_to_next_mode == 1:
+            level = "medium"
+
+        return {
+            "level": level,
+            "score": int(score),
+            "selected_agent_mode": selected,
+            "next_agent_mode": next_mode if next_mode != selected else None,
+            "next_agent_mode_threshold": next_threshold,
+            "score_to_next_mode": score_to_next_mode,
+            "uncertainty_signals": list(uncertainty_signals)[:6],
+            "adjusted": False,
+        }
+
+    def _maybe_apply_auto_uncertainty_margin(
+        self,
+        *,
+        selected: str,
+        score: int,
+        allowed_modes: Sequence[str],
+        action_mode: str,
+        budget_profile: str,
+        route_confidence: Dict[str, Any],
+        uncertainty_signals: Sequence[str],
+    ) -> tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]:
+        if (
+            budget_profile == "fast"
+            or action_mode == "image"
+            or len(uncertainty_signals) < 2
+            or route_confidence.get("score_to_next_mode") != 1
+        ):
+            return selected, None, route_confidence
+
+        upgraded = self._neighbor_auto_agent_mode(selected, allowed_modes, 1)
+        if upgraded == selected:
+            return selected, None, route_confidence
+
+        adjustment = {
+            "direction": "upgrade",
+            "from": selected,
+            "to": upgraded,
+            "reason": "borderline_score_with_uncertainty_signals",
+            "score": int(score),
+            "score_to_next_mode": route_confidence.get("score_to_next_mode"),
+            "uncertainty_signals": list(uncertainty_signals)[:6],
+            "budget_profile": budget_profile,
+        }
+        adjusted_confidence = dict(route_confidence)
+        adjusted_confidence.update(
+            {
+                "adjusted": True,
+                "adjusted_from": selected,
+                "selected_agent_mode": upgraded,
+                "adjustment_reason": adjustment["reason"],
+                "level": "medium",
+            }
+        )
+        return upgraded, adjustment, adjusted_confidence
+
+    def _adaptive_route_evidence(self, stats: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(stats, dict):
+            return None
+        adaptive = stats.get("adaptive") if isinstance(stats.get("adaptive"), dict) else {}
+        economics = stats.get("economics") if isinstance(stats.get("economics"), dict) else {}
+        try:
+            economics_samples = int(economics.get("sample_count") or 0)
+            avg_cost = float(economics.get("avg_cost_units"))
+        except (TypeError, ValueError):
+            return None
+        try:
+            weighted_count = float(adaptive.get("weighted_count") or 0.0)
+            quality_score = float(adaptive.get("quality_score"))
+            quality_cost_score = float(adaptive.get("quality_cost_score"))
+        except (TypeError, ValueError):
+            return None
+        if (
+            economics_samples < 1
+            or not math.isfinite(avg_cost)
+            or not math.isfinite(weighted_count)
+            or not math.isfinite(quality_score)
+            or not math.isfinite(quality_cost_score)
+            or weighted_count < AUTO_AGENT_ADAPTIVE_MIN_WEIGHTED_COUNT
+            or quality_score < 0.0
+            or quality_cost_score < 0.0
+            or avg_cost < 0.0
+            or bool(adaptive.get("regression_signal"))
+        ):
+            return None
+        quality_lower_bound = adaptive.get("quality_lower_bound")
+        quality_upper_bound = adaptive.get("quality_upper_bound")
+        quality_cost_lower_bound = adaptive.get("quality_cost_lower_bound")
+        quality_cost_upper_bound = adaptive.get("quality_cost_upper_bound")
+        effective_sample_size = adaptive.get("effective_sample_size")
+        try:
+            quality_lower_bound = float(quality_lower_bound)
+            quality_upper_bound = float(quality_upper_bound)
+            quality_cost_lower_bound = float(quality_cost_lower_bound)
+            quality_cost_upper_bound = float(quality_cost_upper_bound)
+            effective_sample_size = float(effective_sample_size)
+        except (TypeError, ValueError):
+            quality_lower_bound = None
+            quality_upper_bound = None
+            quality_cost_lower_bound = None
+            quality_cost_upper_bound = None
+            effective_sample_size = 0.0
+        confidence_status = str(adaptive.get("confidence_status") or "no_evidence")
+        return {
+            "sample_count": int(adaptive.get("sample_count") or stats.get("count") or 0),
+            "economics_sample_count": economics_samples,
+            "avg_cost_units": round(avg_cost, 3),
+            "weighted_count": round(weighted_count, 3),
+            "quality_score": round(quality_score, 3),
+            "quality_cost_score": round(quality_cost_score, 3),
+            "quality_lower_bound": (
+                round(quality_lower_bound, 3) if isinstance(quality_lower_bound, float) and math.isfinite(quality_lower_bound) else None
+            ),
+            "quality_upper_bound": (
+                round(quality_upper_bound, 3) if isinstance(quality_upper_bound, float) and math.isfinite(quality_upper_bound) else None
+            ),
+            "quality_cost_lower_bound": (
+                round(quality_cost_lower_bound, 3)
+                if isinstance(quality_cost_lower_bound, float) and math.isfinite(quality_cost_lower_bound)
+                else None
+            ),
+            "quality_cost_upper_bound": (
+                round(quality_cost_upper_bound, 3)
+                if isinstance(quality_cost_upper_bound, float) and math.isfinite(quality_cost_upper_bound)
+                else None
+            ),
+            "effective_sample_size": (
+                round(effective_sample_size, 3) if math.isfinite(effective_sample_size) else 0.0
+            ),
+            "confidence_level": adaptive.get("confidence_level"),
+            "confidence_status": confidence_status,
+            "risk_adjusted_quality_cost_score": (
+                round(quality_cost_lower_bound, 3)
+                if confidence_status == "established"
+                and isinstance(quality_cost_lower_bound, float)
+                and math.isfinite(quality_cost_lower_bound)
+                else round(quality_cost_score, 3)
+            ),
+            "weighted_net": adaptive.get("weighted_net"),
+            "decay": adaptive.get("decay"),
+        }
+
+    def _adaptive_route_evidence_status(self, stats: Any) -> str:
+        if not isinstance(stats, dict):
+            return "heuristic_prior"
+        adaptive = stats.get("adaptive") if isinstance(stats.get("adaptive"), dict) else {}
+        economics = stats.get("economics") if isinstance(stats.get("economics"), dict) else {}
+        sample_count = 0
+        try:
+            sample_count = int(adaptive.get("sample_count") or stats.get("count") or 0)
+        except (TypeError, ValueError):
+            sample_count = 0
+        economics_sample_count = 0
+        try:
+            economics_sample_count = int(economics.get("sample_count") or 0)
+        except (TypeError, ValueError):
+            economics_sample_count = 0
+        if sample_count <= 0 and economics_sample_count <= 0:
+            return "heuristic_prior"
+        if bool(adaptive.get("regression_signal")):
+            return "adaptive_regression_blocked"
+        try:
+            avg_cost = float(economics.get("avg_cost_units"))
+        except (TypeError, ValueError):
+            return "adaptive_incomplete_cost_evidence"
+        if economics_sample_count < 1 or not math.isfinite(avg_cost) or avg_cost < 0.0:
+            return "adaptive_incomplete_cost_evidence"
+        try:
+            weighted_count = float(adaptive.get("weighted_count") or 0.0)
+            quality_score = float(adaptive.get("quality_score"))
+            quality_cost_score = float(adaptive.get("quality_cost_score"))
+        except (TypeError, ValueError):
+            return "adaptive_incomplete_feedback_evidence"
+        if (
+            not math.isfinite(weighted_count)
+            or not math.isfinite(quality_score)
+            or not math.isfinite(quality_cost_score)
+            or weighted_count < AUTO_AGENT_ADAPTIVE_MIN_WEIGHTED_COUNT
+            or quality_score < 0.0
+            or quality_cost_score < 0.0
+        ):
+            return "adaptive_incomplete_feedback_evidence"
+        return "adaptive_complete"
+
+    def _prefer_adaptive_neighbor_route(
+        self,
+        *,
+        selected: str,
+        score: int,
+        mode_scores: Dict[str, Any],
+        allowed_modes: Sequence[str],
+        budget_profile: str,
+    ) -> tuple[str, Optional[Dict[str, Any]]]:
+        selected_idx = AUTO_AGENT_MODE_ORDER.index(selected) if selected in AUTO_AGENT_MODE_ORDER else 0
+        selected_stats = mode_scores.get(selected) if isinstance(mode_scores.get(selected), dict) else {}
+        selected_evidence = self._adaptive_route_evidence(selected_stats)
+        selected_quality = float((selected_evidence or {}).get("quality_score", 0.5))
+        selected_confident = bool((selected_evidence or {}).get("confidence_status") == "established")
+        selected_quality_cost = float(
+            (selected_evidence or {}).get(
+                "quality_cost_upper_bound" if selected_confident else "quality_cost_score",
+                0.5,
+            )
+        )
+        selected_has_evidence = selected_evidence is not None
+
+        candidates: List[Dict[str, Any]] = []
+        for direction in (-1, 1):
+            candidate = self._neighbor_auto_agent_mode(selected, allowed_modes, direction)
+            if candidate == selected:
+                continue
+            stats = mode_scores.get(candidate) if isinstance(mode_scores.get(candidate), dict) else {}
+            evidence = self._adaptive_route_evidence(stats)
+            if evidence is None:
+                continue
+            candidate_idx = AUTO_AGENT_MODE_ORDER.index(candidate)
+            moving_deeper = candidate_idx > selected_idx
+            threshold = int(AUTO_AGENT_POSITIVE_THRESHOLDS.get(candidate, 99))
+            if moving_deeper and score < threshold:
+                continue
+            candidate_quality = float(evidence["quality_score"])
+            use_confidence_bound = selected_confident and evidence.get("confidence_status") == "established"
+            candidate_quality_cost = float(
+                evidence["risk_adjusted_quality_cost_score" if use_confidence_bound else "quality_cost_score"]
+            )
+            if candidate_quality < AUTO_AGENT_ADAPTIVE_QUALITY_FLOOR:
+                continue
+
+            quality_delta = round(candidate_quality - selected_quality, 3)
+            quality_cost_delta = round(candidate_quality_cost - selected_quality_cost, 3)
+            if budget_profile == "max":
+                if quality_delta < AUTO_AGENT_ADAPTIVE_QUALITY_DELTA:
+                    continue
+                rank_score = candidate_quality
+            elif selected_has_evidence:
+                if (
+                    quality_cost_delta < AUTO_AGENT_ADAPTIVE_QUALITY_COST_DELTA
+                    and quality_delta < AUTO_AGENT_ADAPTIVE_QUALITY_DELTA
+                ):
+                    continue
+                rank_score = candidate_quality_cost + max(0.0, quality_delta * 0.5)
+            else:
+                if moving_deeper:
+                    if candidate_quality < 0.78:
+                        continue
+                elif quality_cost_delta < AUTO_AGENT_ADAPTIVE_QUALITY_COST_DELTA:
+                    continue
+                rank_score = candidate_quality_cost
+
+            candidates.append(
+                {
+                    "mode": candidate,
+                    "direction": "upgrade" if moving_deeper else "downgrade",
+                    "rank_score": rank_score,
+                    "quality_delta": quality_delta,
+                    "quality_cost_delta": quality_cost_delta,
+                    "evidence": evidence,
+                    "utility_source": (
+                        "confidence_lower_bound"
+                        if use_confidence_bound
+                        else "adaptive_mean"
+                    ),
+                }
+            )
+
+        if not candidates:
+            return selected, None
+        chosen = max(candidates, key=lambda item: (float(item["rank_score"]), float(item["evidence"]["weighted_count"])))
+        if chosen["mode"] == selected:
+            return selected, None
+        evidence = chosen["evidence"]
+        return str(chosen["mode"]), {
+            "direction": chosen["direction"],
+            "from": selected,
+            "to": str(chosen["mode"]),
+            "reason": "adaptive_quality_cost_preferred_neighbor",
+            "budget_profile": budget_profile,
+            "quality_score": evidence.get("quality_score"),
+            "quality_cost_score": evidence.get("quality_cost_score"),
+            "risk_adjusted_quality_cost_score": evidence.get("risk_adjusted_quality_cost_score"),
+            "quality_lower_bound": evidence.get("quality_lower_bound"),
+            "quality_upper_bound": evidence.get("quality_upper_bound"),
+            "effective_sample_size": evidence.get("effective_sample_size"),
+            "confidence_status": evidence.get("confidence_status"),
+            "utility_source": chosen.get("utility_source"),
+            "quality_delta": chosen["quality_delta"],
+            "quality_cost_delta": chosen["quality_cost_delta"],
+            "weighted_count": evidence.get("weighted_count"),
+            "weighted_net": evidence.get("weighted_net"),
+            "decay": evidence.get("decay"),
+        }
+
+    def _apply_auto_route_feedback(
+        self,
+        *,
+        selected: str,
+        score: int,
+        feedback_summary: Dict[str, Any],
+        allowed_modes: Sequence[str],
+        budget_profile: str = "balanced",
+    ) -> tuple[str, Optional[Dict[str, Any]]]:
+        mode_scores = feedback_summary.get("mode_scores") if isinstance(feedback_summary, dict) else {}
+        if not isinstance(mode_scores, dict):
+            return selected, None
+
+        selected_stats = mode_scores.get(selected) if isinstance(mode_scores.get(selected), dict) else {}
+        selected_adaptive = selected_stats.get("adaptive") if isinstance(selected_stats.get("adaptive"), dict) else {}
+        selected_net = int(selected_stats.get("quality_net", selected_stats.get("net")) or 0)
+        selected_negative = int(selected_stats.get("quality_negative", selected_stats.get("negative")) or 0)
+
+        if not bool(feedback_summary.get("used_recent_fallback")) and bool(selected_adaptive.get("preference_signal")):
+            preference_direction = str(selected_adaptive.get("preference_direction") or "")
+            direction = 1 if preference_direction == "deeper" else -1 if preference_direction == "shallower" else 0
+            preferred = self._neighbor_auto_agent_mode(selected, allowed_modes, direction) if direction else selected
+            if preferred != selected:
+                cost_pressure = float(selected_adaptive.get("weighted_cost_pressure") or 0.0)
+                latency_pressure = float(selected_adaptive.get("weighted_latency_pressure") or 0.0)
+                if direction > 0:
+                    reason = "explicit_feedback_requested_deeper_route"
+                elif latency_pressure > cost_pressure:
+                    reason = "explicit_feedback_requested_lower_latency_route"
+                else:
+                    reason = "explicit_feedback_requested_lower_cost_route"
+                return preferred, {
+                    "direction": "upgrade" if direction > 0 else "downgrade",
+                    "from": selected,
+                    "to": preferred,
+                    "reason": reason,
+                    "preference_direction": preference_direction,
+                    "weighted_depth_preference": selected_adaptive.get("weighted_depth_preference"),
+                    "weighted_cost_pressure": selected_adaptive.get("weighted_cost_pressure"),
+                    "weighted_latency_pressure": selected_adaptive.get("weighted_latency_pressure"),
+                    "feedback_scope": "prompt_session",
+                }
+
+        if (
+            not bool(feedback_summary.get("used_recent_fallback"))
+            and selected_negative >= 2
+            and selected_net <= -2
+        ):
+            downgraded = self._neighbor_auto_agent_mode(selected, allowed_modes, -1)
+            if downgraded != selected:
+                return downgraded, {
+                    "direction": "downgrade",
+                    "from": selected,
+                    "to": downgraded,
+                    "reason": "recent_session_feedback_rejected_selected_route",
+                    "net": selected_net,
+                    "negative": selected_negative,
+                }
+
+        if (
+            selected != "off"
+            and not bool(feedback_summary.get("used_recent_fallback"))
+            and bool(selected_adaptive.get("regression_signal"))
+        ):
+            downgraded = self._neighbor_auto_agent_mode(selected, allowed_modes, -1)
+            if downgraded != selected:
+                return downgraded, {
+                    "direction": "downgrade",
+                    "from": selected,
+                    "to": downgraded,
+                    "reason": "recent_weighted_feedback_regression",
+                    "weighted_net": selected_adaptive.get("weighted_net"),
+                    "weighted_negative": selected_adaptive.get("weighted_negative"),
+                    "quality_score": selected_adaptive.get("quality_score"),
+                    "recent_negative_rate": selected_adaptive.get("recent_negative_rate"),
+                    "decay": selected_adaptive.get("decay"),
+                }
+
+        if not bool(feedback_summary.get("used_recent_fallback")):
+            adjusted, adaptive_adjustment = self._prefer_adaptive_neighbor_route(
+                selected=selected,
+                score=score,
+                mode_scores=mode_scores,
+                allowed_modes=allowed_modes,
+                budget_profile=budget_profile,
+            )
+            if adjusted != selected:
+                return adjusted, adaptive_adjustment
+
+        upgraded = self._neighbor_auto_agent_mode(selected, allowed_modes, 1)
+        if not bool(feedback_summary.get("used_recent_fallback")) and upgraded != selected:
+            upgraded_stats = mode_scores.get(upgraded) if isinstance(mode_scores.get(upgraded), dict) else {}
+            upgraded_net = int(upgraded_stats.get("quality_net", upgraded_stats.get("net")) or 0)
+            upgraded_positive = int(upgraded_stats.get("quality_positive", upgraded_stats.get("positive")) or 0)
+            threshold = int(AUTO_AGENT_POSITIVE_THRESHOLDS.get(upgraded, 99))
+            if upgraded_positive >= 2 and upgraded_net >= 2 and score >= threshold:
+                return upgraded, {
+                    "direction": "upgrade",
+                    "from": selected,
+                    "to": upgraded,
+                    "reason": "recent_session_feedback_preferred_deeper_route",
+                    "net": upgraded_net,
+                    "positive": upgraded_positive,
+                }
+
+        if selected != "off" and budget_profile != "max":
+            selected_economics = (
+                selected_stats.get("economics")
+                if isinstance(selected_stats.get("economics"), dict)
+                else {}
+            )
+            economics = selected_economics
+            if isinstance(economics, dict):
+                sample_count = int(economics.get("sample_count") or 0)
+                relevant_feedback = int(feedback_summary.get("relevant_feedback") or 0)
+                used_recent_fallback = bool(feedback_summary.get("used_recent_fallback"))
+                avg_cost = float(economics.get("avg_cost_units") or 0.0)
+                avg_elapsed_ms = float(economics.get("avg_elapsed_ms") or 0.0)
+                budget_limits = {
+                    "fast": {"cost": 3.0, "elapsed_ms": 2500.0},
+                    "balanced": {"cost": 6.0, "elapsed_ms": 8000.0},
+                    "deep": {"cost": 10.0, "elapsed_ms": 15000.0},
+                }
+                limits = budget_limits.get(budget_profile, budget_limits["balanced"])
+                selected_positive = int(selected_stats.get("quality_positive", selected_stats.get("positive")) or 0)
+                pressure_reasons: List[str] = []
+                if avg_cost >= float(limits["cost"]):
+                    pressure_reasons.append("cost")
+                if avg_elapsed_ms >= float(limits["elapsed_ms"]):
+                    pressure_reasons.append("latency")
+                if (
+                    sample_count >= 1
+                    and relevant_feedback >= 2
+                    and not used_recent_fallback
+                    and pressure_reasons
+                    and selected_positive <= 0
+                    and selected_net <= 0
+                ):
+                    downgraded = self._neighbor_auto_agent_mode(selected, allowed_modes, -1)
+                    if downgraded != selected:
+                        return downgraded, {
+                            "direction": "downgrade",
+                            "from": selected,
+                            "to": downgraded,
+                            "reason": "session_route_economics_exceeded_budget_health",
+                            "budget_profile": budget_profile,
+                            "economic_pressure": pressure_reasons,
+                            "pressure_scope": selected,
+                            "sample_count": sample_count,
+                            "relevant_feedback": relevant_feedback,
+                            "avg_cost_units": round(avg_cost, 3),
+                            "avg_elapsed_ms": round(avg_elapsed_ms, 3),
+                            "cost_limit": limits["cost"],
+                            "elapsed_ms_limit": limits["elapsed_ms"],
+                        }
+
+        return selected, None
+
+    def _resolve_auto_agent_mode(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+        chosen_record: ModelRecord,
+    ) -> Dict[str, Any]:
+        compute_policy = chat_app.estimate_auto_reasoning_cycles(prompt)
+        score = int(compute_policy.get("score") or 0)
+        reasons = list(compute_policy.get("reasons") or [])
+        lowered = str(prompt or "").lower()
+
+        if bool(settings.get("web_search_enabled", False)) and should_offer_web_search(prompt):
+            score += 1
+            reasons.append("fresh_knowledge")
+        if settings.get("uploaded_image_path"):
+            score += 1
+            reasons.append("uploaded_artifact")
+        if re.search(r"\b(latest|recent|state of the art|sota|paper|github|cite|source)\b", lowered):
+            score += 1
+            reasons.append("external_evidence")
+        if re.search(r"\b(end to end|whole project|multi[- ]agent|sub[- ]agent|regression|production)\b", lowered):
+            score += 1
+            reasons.append("workflow_depth")
+
+        consultants = self._collective_consultants(settings=settings, chosen_record=chosen_record)
+        collective_model_count = len(consultants)
+        collective_available = collective_model_count >= 2
+        allow_collective = settings.get("auto_agent_collective", True) is not False
+        allow_loop = settings.get("auto_agent_loop", True) is not False
+        budget_profile = self._normalized_auto_budget_profile(
+            settings.get("auto_agent_budget") or settings.get("auto_route_budget") or settings.get("budget_profile")
+        )
+        budget_policy = dict(AUTO_AGENT_BUDGET_PROFILES[budget_profile])
+        score_before_budget = score
+        score = max(0, score + int(budget_policy.get("score_bias") or 0))
+        if budget_policy.get("score_bias"):
+            reasons.append(f"budget_{budget_profile}")
+
+        base_allowed_modes = self._allowed_auto_agent_modes(
+            action_mode=action_mode,
+            allow_collective=allow_collective,
+            collective_available=collective_available,
+            allow_loop=allow_loop,
+        )
+        allowed_modes = self._budget_allowed_auto_agent_modes(
+            base_allowed_modes,
+            str(budget_policy.get("max_agent_mode") or "collective_loop"),
+        )
+
+        if action_mode == "image":
+            if allow_collective and collective_available and score >= 3:
+                selected = "collective"
+                reason = "complex_image_or_multimodal_prompt"
+            else:
+                selected = "off"
+                reason = "image_generation_prefers_single_pass"
+        elif score >= 5 and "collective_loop" in allowed_modes:
+            selected = "collective_loop"
+            reason = "high_complexity_with_collective_capacity"
+        elif score >= 4 and "loop" in allowed_modes:
+            selected = "loop"
+            reason = "high_complexity_iterative_work"
+        elif score >= 2 and "collective" in allowed_modes:
+            selected = "collective"
+            reason = "moderate_complexity_panel_synthesis"
+        else:
+            selected = "off"
+            reason = "low_complexity_single_pass"
+        if selected not in allowed_modes:
+            selected = self._neighbor_auto_agent_mode(allowed_modes[-1], allowed_modes, 0) if allowed_modes else "off"
+            reason = "budget_profile_limited_route_depth"
+        base_selected_agent_mode = selected
+        uncertainty_signals = self._auto_route_uncertainty_signals(prompt)
+        route_confidence = self._auto_route_confidence(
+            selected=selected,
+            score=score,
+            allowed_modes=allowed_modes,
+            action_mode=action_mode,
+            uncertainty_signals=uncertainty_signals,
+        )
+        uncertainty_adjustment: Optional[Dict[str, Any]] = None
+        adjusted, uncertainty_adjustment, route_confidence = self._maybe_apply_auto_uncertainty_margin(
+            selected=selected,
+            score=score,
+            allowed_modes=allowed_modes,
+            action_mode=action_mode,
+            budget_profile=budget_profile,
+            route_confidence=route_confidence,
+            uncertainty_signals=uncertainty_signals,
+        )
+        if adjusted != selected:
+            selected = adjusted
+            reason = str(uncertainty_adjustment.get("reason") or reason)
+        feedback_summary = self.memory_store.route_feedback_summary(session_id, prompt)
+        feedback_adjustment: Optional[Dict[str, Any]] = None
+        if int(feedback_summary.get("total_feedback") or 0) > 0:
+            adjusted, feedback_adjustment = self._apply_auto_route_feedback(
+                selected=selected,
+                score=score,
+                feedback_summary=feedback_summary,
+                allowed_modes=allowed_modes,
+                budget_profile=budget_profile,
+            )
+            if adjusted != selected:
+                selected = adjusted
+                reason = str(feedback_adjustment.get("reason") or reason)
+                route_confidence["feedback_adjusted"] = True
+                route_confidence["selected_agent_mode"] = selected
+
+        policy = {
+            "mode": "auto",
+            "selected_agent_mode": selected,
+            "base_selected_agent_mode": base_selected_agent_mode,
+            "reason": reason,
+            "score": score,
+            "score_before_budget": score_before_budget,
+            "reasons": reasons or ["simple_prompt"],
+            "reasoning_cycles": int(compute_policy.get("cycles") or 0),
+            "collective_model_count": collective_model_count,
+            "collective_available": collective_available,
+            "loop_available": action_mode != "image",
+            "budget_profile": budget_profile,
+            "budget_policy": budget_policy,
+            "allowed_agent_modes": allowed_modes,
+            "route_confidence": route_confidence,
+            "uncertainty_adjustment": uncertainty_adjustment,
+            "feedback_summary": feedback_summary,
+            "feedback_adjustment": feedback_adjustment,
+        }
+        return _stamp_auto_route_policy(
+            policy,
+            selected_agent_mode=selected,
+            action_mode=action_mode,
+        )
+
+    def _format_loop_history(self, steps: Sequence[Dict[str, Any]]) -> str:
         if not steps:
             return "No prior loop work yet."
         lines: List[str] = []
@@ -2068,6 +3954,8 @@ class UnifiedModelManager:
                 lines.append(f"Worker: {row['worker_excerpt']}")
             if row.get("review_note"):
                 lines.append(f"Reviewer: {row['review_note']}")
+            if row.get("review_score") is not None:
+                lines.append(f"Verifier score: {row['review_score']}")
             if row.get("next_step"):
                 lines.append(f"Next: {row['next_step']}")
         return "\n".join(lines[-20:])
@@ -2123,8 +4011,12 @@ class UnifiedModelManager:
             "Judge whether the user's task is complete enough to stop.\n"
             "Respond using exactly these headings:\n"
             "COMPLETE: yes or no\n"
+            "SCORE: number from 0.0 to 1.0 where 1.0 means fully complete and safe to stop\n"
+            "CONFIDENCE: number from 0.0 to 1.0\n"
+            "RISK_SCORE: number from 0.0 to 1.0 where 1.0 means high error or missing-work risk\n"
             "FINAL_RESPONSE: the reply that should be shown to the user right now\n"
             "REASON: why you marked it complete or incomplete\n"
+            "EVIDENCE: concrete evidence behind the score\n"
             "NEXT_STEP: the next action if it is not complete\n\n"
             f"Original task:\n{prompt}\n\n"
             f"Loop step: {step_index} of {max_steps}\n"
@@ -2146,8 +4038,15 @@ class UnifiedModelManager:
         collective_mode: bool,
     ) -> ChatResult:
         controller_record = chosen_record if chosen_record.supports_chat else self._default_text_record()
-        max_steps = int(settings.get("loop_max_steps") or settings.get("loop_budget") or LOOP_AGENT_DEFAULT_MAX_STEPS)
-        max_steps = max(2, min(LOOP_AGENT_HARD_MAX_STEPS, max_steps))
+        max_steps = _coerce_int_setting(
+            settings.get("loop_max_steps") or settings.get("loop_budget"),
+            LOOP_AGENT_DEFAULT_MAX_STEPS,
+            minimum=2,
+            maximum=LOOP_AGENT_HARD_MAX_STEPS,
+        )
+        score_threshold = _loop_score_threshold(
+            settings.get("loop_score_threshold") or settings.get("loop_completion_threshold")
+        )
         tool_cache = {
             _trim_text(event.query, limit=220).lower(): event
             for event in self._seed_auto_tool_events(prompt, settings)
@@ -2156,9 +4055,11 @@ class UnifiedModelManager:
         consult_rows: List[Dict[str, str]] = []
         consulted_labels: List[str] = []
         skipped_models: List[Dict[str, str]] = []
-        loop_steps: List[Dict[str, str]] = []
+        loop_steps: List[Dict[str, Any]] = []
         final_response = ""
         completion_reason = ""
+        stop_reason_code = "budget_exhausted"
+        loop_stop_score: Optional[float] = None
         completed = False
 
         for step_index in range(1, max_steps + 1):
@@ -2254,6 +4155,7 @@ class UnifiedModelManager:
             review_complete = _parse_yes_no_section(reviewer_result.response, "COMPLETE")
             if review_complete is None:
                 review_complete = _parse_yes_no_section(reviewer_result.response, "DONE")
+            review_metrics = _loop_review_metrics(reviewer_result.response, review_complete)
             review_reason = (
                 _extract_labeled_section(reviewer_result.response, "REASON")
                 or _extract_labeled_section(reviewer_result.response, "MISSING")
@@ -2268,6 +4170,24 @@ class UnifiedModelManager:
                 or worker_output
                 or _trim_text(reviewer_result.response, limit=1800)
             )
+            score_stop = (
+                review_complete is None
+                and review_metrics["review_score"] >= score_threshold
+                and review_metrics["risk_score"] <= 0.35
+            )
+            step_stop_reason = ""
+            stop_decision = "continue"
+            if review_complete is True:
+                stop_decision = "stop"
+                step_stop_reason = "reviewer_complete"
+            elif score_stop:
+                stop_decision = "stop"
+                step_stop_reason = "score_threshold"
+            elif review_complete is False:
+                step_stop_reason = "reviewer_continue"
+            else:
+                step_stop_reason = "score_below_threshold"
+
             loop_steps.append(
                 {
                     "step": str(step_index),
@@ -2275,13 +4195,30 @@ class UnifiedModelManager:
                     "worker_excerpt": _trim_text(worker_output, limit=320),
                     "review_note": _trim_text(review_reason or "", limit=220),
                     "next_step": _trim_text(next_step, limit=220),
+                    "review_complete": review_complete,
+                    "review_score": review_metrics["review_score"],
+                    "loop_score": review_metrics["review_score"],
+                    "verifier_score": review_metrics["verifier_score"],
+                    "progress_score": review_metrics["progress_score"],
+                    "confidence_score": review_metrics["confidence_score"],
+                    "risk_score": review_metrics["risk_score"],
+                    "completion_evidence": review_metrics["completion_evidence"],
+                    "stop_decision": stop_decision,
+                    "stop_reason_code": step_stop_reason,
                 }
             )
             final_response = final_candidate
-            completion_reason = review_reason or success_signal or f"Loop agent finished step {step_index}."
+            completion_reason = (
+                review_reason
+                or review_metrics["completion_evidence"]
+                or success_signal
+                or f"Loop agent finished step {step_index}."
+            )
+            loop_stop_score = review_metrics["review_score"]
 
-            if review_complete is True:
+            if stop_decision == "stop":
                 completed = True
+                stop_reason_code = step_stop_reason
                 break
 
         if not completed and final_response:
@@ -2289,6 +4226,10 @@ class UnifiedModelManager:
                 f"{final_response}\n\nLoop agent note: the loop budget ended before it confidently marked the task complete."
             )
             completion_reason = completion_reason or "Loop budget reached before completion."
+        elif completed and stop_reason_code == "score_threshold":
+            completion_reason = completion_reason or (
+                f"Reviewer score met the {score_threshold:.2f} completion threshold."
+            )
 
         deduped_consulted = list(dict.fromkeys(label for label in consulted_labels if label))
         result = ChatResult(
@@ -2300,7 +4241,13 @@ class UnifiedModelManager:
                 + (" with collective worker consultations." if collective_mode else f" on {controller_record.label}.")
             ),
             response=final_response or "Loop agent did not produce a final answer.",
-            timing={"loop_steps": len(loop_steps), "loop_max_steps": max_steps},
+            timing={
+                "loop_steps": len(loop_steps),
+                "loop_max_steps": max_steps,
+                "loop_stop_step": len(loop_steps),
+                "loop_stop_score": loop_stop_score,
+                "loop_stop_reason_code": stop_reason_code,
+            },
             prompt_used=prompt,
         )
         result.agent_trace = {
@@ -2314,6 +4261,10 @@ class UnifiedModelManager:
             "loop_completed": completed,
             "loop_completion_reason": completion_reason,
             "loop_budget": max_steps,
+            "loop_score_threshold": score_threshold,
+            "loop_stop_reason_code": stop_reason_code,
+            "loop_stop_step": len(loop_steps),
+            "loop_stop_score": loop_stop_score,
             "loop_controller_model": controller_record.label,
             "loop_worker_mode": "collective" if collective_mode else "single_model",
         }
@@ -2470,7 +4421,13 @@ class UnifiedModelManager:
                 f"back to {_record.label}."
             )
         final_settings["route_reason"] = effective_route_reason
-        image_result = backend.generate_image(session_id, planner_result.response or prompt, final_settings)
+        generation_settings = dict(final_settings)
+        generation_settings.pop("_route_model_call_counter", None)
+        image_result = backend.generate_image(session_id, planner_result.response or prompt, generation_settings)
+        _record_route_model_call(
+            final_settings,
+            max(1, int((image_result.timing or {}).get("model_calls") or 1)),
+        )
         image_result.agent_trace = {
             "agent_mode": "collective_panel",
             "memory_notes": list(memory_bundle.get("memory_notes") or []),
@@ -2498,12 +4455,256 @@ class UnifiedModelManager:
                 "exports_dir": str(self.exports_dir),
                 "extraction_root": str(self.extraction_root),
                 "memory_status": self.memory_store.global_status(),
+                "route_policy_ledger": self.route_policy_ledger.report(),
                 "active_backend_status": self._backend.status() if self._backend is not None else None,
             }
 
     def session_memory_snapshot(self, session_id: str) -> Dict[str, Any]:
         with self._lock:
             return self.memory_store.session_snapshot(session_id)
+
+    def record_route_feedback(self, *, session_id: str, feedback: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            route_id = str(feedback.get("route_id") or "").strip()
+            try:
+                durable_decision = self.route_policy_ledger.get_decision(route_id)
+            except (DecisionNotFoundError, KeyError):
+                durable_decision = None
+            if durable_decision is not None:
+                if durable_decision.get("session_hash") != hash_session_identity(session_id):
+                    raise ValueError("route_id does not belong to this session")
+                if durable_decision.get("status") != "completed":
+                    raise ValueError("feedback requires a successfully completed route")
+            if durable_decision is None:
+                # Legacy feedback can predate the durable decision ledger. It
+                # remains descriptive in the JSON compatibility store and is
+                # never eligible for readiness certification.
+                result = self.memory_store.add_feedback(session_id=session_id, feedback=feedback)
+                result["durable_feedback"] = {
+                    "status": "legacy_unjoined",
+                    "eligible_for_readiness": False,
+                }
+                return result
+
+            row = self.memory_store.prepare_feedback(session_id=session_id, feedback=feedback)
+            durable_payload = {
+                "rating": row.get("rating"),
+                "feedback_intent": row.get("feedback_intent"),
+                "feedback_tags": list(row.get("feedback_tags") or []),
+                "feedback_axes": dict(row.get("feedback_axes") or {}),
+                "reason": row.get("reason"),
+                "source": "explicit_user_route_feedback",
+                "observation_status": "observed",
+            }
+            # Commit the source-of-truth row first. Its content-derived
+            # idempotency key makes an identical retry return the same revision.
+            durable_feedback = self.route_policy_ledger.record_feedback(route_id, durable_payload)
+            durable_revision = max(1, int(durable_feedback.get("revision") or 1))
+            try:
+                result = self.memory_store.commit_feedback(
+                    session_id=session_id,
+                    feedback_row=row,
+                    feedback_revision=durable_revision,
+                )
+            except Exception as exc:
+                # A compatibility-mirror failure must not turn an already
+                # durable user acknowledgement into an API failure. An
+                # identical retry safely reconciles the pinned revision.
+                logging.exception("Route feedback compatibility mirror is pending reconciliation")
+                accepted_row = dict(row)
+                accepted_row.update(
+                    {
+                        "feedback_revision": durable_revision,
+                        "durable_feedback_revision": durable_revision,
+                    }
+                )
+                result = {
+                    "ok": True,
+                    "feedback": accepted_row,
+                    "summary": None,
+                    "compatibility_mirror": {
+                        "status": "pending_reconciliation",
+                        "durable_revision": durable_revision,
+                        "error_category": type(exc).__name__,
+                    },
+                }
+            result["durable_feedback"] = {
+                "status": "committed",
+                "revision": durable_revision,
+                "idempotent": bool(durable_feedback.get("idempotent")),
+                "eligible_for_readiness": True,
+            }
+            return result
+
+    def route_health_snapshot(self, session_id: str) -> Dict[str, Any]:
+        with self._lock:
+            summary = self.memory_store.route_feedback_summary(session_id)
+            summary["route_usage"] = self.memory_store.route_usage_summary(session_id)
+            return summary
+
+    def route_shadow_registry_snapshot(self) -> Dict[str, Any]:
+        """Return the isolated shadow-assignment registry without changing it."""
+
+        registry_path = self.route_shadow_registry_path
+        with self._lock:
+            if not registry_path.is_file():
+                self._route_shadow_registry_cache_signature = None
+                self._route_shadow_registry_cache_snapshot = None
+                return {
+                    "ok": True,
+                    "available": False,
+                    "status": "not_initialized",
+                    "registry_location": f"memory/{registry_path.name}",
+                    "read_only": True,
+                    "campaign_count": 0,
+                    "campaigns": [],
+                    "event_chain": None,
+                    "execution_enabled": False,
+                    "activation_available": False,
+                    "automatic_promotion_allowed": False,
+                }
+
+            signature_before = self._route_shadow_registry_signature(registry_path)
+            if (
+                signature_before == self._route_shadow_registry_cache_signature
+                and self._route_shadow_registry_cache_snapshot is not None
+            ):
+                return copy.deepcopy(self._route_shadow_registry_cache_snapshot)
+
+            snapshot = RouteShadowAssignmentRegistry(registry_path, read_only=True).snapshot()
+            result = {
+                **snapshot,
+                "available": True,
+                "status": "verified" if snapshot.get("ok") else "verification_failed",
+                "registry_location": f"memory/{registry_path.name}",
+                "read_only": True,
+            }
+            signature_after = self._route_shadow_registry_signature(registry_path)
+            if signature_before == signature_after:
+                self._route_shadow_registry_cache_signature = signature_after
+                self._route_shadow_registry_cache_snapshot = copy.deepcopy(result)
+            else:
+                # A concurrent registry write may have landed during the audit.
+                # The transactional snapshot is still coherent, but do not reuse it.
+                self._route_shadow_registry_cache_signature = None
+                self._route_shadow_registry_cache_snapshot = None
+            return result
+
+    @staticmethod
+    def _route_shadow_registry_signature(
+        registry_path: Path,
+    ) -> Tuple[Tuple[Any, ...], ...]:
+        """Fingerprint durable SQLite state without reading or mutating the registry."""
+
+        rows: List[Tuple[Any, ...]] = []
+        for path in (registry_path, Path(f"{registry_path}-wal")):
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                rows.append((False,))
+            else:
+                # SQLite may materialize an empty WAL while opening a read-only
+                # connection. It carries no committed frames, so normalize it
+                # to the same signature as an absent WAL.
+                if path != registry_path and stat.st_size == 0:
+                    rows.append((False,))
+                    continue
+                rows.append(
+                    (
+                        True,
+                        stat.st_dev,
+                        stat.st_ino,
+                        stat.st_size,
+                        stat.st_mtime_ns,
+                        stat.st_ctime_ns,
+                    )
+                )
+        return tuple(rows)
+
+    def route_policy_lab_snapshot(self, session_id: str, profile: str = "balanced") -> Dict[str, Any]:
+        with self._lock:
+            payload = self.memory_store.load_session(session_id)
+            durable_evidence = self.route_policy_ledger.policy_evidence_snapshot(
+                session_id=session_id,
+                policy_name=AUTO_ROUTE_POLICY_ID,
+                policy_version=AUTO_ROUTE_POLICY_VERSION,
+                limit=1000,
+            )
+            durable_usage = list(durable_evidence.get("usage_rows") or [])
+            durable_feedback = list(durable_evidence.get("feedback_rows") or [])
+            if durable_usage:
+                usage_rows = durable_usage
+                feedback_rows = durable_feedback
+                expected_contexts = durable_evidence.get("expected_context_by_route_id")
+                evidence_source = "durable_sqlite_ledger"
+                lifecycle_source: Optional[Mapping[str, Any]] = durable_evidence
+            else:
+                usage_rows = list(payload.get("route_usage") or [])
+                feedback_rows = list(payload.get("route_feedback") or [])
+                expected_contexts = None
+                evidence_source = "legacy_json_compatibility"
+                lifecycle_source = None
+            report = analyze_route_policy(
+                usage_rows,
+                feedback_rows,
+                profile=profile,
+                expected_policy_id=AUTO_ROUTE_POLICY_ID,
+                expected_policy_version=AUTO_ROUTE_POLICY_VERSION,
+                expected_feature_schema=AUTO_ROUTE_FEATURE_SCHEMA_VERSION,
+                expected_context_by_route_id=(
+                    expected_contexts if isinstance(expected_contexts, Mapping) else None
+                ),
+                durable_lifecycle=lifecycle_source,
+            )
+            report["evidence_source"] = evidence_source
+            report["durable_evidence_window"] = durable_evidence.get("analysis_window")
+            outcome_contract_maturity = durable_evidence.get("outcome_contract_maturity")
+            report["outcome_contract_maturity"] = (
+                dict(outcome_contract_maturity)
+                if isinstance(outcome_contract_maturity, Mapping)
+                else {}
+            )
+            report["compatibility_view"] = {
+                "usage_rows": len(payload.get("route_usage") or []),
+                "feedback_rows": len(payload.get("route_feedback") or []),
+                "used_for_analysis": not bool(durable_usage),
+                "used_for_readiness": False,
+                "eligible_for_readiness": False,
+            }
+            report["available_profiles"] = [item.as_dict() for item in POLICY_PROFILES.values()]
+            report["active_logging_policy"] = {
+                "policy_id": AUTO_ROUTE_POLICY_ID,
+                "policy_version": AUTO_ROUTE_POLICY_VERSION,
+                "feature_schema_version": AUTO_ROUTE_FEATURE_SCHEMA_VERSION,
+                "decision_type": "deterministic",
+                "counterfactual_support": "none",
+                "support_schema_version": SUPPORT_SCHEMA_VERSION,
+                "failure_observation": "two_phase_started_and_terminal",
+                "durable_store": "sqlite_wal",
+                "retention": {
+                    "durable_decisions": "uncapped",
+                    "compatibility_usage_rows": 240,
+                    "compatibility_feedback_rows": 120,
+                },
+            }
+            durable = durable_evidence.get("lifecycle") or self.route_policy_ledger.report(
+                session_id=session_id,
+                policy_name=AUTO_ROUTE_POLICY_ID,
+                policy_version=AUTO_ROUTE_POLICY_VERSION,
+            )
+            report["durable_ledger"] = durable
+            report["warnings"].append(
+                "Durable failure counts are descriptive runtime diagnostics; they do not create counterfactual support."
+            )
+            report["warnings"].append(
+                "Outcome-contract maturity is diagnostic-only telemetry; it is not a policy-value estimator and "
+                "cannot authorize route promotion."
+            )
+            if int((durable.get("counts") or {}).get("inflight") or 0) > 0:
+                report["warnings"].append(
+                    "In-flight rows can include active work or interrupted processes and require terminal reconciliation."
+                )
+            return report
 
     def three_d_model_view(self) -> Dict[str, Any]:
         record = self.record_map.get("three_d_generation_micro_v1")
@@ -2624,6 +4825,20 @@ class UnifiedModelManager:
                 "saved_path": str(target),
             }
 
+    @staticmethod
+    def _route_error_category(exc: Exception) -> str:
+        if isinstance(exc, TimeoutError):
+            return "timeout"
+        if isinstance(exc, MemoryError):
+            return "resource_exhausted"
+        if isinstance(exc, FileNotFoundError):
+            return "model_artifact_missing"
+        if isinstance(exc, PermissionError):
+            return "permission_error"
+        if isinstance(exc, (KeyError, ValueError)):
+            return "validation_error"
+        return "runtime_error"
+
     def handle_prompt(
         self,
         *,
@@ -2633,7 +4848,64 @@ class UnifiedModelManager:
         action_mode: str,
         settings: Dict[str, Any],
     ) -> Dict[str, Any]:
+        self._route_execution.route_id = ""
+        self._route_execution.ledger_started = False
+        self._route_execution.started_at_perf = None
+        try:
+            return self._handle_prompt_impl(
+                session_id=session_id,
+                prompt=prompt,
+                model_key=model_key,
+                action_mode=action_mode,
+                settings=settings,
+            )
+        except Exception as exc:
+            route_id = str(getattr(self._route_execution, "route_id", "") or "")
+            if route_id and bool(getattr(self._route_execution, "ledger_started", False)):
+                try:
+                    failure_economics: Optional[Dict[str, float]] = None
+                    started_at_perf = getattr(self._route_execution, "started_at_perf", None)
+                    if (
+                        isinstance(started_at_perf, (int, float))
+                        and not isinstance(started_at_perf, bool)
+                        and math.isfinite(float(started_at_perf))
+                    ):
+                        completed_at_perf = time.perf_counter()
+                        if math.isfinite(completed_at_perf) and completed_at_perf >= float(started_at_perf):
+                            failure_economics = {
+                                "elapsed_ms": round(
+                                    (completed_at_perf - float(started_at_perf)) * 1000.0,
+                                    2,
+                                )
+                            }
+                    self.route_policy_ledger.complete_decision(
+                        route_id,
+                        success=False,
+                        executed_mode=str(getattr(self._route_execution, "selected_mode", "") or "") or None,
+                        actual_economics=failure_economics,
+                        error_category=self._route_error_category(exc),
+                        error_message=str(exc)[:500],
+                    )
+                except Exception:
+                    logging.exception("Route decision failure completion could not be persisted")
+            raise
+        finally:
+            self._route_execution.route_id = ""
+            self._route_execution.ledger_started = False
+            self._route_execution.selected_mode = ""
+            self._route_execution.started_at_perf = None
+
+    def _handle_prompt_impl(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        model_key: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+    ) -> Dict[str, Any]:
         with self._lock:
+            route_started = time.perf_counter()
             requested_key = model_key or self.selected_model_key or "auto"
             if requested_key == "auto":
                 chosen_record, route_reason = choose_auto_model(
@@ -2658,6 +4930,8 @@ class UnifiedModelManager:
                     resolved_action = "text"
 
             settings = dict(settings or {})
+            route_model_call_counter = {"count": 0}
+            settings["_route_model_call_counter"] = route_model_call_counter
             settings.setdefault("memory_enabled", True)
             settings.setdefault("agent_mode", "off")
             settings.setdefault("web_search_enabled", False)
@@ -2667,14 +4941,162 @@ class UnifiedModelManager:
             settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
             memory_bundle = self._prepare_memory_bundle(session_id, prompt, settings)
             agent_mode = self._normalized_agent_mode(settings.get("agent_mode"))
-            collective_enabled = agent_mode in {"collective", "collective_loop"}
-            loop_enabled = agent_mode in {"loop", "collective_loop"}
-            if loop_enabled and resolved_action == "image":
-                loop_enabled = False
+            requested_agent_mode = agent_mode
+            auto_agent_policy: Optional[Dict[str, Any]] = None
+            if agent_mode == "auto":
+                auto_agent_policy = self._resolve_auto_agent_mode(
+                    session_id=session_id,
+                    prompt=prompt,
+                    action_mode=resolved_action,
+                    settings=settings,
+                    chosen_record=chosen_record,
+                )
+                if settings.get("reasoning_cycles") in (None, "", 0, "0", "model", "default"):
+                    settings["reasoning_cycles"] = int(auto_agent_policy.get("reasoning_cycles") or 1)
+                if settings.get("adaptive_compute") is None:
+                    settings["adaptive_compute"] = True
+                auto_agent_policy["runtime_compute_request"] = {
+                    "reasoning_cycles": settings.get("reasoning_cycles"),
+                    "adaptive_compute": bool(settings.get("adaptive_compute")),
+                    "source": "auto_route_policy",
+                }
+                agent_mode = str(auto_agent_policy["selected_agent_mode"])
+                settings["agent_mode"] = agent_mode
+                budget_profile = str(auto_agent_policy.get("budget_profile") or "balanced")
+                budget_phrase = "" if budget_profile == "balanced" else f" under the {budget_profile} budget profile"
+                route_reason = (
+                    f"{route_reason} Auto orchestration selected {agent_mode} "
+                    f"because {auto_agent_policy['reason']}{budget_phrase}."
+                )
+            effective_agent_mode = self._effective_agent_mode_for_action(agent_mode, resolved_action)
+            if effective_agent_mode != agent_mode:
+                previous_agent_mode = agent_mode
+                agent_mode = effective_agent_mode
+                settings["agent_mode"] = agent_mode
+                if auto_agent_policy is not None:
+                    auto_agent_policy["pre_action_agent_mode"] = previous_agent_mode
+                    auto_agent_policy["selected_agent_mode"] = agent_mode
+                    route_confidence = auto_agent_policy.get("route_confidence")
+                    if isinstance(route_confidence, dict):
+                        route_confidence["selected_agent_mode"] = agent_mode
+                        route_confidence["action_adjusted"] = True
                 route_reason = (
                     f"{route_reason} Loop agent currently supports text and vision replies; "
-                    "image generation stayed on the normal one-pass path."
+                    f"image generation used {agent_mode} instead of {previous_agent_mode}."
                 )
+            route_economics_estimate = self._estimate_route_economics(
+                selected_agent_mode=agent_mode,
+                action_mode=resolved_action,
+                settings=settings,
+                auto_agent_policy=auto_agent_policy,
+            )
+            if auto_agent_policy is not None:
+                budget_limit = self._auto_session_budget_limit(settings)
+                budget_snapshot = self._session_route_budget_snapshot(session_id, budget_limit)
+                adjusted_agent_mode, route_economics_estimate, session_budget_adjustment, session_budget = (
+                    self._apply_auto_session_budget(
+                        selected=agent_mode,
+                        action_mode=resolved_action,
+                        settings=settings,
+                        auto_agent_policy=auto_agent_policy,
+                        budget_snapshot=budget_snapshot,
+                    )
+                )
+                if session_budget is not None:
+                    auto_agent_policy["session_budget"] = session_budget
+                if session_budget_adjustment is not None:
+                    previous_agent_mode = agent_mode
+                    agent_mode = adjusted_agent_mode
+                    settings["agent_mode"] = agent_mode
+                    auto_agent_policy["pre_session_budget_agent_mode"] = previous_agent_mode
+                    auto_agent_policy["selected_agent_mode"] = agent_mode
+                    auto_agent_policy["reason"] = str(session_budget_adjustment.get("reason") or auto_agent_policy["reason"])
+                    auto_agent_policy["session_budget_adjustment"] = session_budget_adjustment
+                    route_confidence = auto_agent_policy.get("route_confidence")
+                    if isinstance(route_confidence, dict):
+                        route_confidence["session_budget_adjusted"] = True
+                        route_confidence["selected_agent_mode"] = agent_mode
+                    if previous_agent_mode == agent_mode:
+                        route_reason = (
+                            f"{route_reason} Session budget is exhausted; Auto kept {agent_mode} "
+                            "because single-pass execution is the minimum route."
+                        )
+                    else:
+                        if session_budget_adjustment.get("reason") == "session_route_budget_target_pacing":
+                            route_reason = (
+                                f"{route_reason} Session budget target pacing downgraded {previous_agent_mode} "
+                                f"to {agent_mode} to preserve budget for the configured route horizon."
+                            )
+                        else:
+                            route_reason = (
+                                f"{route_reason} Session budget pacing downgraded {previous_agent_mode} to {agent_mode} "
+                                f"because the estimated route cost would exceed the remaining budget."
+                            )
+                else:
+                    auto_agent_policy["session_budget_adjustment"] = None
+                auto_agent_policy["route_economics_estimate"] = dict(route_economics_estimate)
+                logging_support = self._build_post_filter_logging_support(
+                    selected=agent_mode,
+                    action_mode=resolved_action,
+                    settings=settings,
+                    auto_agent_policy=auto_agent_policy,
+                    selected_estimate=route_economics_estimate,
+                )
+                _stamp_auto_route_policy(
+                    auto_agent_policy,
+                    selected_agent_mode=agent_mode,
+                    action_mode=resolved_action,
+                    logging_support=logging_support,
+                )
+            route_id = uuid.uuid4().hex
+            ledger_policy = auto_agent_policy if isinstance(auto_agent_policy, dict) else {}
+            ledger_context = dict(ledger_policy.get("decision_context") or {})
+            ledger_context.update(
+                {
+                    "action_mode": resolved_action,
+                    "requested_model_key": requested_key,
+                    "selected_model_key": chosen_record.key,
+                    "requested_agent_mode": requested_agent_mode,
+                    "selected_agent_mode": agent_mode,
+                    "feedback_observation_status": "pending",
+                }
+            )
+            eligible_modes = list(
+                ledger_policy.get("eligible_agent_modes")
+                or ledger_policy.get("eligible_actions")
+                or [agent_mode]
+            )
+            action_probabilities = dict(
+                ledger_policy.get("post_filter_action_probabilities")
+                or ledger_policy.get("action_probabilities")
+                or {agent_mode: 1.0}
+            )
+            self.route_policy_ledger.begin_decision(
+                session_id=session_id,
+                policy_name=str(ledger_policy.get("policy_id") or "explicit-route-v1"),
+                policy_version=str(ledger_policy.get("policy_version") or "1.0.0"),
+                policy_schema_version=str(
+                    ledger_policy.get("feature_schema_version") or AUTO_ROUTE_FEATURE_SCHEMA_VERSION
+                ),
+                decision_context=ledger_context,
+                eligible_modes=eligible_modes,
+                chosen_mode=agent_mode,
+                action_probabilities=action_probabilities,
+                logging_support=(
+                    ledger_policy.get("logging_support")
+                    if isinstance(ledger_policy.get("logging_support"), dict)
+                    else None
+                ),
+                estimated_economics=route_economics_estimate,
+                outcome_contracts=build_route_outcome_contracts(commitment_source="caller"),
+                route_id=route_id,
+            )
+            self._route_execution.route_id = route_id
+            self._route_execution.ledger_started = True
+            self._route_execution.selected_mode = agent_mode
+            self._route_execution.started_at_perf = route_started
+            collective_enabled = agent_mode in {"collective", "collective_loop"}
+            loop_enabled = agent_mode in {"loop", "collective_loop"}
 
             if loop_enabled:
                 result = self._run_loop_agent_text(
@@ -2728,7 +5150,13 @@ class UnifiedModelManager:
                 if resolved_action == "image":
                     if not record.supports_image:
                         raise RuntimeError(f"{record.label} does not support image generation.")
-                    result = backend.generate_image(session_id, prompt, base_settings)
+                    generation_settings = dict(base_settings)
+                    generation_settings.pop("_route_model_call_counter", None)
+                    result = backend.generate_image(session_id, prompt, generation_settings)
+                    _record_route_model_call(
+                        base_settings,
+                        max(1, int((result.timing or {}).get("model_calls") or 1)),
+                    )
                     result.agent_trace = {
                         "agent_mode": "off",
                         "memory_notes": list(memory_bundle.get("memory_notes") or []),
@@ -2736,7 +5164,13 @@ class UnifiedModelManager:
                     }
                 else:
                     if not record.supports_chat and record.supports_image:
-                        result = backend.generate_image(session_id, prompt, base_settings)
+                        generation_settings = dict(base_settings)
+                        generation_settings.pop("_route_model_call_counter", None)
+                        result = backend.generate_image(session_id, prompt, generation_settings)
+                        _record_route_model_call(
+                            base_settings,
+                            max(1, int((result.timing or {}).get("model_calls") or 1)),
+                        )
                         result.agent_trace = {
                             "agent_mode": "off",
                             "memory_notes": list(memory_bundle.get("memory_notes") or []),
@@ -2758,9 +5192,42 @@ class UnifiedModelManager:
                             "tool_events": [event.to_dict() for event in list(tool_cache.values())],
                         }
 
+            elapsed_ms = (time.perf_counter() - route_started) * 1000.0
+            trace = dict(result.agent_trace or {})
+            trace["route_id"] = route_id
+            if result.compute:
+                trace["compute"] = dict(result.compute)
+            route_economics = self._finalize_route_economics(
+                estimate=route_economics_estimate,
+                trace=trace,
+                elapsed_ms=elapsed_ms,
+                actual_model_calls=int(route_model_call_counter.get("count") or 0),
+            )
+            trace["route_economics"] = route_economics
+            if auto_agent_policy:
+                trace["requested_agent_mode"] = "auto"
+                trace["resolved_agent_mode"] = agent_mode
+                auto_agent_policy["route_economics_actual"] = dict(route_economics["actual"])
+                trace["auto_agent_policy"] = auto_agent_policy
+            result.agent_trace = trace
+            timing = dict(result.timing or {})
+            timing["route_elapsed_ms"] = round(float(elapsed_ms), 2)
+            timing.setdefault("route_cost_units", route_economics["actual"]["cost_units"])
+            result.timing = timing
+
             assistant_summary = result.response or result.prompt_used or result.refined_prompt or ""
             tools_for_memory = list((result.agent_trace or {}).get("tool_events") or [])
             consultants_for_memory = list((result.agent_trace or {}).get("consultation_rows") or [])
+            self.memory_store.add_route_usage(
+                session_id=session_id,
+                route_id=route_id,
+                prompt=prompt,
+                selected_agent_mode=agent_mode,
+                route_economics=route_economics,
+                auto_agent_policy=auto_agent_policy,
+                route_reason=result.route_reason,
+                model_key=result.model_key,
+            )
             self.memory_store.update(
                 session_id=session_id,
                 user_text=prompt,
@@ -2778,4 +5245,377 @@ class UnifiedModelManager:
             payload["active_model_key"] = result.model_key
             payload["active_model_label"] = result.model_label
             payload["active_model_kind"] = self.record_map[result.model_key].kind
+            payload["route_id"] = route_id
+            # The durable ledger stores a flat terminal economics record.  Do
+            # not wrap the already-partitioned trace object a second time or
+            # replay will miss cost_units/elapsed_ms at the expected level.
+            ledger_actual_economics = dict(route_economics.get("actual") or {})
+            ledger_actual_economics["executed_model_key"] = result.model_key
+            # A terminal-ledger failure is not a model failure. Clear the
+            # exception bridge before the atomic pending -> completed update so
+            # a persistence error leaves an honest in-flight row for repair.
+            self._route_execution.route_id = ""
+            self._route_execution.ledger_started = False
+            ledger_row = self.route_policy_ledger.complete_decision(
+                route_id,
+                success=True,
+                executed_mode=agent_mode,
+                actual_economics=ledger_actual_economics,
+            )
+            payload_trace = payload.get("agent_trace")
+            if isinstance(payload_trace, dict):
+                payload_trace["route_ledger"] = {
+                    "schema_version": ledger_row.get("ledger_schema_version"),
+                    "status": ledger_row.get("status"),
+                    "session_sequence": ledger_row.get("session_sequence"),
+                    "feedback_status": ledger_row.get("feedback_status"),
+                    "decision_type": ledger_row.get("decision_type"),
+                    "probability_stage": ledger_row.get("probability_stage"),
+                    "candidate_set_hash": ledger_row.get("candidate_set_hash"),
+                    "distribution_hash": ledger_row.get("distribution_hash"),
+                }
             return payload
+
+    def preview_route_plan(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        model_key: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        with self._lock:
+            requested_key = model_key or self.selected_model_key or "auto"
+            if requested_key == "auto":
+                chosen_record, route_reason = choose_auto_model(
+                    self.records,
+                    prompt,
+                    action_mode=action_mode,
+                    uploaded_image_path=str((settings or {}).get("uploaded_image_path") or ""),
+                )
+                if chosen_record is None:
+                    raise RuntimeError("No local models were discovered.")
+            else:
+                chosen_record = self.record_map.get(requested_key)
+                if chosen_record is None:
+                    raise KeyError(f"Unknown model key: {requested_key}")
+                route_reason = f"Manual selection kept {chosen_record.label}."
+
+            resolved_action = action_mode
+            if resolved_action == "auto":
+                resolved_action = "image" if chosen_record.supports_image and not chosen_record.supports_chat else "text"
+
+            settings = dict(settings or {})
+            settings.setdefault("agent_mode", "off")
+            settings.setdefault("web_search_enabled", False)
+            settings.setdefault("cmd_open_enabled", True)
+            settings.setdefault("web_search_budget", 3)
+            settings.setdefault("web_search_results", 5)
+            settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
+
+            requested_agent_mode = self._normalized_agent_mode(settings.get("agent_mode"))
+            agent_mode = requested_agent_mode
+            auto_agent_policy: Optional[Dict[str, Any]] = None
+            if agent_mode == "auto":
+                auto_agent_policy = self._resolve_auto_agent_mode(
+                    session_id=session_id,
+                    prompt=prompt,
+                    action_mode=resolved_action,
+                    settings=settings,
+                    chosen_record=chosen_record,
+                )
+                if settings.get("reasoning_cycles") in (None, "", 0, "0", "model", "default"):
+                    settings["reasoning_cycles"] = int(auto_agent_policy.get("reasoning_cycles") or 1)
+                if settings.get("adaptive_compute") is None:
+                    settings["adaptive_compute"] = True
+                auto_agent_policy["runtime_compute_request"] = {
+                    "reasoning_cycles": settings.get("reasoning_cycles"),
+                    "adaptive_compute": bool(settings.get("adaptive_compute")),
+                    "source": "auto_route_policy",
+                }
+                agent_mode = str(auto_agent_policy["selected_agent_mode"])
+                settings["agent_mode"] = agent_mode
+                budget_profile = str(auto_agent_policy.get("budget_profile") or "balanced")
+                budget_phrase = "" if budget_profile == "balanced" else f" under the {budget_profile} budget profile"
+                route_reason = (
+                    f"{route_reason} Auto orchestration selected {agent_mode} "
+                    f"because {auto_agent_policy['reason']}{budget_phrase}."
+                )
+            effective_agent_mode = self._effective_agent_mode_for_action(agent_mode, resolved_action)
+            if effective_agent_mode != agent_mode:
+                previous_agent_mode = agent_mode
+                agent_mode = effective_agent_mode
+                settings["agent_mode"] = agent_mode
+                if auto_agent_policy is not None:
+                    auto_agent_policy["pre_action_agent_mode"] = previous_agent_mode
+                    auto_agent_policy["selected_agent_mode"] = agent_mode
+                    route_confidence = auto_agent_policy.get("route_confidence")
+                    if isinstance(route_confidence, dict):
+                        route_confidence["selected_agent_mode"] = agent_mode
+                        route_confidence["action_adjusted"] = True
+                route_reason = (
+                    f"{route_reason} Loop agent currently supports text and vision replies; "
+                    f"image generation would use {agent_mode} instead of {previous_agent_mode}."
+                )
+
+            route_economics_estimate = self._estimate_route_economics(
+                selected_agent_mode=agent_mode,
+                action_mode=resolved_action,
+                settings=settings,
+                auto_agent_policy=auto_agent_policy,
+            )
+            if auto_agent_policy is not None:
+                budget_limit = self._auto_session_budget_limit(settings)
+                budget_snapshot = self._session_route_budget_snapshot(session_id, budget_limit)
+                adjusted_agent_mode, route_economics_estimate, session_budget_adjustment, session_budget = (
+                    self._apply_auto_session_budget(
+                        selected=agent_mode,
+                        action_mode=resolved_action,
+                        settings=settings,
+                        auto_agent_policy=auto_agent_policy,
+                        budget_snapshot=budget_snapshot,
+                    )
+                )
+                if session_budget is not None:
+                    auto_agent_policy["session_budget"] = session_budget
+                if session_budget_adjustment is not None:
+                    previous_agent_mode = agent_mode
+                    agent_mode = adjusted_agent_mode
+                    settings["agent_mode"] = agent_mode
+                    auto_agent_policy["pre_session_budget_agent_mode"] = previous_agent_mode
+                    auto_agent_policy["selected_agent_mode"] = agent_mode
+                    auto_agent_policy["reason"] = str(session_budget_adjustment.get("reason") or auto_agent_policy["reason"])
+                    auto_agent_policy["session_budget_adjustment"] = session_budget_adjustment
+                    route_confidence = auto_agent_policy.get("route_confidence")
+                    if isinstance(route_confidence, dict):
+                        route_confidence["session_budget_adjusted"] = True
+                        route_confidence["selected_agent_mode"] = agent_mode
+                    if previous_agent_mode == agent_mode:
+                        route_reason = (
+                            f"{route_reason} Session budget is exhausted; Auto kept {agent_mode} "
+                            "because single-pass execution is the minimum route."
+                        )
+                    elif session_budget_adjustment.get("reason") == "session_route_budget_target_pacing":
+                        route_reason = (
+                            f"{route_reason} Session budget target pacing downgraded {previous_agent_mode} "
+                            f"to {agent_mode} to preserve budget for the configured route horizon."
+                        )
+                    else:
+                        route_reason = (
+                            f"{route_reason} Session budget pacing downgraded {previous_agent_mode} to {agent_mode} "
+                            f"because the estimated route cost would exceed the remaining budget."
+                        )
+                else:
+                    auto_agent_policy["session_budget_adjustment"] = None
+                auto_agent_policy["route_economics_estimate"] = dict(route_economics_estimate)
+                logging_support = self._build_post_filter_logging_support(
+                    selected=agent_mode,
+                    action_mode=resolved_action,
+                    settings=settings,
+                    auto_agent_policy=auto_agent_policy,
+                    selected_estimate=route_economics_estimate,
+                )
+                _stamp_auto_route_policy(
+                    auto_agent_policy,
+                    selected_agent_mode=agent_mode,
+                    action_mode=resolved_action,
+                    logging_support=logging_support,
+                )
+
+            collective_enabled = agent_mode in {"collective", "collective_loop"}
+            loop_enabled = agent_mode in {"loop", "collective_loop"} and resolved_action != "image"
+            route_alternatives = self._preview_route_alternatives(
+                selected=agent_mode,
+                action_mode=resolved_action,
+                settings=settings,
+                auto_agent_policy=auto_agent_policy,
+            )
+            route_frontier = self._annotate_route_frontier(
+                alternatives=route_alternatives,
+                selected=agent_mode,
+                action_mode=resolved_action,
+                auto_agent_policy=auto_agent_policy,
+            )
+            return {
+                "ok": True,
+                "dry_run": True,
+                "session_id": session_id,
+                "requested_model_key": requested_key,
+                "active_model_key": chosen_record.key,
+                "active_model_label": chosen_record.label,
+                "active_model_kind": chosen_record.kind,
+                "action_mode": resolved_action,
+                "requested_agent_mode": requested_agent_mode,
+                "selected_agent_mode": agent_mode,
+                "route_reason": route_reason,
+                "route_economics_estimate": route_economics_estimate,
+                "route_alternatives": route_alternatives,
+                "route_frontier": route_frontier,
+                "auto_agent_policy": auto_agent_policy,
+                "execution_plan": {
+                    "collective_enabled": collective_enabled,
+                    "loop_enabled": loop_enabled,
+                    "single_pass": not collective_enabled and not loop_enabled,
+                    "will_write_memory": False,
+                    "will_run_inference": False,
+                },
+            }
+
+    def preview_route_study(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        model_key: str,
+        action_mode: str,
+        settings: Dict[str, Any],
+        exploration_rate: float = 0.10,
+        planned_routes: int = 2_000,
+        scenario_confidence: float = 0.95,
+        assumed_feedback_rate: float = 0.30,
+        target_observed_labels: int = 20,
+        target_policy_profile: str = "balanced",
+        protocol_design_mode: str = "sticky_session_cluster",
+        carryover_scope: str = "unknown",
+        interference_scope: str = "unknown",
+        temporal_variation: str = "unknown",
+        planned_clusters: int = 200,
+        max_routes_per_cluster: int = 20,
+        analysis_every_clusters: int = 50,
+        block_length_routes: int = 20,
+        washout_routes: int = 0,
+    ) -> Dict[str, Any]:
+        """Rehearse a prompt-specific adjacent-route charter without side effects.
+
+        The normal preview path performs the final capability and session-budget
+        filtering.  This method projects that immutable support into a distinct
+        study cohort, but deliberately never samples, executes, or persists an
+        assignment.  Rehearsed probabilities must not be treated as executed
+        logging propensities.
+        """
+
+        preview_settings = dict(settings or {})
+        if self._normalized_agent_mode(preview_settings.get("agent_mode")) != "auto":
+            raise ValueError("Adjacent-route study rehearsal requires Auto Router mode")
+        preview = self.preview_route_plan(
+            session_id=session_id,
+            prompt=prompt,
+            model_key=model_key,
+            action_mode=action_mode,
+            settings=preview_settings,
+        )
+        policy = preview.get("auto_agent_policy")
+        if not isinstance(policy, Mapping):
+            raise ValueError("Auto Router did not produce a route policy for study rehearsal")
+        support = policy.get("logging_support")
+        if not isinstance(support, Mapping):
+            raise ValueError("Auto Router did not produce final post-filter support")
+        study = plan_adjacent_route_study(
+            str(preview.get("selected_agent_mode") or ""),
+            list(support.get("candidates") or []),
+            list(support.get("exclusions") or []),
+            source_contract={
+                "policy_id": policy.get("policy_id"),
+                "policy_version": policy.get("policy_version"),
+                "feature_schema_version": policy.get("feature_schema_version"),
+                "support_schema_version": support.get("schema_version"),
+                "candidate_set_hash": support.get("candidate_set_hash"),
+                "distribution_hash": support.get("distribution_hash"),
+                "outcome_contract_schema_version": OUTCOME_CONTRACT_SCHEMA_VERSION,
+            },
+            exploration_rate=exploration_rate,
+            planned_routes=planned_routes,
+            scenario_confidence=scenario_confidence,
+            assumed_feedback_rate=assumed_feedback_rate,
+            target_observed_labels=target_observed_labels,
+        )
+        protocol_preflight = None
+        protocol_preflight_reason = "no_eligible_adjacent_support"
+        if study["charter"]["enrollment"]["eligible"] is True:
+            protocol_preflight = build_route_study_protocol(
+                study,
+                target_policy_profile=target_policy_profile,
+                design_mode=protocol_design_mode,
+                carryover_scope=carryover_scope,
+                interference_scope=interference_scope,
+                temporal_variation=temporal_variation,
+                population_rule_id="interactive-auto-route-opt-in",
+                population_rule_version="1",
+                cluster_key_schema_version="session-hash-v1",
+                planned_clusters=planned_clusters,
+                max_routes_per_cluster=max_routes_per_cluster,
+                analysis_every_clusters=analysis_every_clusters,
+                block_length_routes=block_length_routes,
+                washout_routes=washout_routes,
+            )
+            protocol_preflight_reason = "draft_for_independent_review"
+        return {
+            "ok": True,
+            "dry_run": True,
+            "session_id": session_id,
+            "requested_model_key": preview.get("requested_model_key"),
+            "active_model_key": preview.get("active_model_key"),
+            "active_model_label": preview.get("active_model_label"),
+            "action_mode": preview.get("action_mode"),
+            "baseline_agent_mode": preview.get("selected_agent_mode"),
+            "route_reason": preview.get("route_reason"),
+            "deterministic_support": {
+                "policy_id": policy.get("policy_id"),
+                "policy_version": policy.get("policy_version"),
+                "feature_schema_version": policy.get("feature_schema_version"),
+                "support_schema_version": support.get("schema_version"),
+                "candidate_set_hash": policy.get("candidate_set_hash"),
+                "distribution_hash": policy.get("distribution_hash"),
+                "outcome_contract_schema_version": OUTCOME_CONTRACT_SCHEMA_VERSION,
+            },
+            "route_study": study,
+            "route_protocol_preflight": protocol_preflight,
+            "route_protocol_preflight_reason": protocol_preflight_reason,
+            "execution_plan": {
+                "will_run_inference": False,
+                "will_write_memory": False,
+                "will_write_ledger": False,
+                "will_assign_route": False,
+                "will_randomize": False,
+                "activation_available": False,
+            },
+        }
+
+    def build_route_protocol_review_bundle(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        """Build and fully reconstruct a prompt-free multi-stratum review bundle."""
+
+        bundle = build_route_study_review_bundle_from_input(payload)
+        verification = audit_route_study_review_bundle(bundle)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "route_protocol_review_bundle": bundle,
+            "verification": verification,
+            "execution_plan": {
+                "will_run_inference": False,
+                "will_write_memory": False,
+                "will_write_ledger": False,
+                "will_assign_route": False,
+                "will_randomize": False,
+                "activation_available": False,
+            },
+        }
+
+    def audit_route_protocol_review_bundle(self, bundle: Any) -> Dict[str, Any]:
+        """Perform full source-bound reconstruction without touching runtime state."""
+
+        verification = audit_route_study_review_bundle(bundle)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "verification": verification,
+            "execution_plan": {
+                "will_run_inference": False,
+                "will_write_memory": False,
+                "will_write_ledger": False,
+                "will_assign_route": False,
+                "will_randomize": False,
+                "activation_available": False,
+            },
+        }

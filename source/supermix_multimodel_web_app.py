@@ -18,11 +18,75 @@ from PIL import Image
 
 app = Flask(__name__)
 manager: UnifiedModelManager | None = None
+MAX_ROUTE_REVIEW_BUNDLE_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_ROUTE_REVIEW_BUNDLE_WEB_STRATA = 100
 
 def build_app(unified_manager: UnifiedModelManager) -> Flask:
     global manager
     manager = unified_manager
     return app
+
+
+def _validate_route_review_request_size(value: Any) -> None:
+    try:
+        size = len(
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("route protocol review request must be finite canonical JSON") from exc
+    if size > MAX_ROUTE_REVIEW_BUNDLE_REQUEST_BYTES:
+        raise ValueError("route protocol review request exceeds the 2 MiB browser limit")
+
+
+def _read_strict_route_review_json() -> Any:
+    """Parse the integrity-sensitive review surface without last-key-wins JSON."""
+
+    raw = request.get_data(cache=True)
+    if not raw:
+        raise ValueError("route protocol review request body must contain JSON")
+    if len(raw) > MAX_ROUTE_REVIEW_BUNDLE_REQUEST_BYTES:
+        raise ValueError("route protocol review request exceeds the 2 MiB browser limit")
+
+    def reject_duplicate_keys(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(
+                    f"route protocol review JSON contains duplicate object key: {key}"
+                )
+            value[key] = item
+        return value
+
+    def reject_non_finite(token):
+        raise ValueError(
+            f"route protocol review JSON contains non-finite number: {token}"
+        )
+
+    try:
+        return json.loads(
+            raw.decode("utf-8-sig"),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_non_finite,
+        )
+    except UnicodeDecodeError as exc:
+        raise ValueError("route protocol review request must be UTF-8 JSON") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"route protocol review request is not valid JSON: {exc.msg}"
+        ) from exc
+
+
+def _validate_route_review_strata(value: Any) -> None:
+    if not isinstance(value, list) or not value:
+        raise ValueError("route protocol review requires a non-empty study_plans list")
+    if len(value) > MAX_ROUTE_REVIEW_BUNDLE_WEB_STRATA:
+        raise ValueError("route protocol review supports at most 100 browser strata")
 
 
 # ─── Benchmark graph embed helper ───────────────────────────────────────────
@@ -240,6 +304,14 @@ HTML_TEMPLATE = r"""<!doctype html>
     .model-pill.v46 { background:rgba(52,211,153,0.13);
                       border-color:rgba(52,211,153,0.45); color:#86efac;
                       box-shadow:0 0 20px rgba(52,211,153,0.13); }
+    .panel-toggle { display:none; align-items:center; gap:8px; min-height:38px; padding:8px 12px;
+                    border:1px solid rgba(56,189,248,.28); border-radius:12px;
+                    background:rgba(56,189,248,.09); color:#bae6fd; font-size:11px;
+                    font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+    .panel-toggle:hover { background:rgba(56,189,248,.16); border-color:rgba(56,189,248,.5); }
+    .panel-toggle:focus-visible, .panel-close:focus-visible {
+      outline:2px solid var(--blue); outline-offset:2px;
+    }
 
     /* ── Thread ─────────────────────────────────────────────────────── */
     .thread { padding:40px 14%; overflow-y:auto; display:flex;
@@ -329,6 +401,109 @@ HTML_TEMPLATE = r"""<!doctype html>
                     border:1.5px solid var(--teal); display:flex;
                     align-items:center; justify-content:center;
                     font-size:10px; font-weight:800; color:var(--teal); }
+    .trace-summary { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .trace-pill { display:inline-flex; margin:0 6px 4px 0;
+                  border:1px solid rgba(255,255,255,.10); border-radius:999px;
+                  padding:5px 9px; color:var(--muted); background:rgba(255,255,255,.03); }
+    .trace-score { color:var(--green); border-color:rgba(52,211,153,.28); }
+    .route-feedback { margin-top:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .route-feedback-label { color:var(--muted); font-size:11px; font-weight:900;
+                            text-transform:uppercase; letter-spacing:.12em; margin-right:2px; }
+    .route-feedback button { border:1px solid var(--border); border-radius:999px;
+                             background:rgba(255,255,255,.04); color:var(--muted);
+                             padding:6px 10px; font-size:11px; font-weight:900; }
+    .route-feedback button:hover { color:var(--text); border-color:rgba(129,140,248,.4);
+                                   background:rgba(129,140,248,.09); }
+    .route-feedback button:disabled { opacity:.5; cursor:default; }
+    .route-health { margin-top:10px; display:flex; align-items:center; gap:7px;
+                    flex-wrap:wrap; color:var(--muted); }
+    .route-health span { display:inline-flex; border:1px solid rgba(56,189,248,.18);
+                         background:rgba(56,189,248,.06); border-radius:999px;
+                         padding:6px 9px; font-size:10.5px; font-weight:900; }
+    .policy-lab { margin-top:14px; padding:13px; border:1px solid rgba(129,140,248,.2);
+                  border-radius:14px; background:linear-gradient(145deg,rgba(129,140,248,.08),rgba(56,189,248,.035)); }
+    .policy-lab-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .policy-lab-heading { display:flex; align-items:center; flex-wrap:wrap; gap:7px; min-width:0; }
+    .policy-lab-title { font-size:11px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+    .policy-lab-source { padding:3px 7px; border:1px solid rgba(56,189,248,.3); border-radius:999px;
+                         background:rgba(56,189,248,.08); color:#7dd3fc; font-size:9px; font-weight:800;
+                         letter-spacing:.04em; text-transform:uppercase; }
+    .policy-lab-controls { display:flex; gap:6px; align-items:center; }
+    .policy-lab select,.policy-lab button { border:1px solid var(--border); border-radius:8px;
+                                            background:rgba(8,12,25,.75); color:var(--text);
+                                            padding:5px 7px; font-size:10.5px; font-weight:800; }
+    .policy-lab button:disabled { opacity:.55; cursor:wait; }
+    .policy-lab-metrics { margin-top:10px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+    .policy-lab-metric { border:1px solid rgba(255,255,255,.07); border-radius:9px;
+                         padding:8px; background:rgba(0,0,0,.16); }
+    .policy-lab-metric b { display:block; font-size:13px; color:var(--text); }
+    .policy-lab-metric span { display:block; margin-top:2px; color:var(--muted); font-size:9.5px; }
+    .policy-lab-gate { margin-top:9px; font-size:10.5px; line-height:1.45; color:#fbbf24; }
+    .policy-lab-readiness { margin-top:9px; padding:9px; border:1px solid rgba(255,255,255,.07);
+                            border-radius:10px; background:rgba(0,0,0,.14); }
+    .policy-lab-readiness-title { margin-bottom:7px; color:var(--muted); font-size:9px;
+                                  font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+    .policy-lab-checks { display:grid; grid-template-columns:1fr; gap:4px; }
+    .policy-lab-check { display:flex; align-items:flex-start; gap:6px; padding:5px 6px;
+                        border-radius:7px; color:var(--muted); font-size:9.5px; line-height:1.35; }
+    .policy-lab-check::before { content:'?'; flex:0 0 14px; height:14px; border-radius:50%;
+                                display:inline-flex; align-items:center; justify-content:center;
+                                background:rgba(148,163,184,.12); color:#cbd5e1; font-size:8px; font-weight:900; }
+    .policy-lab-check[data-state="pass"] { background:rgba(52,211,153,.06); color:#a7f3d0; }
+    .policy-lab-check[data-state="pass"]::before { content:'\2713'; background:rgba(52,211,153,.18); color:#6ee7b7; }
+    .policy-lab-check[data-state="fail"] { background:rgba(251,113,133,.06); color:#fecdd3; }
+    .policy-lab-check[data-state="fail"]::before { content:'\00D7'; background:rgba(251,113,133,.17); color:#fda4af; }
+    .policy-lab-blockers { margin-top:7px; color:#fcd34d; font-size:9.5px; line-height:1.45; }
+    .policy-lab-warning { margin-top:7px; padding:7px 8px; border:1px solid rgba(251,191,36,.32);
+                          border-radius:8px; background:rgba(251,191,36,.08); color:#fde68a;
+                          font-size:10px; font-weight:700; line-height:1.45; }
+    .policy-lab-note { margin-top:6px; font-size:9.5px; line-height:1.45; color:var(--muted); }
+    .route-study { margin-top:12px; padding:13px; border:1px solid rgba(45,212,191,.24);
+                   border-radius:14px; background:linear-gradient(145deg,rgba(45,212,191,.075),rgba(56,189,248,.025)); }
+    .route-study-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+    .route-study-heading { min-width:0; }
+    .route-study-title { font-size:11px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+    .route-study-badge { display:inline-flex; margin-top:5px; padding:3px 7px; border:1px solid rgba(45,212,191,.32);
+                         border-radius:999px; background:rgba(45,212,191,.08); color:#99f6e4;
+                         font-size:8.5px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    .route-study button { border:1px solid rgba(45,212,191,.28); border-radius:8px;
+                          background:rgba(8,12,25,.75); color:#ccfbf1; padding:6px 8px;
+                          font-size:10.5px; font-weight:900; }
+    .route-study button:disabled { opacity:.55; cursor:wait; }
+    .route-study-controls { margin-top:10px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+    .route-study-control { display:flex; flex-direction:column; gap:4px; min-width:0; color:var(--muted);
+                           font-size:8.5px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+    .route-study-control input,.route-study-control select { width:100%; min-width:0; border:1px solid var(--border);
+                                                              border-radius:8px; background:rgba(8,12,25,.75);
+                                                              color:var(--text); padding:6px 7px; font-size:10.5px; }
+    .route-study-status { margin-top:9px; padding:8px; border:1px solid rgba(251,191,36,.28);
+                          border-radius:9px; background:rgba(251,191,36,.065); color:#fde68a;
+                          font-size:10px; font-weight:800; line-height:1.45; }
+    .route-study-metrics { margin-top:8px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+    .route-study-metric { padding:8px; border:1px solid rgba(255,255,255,.07); border-radius:9px;
+                          background:rgba(0,0,0,.15); min-width:0; }
+    .route-study-metric b { display:block; color:var(--text); font-size:12.5px; overflow-wrap:anywhere; }
+    .route-study-metric span { display:block; margin-top:2px; color:var(--muted); font-size:9px; line-height:1.35; }
+    .route-study-dist { margin-top:8px; display:flex; flex-wrap:wrap; gap:5px; }
+    .route-study-chip { padding:5px 7px; border:1px solid rgba(56,189,248,.22); border-radius:999px;
+                        background:rgba(56,189,248,.06); color:#bae6fd; font-size:9px; font-weight:800; }
+    .route-study-chip[data-state="unresolved"] { border-color:rgba(251,113,133,.3); background:rgba(251,113,133,.07); color:#fecdd3; }
+    .route-study-chip[data-state="declared_unvalidated"] { border-color:rgba(251,191,36,.3); background:rgba(251,191,36,.07); color:#fde68a; }
+    .route-study-chip[data-state="drafted_unsealed"],.route-study-chip[data-state="drafted_unvalidated"] {
+      border-color:rgba(167,139,250,.3); background:rgba(167,139,250,.07); color:#ddd6fe;
+    }
+    .route-study-note { margin-top:7px; color:var(--muted); font-size:9.5px; line-height:1.45; }
+    .route-study-campaign { margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,.08); }
+    .route-study-campaign-head { display:flex; align-items:center; justify-content:space-between; gap:8px;
+                                 color:var(--text); font-size:10px; font-weight:900; }
+    .route-study-actions { margin-top:7px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .route-study-file-label { display:inline-flex; align-items:center; border:1px solid rgba(45,212,191,.28);
+                              border-radius:8px; background:rgba(8,12,25,.75); color:#ccfbf1;
+                              padding:6px 8px; font-size:10.5px; font-weight:900; cursor:pointer; }
+    .route-study-file-label input { position:absolute; width:1px; height:1px; overflow:hidden;
+                                    clip:rect(0,0,0,0); white-space:nowrap; }
+    .route-study-inventory { margin-top:7px; display:flex; flex-wrap:wrap; gap:5px; }
+    .route-study-inventory button { text-align:left; overflow-wrap:anywhere; }
 
     /* ── Composer ───────────────────────────────────────────────────── */
     .compose-wrap { padding:0 14% 32px; flex-shrink: 0; z-index: 20;
@@ -385,6 +560,12 @@ HTML_TEMPLATE = r"""<!doctype html>
     .panel { background:rgba(15, 23, 42, 0.4); border-left:1px solid var(--border);
              backdrop-filter: var(--glass); display:flex; flex-direction:column; overflow:hidden; }
     .panel-tabs { display:flex; border-bottom:1px solid var(--border); background: rgba(0,0,0,0.1); }
+    .panel-close { display:none; flex:0 0 48px; align-items:center; justify-content:center;
+                   color:var(--muted); border-left:1px solid var(--border); font-size:22px; }
+    .panel-close:hover { color:var(--text); background:rgba(255,255,255,.06); }
+    .panel-backdrop { display:none; position:fixed; inset:0; z-index:70; padding:0;
+                      background:rgba(2,6,23,.68); backdrop-filter:blur(4px); opacity:0;
+                      pointer-events:none; transition:opacity .25s ease; }
     .ptab { flex:1; padding:18px 8px; font-size:11px; font-weight:800;
             text-align:center; text-transform:uppercase; letter-spacing:.14em;
             color:var(--muted); cursor:pointer; border:none;
@@ -421,6 +602,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     .mode-card.on { background:rgba(56,189,248,.08);
                     border-color:rgba(56,189,248,.5);
                     box-shadow:0 8px 24px rgba(0,0,0,0.2), inset 0 0 20px rgba(56,189,248,0.03); }
+    .mode-card.on[data-mode="auto"] { background:rgba(129,140,248,.08);
+                                       border-color:rgba(129,140,248,.5); }
     .mode-card.on[data-mode="collective"] { background:rgba(45,212,191,.08);
                                              border-color:rgba(45,212,191,.5); }
     .mode-card.on[data-mode="loop"] { background:rgba(245,158,11,.08);
@@ -428,6 +611,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     .mc-title { font-size:14.5px; font-weight:800; margin-bottom:6px;
                 display:flex; align-items:center; gap:10px; }
     .mc-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+    .mc-dot.auto { background:#818cf8; box-shadow:0 0 8px #818cf8; }
     .mc-dot.std  { background:var(--green); box-shadow:0 0 8px var(--green); }
     .mc-dot.col  { background:var(--teal);  box-shadow:0 0 8px var(--teal); }
     .mc-dot.loop { background:var(--amber); box-shadow:0 0 8px var(--amber); }
@@ -463,14 +647,26 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     @media (max-width: 1100px) {
       .shell { grid-template-columns:64px 1fr; }
-      .panel { position:fixed; right:0; top:0; bottom:0; width:min(390px,92vw); z-index:80; }
+      .panel-toggle, .panel-close { display:inline-flex; }
+      .panel-backdrop { display:block; }
+      .panel { position:fixed; right:0; top:0; bottom:0; width:min(390px,92vw); z-index:80;
+               background:rgba(8,15,30,.97); box-shadow:-24px 0 70px rgba(0,0,0,.48);
+               transform:translateX(105%); opacity:0; visibility:hidden; pointer-events:none;
+               transition:transform .28s cubic-bezier(.16,1,.3,1), opacity .2s ease, visibility 0s linear .28s; }
+      .panel.is-open { transform:none; opacity:1; visibility:visible; pointer-events:auto;
+                       transition-delay:0s; }
+      .shell.panel-open .panel-backdrop { opacity:1; pointer-events:auto; }
       .thread, .compose-wrap { padding-left:7%; padding-right:7%; }
     }
     @media (max-width: 760px) {
       .shell { grid-template-columns:1fr; }
       .rail { display:none; }
-      .panel { display:none; }
       .wk-header { padding:0 18px; }
+      .wk-header > div:first-child { min-width:0; gap:10px !important; }
+      .wk-title { font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .model-pill { display:none; }
+      .panel-toggle span { display:none; }
+      .panel-toggle { min-width:40px; padding:8px; justify-content:center; }
       .thread { padding:24px 18px; gap:22px; }
       .compose-wrap { padding:0 18px 18px; }
       .msg { max-width:100%; }
@@ -521,7 +717,14 @@ HTML_TEMPLATE = r"""<!doctype html>
         <div class="model-pill v46" id="activePill">V46 Champion</div>
         <div class="model-pill" id="modePill" style="display:none">Standard</div>
       </div>
-      <div class="wk-actions" id="wkActions"></div>
+      <div class="wk-actions" id="wkActions">
+        <button type="button" class="panel-toggle" id="panelToggle" aria-controls="controlPanel" aria-expanded="false" aria-label="Open control panel">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M4,5H20V7H4V5ZM4,11H20V13H4V11ZM4,17H20V19H4V17Z"/>
+          </svg>
+          <span>Controls</span>
+        </button>
+      </div>
     </header>
 
     <div class="thread" id="thread">
@@ -569,6 +772,11 @@ HTML_TEMPLATE = r"""<!doctype html>
                 <path d="M15.5,14h-.79l-.28-.27A6.471,6.471,0,0,0,16,9.5,6.5,6.5,0,1,0,9.5,16a6.471,6.471,0,0,0,4.23-1.57l.27.28v.79l5,4.99L20.49,19Zm-6,0a4.5,4.5,0,1,1,4.5-4.5A4.494,4.494,0,0,1,9.5,14Z"/>
               </svg>
             </button>
+            <button class="ic-btn" title="Preview route plan" id="routePlanBtn">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9,3h6l1.5,3H21v6H3V6H7.5L9,3Zm1.24,2L9.22,7H5v3H19V8h-3.72L14.26,5H10.24ZM5,14h14v2H5V14Zm0,4h9v2H5V18Z"/>
+              </svg>
+            </button>
           </div>
           <button class="send-btn" id="sendBtn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -583,11 +791,12 @@ HTML_TEMPLATE = r"""<!doctype html>
   </main>
 
   <!-- ── Right Panel ── -->
-  <aside class="panel">
+  <aside class="panel" id="controlPanel" aria-label="Model, mode, and benchmark controls">
     <div class="panel-tabs">
       <button class="ptab on" data-ptab="model">Model</button>
       <button class="ptab" data-ptab="mode">Mode</button>
       <button class="ptab" data-ptab="bench">Bench</button>
+      <button type="button" class="panel-close" id="panelClose" aria-label="Close control panel">&times;</button>
     </div>
 
     <!-- MODEL tab -->
@@ -621,6 +830,42 @@ HTML_TEMPLATE = r"""<!doctype html>
           <input class="cfg-input" type="number" id="loopBudget" value="4" min="2" max="16" style="width:70px">
         </div>
         <div class="cfg-row">
+          <label>Auto budget</label>
+          <select class="cfg-input" id="autoBudget" style="width:116px">
+            <option value="fast">Fast</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="deep">Deep</option>
+            <option value="max">Max</option>
+          </select>
+        </div>
+        <div class="cfg-row">
+          <label>Reasoning cycles</label>
+          <select class="cfg-input" id="reasoningCycles" style="width:116px" title="Model uses checkpoint metadata; Prompt auto estimates a budget from the request">
+            <option value="model" selected>Model / Route</option>
+            <option value="auto">Prompt auto</option>
+            <option value="1">1 cycle</option>
+            <option value="3">3 cycles</option>
+            <option value="8">8 cycles</option>
+            <option value="16">16 cycles</option>
+          </select>
+        </div>
+        <div class="cfg-row">
+          <label>Adaptive compute</label>
+          <select class="cfg-input" id="adaptiveCompute" style="width:116px" title="Let supported checkpoints stop early when predictions stabilize">
+            <option value="model" selected>Model / Route</option>
+            <option value="on">Enabled</option>
+            <option value="off">Disabled</option>
+          </select>
+        </div>
+        <div class="cfg-row">
+          <label>Session budget</label>
+          <input class="cfg-input" type="number" id="sessionBudget" value="0" min="0" max="100000" step="0.5" style="width:90px" title="0 disables session cost pacing">
+        </div>
+        <div class="cfg-row">
+          <label>Budget horizon</label>
+          <input class="cfg-input" type="number" id="sessionBudgetTargetRoutes" value="0" min="0" max="10000" step="1" style="width:90px" title="0 uses only the remaining session budget">
+        </div>
+        <div class="cfg-row">
           <label>Neural Memory</label>
           <select class="cfg-input" id="memToggle" style="width:90px">
             <option value="on">Enabled</option>
@@ -642,7 +887,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       <div class="panel-section">
         <h4>Operational Mode</h4>
         <div class="modes">
-          <div class="mode-card on" data-mode="off">
+          <div class="mode-card on" data-mode="auto">
+            <div class="mc-title"><div class="mc-dot auto"></div>Adaptive Router</div>
+            <div class="mc-desc">Prompt-aware orchestration. Chooses standard, collective, or loop depth from task complexity and budget.</div>
+          </div>
+          <div class="mode-card" data-mode="off">
             <div class="mc-title"><div class="mc-dot std"></div>Standard Case</div>
             <div class="mc-desc">Optimal for direct queries and creative generation. High-speed single-pass.</div>
           </div>
@@ -656,9 +905,194 @@ HTML_TEMPLATE = r"""<!doctype html>
           </div>
         </div>
       </div>
-      <div class="panel-section" id="loopPanel" style="display:none">
+      <div class="panel-section" id="loopPanel" style="display:block">
         <h4>Loop Observation</h4>
         <div class="loop-steps" id="loopSteps"></div>
+        <div class="route-feedback" id="routeFeedback" style="display:none">
+          <div class="route-feedback-label" id="routeFeedbackLabel">Route</div>
+          <button type="button" id="routeGoodBtn" title="Prefer this Auto route next time">Good route</button>
+          <button type="button" id="routeBadBtn" title="The route produced a poor answer">Bad quality</button>
+          <button type="button" id="routeDeeperBtn" title="Use a deeper Auto route for similar prompts">Needs deeper</button>
+          <button type="button" id="routeCostBtn" title="Prefer a lower-cost Auto route for similar prompts">Too costly</button>
+          <button type="button" id="routeSlowBtn" title="Prefer a lower-latency Auto route for similar prompts">Too slow</button>
+        </div>
+        <div class="route-health" id="routeHealth" style="display:none">
+          <span id="routeHealthCount">Routes 0</span>
+          <span id="routeHealthQuality">Quality -</span>
+          <span id="routeHealthConfidence">Recent evidence -</span>
+          <span id="routeHealthPreference">Preference -</span>
+          <span id="routeHealthCost">Avg cost -</span>
+          <span id="routeHealthLatency">Avg ms -</span>
+        </div>
+        <div class="policy-lab" id="policyLab">
+          <div class="policy-lab-head">
+            <div class="policy-lab-title">Route Policy Lab</div>
+            <div class="policy-lab-controls">
+              <select id="policyLabProfile" title="Shadow threshold profile">
+                <option value="balanced">Balanced</option>
+                <option value="efficiency">Efficiency</option>
+                <option value="quality_first">Quality first</option>
+              </select>
+              <button type="button" id="policyLabRefresh">Replay</button>
+            </div>
+          </div>
+          <div class="policy-lab-metrics">
+            <div class="policy-lab-metric"><b id="policyLabJoined">0 / 0</b><span>exact usage-feedback joins</span></div>
+            <div class="policy-lab-metric"><b id="policyLabAgreement">-</b><span>candidate action agreement</span></div>
+            <div class="policy-lab-metric"><b id="policyLabApproval">-</b><span>matched observed approval</span></div>
+            <div class="policy-lab-metric"><b id="policyLabEconomics">-</b><span>matched cost / latency</span></div>
+            <div class="policy-lab-metric"><b id="policyLabLifecycle">0 / 0 / 0</b><span>completed / failed / in flight</span></div>
+            <div class="policy-lab-metric"><b id="policyLabFeedbackCoverage">-</b><span>terminal feedback coverage</span></div>
+            <div class="policy-lab-metric"><b id="policyLabOverlapEss">ESS 0.0 / 20</b><span>target-policy overlap</span></div>
+            <div class="policy-lab-metric"><b id="policyLabWeakestAction">-</b><span>weakest target action</span></div>
+            <div class="policy-lab-metric"><b id="policyLabReadinessChecks">0 / 12</b><span>readiness checks passed</span></div>
+            <div class="policy-lab-metric"><b id="policyLabOutcomeCoverage">0 / 0</b><span>quality outcomes observed</span></div>
+            <div class="policy-lab-metric"><b id="policyLabContractCoverage">0 / 0</b><span>routes with precommitted outcome set</span></div>
+            <div class="policy-lab-metric"><b id="policyLabEvidenceSource">waiting</b><span>evidence source</span></div>
+          </div>
+          <div class="policy-lab-gate" id="policyLabGate">Shadow only - waiting for joined evidence.</div>
+          <div class="policy-lab-readiness">
+            <div class="policy-lab-readiness-title">Readiness matrix</div>
+            <div class="policy-lab-checks" id="policyLabChecks" aria-label="Readiness checks"></div>
+            <div class="policy-lab-blockers" id="policyLabBlockers">Waiting for durable evidence.</div>
+          </div>
+          <div class="policy-lab-note" id="policyLabNote">Associational replay only. Changed actions receive no imputed reward.</div>
+        </div>
+        <div class="route-study" id="routeStudy">
+          <div class="route-study-head">
+            <div class="route-study-heading">
+              <div class="route-study-title">Bounded Exposure Rehearsal</div>
+              <div class="route-study-badge">Rehearsal only - execution off</div>
+            </div>
+            <button type="button" id="routeStudyPreview">Rehearse</button>
+          </div>
+          <div class="route-study-controls">
+            <label class="route-study-control" for="routeStudyHorizon">Route horizon
+              <input id="routeStudyHorizon" type="number" value="2000" min="20" max="100000" step="20">
+            </label>
+            <label class="route-study-control" for="routeStudyEpsilon">Alternate mass
+              <select id="routeStudyEpsilon">
+                <option value="0.10" selected>10%</option>
+                <option value="0.15">15%</option>
+                <option value="0.20">20%</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeStudyResponseRate">Rating response
+              <select id="routeStudyResponseRate">
+                <option value="0.10">10% scenario</option>
+                <option value="0.30" selected>30% scenario</option>
+                <option value="0.50">50% scenario</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeStudyTargetLabels">Target labels
+              <input id="routeStudyTargetLabels" type="number" value="20" min="1" max="1000" step="1">
+            </label>
+            <label class="route-study-control" for="routeProtocolTarget">Target policy class
+              <select id="routeProtocolTarget">
+                <option value="efficiency">Efficiency</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="quality_first">Quality first</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeProtocolDesign">Stateful design
+              <select id="routeProtocolDesign">
+                <option value="sticky_session_cluster" selected>Sticky session cluster</option>
+                <option value="clustered_switchback">Clustered switchback</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeProtocolCarryover">Carryover declaration
+              <select id="routeProtocolCarryover">
+                <option value="unknown" selected>Unknown</option>
+                <option value="none_declared">None declared</option>
+                <option value="within_session">Within session</option>
+                <option value="cross_session">Cross session</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeProtocolInterference">Interference declaration
+              <select id="routeProtocolInterference">
+                <option value="unknown" selected>Unknown</option>
+                <option value="none_declared">None declared</option>
+                <option value="shared_resource">Shared resource</option>
+                <option value="cross_cluster">Cross cluster</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeProtocolTemporal">Temporal variation
+              <select id="routeProtocolTemporal">
+                <option value="unknown" selected>Unknown</option>
+                <option value="stable_declared">Stable declared</option>
+                <option value="nonstationary">Nonstationary</option>
+              </select>
+            </label>
+            <label class="route-study-control" for="routeProtocolClusters">Cluster ceiling
+              <input id="routeProtocolClusters" type="number" value="200" min="2" max="1000000" step="10">
+            </label>
+            <label class="route-study-control" for="routeProtocolBlock">Switchback block routes
+              <input id="routeProtocolBlock" type="number" value="20" min="2" max="10000" step="1">
+            </label>
+            <label class="route-study-control" for="routeProtocolWashout">Switchback washout routes
+              <input id="routeProtocolWashout" type="number" value="0" min="0" max="9999" step="1">
+            </label>
+          </div>
+          <div class="route-study-status" id="routeStudyStatus" role="status" aria-live="polite">
+            Preview a prompt to rehearse exact post-filter propensities. No route will run and no evidence will be written.
+          </div>
+          <div class="route-study-metrics">
+            <div class="route-study-metric"><b id="routeStudyBaseline">-</b><span>incumbent route</span></div>
+            <div class="route-study-metric"><b id="routeStudyFloor">-</b><span>minimum alternate propensity</span></div>
+            <div class="route-study-metric"><b id="routeStudyTraffic">-</b><span>routes for target on every alternate</span></div>
+            <div class="route-study-metric"><b id="routeStudyCost">-</b><span>same-stratum expected cost units</span></div>
+            <div class="route-study-metric"><b id="routeStudyLatency">-</b><span>latency-tier envelope</span></div>
+            <div class="route-study-metric"><b id="routeStudyCharter">-</b><span>draft charter fingerprint</span></div>
+            <div class="route-study-metric"><b id="routeProtocolMode">-</b><span>stateful design screen</span></div>
+            <div class="route-study-metric"><b id="routeProtocolPolicy">-</b><span>frozen target-policy draft</span></div>
+            <div class="route-study-metric"><b id="routeProtocolReview">-</b><span>independent-review state</span></div>
+            <div class="route-study-metric"><b id="routeProtocolHash">-</b><span>protocol draft fingerprint</span></div>
+          </div>
+          <div class="route-study-dist" id="routeStudyDistribution" aria-label="Rehearsed route probabilities"></div>
+          <div class="route-study-dist" id="routeProtocolBlockers" aria-label="Protocol activation blocker register"></div>
+          <div class="route-study-campaign">
+            <div class="route-study-campaign-head">
+              <span>Multi-stratum semantic review</span>
+              <span id="routeBundleCount">0 strata</span>
+            </div>
+            <div class="route-study-actions">
+              <button type="button" id="routeBundleAdd" disabled>Add current stratum</button>
+              <button type="button" id="routeBundleBuild" disabled>Build review bundle</button>
+              <button type="button" id="routeBundleDownload" disabled>Download bundle</button>
+              <label class="route-study-file-label" for="routeBundleImport">Import and verify
+                <input id="routeBundleImport" type="file" accept="application/json,.json">
+              </label>
+              <button type="button" id="routeBundleClear" disabled>Clear inventory</button>
+            </div>
+            <div class="route-study-inventory" id="routeBundleInventory" aria-label="Prompt-free support stratum inventory"></div>
+            <div class="route-study-metrics">
+              <div class="route-study-metric"><b id="routeBundleVerification">not built</b><span>semantic verification</span></div>
+              <div class="route-study-metric"><b id="routeBundleHash">-</b><span>review bundle fingerprint</span></div>
+            </div>
+            <div class="route-study-note" id="routeBundleStatus">
+              Inventory only. Strata are never pooled, weighted, assigned, executed, or promoted.
+            </div>
+          </div>
+          <div class="route-study-campaign" id="routeShadowRegistry">
+            <div class="route-study-campaign-head">
+              <span>Shadow assignment registry - read only</span>
+              <button type="button" id="routeShadowRegistryRefresh">Refresh</button>
+            </div>
+            <div class="route-study-metrics">
+              <div class="route-study-metric"><b id="routeShadowRegistryCount">0</b><span>sealed campaigns</span></div>
+              <div class="route-study-metric"><b id="routeShadowRegistryChain">not loaded</b><span>append-only event chain</span></div>
+              <div class="route-study-metric"><b id="routeShadowRegistryAssignments">0 / 0</b><span>verified / committed assignments</span></div>
+              <div class="route-study-metric"><b id="routeShadowRegistryState">not initialized</b><span>campaign states</span></div>
+            </div>
+            <div class="route-study-inventory" id="routeShadowRegistryCampaigns" aria-label="Read-only shadow campaign status"></div>
+            <div class="route-study-note" id="routeShadowRegistryStatus" role="status" aria-live="polite">
+              Refresh to inspect the isolated local registry. This browser cannot seal, assign, reveal, activate, or promote a route policy.
+            </div>
+          </div>
+          <div class="route-study-note" id="routeStudyNote">
+            Same-support rehearsal only. ESS, policy value, live assignment, and promotion remain unavailable.
+          </div>
+        </div>
       </div>
     </div>
 
@@ -676,6 +1110,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     <div class="panel-footer" id="panelStatus">system: active  |  accelerator: auto  |  v: 46.20</div>
   </aside>
+  <div class="panel-backdrop" id="panelBackdrop" aria-hidden="true"></div>
 </div>
 
 <div id="toasts"></div>
@@ -691,11 +1126,15 @@ HTML_TEMPLATE = r"""<!doctype html>
   const sessionId = ([1e7]+-1e3+-4e3+-8e2+-1e11).replace(/[018]/g, c =>
     (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16));
 
-  let agentMode   = 'off';
+  let agentMode   = 'auto';
   let currentUpload = null;
   let currentUpUrl  = '';
   let loopStep = 0;
   let catalogByKey = {};
+  let lastRouteFeedback = null;
+  let latestRouteStudy = null;
+  let routeStudyStrata = [];
+  let latestRouteReviewBundle = null;
 
   async function api(path, body=null) {
     const opts = body
@@ -732,6 +1171,32 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
   }
 
+  const compactPanelMedia = window.matchMedia('(max-width: 1100px)');
+
+  function setPanelOpen(open, options = {}) {
+    const panel = el('controlPanel');
+    const toggle = el('panelToggle');
+    const compact = compactPanelMedia.matches;
+    const nextOpen = compact && Boolean(open);
+    el('shell').classList.toggle('panel-open', nextOpen);
+    panel.classList.toggle('is-open', nextOpen);
+    panel.setAttribute('aria-hidden', compact && !nextOpen ? 'true' : 'false');
+    panel.inert = compact && !nextOpen;
+    toggle.setAttribute('aria-expanded', String(nextOpen));
+    toggle.setAttribute('aria-label', nextOpen ? 'Close control panel' : 'Open control panel');
+    if (nextOpen && options.focus !== false) {
+      const activeTab = panel.querySelector('.ptab.on') || panel.querySelector('.ptab');
+      if (activeTab) activeTab.focus();
+    } else if (!nextOpen && options.restoreFocus) {
+      toggle.focus();
+    }
+  }
+
+  function openPanelTab(name) {
+    switchPtab(name);
+    setPanelOpen(true);
+  }
+
   // ── Tabs (rail) ─────────────────────────────────────────────────────
   qsa('.rail-item[data-tab]').forEach(btn => {
     btn.onclick = () => {
@@ -740,7 +1205,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       const ptab = btn.dataset.tab === 'bench' ? 'bench'
                  : btn.dataset.tab === 'settings' ? 'model'
                  : 'model';
-      switchPtab(ptab);
+      if (btn.dataset.tab === 'bench' || btn.dataset.tab === 'settings') openPanelTab(ptab);
+      else {
+        switchPtab(ptab);
+        setPanelOpen(false);
+      }
     };
   });
 
@@ -748,6 +1217,17 @@ HTML_TEMPLATE = r"""<!doctype html>
   qsa('.ptab').forEach(btn => {
     btn.onclick = () => switchPtab(btn.dataset.ptab);
   });
+
+  el('panelToggle').onclick = () => setPanelOpen(!el('controlPanel').classList.contains('is-open'));
+  el('panelClose').onclick = () => setPanelOpen(false, { restoreFocus: true });
+  el('panelBackdrop').onclick = () => setPanelOpen(false, { restoreFocus: true });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && el('controlPanel').classList.contains('is-open')) {
+      setPanelOpen(false, { restoreFocus: true });
+    }
+  });
+  compactPanelMedia.addEventListener('change', () => setPanelOpen(false, { focus: false }));
+  setPanelOpen(false, { focus: false });
 
   function switchPtab(name) {
     qsa('.ptab').forEach(b => b.classList.toggle('on', b.dataset.ptab === name));
@@ -762,7 +1242,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       qsa('.mode-card').forEach(x => x.classList.remove('on'));
       c.classList.add('on');
       agentMode = c.dataset.mode;
-      el('loopPanel').style.display = agentMode==='loop' ? 'block' : 'none';
+      el('loopPanel').style.display = ['auto','loop','collective_loop'].includes(agentMode) ? 'block' : 'none';
       el('loopSteps').innerHTML = '';
       loopStep = 0;
       updateModePill();
@@ -772,14 +1252,16 @@ HTML_TEMPLATE = r"""<!doctype html>
 
   function updateModePill() {
     const pill = el('modePill');
-    const labels = { off:'Standard', collective:'Collective', loop:'Autonomous' };
+    const labels = { auto:'Auto', off:'Standard', collective:'Collective', loop:'Autonomous', collective_loop:'Collective Loop' };
     if (agentMode === 'off') { pill.style.display='none'; return; }
     pill.style.display='block';
     pill.textContent = labels[agentMode] || agentMode;
-    pill.style.color = agentMode==='collective' ? 'var(--teal)' : 'var(--amber)';
-    pill.style.borderColor = agentMode==='collective'
+    const isCollective = agentMode==='collective' || agentMode==='collective_loop';
+    const isAuto = agentMode==='auto';
+    pill.style.color = isAuto ? '#818cf8' : isCollective ? 'var(--teal)' : 'var(--amber)';
+    pill.style.borderColor = isAuto ? 'rgba(129,140,248,.4)' : isCollective
       ? 'rgba(45,212,191,.4)' : 'rgba(245,158,11,.4)';
-    pill.style.background = agentMode==='collective'
+    pill.style.background = isAuto ? 'rgba(129,140,248,.08)' : isCollective
       ? 'rgba(45,212,191,.08)' : 'rgba(245,158,11,.08)';
   }
 
@@ -836,6 +1318,110 @@ HTML_TEMPLATE = r"""<!doctype html>
                     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  function scorePct(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    const bounded = Math.max(0, Math.min(1, n));
+    return Math.round(bounded * 100);
+  }
+
+  function stopReasonLabel(code) {
+    const labels = {
+      reviewer_complete: 'Reviewer complete',
+      score_threshold: 'Score threshold',
+      budget_exhausted: 'Budget exhausted',
+      reviewer_continue: 'Reviewer continue',
+      score_below_threshold: 'Score below threshold'
+    };
+    return labels[code] || String(code || '').replace(/_/g, ' ');
+  }
+
+  function autoPolicyPills(policy) {
+    if (!policy) return [];
+    const selected = policy.selected_agent_mode || policy.resolved_agent_mode || 'off';
+    const bits = [`<span class="trace-pill">Auto ${escHtml(selected)}</span>`];
+    if (policy.budget_profile) bits.push(`<span class="trace-pill">Budget ${escHtml(policy.budget_profile)}</span>`);
+    if (policy.session_budget) {
+      const b = policy.session_budget;
+      bits.push(`<span class="trace-pill">Session ${escHtml(b.remaining_cost_units)} / ${escHtml(b.limit_cost_units)}</span>`);
+    }
+    if (policy.score !== undefined) bits.push(`<span class="trace-pill">Difficulty ${escHtml(policy.score)}</span>`);
+    if (policy.score_before_budget !== undefined && policy.score_before_budget !== policy.score) {
+      bits.push(`<span class="trace-pill">Score ${escHtml(policy.score_before_budget)} -> ${escHtml(policy.score)}</span>`);
+    }
+    if (policy.reason) bits.push(`<span class="trace-pill">${escHtml(stopReasonLabel(policy.reason))}</span>`);
+    if (Array.isArray(policy.reasons) && policy.reasons.length) {
+      bits.push(`<span class="trace-pill">${escHtml(policy.reasons.slice(0,3).join(', '))}</span>`);
+    }
+    if (policy.feedback_adjustment) {
+      const adj = policy.feedback_adjustment;
+      const label = adj.reason === 'recent_weighted_feedback_regression'
+        ? 'Adaptive'
+        : (adj.reason === 'adaptive_quality_cost_preferred_neighbor' ? 'Pareto' : 'Feedback');
+      bits.push(`<span class="trace-pill">${label} ${escHtml(adj.from || '')} -> ${escHtml(adj.to || '')}</span>`);
+    } else if (policy.feedback_summary && policy.feedback_summary.total_feedback) {
+      bits.push(`<span class="trace-pill">Feedback ${escHtml(policy.feedback_summary.total_feedback)}</span>`);
+    }
+    if (policy.uncertainty_adjustment) {
+      const adj = policy.uncertainty_adjustment;
+      bits.push(`<span class="trace-pill">Uncertain ${escHtml(adj.from || '')} -> ${escHtml(adj.to || '')}</span>`);
+    }
+    if (policy.session_budget_adjustment) {
+      const adj = policy.session_budget_adjustment;
+      bits.push(`<span class="trace-pill">Paced ${escHtml(adj.from || '')} -> ${escHtml(adj.to || '')}</span>`);
+    }
+    return bits;
+  }
+
+  function routeEconomicsPills(economics) {
+    if (!economics) return [];
+    const estimate = economics.estimate || {};
+    const actual = economics.actual || {};
+    const bits = [];
+    if (estimate.estimated_cost_units !== undefined) {
+      bits.push(`<span class="trace-pill">Cost ~${escHtml(estimate.estimated_cost_units)}</span>`);
+    }
+    if (estimate.estimated_model_calls !== undefined) {
+      bits.push(`<span class="trace-pill">Planned calls ${escHtml(estimate.estimated_model_calls)}</span>`);
+    }
+    if (actual.elapsed_ms !== undefined) {
+      bits.push(`<span class="trace-pill">Elapsed ${escHtml(actual.elapsed_ms)}ms</span>`);
+    }
+    if (actual.model_calls !== undefined) {
+      bits.push(`<span class="trace-pill">Calls ${escHtml(actual.model_calls)}</span>`);
+    }
+    return bits;
+  }
+
+  function computePills(compute) {
+    if (!compute || !Object.keys(compute).length) return [];
+    const bits = [];
+    const requested = compute.requested_reasoning_cycles ?? compute.selected_reasoning_cycles;
+    const used = compute.cycles_used;
+    if (requested !== undefined && requested !== null) {
+      bits.push(`<span class="trace-pill">Compute ${escHtml(requested)} requested</span>`);
+    }
+    if (used !== undefined && used !== null) {
+      bits.push(`<span class="trace-pill trace-score">${escHtml(used)} cycles used</span>`);
+    }
+    if (compute.reasoning_budget_mode) {
+      bits.push(`<span class="trace-pill">${escHtml(compute.reasoning_budget_mode)} budget</span>`);
+    }
+    if (compute.adaptive_compute !== undefined) {
+      bits.push(`<span class="trace-pill">Adaptive ${compute.adaptive_compute ? 'on' : 'off'}</span>`);
+    }
+    if (compute.exit_reason) {
+      bits.push(`<span class="trace-pill">Exit ${escHtml(stopReasonLabel(compute.exit_reason))}</span>`);
+    }
+    if (compute.prediction_confidence_delta !== undefined && compute.prediction_confidence_delta !== null) {
+      bits.push(`<span class="trace-pill">Prediction drift ${escHtml(compute.prediction_confidence_delta)}</span>`);
+    }
+    if (compute.applied === false && compute.supported === false) {
+      bits.push('<span class="trace-pill">Compute controls unsupported</span>');
+    }
+    return bits;
+  }
+
   function buildTrace(trace) {
     const wrapper = document.createElement('div');
     wrapper.className = 'trace';
@@ -847,13 +1433,36 @@ HTML_TEMPLATE = r"""<!doctype html>
       hdr.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,4V1L8,5l4,4V6c3.31,0,6,2.69,6,6a5.987,5.987,0,0,1-.7,2.8l1.46,1.46A7.93,7.93,0,0,0,20,12C20,7.58,16.42,4,12,4Zm0,14c-3.31,0-6-2.69-6-6a5.987,5.987,0,0,1,.7-2.8L5.24,7.74A7.93,7.93,0,0,0,4,12c0,4.42,3.58,8,8,8v3l4-4-4-4Z"/></svg> Autonomous Logic Chain — ${trace.loop_steps.length} cycles`;
       wrapper.appendChild(hdr);
 
+      const summaryBits = autoPolicyPills(trace.auto_agent_policy);
+      summaryBits.push(...routeEconomicsPills(trace.route_economics));
+      summaryBits.push(...computePills(trace.compute));
+      const stopScore = scorePct(trace.loop_stop_score);
+      if (trace.loop_stop_reason_code) summaryBits.push(`<span class="trace-pill">${escHtml(stopReasonLabel(trace.loop_stop_reason_code))}</span>`);
+      if (stopScore != null) summaryBits.push(`<span class="trace-pill trace-score">Stop score ${stopScore}%</span>`);
+      if (trace.loop_budget != null) summaryBits.push(`<span class="trace-pill">Budget ${escHtml(trace.loop_steps.length)}/${escHtml(trace.loop_budget)}</span>`);
+      if (trace.loop_completion_reason) summaryBits.push(`<span class="trace-pill">${escHtml(String(trace.loop_completion_reason).slice(0,160))}</span>`);
+      if (summaryBits.length) {
+        const summary = document.createElement('div');
+        summary.className = 'trace-body trace-summary';
+        summary.innerHTML = summaryBits.join('');
+        wrapper.appendChild(summary);
+      }
+
       const body = document.createElement('div');
       body.className = 'trace-body';
       trace.loop_steps.forEach(s => {
+        const stepScore = scorePct(s.review_score ?? s.loop_score);
+        const scoreHtml = stepScore == null ? '' : `<span class="trace-pill trace-score">Score ${stepScore}%</span>`;
+        const stopHtml = s.stop_decision === 'stop'
+          ? `<span class="trace-pill">${escHtml(stopReasonLabel(s.stop_reason_code))}</span>`
+          : '';
+        const note = s.review_note || s.completion_evidence || s.next_step || '';
         body.innerHTML += `<div class="trace-step">
           <div class="trace-step-n">${s.step}</div>
           <div><strong style="color:var(--text)">${escHtml(s.goal||'Strategy Initialization')}</strong><br>
-          <span style="color:var(--muted);font-size:11px">${escHtml((s.worker_excerpt||'').slice(0,140))}...</span></div>
+          <span style="color:var(--muted);font-size:11px">${escHtml((s.worker_excerpt||'').slice(0,140))}...</span>
+          <div style="margin-top:6px">${scoreHtml}${stopHtml}</div>
+          ${note ? `<div style="color:var(--muted);font-size:11px;margin-top:4px">${escHtml(String(note).slice(0,160))}</div>` : ''}</div>
         </div>`;
       });
       wrapper.appendChild(body);
@@ -883,7 +1492,41 @@ HTML_TEMPLATE = r"""<!doctype html>
       const body = document.createElement('div');
       body.className = 'trace-body';
       body.style.fontSize = '12px';
-      body.innerHTML = '<span style="color:var(--muted)">Expert weights synthesized from:</span> ' + trace.consulted_models.join(', ');
+      const policyBits = autoPolicyPills(trace.auto_agent_policy)
+        .concat(routeEconomicsPills(trace.route_economics), computePills(trace.compute));
+      body.innerHTML = (policyBits.length ? `<div class="trace-summary" style="margin-bottom:10px">${policyBits.join('')}</div>` : '') +
+        '<span style="color:var(--muted)">Expert weights synthesized from:</span> ' + trace.consulted_models.join(', ');
+      wrapper.appendChild(body);
+    } else if (trace.auto_agent_policy) {
+      const hdr = document.createElement('div');
+      hdr.className = 'trace-hdr';
+      hdr.style.color = '#818cf8';
+      hdr.textContent = 'Adaptive Router';
+      wrapper.appendChild(hdr);
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = autoPolicyPills(trace.auto_agent_policy)
+        .concat(routeEconomicsPills(trace.route_economics), computePills(trace.compute)).join('');
+      wrapper.appendChild(body);
+    } else if (trace.route_economics) {
+      const hdr = document.createElement('div');
+      hdr.className = 'trace-hdr';
+      hdr.style.color = 'var(--blue)';
+      hdr.textContent = 'Route Economics';
+      wrapper.appendChild(hdr);
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = routeEconomicsPills(trace.route_economics).concat(computePills(trace.compute)).join('');
+      wrapper.appendChild(body);
+    } else if (trace.compute && Object.keys(trace.compute).length) {
+      const hdr = document.createElement('div');
+      hdr.className = 'trace-hdr';
+      hdr.style.color = 'var(--teal)';
+      hdr.textContent = 'Adaptive Compute';
+      wrapper.appendChild(hdr);
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = computePills(trace.compute).join('');
       wrapper.appendChild(body);
     }
 
@@ -916,7 +1559,788 @@ HTML_TEMPLATE = r"""<!doctype html>
     });
   }
 
+  function setRouteFeedbackVisible(show, label='Route') {
+    const box = el('routeFeedback');
+    if (!box) return;
+    box.style.display = show ? 'flex' : 'none';
+    const labelEl = el('routeFeedbackLabel');
+    if (labelEl) labelEl.textContent = label;
+    ['routeGoodBtn','routeBadBtn','routeDeeperBtn','routeCostBtn','routeSlowBtn'].forEach(id => {
+      const btn = el(id);
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  function routeMetricText(value, digits=1) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '-';
+    return n.toFixed(digits).replace(/\.0$/, '');
+  }
+
+  function routeQualityText(adaptive) {
+    if (!adaptive) return 'Quality -';
+    const q = Number(adaptive.quality_score);
+    if (!Number.isFinite(q)) return 'Quality -';
+    const suffix = adaptive.regression_signal ? ' risk' : '';
+    return `Quality ${Math.round(Math.max(0, Math.min(1, q)) * 100)}%${suffix}`;
+  }
+
+  function routeConfidenceText(adaptive) {
+    if (!adaptive) return 'Recent evidence -';
+    const lowerRaw = adaptive.quality_lower_bound;
+    const upperRaw = adaptive.quality_upper_bound;
+    if (lowerRaw === null || lowerRaw === undefined || upperRaw === null || upperRaw === undefined) return 'Recent evidence -';
+    const lower = Number(lowerRaw);
+    const upper = Number(upperRaw);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) return 'Recent evidence -';
+    const status = adaptive.confidence_status ? ` ${adaptive.confidence_status}` : '';
+    return `Heuristic ${Math.round(Math.max(0, lower) * 100)}-${Math.round(Math.min(1, upper) * 100)}%${status}`;
+  }
+
+  function routePreferenceText(adaptive) {
+    if (!adaptive) return 'Preference -';
+    if (adaptive.preference_direction === 'deeper') return 'Preference deeper';
+    if (adaptive.preference_direction === 'shallower') {
+      const cost = Number(adaptive.weighted_cost_pressure) || 0;
+      const latency = Number(adaptive.weighted_latency_pressure) || 0;
+      return latency > cost ? 'Preference faster' : 'Preference cheaper';
+    }
+    return 'Preference neutral';
+  }
+
+  function renderRouteHealth(summary) {
+    const box = el('routeHealth');
+    if (!box) return;
+    const usage = summary && summary.route_usage ? summary.route_usage : {};
+    const usageEconomics = usage && usage.economics ? usage.economics : {};
+    const feedbackEconomics = summary && summary.economics ? summary.economics : {};
+    const economics = usageEconomics.sample_count ? usageEconomics : feedbackEconomics;
+    const adaptive = summary && summary.adaptive ? summary.adaptive : {};
+    const total = summary && summary.total_feedback !== undefined ? Number(summary.total_feedback) : NaN;
+    const routeTotal = usage && usage.total_routes !== undefined ? Number(usage.total_routes) : NaN;
+    const samples = economics.sample_count ? Number(economics.sample_count) : 0;
+    const shownTotal = Number.isFinite(routeTotal) && routeTotal ? routeTotal : Number.isFinite(total) ? total : samples;
+    if (!shownTotal && !samples) {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = 'flex';
+    el('routeHealthCount').textContent = `Routes ${shownTotal}`;
+    el('routeHealthQuality').textContent = routeQualityText(adaptive);
+    el('routeHealthConfidence').textContent = routeConfidenceText(adaptive);
+    el('routeHealthPreference').textContent = routePreferenceText(adaptive);
+    el('routeHealthCost').textContent = `Avg cost ${routeMetricText(economics.avg_cost_units, 2)}`;
+    el('routeHealthLatency').textContent = `Avg ms ${routeMetricText(economics.avg_elapsed_ms, 0)}`;
+  }
+
+  async function refreshRouteHealth() {
+    try {
+      const result = await api('/api/route_health', { session_id: sessionId });
+      renderRouteHealth(result.route_health || result.summary || {});
+    } catch (_) {}
+  }
+
+  function policyLabPercent(value) {
+    if (value === null || value === undefined || value === '') return '-';
+    const n = Number(value);
+    return Number.isFinite(n) ? `${Math.round(Math.max(0, Math.min(1, n)) * 100)}%` : '-';
+  }
+
+  function policyLabLabel(value) {
+    return String(value || '').replace(/_/g, ' ').trim();
+  }
+
+  const policyLabCheckLabels = {
+    candidate_delta_present: 'Candidate changes at least one action',
+    population_integrity_complete: 'Durable population is unique and evaluable',
+    execution_integrity_complete: 'Execution state and chosen action reconcile',
+    logging_integrity_complete: 'Logging metadata and decision fingerprint verify',
+    minimum_overlap_routes_met: 'Minimum overlap route count',
+    target_probability_floor_met: 'Target probability floor',
+    global_overlap_ess_met: 'Global overlap ESS floor',
+    per_action_overlap_met: 'Per-action overlap ESS floor',
+    outcome_evidence_integrity: 'Outcome contracts and eligible quality evidence verify',
+    quality_observation_ready: 'Quality observation process',
+    durable_lifecycle_present: 'Durable lifecycle evidence',
+    lifecycle_reconciled: 'Lifecycle fully reconciled',
+  };
+
+  function renderPolicyLabChecks(checks, blockers) {
+    const container = el('policyLabChecks');
+    container.replaceChildren();
+    const knownChecks = checks && typeof checks === 'object' ? checks : {};
+    Object.entries(policyLabCheckLabels).forEach(([key, label]) => {
+      const item = document.createElement('div');
+      const known = Object.prototype.hasOwnProperty.call(knownChecks, key);
+      item.className = 'policy-lab-check';
+      item.dataset.state = known ? (knownChecks[key] ? 'pass' : 'fail') : 'unknown';
+      item.textContent = label;
+      container.appendChild(item);
+    });
+    const blockerList = Array.isArray(blockers) ? blockers.filter(Boolean) : [];
+    const blockerBox = el('policyLabBlockers');
+    if (blockerList.length) {
+      blockerBox.textContent = `Blockers: ${blockerList.map(policyLabLabel).join(' | ')}`;
+    } else if (Object.keys(knownChecks).length) {
+      blockerBox.textContent = 'No readiness blockers; validated external OPE is still required.';
+    } else {
+      blockerBox.textContent = 'Blockers unavailable until replay succeeds.';
+    }
+  }
+
+  function renderPolicyLabUnavailable(message) {
+    const defaults = {
+      policyLabJoined: '0 / 0', policyLabAgreement: '-', policyLabApproval: '-',
+      policyLabEconomics: '-', policyLabLifecycle: '0 / 0 / 0', policyLabFeedbackCoverage: '-',
+      policyLabOverlapEss: 'ESS - / -', policyLabWeakestAction: '-',
+      policyLabReadinessChecks: `0 / ${Object.keys(policyLabCheckLabels).length}`,
+      policyLabOutcomeCoverage: '0 / 0',
+      policyLabContractCoverage: '0 / 0',
+      policyLabEvidenceSource: 'unavailable',
+    };
+    Object.entries(defaults).forEach(([id, value]) => { el(id).textContent = value; });
+    el('policyLabGate').textContent = `Policy replay unavailable: ${message}`;
+    el('policyLabNote').textContent = 'No Policy Lab metrics are current. Shadow-only gating remains in force.';
+    renderPolicyLabChecks({}, []);
+  }
+
+  function renderPolicyLab(report) {
+    const support = report && report.support ? report.support : {};
+    const usage = support.usage || {};
+    const agreement = report && report.candidate_action_agreement ? report.candidate_action_agreement : {};
+    const matched = report && report.matched_observed ? report.matched_observed : {};
+    const gate = report && report.promotion_gate ? report.promotion_gate : {};
+    const propensity = report && report.propensity_readiness ? report.propensity_readiness : {};
+    const readiness = report && report.evaluation_readiness ? report.evaluation_readiness : {};
+    const thresholds = readiness.thresholds || {};
+    const overlap = readiness.target_overlap || {};
+    const outcome = readiness.outcome_observation || {};
+    const maturity = report && report.outcome_contract_maturity && typeof report.outcome_contract_maturity === 'object'
+      ? report.outcome_contract_maturity
+      : {};
+    const maturityByOutcome = maturity.by_outcome && typeof maturity.by_outcome === 'object'
+      ? maturity.by_outcome
+      : {};
+    const qualityMaturity = maturityByOutcome.user_quality_rating && typeof maturityByOutcome.user_quality_rating === 'object'
+      ? maturityByOutcome.user_quality_rating
+      : {};
+    const durable = report && report.durable_ledger ? report.durable_ledger : {};
+    const lifecycle = durable.counts || {};
+    const feedbackCoverage = durable.feedback_coverage || {};
+    const evidenceSource = String(report && report.evidence_source ? report.evidence_source : 'unknown');
+    const durableEvidence = evidenceSource === 'durable_sqlite_ledger';
+    el('policyLabJoined').textContent = `${Number(support.exact_joined_route_ids) || 0} / ${Number(usage.unique_route_ids) || 0}`;
+    el('policyLabAgreement').textContent = policyLabPercent(agreement.agreement_rate);
+    const approval = policyLabPercent(matched.approval_rate);
+    el('policyLabApproval').textContent = matched.quality_sample_count ? `${approval} (n=${matched.quality_sample_count})` : '-';
+    const hasCost = matched.avg_cost_units !== null && matched.avg_cost_units !== undefined && matched.avg_cost_units !== '';
+    const hasLatency = matched.avg_elapsed_ms !== null && matched.avg_elapsed_ms !== undefined && matched.avg_elapsed_ms !== '';
+    const cost = hasCost ? Number(matched.avg_cost_units) : NaN;
+    const latency = hasLatency ? Number(matched.avg_elapsed_ms) : NaN;
+    el('policyLabEconomics').textContent = Number.isFinite(cost) || Number.isFinite(latency)
+      ? `${Number.isFinite(cost) ? cost.toFixed(2) : '-'} / ${Number.isFinite(latency) ? Math.round(latency) + ' ms' : '-'}`
+      : '-';
+    el('policyLabLifecycle').textContent =
+      `${Number(lifecycle.completed) || 0} / ${Number(lifecycle.failed) || 0} / ${Number(lifecycle.inflight) || 0}`;
+    el('policyLabFeedbackCoverage').textContent = policyLabPercent(feedbackCoverage.terminal_coverage_rate);
+    const overlapEss = Number(overlap.effective_sample_size) || 0;
+    const globalEssFloor = Number(thresholds.minimum_global_effective_sample_size) || 20;
+    const actionEssFloor = Number(thresholds.minimum_per_action_effective_sample_size) || 10;
+    const weakestAction = policyLabLabel(overlap.weakest_target_action || 'none');
+    const weakestEss = Number(overlap.weakest_action_effective_sample_size) || 0;
+    el('policyLabOverlapEss').textContent = `ESS ${overlapEss.toFixed(1)} / ${globalEssFloor.toFixed(0)}`;
+    el('policyLabWeakestAction').textContent = overlap.weakest_target_action
+      ? `${weakestAction} ${weakestEss.toFixed(1)} / ${actionEssFloor.toFixed(0)}`
+      : '-';
+    const totalChecks = Number(gate.total_checks) || Object.keys(policyLabCheckLabels).length;
+    el('policyLabReadinessChecks').textContent = `${Number(gate.passed_checks) || 0} / ${totalChecks}`;
+    el('policyLabOutcomeCoverage').textContent =
+      `${Number(outcome.quality_observed_routes) || 0} / ${Number(outcome.evaluable_routes) || 0}`;
+    el('policyLabContractCoverage').textContent =
+      `${Number(maturity.precommitted_routes) || 0} / ${Number(maturity.included_routes) || 0}`;
+    el('policyLabEvidenceSource').textContent = durableEvidence ? 'durable SQLite' : policyLabLabel(evidenceSource);
+    const gateStatus = policyLabLabel(gate.status || 'blocked');
+    const gateReason = policyLabLabel(gate.reason_code || 'no evidence');
+    const blockers = Array.isArray(gate.blocking_reason_codes) ? gate.blocking_reason_codes : [];
+    const moreBlockers = Math.max(0, blockers.length - 1);
+    renderPolicyLabChecks(gate.checks || {}, blockers);
+    el('policyLabGate').textContent =
+      `${gateStatus} · ${Number(gate.passed_checks) || 0}/${totalChecks} checks · ${gateReason}` +
+      `${moreBlockers ? ` + ${moreBlockers} more` : ''} · ${policyLabLabel(gate.deployment || 'shadow only')}`;
+    const valid = Number(propensity.valid_routes) || 0;
+    const checked = Number(propensity.checked_evaluable_usage_routes) || 0;
+    const started = Number(lifecycle.started) || 0;
+    const minTarget = overlap.minimum_target_probability === null || overlap.minimum_target_probability === undefined
+      ? '-'
+      : Number(overlap.minimum_target_probability).toFixed(3);
+    el('policyLabNote').textContent =
+      `${durableEvidence ? 'Durable ledger evidence.' : 'Nondurable compatibility evidence; readiness is blocked.'} ` +
+      `Durable routes ${started}; target overlap ESS ${overlapEss.toFixed(1)}/${globalEssFloor.toFixed(0)}; ` +
+      `minimum target propensity ${minTarget}; quality observed ${Number(outcome.quality_observed_routes) || 0}/${Number(outcome.evaluable_routes) || 0}. ` +
+      `Outcome contracts ${Number(maturity.precommitted_routes) || 0}/${Number(maturity.included_routes) || 0} precommitted; ` +
+      `quality events ${Number(qualityMaturity.observed_event_count) || 0}, mature contracts ${Number(qualityMaturity.mature_contract_count) || 0}. ` +
+      `Missing feedback stays unknown; maturity is diagnostic only; ${valid}/${checked} usage rows validate logging metadata. No policy value was estimated.`;
+  }
+
+  async function refreshPolicyLab() {
+    const button = el('policyLabRefresh');
+    if (button) button.disabled = true;
+    try {
+      const result = await api('/api/route_policy_lab', {
+        session_id: sessionId,
+        profile: el('policyLabProfile').value,
+      });
+      renderPolicyLab(result.policy_lab || {});
+    } catch (err) {
+      renderPolicyLabUnavailable(err.message);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function routeStudyNumber(value, digits = 0) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    return number.toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  }
+
+  function renderRouteStudyUnavailable(message) {
+    latestRouteStudy = null;
+    el('routeBundleAdd').disabled = true;
+    const defaults = {
+      routeStudyBaseline: '-', routeStudyFloor: '-', routeStudyTraffic: '-',
+      routeStudyCost: '-', routeStudyLatency: '-', routeStudyCharter: '-',
+      routeProtocolMode: '-', routeProtocolPolicy: '-', routeProtocolReview: '-',
+      routeProtocolHash: '-',
+    };
+    Object.entries(defaults).forEach(([id, value]) => { el(id).textContent = value; });
+    el('routeStudyDistribution').replaceChildren();
+    el('routeProtocolBlockers').replaceChildren();
+    el('routeStudyStatus').textContent = message;
+    el('routeStudyNote').textContent =
+      'No study probabilities are current. Execution, evidence writes, policy value, and promotion remain unavailable.';
+  }
+
+  function renderRouteShadowRegistry(snapshot) {
+    const campaigns = Array.isArray(snapshot && snapshot.campaigns) ? snapshot.campaigns : [];
+    const chain = snapshot && snapshot.event_chain ? snapshot.event_chain : null;
+    const available = snapshot && snapshot.available === true;
+    const committed = campaigns.reduce((total, row) => total + (Number(row.commitment_count) || 0), 0);
+    const matched = campaigns.reduce((total, row) => total + (Number(row.matched_assignment_count) || 0), 0);
+    const processed = campaigns.reduce((total, row) => total + (Number(row.processed_reveal_count) || 0), 0);
+    const mismatched = campaigns.reduce((total, row) => total + (Number(row.mismatched_assignment_count) || 0), 0);
+    const states = [...new Set(campaigns.map(row => policyLabLabel((row || {}).state || 'unknown')))];
+    el('routeShadowRegistryCount').textContent = routeStudyNumber(snapshot && snapshot.campaign_count, 0);
+    el('routeShadowRegistryChain').textContent = chain
+      ? `${chain.ok ? 'verified' : 'failed'} - ${routeStudyNumber(chain.verified_events, 0)} events`
+      : 'not initialized';
+    el('routeShadowRegistryAssignments').textContent = `${routeStudyNumber(matched, 0)} / ${routeStudyNumber(committed, 0)}`;
+    el('routeShadowRegistryState').textContent = states.length ? states.join(', ') : 'not initialized';
+
+    const inventory = el('routeShadowRegistryCampaigns');
+    inventory.replaceChildren();
+    campaigns.forEach(row => {
+      const chip = document.createElement('span');
+      chip.className = 'route-study-chip';
+      chip.dataset.state = Number(row.mismatched_assignment_count) > 0 ? 'unresolved' : '';
+      chip.textContent = `${row.campaign_id || 'campaign'} - ${policyLabLabel(row.state || 'unknown')} - ${routeStudyNumber(row.matched_assignment_count, 0)}/${routeStudyNumber(row.commitment_count, 0)} matched`;
+      inventory.appendChild(chip);
+    });
+
+    if (!available) {
+      el('routeShadowRegistryStatus').textContent =
+        `No shadow registry exists at ${snapshot && snapshot.registry_location ? snapshot.registry_location : 'the canonical memory path'}. ` +
+        'Browser access is read-only; execution, activation, and automatic promotion remain unavailable.';
+      return;
+    }
+    el('routeShadowRegistryStatus').textContent =
+      `${snapshot.ok ? 'Registry verification passed.' : 'Registry verification failed.'} ` +
+      `${campaigns.length} campaign(s), ${committed} opaque commitment(s), ${matched} matched assignment(s), ${processed} processed reveal(s), ${mismatched} mismatch(es). ` +
+      'Local chain verification is not an external transparency anchor. Browser access is read-only; execution, activation, and promotion remain unavailable.';
+  }
+
+  async function refreshRouteShadowRegistry() {
+    const button = el('routeShadowRegistryRefresh');
+    button.disabled = true;
+    el('routeShadowRegistryStatus').textContent = 'Reading and verifying the local shadow registry...';
+    try {
+      const result = await api('/api/route_shadow_registry/status');
+      renderRouteShadowRegistry(result.route_shadow_registry || {});
+    } catch (err) {
+      renderRouteShadowRegistry({available:false, campaign_count:0, campaigns:[]});
+      el('routeShadowRegistryStatus').textContent = `Registry status error: ${err.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function renderRouteStudy(payload) {
+    const study = payload && payload.route_study ? payload.route_study : {};
+    const charter = study.charter || {};
+    const enrollment = charter.enrollment || {};
+    const design = charter.probability_design || {};
+    const traffic = charter.traffic_scenario || {};
+    const labelScenario = traffic.observed_label_scenario || {};
+    const exact = labelScenario.exact_simultaneous_target || {};
+    const resources = charter.resource_forecast || {};
+    const boundaries = charter.causal_boundaries || {};
+    const protocol = payload && payload.route_protocol_preflight
+      ? payload.route_protocol_preflight : null;
+    const protocolCharter = protocol ? (protocol.charter || {}) : {};
+    const stateful = protocolCharter.stateful_design || {};
+    const targetClass = protocolCharter.target_policy_class || {};
+    const protocolMeta = protocol ? (protocol.protocol || {}) : {};
+    const blockerRegister = Array.isArray(protocolCharter.blocker_register)
+      ? protocolCharter.blocker_register : [];
+    const totals = resources.expected_for_planned_routes || {};
+    const probabilities = design.action_probabilities || {};
+    const baseline = enrollment.baseline_action || payload.baseline_agent_mode || '-';
+    const floor = design.minimum_positive_exploration_probability;
+    const expectedByAlternate = labelScenario.expected_routes_for_target_by_alternate_action || {};
+    const expectedRouteValues = Object.values(expectedByAlternate)
+      .map(Number).filter(Number.isFinite);
+    const expectedRoutes = expectedRouteValues.length ? Math.max(...expectedRouteValues) : null;
+    const confidenceRoutes = exact.minimum_routes_for_target_on_every_alternate_action;
+    const confidencePct = Number(exact.confidence_level) * 100;
+    const targetLabels = Number(labelScenario.target_observed_labels_per_alternate_action) || 0;
+    const eligible = enrollment.eligible === true;
+    latestRouteStudy = eligible ? JSON.parse(JSON.stringify(study)) : null;
+    el('routeBundleAdd').disabled = !latestRouteStudy;
+    el('routeStudyBaseline').textContent = policyLabLabel(baseline) || '-';
+    el('routeStudyFloor').textContent = Number.isFinite(Number(floor))
+      ? `${Math.round(Number(floor) * 100)}%`
+      : 'not enrolled';
+    el('routeStudyTraffic').textContent = expectedRoutes && confidenceRoutes
+      ? `~${routeStudyNumber(expectedRoutes)} exp each / ${routeStudyNumber(confidenceRoutes)} @${routeStudyNumber(confidencePct)}% joint`
+      : 'no alternate support';
+    el('routeStudyCost').textContent = routeStudyNumber(totals.cost_units, 1);
+    const tierOrder = ['low', 'moderate', 'high', 'frontier', 'unknown'];
+    const tiers = Object.values(resources.by_action || {})
+      .map(row => String((row || {}).latency_tier || 'unknown'))
+      .filter((tier, index, values) => values.indexOf(tier) === index)
+      .sort((a, b) => tierOrder.indexOf(a) - tierOrder.indexOf(b));
+    el('routeStudyLatency').textContent = tiers.length
+      ? `${policyLabLabel(tiers[0])}${tiers.length > 1 ? ' to ' + policyLabLabel(tiers[tiers.length - 1]) : ''}`
+      : '-';
+    el('routeStudyCharter').textContent = study.design_hash ? String(study.design_hash).slice(0, 12) : '-';
+    el('routeProtocolMode').textContent = protocol
+      ? policyLabLabel(stateful.selected_design_mode || 'not screened') : 'not enrolled';
+    el('routeProtocolPolicy').textContent = protocol
+      ? policyLabLabel(targetClass.profile_name || 'not frozen') : '-';
+    el('routeProtocolReview').textContent = protocol
+      ? policyLabLabel(stateful.selected_design_status || protocolMeta.state || 'blocked')
+      : policyLabLabel(payload.route_protocol_preflight_reason || 'unavailable');
+    el('routeProtocolHash').textContent = protocol && protocol.protocol_hash
+      ? String(protocol.protocol_hash).slice(0, 12) : '-';
+
+    const distribution = el('routeStudyDistribution');
+    distribution.replaceChildren();
+    Object.entries(probabilities).forEach(([action, probability]) => {
+      const chip = document.createElement('span');
+      chip.className = 'route-study-chip';
+      chip.textContent = `${policyLabLabel(action)} ${Math.round(Number(probability) * 100)}%`;
+      distribution.appendChild(chip);
+    });
+    const blockerList = el('routeProtocolBlockers');
+    blockerList.replaceChildren();
+    blockerRegister.forEach(row => {
+      const chip = document.createElement('span');
+      chip.className = 'route-study-chip';
+      chip.dataset.state = String((row || {}).status || 'unresolved');
+      chip.textContent = `${policyLabLabel((row || {}).code || 'blocker')} - ${policyLabLabel((row || {}).status || 'unresolved')}`;
+      blockerList.appendChild(chip);
+    });
+    const adjacent = Array.isArray(enrollment.adjacent_feasible_actions)
+      ? enrollment.adjacent_feasible_actions.map(policyLabLabel).join(', ')
+      : '';
+    el('routeStudyStatus').textContent = eligible
+      ? `Rehearsal ready - ${adjacent || 'adjacent support'} - protocol ${policyLabLabel(protocolMeta.state || 'unavailable')} - activation, assignment, and execution remain off.`
+      : `Not enrolled - ${policyLabLabel(enrollment.reason || 'no feasible adjacent action')} - baseline remains deterministic.`;
+    const blockers = Array.isArray(boundaries.activation_blockers)
+      ? boundaries.activation_blockers.map(item => String(item).replaceAll('_', ' '))
+      : [];
+    const trafficMethod = String(exact.method || 'not applicable').replaceAll('_', ' ');
+    const designReasons = Array.isArray(stateful.selected_design_blocking_reasons)
+      ? stateful.selected_design_blocking_reasons.map(item => String(item).replaceAll('_', ' '))
+      : [];
+    el('routeStudyNote').textContent =
+      `Hypothetical repetition of this prompt-specific support: ${routeStudyNumber(traffic.planned_routes)} routes; ` +
+      `target ${routeStudyNumber(targetLabels)} observed ratings on every alternate; ` +
+      `assumed response ${routeStudyNumber(Number(labelScenario.assumed_feedback_rate) * 100)}%. ` +
+      `${trafficMethod}. This is not power, an observation model, OPE, or a promotion decision. ` +
+      `Stateful preflight: ${policyLabLabel(stateful.selected_design_status || 'not available')}; ` +
+      `${designReasons.length ? 'design review reasons: ' + designReasons.join('; ') + '. ' : ''}` +
+      `Declarations are not validation, route-level campaign assignment is screened out, and no seed is sealed. ` +
+      `Activation blockers (${blockers.length}): ${blockers.join('; ') || 'live integration unavailable'}. ` +
+      `No route was assigned, executed, or written.`;
+  }
+
+  function routeProtocolBuildInput() {
+    const plannedClusters = parseInt(el('routeProtocolClusters').value, 10);
+    return {
+      study_plans: routeStudyStrata.map(plan => JSON.parse(JSON.stringify(plan))),
+      target_policy_profile: el('routeProtocolTarget').value,
+      design_mode: el('routeProtocolDesign').value,
+      carryover_scope: el('routeProtocolCarryover').value,
+      interference_scope: el('routeProtocolInterference').value,
+      temporal_variation: el('routeProtocolTemporal').value,
+      population_rule_id: 'interactive-auto-route-opt-in',
+      population_rule_version: '1',
+      cluster_key_schema_version: 'session-hash-v1',
+      planned_clusters: plannedClusters,
+      max_routes_per_cluster: 20,
+      analysis_every_clusters: Math.min(plannedClusters, 50),
+      block_length_routes: parseInt(el('routeProtocolBlock').value, 10),
+      washout_routes: parseInt(el('routeProtocolWashout').value, 10),
+      seed_commitment: null,
+      external_estimator_id: null,
+      external_reviewer_id: null,
+    };
+  }
+
+  function invalidateRouteReviewBundle(message) {
+    latestRouteReviewBundle = null;
+    el('routeBundleVerification').textContent = 'not built';
+    el('routeBundleHash').textContent = '-';
+    el('routeBundleDownload').disabled = true;
+    el('routeBundleStatus').textContent = message ||
+      'Inventory changed. Rebuild for full source-bound semantic verification.';
+  }
+
+  function renderRouteBundleInventory() {
+    const inventory = el('routeBundleInventory');
+    inventory.replaceChildren();
+    routeStudyStrata.forEach((plan, index) => {
+      const charter = (plan || {}).charter || {};
+      const enrollment = charter.enrollment || {};
+      const design = charter.probability_design || {};
+      const hash = String((plan || {}).design_hash || '').slice(0, 10) || 'unhashed';
+      const baseline = policyLabLabel(enrollment.baseline_action || 'unknown');
+      const actions = Array.isArray(design.eligible_actions)
+        ? design.eligible_actions.map(policyLabLabel).join('/') : 'unknown support';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'route-study-chip';
+      remove.textContent = `${index + 1}. ${hash} - ${baseline} - ${actions} - remove`;
+      remove.setAttribute('aria-label', `Remove support stratum ${index + 1}, ${hash}`);
+      remove.onclick = () => {
+        routeStudyStrata.splice(index, 1);
+        invalidateRouteReviewBundle('Support stratum removed. Rebuild before review.');
+        renderRouteBundleInventory();
+      };
+      inventory.appendChild(remove);
+    });
+    const count = routeStudyStrata.length;
+    el('routeBundleCount').textContent = `${count} ${count === 1 ? 'stratum' : 'strata'}`;
+    el('routeBundleBuild').disabled = count === 0;
+    el('routeBundleClear').disabled = count === 0;
+  }
+
+  function addCurrentRouteStudyStratum() {
+    if (!latestRouteStudy) {
+      toast('err', 'Rehearse an eligible prompt-specific support stratum first');
+      return;
+    }
+    const designHash = String(latestRouteStudy.design_hash || '');
+    if (!designHash) {
+      toast('err', 'Current rehearsal has no canonical design hash');
+      return;
+    }
+    if (routeStudyStrata.some(plan => String((plan || {}).design_hash || '') === designHash)) {
+      toast('err', 'That support stratum is already in the review inventory');
+      return;
+    }
+    if (routeStudyStrata.length >= 100) {
+      toast('err', 'Browser review inventory is limited to 100 support strata');
+      return;
+    }
+    routeStudyStrata.push(JSON.parse(JSON.stringify(latestRouteStudy)));
+    invalidateRouteReviewBundle('Support stratum added. Build the bundle for semantic verification.');
+    renderRouteBundleInventory();
+    toast('ok', 'Prompt-free support stratum added to the review inventory');
+  }
+
+  function renderRouteBundleVerification(verification) {
+    const checked = verification || {};
+    const full = checked.verification_level === 'full_source_bound_reconstruction' &&
+      checked.source_plan_reconstruction_performed === true;
+    el('routeBundleVerification').textContent = full ? 'full reconstruction' : 'verification failed';
+    el('routeBundleHash').textContent = checked.bundle_hash
+      ? String(checked.bundle_hash).slice(0, 12) : '-';
+    el('routeBundleDownload').disabled = !full || !latestRouteReviewBundle;
+    el('routeBundleStatus').textContent = full
+      ? `Verified ${checked.support_stratum_count || 0} canonical source strata by rebuilding the protocol. ` +
+        'This is semantic conformance only: no signature, trusted timestamp, causal validation, assignment, or activation.'
+      : 'Full source-bound reconstruction did not complete; the bundle is not review-ready.';
+  }
+
+  async function buildRouteReviewBundle() {
+    if (!routeStudyStrata.length) {
+      toast('err', 'Add at least one support stratum first');
+      return;
+    }
+    const button = el('routeBundleBuild');
+    button.disabled = true;
+    el('routeBundleStatus').textContent = 'Reconstructing the campaign protocol from canonical prompt-free source plans...';
+    try {
+      const result = await api('/api/route_study_protocol_bundle', routeProtocolBuildInput());
+      latestRouteReviewBundle = result.route_protocol_review_bundle || null;
+      renderRouteBundleVerification(result.verification || {});
+      toast('ok', 'Multi-stratum review bundle passed full source reconstruction');
+    } catch (err) {
+      invalidateRouteReviewBundle(`Review bundle unavailable: ${err.message}`);
+      toast('err', err.message);
+    } finally {
+      renderRouteBundleInventory();
+    }
+  }
+
+  function downloadRouteReviewBundle() {
+    if (!latestRouteReviewBundle) return;
+    const rendered = JSON.stringify(latestRouteReviewBundle, null, 2) + '\n';
+    const blob = new Blob([rendered], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const hash = String(latestRouteReviewBundle.bundle_hash || 'unverified').slice(0, 12);
+    link.href = url;
+    link.download = `supermix-route-review-${hash}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importRouteReviewFile(event) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      if (file.size > 2 * 1024 * 1024) {
+        throw new Error('Review file exceeds the 2 MiB browser limit');
+      }
+      const parsed = JSON.parse(await file.text());
+      let result;
+      if (parsed && parsed.schema_version === 'route-study-review-bundle-v1') {
+        result = await api('/api/route_study_protocol_bundle/audit', {bundle: parsed});
+        latestRouteReviewBundle = parsed;
+      } else if (parsed && Array.isArray(parsed.study_plans)) {
+        result = await api('/api/route_study_protocol_bundle', parsed);
+        latestRouteReviewBundle = result.route_protocol_review_bundle || null;
+      } else {
+        throw new Error('Import must be a review bundle or closed prompt-free protocol build input');
+      }
+      routeStudyStrata = JSON.parse(JSON.stringify(
+        (latestRouteReviewBundle || {}).source_study_plans || []
+      ));
+      renderRouteBundleInventory();
+      renderRouteBundleVerification(result.verification || {});
+      toast('ok', 'Review file verified by full source-bound reconstruction');
+    } catch (err) {
+      invalidateRouteReviewBundle(`Review import rejected: ${err.message}`);
+      toast('err', err.message);
+    } finally {
+      input.value = '';
+    }
+  }
+
+  function clearRouteReviewInventory() {
+    routeStudyStrata = [];
+    invalidateRouteReviewBundle(
+      'Inventory cleared. Strata were client-side only; no ledger or memory records were written.'
+    );
+    renderRouteBundleInventory();
+  }
+
+  async function previewRouteStudy() {
+    const button = el('routeStudyPreview');
+    const text = el('prompt').value.trim();
+    if (!text) {
+      renderRouteStudyUnavailable('Enter a prompt first; rehearsal needs the final prompt-specific route support.');
+      return;
+    }
+    if (agentMode !== 'auto') {
+      renderRouteStudyUnavailable('Select Adaptive Router before rehearsing the adjacent-route study.');
+      return;
+    }
+    button.disabled = true;
+    el('routeStudyStatus').textContent = 'Rehearsing post-filter support without assigning or running a route...';
+    try {
+      const payload = buildRoutePayload(text);
+      Object.assign(payload, {
+        exploration_rate: Number(el('routeStudyEpsilon').value),
+        planned_routes: parseInt(el('routeStudyHorizon').value, 10),
+        scenario_confidence: 0.95,
+        assumed_feedback_rate: Number(el('routeStudyResponseRate').value),
+        target_observed_labels: parseInt(el('routeStudyTargetLabels').value, 10),
+        target_policy_profile: el('routeProtocolTarget').value,
+        protocol_design_mode: el('routeProtocolDesign').value,
+        carryover_scope: el('routeProtocolCarryover').value,
+        interference_scope: el('routeProtocolInterference').value,
+        temporal_variation: el('routeProtocolTemporal').value,
+        planned_clusters: parseInt(el('routeProtocolClusters').value, 10),
+        max_routes_per_cluster: 20,
+        analysis_every_clusters: Math.min(
+          parseInt(el('routeProtocolClusters').value, 10), 50
+        ),
+        block_length_routes: parseInt(el('routeProtocolBlock').value, 10),
+        washout_routes: parseInt(el('routeProtocolWashout').value, 10),
+      });
+      const result = await api('/api/route_study_plan', payload);
+      renderRouteStudy(result);
+      toast('ok', 'Adjacent-route rehearsal ready; execution stayed off');
+    } catch (err) {
+      renderRouteStudyUnavailable(`Study rehearsal unavailable: ${err.message}`);
+      toast('err', err.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function sendRouteFeedback(rating, feedbackIntent, reason) {
+    if (!lastRouteFeedback) return;
+    const buttons = ['routeGoodBtn','routeBadBtn','routeDeeperBtn','routeCostBtn','routeSlowBtn']
+      .map(id => el(id)).filter(Boolean);
+    buttons.forEach(btn => btn.disabled = true);
+    try {
+      const result = await api('/api/route_feedback', {
+        ...lastRouteFeedback,
+        rating,
+        feedback_intent: feedbackIntent,
+        reason: reason || feedbackIntent,
+      });
+      const total = result.summary ? result.summary.total_feedback : '';
+      setRouteFeedbackVisible(true, total ? `Route ${total}` : 'Route saved');
+      if (result.summary) renderRouteHealth(result.summary);
+      refreshPolicyLab();
+      const message = feedbackIntent === 'needs_deeper' ? 'Deeper-route preference saved'
+        : feedbackIntent === 'too_costly' ? 'Lower-cost preference saved'
+        : feedbackIntent === 'too_slow' ? 'Lower-latency preference saved'
+        : rating === 'up' ? 'Route preference saved' : 'Quality correction saved';
+      toast('ok', message);
+    } catch (err) {
+      buttons.forEach(btn => btn.disabled = false);
+      toast('err', err.message);
+    }
+  }
+
   // ── Typing indicator ─────────────────────────────────────────────────
+  function buildRoutePayload(text) {
+    const settings = {
+      agent_mode: agentMode,
+      auto_agent_budget: el('autoBudget').value,
+      auto_session_budget_units: parseFloat(el('sessionBudget').value) || 0,
+      auto_session_budget_target_routes: parseInt(el('sessionBudgetTargetRoutes').value) || 0,
+      loop_max_steps: parseInt(el('loopBudget').value),
+      memory_enabled: el('memToggle').value === 'on',
+      web_search_enabled: el('webToggle').value === 'on',
+      uploaded_image_path: currentUpload
+    };
+    const requestedCycles = el('reasoningCycles').value;
+    const requestedAdaptive = el('adaptiveCompute').value;
+    if (requestedCycles !== 'model') settings.reasoning_cycles = requestedCycles;
+    if (requestedAdaptive !== 'model') settings.adaptive_compute = requestedAdaptive === 'on';
+    return {
+      session_id: sessionId,
+      message: text,
+      model_key: el('modelSelect').value,
+      action_mode: 'text',
+      settings
+    };
+  }
+
+  el('routePlanBtn').onclick = async () => {
+    const text = el('prompt').value.trim();
+    if (!text) return;
+    const btn = el('routePlanBtn');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/route_plan', buildRoutePayload(text));
+      const estimate = result.route_economics_estimate || {};
+      const cost = estimate.estimated_cost_units !== undefined ? `cost ${estimate.estimated_cost_units}` : 'cost -';
+      const selected = result.selected_agent_mode || 'off';
+      const frontier = result.route_frontier || {};
+      const recommendation = frontier.recommended_agent_mode
+        ? `rec ${frontier.recommended_agent_mode}${frontier.selected_matches_recommendation ? '' : ' != selected'}`
+        : '';
+      const recommendedQualityCost = frontier.recommended_estimated_quality_cost_score !== undefined
+        && frontier.recommended_estimated_quality_cost_score !== null
+        ? `rec qc ${frontier.recommended_estimated_quality_cost_score}`
+        : '';
+      const blocker = frontier.selected_budget_blocker || frontier.recommended_budget_blocker;
+      const blockerText = blocker ? `block ${blocker}` : '';
+      const cap = frontier.budget_cap_cost_units !== undefined && frontier.budget_cap_cost_units !== null
+        ? `cap ${frontier.budget_cap_cost_units}`
+        : '';
+      const effective = frontier.effective_cap_cost_units !== undefined && frontier.effective_cap_cost_units !== null
+        ? `effective ${frontier.effective_cap_cost_units}`
+        : '';
+      const remaining = frontier.remaining_cost_units !== undefined && frontier.remaining_cost_units !== null
+        ? `remain ${frontier.remaining_cost_units}`
+        : '';
+      const pacing = frontier.pacing_cap_cost_units !== undefined && frontier.pacing_cap_cost_units !== null
+        ? `pace ${frontier.pacing_cap_cost_units}`
+        : '';
+      const budgetPareto = Array.isArray(frontier.budget_feasible_pareto_modes) && frontier.budget_feasible_pareto_modes.length
+        ? `bpareto ${frontier.budget_feasible_pareto_modes.join(',')}`
+        : '';
+      const alternatives = Array.isArray(result.route_alternatives)
+        ? result.route_alternatives
+          .slice()
+          .sort((a,b) => Number(a.frontier_rank || 99) - Number(b.frontier_rank || 99))
+          .slice(0, 4)
+          .map(row => {
+            const value = row.estimated_cost_units !== undefined ? row.estimated_cost_units : '-';
+            const rank = row.frontier_rank ? `#${row.frontier_rank}` : '';
+            const qualityCost = row.estimated_quality_cost_score !== undefined && row.estimated_quality_cost_score !== null
+              ? `/qc${row.estimated_quality_cost_score}`
+              : '';
+            const evidence = row.quality_source === 'adaptive_feedback'
+              ? '/adaptive'
+              : (row.quality_evidence_status && row.quality_evidence_status !== 'heuristic_prior' ? `/${row.quality_evidence_status}` : '');
+            const lowerRaw = row.estimated_quality_lower_bound;
+            const upperRaw = row.estimated_quality_upper_bound;
+            const lower = Number(lowerRaw);
+            const upper = Number(upperRaw);
+            const confidence = lowerRaw !== null && lowerRaw !== undefined
+              && upperRaw !== null && upperRaw !== undefined
+              && Number.isFinite(lower) && Number.isFinite(upper)
+              ? `/q90:${Math.round(lower * 100)}-${Math.round(upper * 100)}`
+              : '';
+            const riskRaw = row.risk_adjusted_quality_cost_score;
+            const riskQc = Number(riskRaw);
+            const risk = riskRaw !== null && riskRaw !== undefined
+              && Number.isFinite(riskQc) && row.confidence_status === 'established'
+              ? `/riskqc${riskQc}`
+              : '';
+            const pareto = row.budget_feasible_pareto_frontier ? '/bpf' : (row.pareto_frontier ? '/pf' : '');
+            return `${rank}${row.selected_agent_mode}${row.is_selected ? '*' : ''}:${value}${qualityCost}${evidence}${confidence}${risk}${pareto}`;
+          })
+          .join(' ')
+        : '';
+      const frontierBits = [
+        recommendation,
+        recommendedQualityCost,
+        blockerText,
+        cap,
+        effective,
+        remaining,
+        pacing,
+        budgetPareto,
+        alternatives,
+      ].filter(Boolean).join(' | ');
+      addLoopStep(1, 'Route Plan', `${selected} | ${cost}${frontierBits ? ' | ' + frontierBits : ''}`, 'done');
+      openPanelTab('mode');
+      toast('ok', `Route plan: ${selected}`);
+    } catch (err) {
+      toast('err', err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
   function addTyping() {
     const row = document.createElement('div');
     row.className = 'msg asst';
@@ -1001,26 +2425,21 @@ HTML_TEMPLATE = r"""<!doctype html>
     el('sendBtn').disabled = true;
     addTyping();
 
-    if (agentMode === 'loop') {
+    if (agentMode === 'auto' || agentMode === 'loop' || agentMode === 'collective_loop') {
       el('loopSteps').innerHTML = '';
       loopStep = 0;
-      addLoopStep(1, 'Target Initialization', 'Constructing reasoning graph...', 'active');
+      lastRouteFeedback = null;
+      setRouteFeedbackVisible(false);
+      addLoopStep(
+        1,
+        agentMode === 'auto' ? 'Adaptive Routing' : 'Target Initialization',
+        agentMode === 'auto' ? 'Scoring task complexity...' : 'Constructing reasoning graph...',
+        'active'
+      );
       switchPtab('mode');
     }
 
-    const payload = {
-      session_id: sessionId,
-      message: text,
-      model_key: el('modelSelect').value,
-      action_mode: 'text',
-      settings: {
-        agent_mode: agentMode,
-        loop_max_steps: parseInt(el('loopBudget').value),
-        memory_enabled: el('memToggle').value === 'on',
-        web_search_enabled: el('webToggle').value === 'on',
-        uploaded_image_path: currentUpload
-      }
-    };
+    const payload = buildRoutePayload(text);
 
     currentUpload = null; currentUpUrl = '';
     el('uploadBar').style.display = 'none';
@@ -1030,13 +2449,37 @@ HTML_TEMPLATE = r"""<!doctype html>
       const data = await api('/api/chat', payload);
       removeTyping();
 
-      if (agentMode === 'loop' && data.agent_trace && data.agent_trace.loop_steps) {
+      if (data.agent_trace && data.agent_trace.loop_steps) {
         el('loopSteps').innerHTML = '';
         data.agent_trace.loop_steps.forEach((s, i) => {
-          addLoopStep(i+1, s.goal || `Phase ${i+1}`, s.worker_excerpt || '', 'done');
+          const score = scorePct(s.review_score ?? s.loop_score);
+          const bits = [];
+          if (s.worker_excerpt) bits.push(s.worker_excerpt);
+          if (score != null) bits.push(`Score ${score}%`);
+          if (s.stop_decision === 'stop') bits.push(stopReasonLabel(s.stop_reason_code));
+          addLoopStep(i+1, s.goal || `Phase ${i+1}`, bits.join(' | '), 'done');
         });
         finaliseLoopSteps();
+      } else if (data.agent_trace && data.agent_trace.auto_agent_policy) {
+        const p = data.agent_trace.auto_agent_policy;
+        el('loopSteps').innerHTML = '';
+        addLoopStep(1, `Auto selected ${p.selected_agent_mode || 'off'}`, (p.reasons || []).slice(0,3).join(' | '), 'done');
+        finaliseLoopSteps();
       }
+
+      if (data.agent_trace && data.agent_trace.auto_agent_policy) {
+        const routeId = data.route_id || data.agent_trace.route_id || '';
+        lastRouteFeedback = {
+          session_id: sessionId,
+          route_id: routeId,
+        };
+        setRouteFeedbackVisible(Boolean(routeId));
+      } else {
+        lastRouteFeedback = null;
+        setRouteFeedbackVisible(false);
+      }
+      refreshRouteHealth();
+      refreshPolicyLab();
 
       addMsg('assistant', data.response || '(Inference finalized)', data.agent_trace);
       updateStatus(data);
@@ -1055,6 +2498,10 @@ HTML_TEMPLATE = r"""<!doctype html>
       await api('/api/clear', { session_id: sessionId });
       el('thread').innerHTML = '';
       el('loopSteps').innerHTML = '';
+      lastRouteFeedback = null;
+      setRouteFeedbackVisible(false);
+      renderRouteHealth({});
+      renderPolicyLab({});
       addMsg('assistant', 'Session memory cleared. Omni V46 is ready for the next message.');
       toast('ok', 'System memory purged');
     } catch(e) { toast('err', e.message); }
@@ -1097,8 +2544,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       const label = st.active_model_label || selectedLabel || 'Auto Router';
       const score = selected.common_overall_exact != null ? selected.common_overall_exact : selected.recipe_eval_accuracy;
       const scoreText = score != null ? `${(Number(score) * 100).toFixed(1)}%` : 'pending';
+      const policy = data && data.agent_trace ? data.agent_trace.auto_agent_policy : null;
+      const budgetText = policy && policy.budget_profile ? `/${policy.budget_profile}` : '';
+      const modeText = policy ? `${agentMode}${budgetText} -> ${policy.selected_agent_mode || 'off'}` : agentMode;
       el('panelStatus').textContent =
-        `model: ${label || '-'}\ndevice: ${st.device || '-'}\nbenchmark: ${scoreText}\nmode: ${agentMode}`;
+        `model: ${label || '-'}\ndevice: ${st.device || '-'}\nbenchmark: ${scoreText}\nmode: ${modeText}`;
       el('activePill').textContent = String(label).toLowerCase().includes('v46') ? 'V46 Champion' : (label || 'Auto');
       const lowered = label.toLowerCase();
       const pillClass = lowered.includes('v46') ? ' v46' : (lowered.includes('v48') ? ' v48' : (lowered.includes('v47') ? ' v47' : ''));
@@ -1112,6 +2562,31 @@ HTML_TEMPLATE = r"""<!doctype html>
       }
     } catch(_) {}
   }
+
+  el('routeGoodBtn').onclick = () => sendRouteFeedback('up', 'good', 'satisfied');
+  el('routeBadBtn').onclick = () => sendRouteFeedback('down', 'bad_quality', 'bad quality');
+  el('routeDeeperBtn').onclick = () => sendRouteFeedback('down', 'needs_deeper', 'needs deeper reasoning');
+  el('routeCostBtn').onclick = () => sendRouteFeedback('down', 'too_costly', 'too costly');
+  el('routeSlowBtn').onclick = () => sendRouteFeedback('down', 'too_slow', 'too slow');
+  el('policyLabRefresh').onclick = () => refreshPolicyLab();
+  el('policyLabProfile').onchange = () => refreshPolicyLab();
+  el('routeStudyPreview').onclick = () => previewRouteStudy();
+  el('routeShadowRegistryRefresh').onclick = () => refreshRouteShadowRegistry();
+  el('routeBundleAdd').onclick = () => addCurrentRouteStudyStratum();
+  el('routeBundleBuild').onclick = () => buildRouteReviewBundle();
+  el('routeBundleDownload').onclick = () => downloadRouteReviewBundle();
+  el('routeBundleImport').onchange = event => importRouteReviewFile(event);
+  el('routeBundleClear').onclick = () => clearRouteReviewInventory();
+  [
+    'routeProtocolTarget', 'routeProtocolDesign', 'routeProtocolCarryover',
+    'routeProtocolInterference', 'routeProtocolTemporal', 'routeProtocolClusters',
+    'routeProtocolBlock', 'routeProtocolWashout',
+  ].forEach(id => el(id).addEventListener('change', () => {
+    if (latestRouteReviewBundle) {
+      invalidateRouteReviewBundle('Protocol declarations changed. Rebuild before review.');
+    }
+  }));
+  renderRouteBundleInventory();
 
   // ── Benchmark tab ─────────────────────────────────────────────────────
   async function loadBenchData() {
@@ -1157,8 +2632,77 @@ HTML_TEMPLATE = r"""<!doctype html>
 
   // ── Init ─────────────────────────────────────────────────────────────
   initModels();
+  refreshRouteHealth();
+  refreshPolicyLab();
+  refreshRouteShadowRegistry();
 })();
 </script>
+
+<!-- ═══ Studio X Discovery & Compose Scaffold ═══════════════════════════ -->
+<div id="appShell" style="display:none">
+
+  <!-- Discovery Panel -->
+  <input  id="modelSearch" type="text" placeholder="Search models…">
+  <select id="capabilityFilter"><option value="">All</option></select>
+  <div id="quickPickChips"></div>
+  <div id="discoveryNote"></div>
+
+  <!-- Session Planner -->
+  <textarea id="sessionObjective" placeholder="Session objective…"></textarea>
+  <div id="deliverableTarget"></div>
+  <div id="successChecks"></div>
+  <div id="riskBox"></div>
+
+  <!-- Drafts & Context Bank -->
+  <div id="savedDrafts"></div>
+  <div id="contextBankList"></div>
+  <button id="captureLastReplyBtn">Capture</button>
+
+  <!-- Thread Navigation -->
+  <div id="threadBookmarks"></div>
+  <div id="compareSummary"></div>
+  <div id="dispatchPreview"></div>
+
+  <!-- Model Store Panel -->
+  <div id="modelStoreList"></div>
+  <button id="refreshStoreBtn">Refresh Store</button>
+
+  <!-- Compose Toolbar -->
+  <div id="composeScroll">
+    <button id="composeQuickBtn">Quick</button>
+    <button id="composeMediaBtn">Media</button>
+    <button id="composeWorkbenchBtn">Workbench</button>
+  </div>
+
+  <!-- Mode Selector with Loop Agent modes -->
+  <select id="modeSelector">
+    <option value="text">Text</option>
+    <option value="auto">Auto Router</option>
+    <option value="loop">Loop Agent</option>
+    <option value="collective_loop">Collective + Loop</option>
+  </select>
+
+  <!-- Layout Controls -->
+  <button id="toggleSidebarBtn">Toggle Sidebar</button>
+  <button id="toggleThreadDensityBtn">Density</button>
+
+  <!-- Response Deck -->
+  <div id="responseDeck"></div>
+
+  <!-- Structured Reasoning Controls -->
+  <div id="confidenceMode"></div>
+  <div id="evidenceMode"></div>
+  <div id="clarifyMode"></div>
+  <div id="assumptionMode"></div>
+
+  <!-- Refinement Deck -->
+  <div id="refinementDeck">
+    <button id="refineLastReplyBtn">Refine</button>
+    <button id="challengeLastReplyBtn">Challenge</button>
+  </div>
+
+</div>
+
 </body>
 </html>
 """
@@ -1195,6 +2739,168 @@ def api_chat():
     except Exception as exc:
         logging.exception("Chat request failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+@app.route("/api/route_plan", methods=["POST"])
+def api_route_plan():
+    data = request.json or {}
+    try:
+        result = manager.preview_route_plan(
+            session_id=data.get("session_id", "default"),
+            prompt=data.get("message", ""),
+            model_key=data.get("model_key", "auto"),
+            action_mode=data.get("action_mode", "text"),
+            settings=data.get("settings", {}),
+        )
+        return jsonify(result)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Route plan request failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/route_study_plan", methods=["POST"])
+def api_route_study_plan():
+    data = request.json or {}
+    try:
+        result = manager.preview_route_study(
+            session_id=data.get("session_id", "default"),
+            prompt=data.get("message", ""),
+            model_key=data.get("model_key", "auto"),
+            action_mode=data.get("action_mode", "text"),
+            settings=data.get("settings", {}),
+            exploration_rate=data.get("exploration_rate", 0.10),
+            planned_routes=data.get("planned_routes", 2_000),
+            scenario_confidence=data.get("scenario_confidence", 0.95),
+            assumed_feedback_rate=data.get("assumed_feedback_rate", 0.30),
+            target_observed_labels=data.get("target_observed_labels", 20),
+            target_policy_profile=data.get("target_policy_profile", "balanced"),
+            protocol_design_mode=data.get(
+                "protocol_design_mode", "sticky_session_cluster"
+            ),
+            carryover_scope=data.get("carryover_scope", "unknown"),
+            interference_scope=data.get("interference_scope", "unknown"),
+            temporal_variation=data.get("temporal_variation", "unknown"),
+            planned_clusters=data.get("planned_clusters", 200),
+            max_routes_per_cluster=data.get("max_routes_per_cluster", 20),
+            analysis_every_clusters=data.get("analysis_every_clusters", 50),
+            block_length_routes=data.get("block_length_routes", 20),
+            washout_routes=data.get("washout_routes", 0),
+        )
+        return jsonify(result)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Route study rehearsal failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/route_study_protocol_bundle", methods=["POST"])
+def api_route_study_protocol_bundle():
+    try:
+        data = _read_strict_route_review_json()
+        if not isinstance(data, dict):
+            raise ValueError("route protocol review build input must be a JSON object")
+        _validate_route_review_request_size(data)
+        _validate_route_review_strata(data.get("study_plans"))
+        return jsonify(manager.build_route_protocol_review_bundle(data))
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Route protocol review bundle build failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/route_study_protocol_bundle/audit", methods=["POST"])
+def api_route_study_protocol_bundle_audit():
+    try:
+        data = _read_strict_route_review_json()
+        if not isinstance(data, dict) or set(data) != {"bundle"}:
+            raise ValueError("route protocol review audit accepts only a bundle object")
+        _validate_route_review_request_size(data)
+        bundle = data.get("bundle")
+        if not isinstance(bundle, dict):
+            raise ValueError("route protocol review bundle must be a JSON object")
+        _validate_route_review_strata(bundle.get("source_study_plans"))
+        return jsonify(manager.audit_route_protocol_review_bundle(bundle))
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Route protocol review bundle audit failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/route_feedback", methods=["POST"])
+def api_route_feedback():
+    data = request.json or {}
+    session_id = str(data.get("session_id") or "default")
+    try:
+        if not str(data.get("route_id") or "").strip():
+            raise ValueError("route_id is required for route feedback")
+        result = manager.record_route_feedback(
+            session_id=session_id,
+            feedback={
+                "route_id": data.get("route_id") or "",
+                "rating": data.get("rating") or "",
+                "feedback_intent": data.get("feedback_intent") or data.get("intent") or "",
+                "feedback_tags": data.get("feedback_tags") or [],
+                "reason": data.get("reason") or "",
+            },
+        )
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Route feedback request failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+@app.route("/api/route_health", methods=["POST"])
+def api_route_health():
+    data = request.json or {}
+    session_id = str(data.get("session_id") or "default")
+    try:
+        return jsonify({"ok": True, "route_health": manager.route_health_snapshot(session_id)})
+    except Exception as exc:
+        logging.exception("Route health request failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/route_policy_lab", methods=["POST"])
+def api_route_policy_lab():
+    data = request.json or {}
+    session_id = str(data.get("session_id") or "default")
+    profile = str(data.get("profile") or "balanced")
+    try:
+        return jsonify(
+            {
+                "ok": True,
+                "policy_lab": manager.route_policy_lab_snapshot(session_id, profile=profile),
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Route policy lab request failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/route_shadow_registry/status", methods=["GET"])
+def api_route_shadow_registry_status():
+    try:
+        response = jsonify(
+            {
+                "ok": True,
+                "route_shadow_registry": manager.route_shadow_registry_snapshot(),
+            }
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except Exception as exc:
+        logging.exception("Route shadow registry status failed")
+        response = jsonify({"ok": False, "error": str(exc)})
+        response.headers["Cache-Control"] = "no-store"
+        return response, 500
+
 
 @app.route("/api/clear", methods=["POST"])
 def api_clear():
@@ -1246,16 +2952,98 @@ def serve_upload(session_slug, filename):
     return send_from_directory(manager.uploads_dir / safe_slug, filename)
 
 
+# ─── 3D Model View & Downloads ───────────────────────────────────────────────
+
+@app.route("/api/three_d_model_view")
+def api_three_d_model_view():
+    try:
+        model_data = manager.three_d_model_view()
+        model_data["download_zip_url"] = "/download/three_d_model_zip"
+        model_data["download_summary_url"] = "/download/three_d_model_summary"
+        return jsonify({"ok": True, "model": model_data})
+    except Exception as exc:
+        logging.exception("3D model view failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/download/three_d_model_zip")
+def download_three_d_model_zip():
+    try:
+        model_data = manager.three_d_model_view()
+        file_path = Path(model_data["zip_path"])
+        return send_from_directory(str(file_path.parent), file_path.name, as_attachment=True)
+    except Exception as exc:
+        logging.exception("3D zip download failed")
+        return str(exc), 500
+
+
+@app.route("/download/three_d_model_summary")
+def download_three_d_model_summary():
+    try:
+        model_data = manager.three_d_model_view()
+        file_path = Path(model_data["summary_path"])
+        return send_from_directory(str(file_path.parent), file_path.name, as_attachment=True)
+    except Exception as exc:
+        logging.exception("3D summary download failed")
+        return str(exc), 500
+
+
+# ─── Model Store API ─────────────────────────────────────────────────────────
+
+@app.route("/api/model_store")
+def api_model_store():
+    try:
+        force_refresh = request.args.get("force_refresh", "false").lower() == "true"
+        catalog = manager.model_store_catalog(force_refresh=force_refresh)
+        return jsonify({"ok": True, **catalog})
+    except Exception as exc:
+        logging.exception("Model store catalog failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/model_store/jobs")
+def api_model_store_jobs():
+    try:
+        jobs_data = manager.model_store_jobs()
+        return jsonify({"ok": True, **jobs_data})
+    except Exception as exc:
+        logging.exception("Model store jobs failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/model_store/install", methods=["POST"])
+def api_model_store_install():
+    try:
+        data = request.json or {}
+        file_name = data.get("file_name")
+        if not file_name:
+            return jsonify({"ok": False, "error": "file_name is required"}), 400
+        job = manager.install_model_store_artifact(file_name)
+        return jsonify({"ok": True, "job": job})
+    except Exception as exc:
+        logging.exception("Model store install failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
 
-def main():
-    global manager
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Supermix Studio X - V46 20-Suite Champion")
     parser.add_argument("--port",   type=int, default=5000, help="Port to listen on")
     parser.add_argument("--models", type=str, default=str(DEFAULT_MODELS_DIR),
                         help="Path to local models directory")
-    parser.add_argument("--host",   type=str, default="0.0.0.0")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Interface to bind (default: loopback only; opt in explicitly for remote access)",
+    )
+    return parser
+
+
+def main():
+    global manager
+    args = build_arg_parser().parse_args()
 
     manager = UnifiedModelManager(
         records=discover_model_records(Path(args.models)),
