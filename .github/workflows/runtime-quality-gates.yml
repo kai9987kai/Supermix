@@ -1,0 +1,133 @@
+name: Runtime quality gates
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-parity:
+    name: Runtime parity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest flask pillow
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Compile runtime surfaces
+        run: |
+          python -m py_compile \
+            source/chat_app.py \
+            source/chat_web_app.py \
+            source/model_variants.py \
+            source/multimodel_memory.py \
+            source/route_policy_explorer.py \
+            source/route_policy_protocol.py \
+            source/route_policy_ledger.py \
+            source/route_policy_lab.py \
+            source/route_policy_shadow_registry.py \
+            source/route_policy_study_cli.py \
+            source/route_policy_protocol_cli.py \
+            source/route_policy_shadow_cli.py \
+            source/generate_studio_runtime_manifest.py \
+            source/multimodel_runtime.py \
+            source/qwen_supermix_pipeline.py \
+            source/supermix_multimodel_web_app.py \
+            source/supermix_multimodel_desktop_app.py \
+            runtime_python/chat_app.py \
+            runtime_python/chat_web_app.py \
+            runtime_python/model_variants.py
+
+      - name: Check self-contained runtime snapshot
+        run: python source/sync_runtime_model_variants.py --check
+
+      - name: Check Studio distribution contract
+        run: python source/generate_studio_runtime_manifest.py --check
+
+      - name: Run runtime and routing regression tests
+        run: |
+          python -m pytest -q test_runtime_model_variants_parity.py test_runtime_compute_controls.py
+          python -m pytest -q test_cognitive_leap_ultra_expert.py test_v51_materialize_demo.py
+          python -m pytest -q test_route_policy_explorer.py test_route_policy_protocol.py test_route_policy_ledger.py test_route_policy_lab.py test_route_policy_shadow_registry.py test_route_policy_study_cli.py test_route_policy_protocol_cli.py test_route_policy_shadow_cli.py test_route_policy_shadow_web_status.py test_studio_runtime_manifest.py test_multimodel_memory_tools.py
+          python -m pytest -q test_multimodel_runtime.py
+          python -m pytest -q test_supermix_multimodel_web_app.py
+          python -m pytest -q test_training_improvements.py
+
+      - name: Freeze and smoke-test protocol console
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          python -m pip install pyinstaller
+          New-Item -ItemType Directory -Path build\ci_route_study -Force | Out-Null
+          python -m PyInstaller --noconfirm --clean --onefile --console --name SupermixRouteStudy --paths source --distpath dist\ci_route_study --workpath build\ci_route_study\work --specpath build\ci_route_study source\route_policy_protocol_cli.py
+          $payload = (& .\dist\ci_route_study\SupermixRouteStudy.exe --example --compact) | ConvertFrom-Json
+          if ($payload.schema_version -ne 'route-study-protocol-preflight-v1') { throw 'Frozen protocol schema mismatch' }
+          if ($payload.protocol.activation_available -ne $false) { throw 'Frozen protocol unexpectedly enables activation' }
+          if ($payload.charter.randomness.assignment_performed -ne $false) { throw 'Frozen protocol unexpectedly assigns a route' }
+          $bundlePath = Join-Path $PWD 'build\ci_route_study\review-bundle.json'
+          & .\dist\ci_route_study\SupermixRouteStudy.exe --example-bundle --output $bundlePath
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen review-bundle build failed' }
+          $bundle = Get-Content -LiteralPath $bundlePath -Raw | ConvertFrom-Json
+          if ($bundle.schema_version -ne 'route-study-review-bundle-v1') { throw 'Frozen review-bundle schema mismatch' }
+          if ($bundle.source_study_plans.Count -ne 2) { throw 'Frozen review bundle lost source strata' }
+          $audit = (& .\dist\ci_route_study\SupermixRouteStudy.exe --audit-bundle $bundlePath --compact) | ConvertFrom-Json
+          if ($audit.verification_level -ne 'full_source_bound_reconstruction') { throw 'Frozen review bundle did not fully reconstruct' }
+          if ($audit.source_plan_reconstruction_performed -ne $true) { throw 'Frozen review bundle skipped source reconstruction' }
+          if ($audit.activation_available -ne $false) { throw 'Frozen review bundle unexpectedly enables activation' }
+
+          New-Item -ItemType Directory -Path build\ci_route_shadow -Force | Out-Null
+          python -m PyInstaller --noconfirm --clean --onefile --console --name SupermixRouteShadow --paths source --distpath dist\ci_route_shadow --workpath build\ci_route_shadow\work --specpath build\ci_route_shadow source\route_policy_shadow_cli.py
+          $registryPath = Join-Path $PWD 'build\ci_route_shadow\shadow.sqlite3'
+          $seedPath = Join-Path $PWD 'build\ci_route_shadow\private-seed.json'
+          $sealRaw = & .\dist\ci_route_shadow\SupermixRouteShadow.exe seal --registry $registryPath --bundle $bundlePath --seed-output $seedPath --compact
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen shadow campaign seal failed' }
+          $seed = (Get-Content -LiteralPath $seedPath -Raw | ConvertFrom-Json).seed_material_base64url
+          if ($sealRaw -match [regex]::Escape($seed)) { throw 'Frozen shadow seal leaked private seed material' }
+          $seal = $sealRaw | ConvertFrom-Json
+          if ($seal.execution_enabled -ne $false) { throw 'Frozen shadow seal unexpectedly enables execution' }
+          $campaignId = $seal.public_package.campaign_seal.seal.campaign_id
+          $clusterPath = Join-Path $PWD 'build\ci_route_shadow\cluster.json'
+          @{ cluster_identifier = 'ci-shadow-cluster-1' } | ConvertTo-Json -Compress | Set-Content -LiteralPath $clusterPath -Encoding utf8
+          $commit = (& .\dist\ci_route_shadow\SupermixRouteShadow.exe commit --registry $registryPath --campaign $campaignId --seed-input $seedPath --cluster-input $clusterPath --compact) | ConvertFrom-Json
+          if ($commit.chosen_arm_revealed -ne $false) { throw 'Frozen shadow commitment revealed an arm early' }
+          $closure = (& .\dist\ci_route_shadow\SupermixRouteShadow.exe close --registry $registryPath --campaign $campaignId --compact) | ConvertFrom-Json
+          if ($closure.closure.frozen_commitment_count -ne 1) { throw 'Frozen shadow closure count mismatch' }
+          $revealRaw = & .\dist\ci_route_shadow\SupermixRouteShadow.exe reveal --registry $registryPath --campaign $campaignId --seed-input $seedPath --compact
+          if ($revealRaw -match [regex]::Escape($seed)) { throw 'Frozen shadow reveal CLI leaked seed material' }
+          $reveal = $revealRaw | ConvertFrom-Json
+          if ($reveal.seed_material_returned -ne $false) { throw 'Frozen shadow reveal returned seed material' }
+          $verify = (& .\dist\ci_route_shadow\SupermixRouteShadow.exe verify --registry $registryPath --campaign $campaignId --compact) | ConvertFrom-Json
+          if (($verify.complete -ne $true) -or ($verify.matched -ne 1) -or ($verify.mismatched -ne 0)) { throw 'Frozen shadow assignment reconstruction failed' }
+          $registryHashBeforeStatus = (Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash
+          $status = (& .\dist\ci_route_shadow\SupermixRouteShadow.exe status --registry $registryPath --campaign $campaignId --compact) | ConvertFrom-Json
+          if ($status.campaigns[0].state -ne 'reveal_verification_complete') { throw 'Frozen shadow registry state mismatch' }
+          if ($status.read_only -ne $true) { throw 'Frozen shadow registry status is not explicitly read-only' }
+          if ($status.activation_available -ne $false) { throw 'Frozen shadow registry unexpectedly enables activation' }
+          $registryHashAfterStatus = (Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash
+          if ($registryHashAfterStatus -ne $registryHashBeforeStatus) { throw 'Frozen shadow status mutated durable registry bytes' }

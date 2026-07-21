@@ -39,16 +39,22 @@ $ExePath = Join-Path $RepoRoot "dist\SupermixStudioDesktop\SupermixStudioDesktop
 $SetupPath = Join-Path $InstallerDir "SupermixStudioDesktopSetup.exe"
 $BundleManifestSource = Join-Path $RepoRoot "output\supermix_studio_bundled_models_manifest.json"
 $BundleManifestTarget = Join-Path $InstallerDir "SupermixStudioDesktopCuratedBundleManifest.json"
+$RuntimeManifestSource = Join-Path $RepoRoot "source\studio_runtime_manifest.json"
+$RuntimeManifestTarget = Join-Path $InstallerDir "SupermixStudioRuntimeManifest.json"
 $HashFilePath = Join-Path $InstallerDir "SupermixStudioDesktopReleaseSHA256.txt"
 
 if (Test-Path $BundleManifestSource) {
   Copy-Item -Force $BundleManifestSource $BundleManifestTarget
+}
+if (Test-Path $RuntimeManifestSource) {
+  Copy-Item -Force $RuntimeManifestSource $RuntimeManifestTarget
 }
 
 $HashTargets = @()
 if (Test-Path $SetupPath) { $HashTargets += Get-Item $SetupPath }
 if (Test-Path $ExePath) { $HashTargets += Get-Item $ExePath }
 if (Test-Path $BundleManifestTarget) { $HashTargets += Get-Item $BundleManifestTarget }
+if (Test-Path $RuntimeManifestTarget) { $HashTargets += Get-Item $RuntimeManifestTarget }
 
 if ($HashTargets.Count -gt 0) {
   $HashLines = foreach ($Item in $HashTargets) {

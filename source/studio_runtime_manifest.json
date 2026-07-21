@@ -1,0 +1,143 @@
+{
+  "active_runtime_tree": "source",
+  "app_version": "2026.07.18",
+  "contracts": {
+    "source/route_policy_explorer.py": {
+      "REHEARSAL_RECEIPT_SCHEMA_VERSION": "route-exploration-rehearsal-receipt-v1",
+      "REHEARSAL_SUPPORT_PROPOSAL_SCHEMA_VERSION": "route-exploration-rehearsal-support-proposal-v1",
+      "STUDY_ASSIGNMENT_SCHEMA_VERSION": "route-exploration-rehearsal-assignment-v1",
+      "STUDY_ID": "auto-route-adjacent-explorer-v1",
+      "STUDY_PLAN_SCHEMA_VERSION": "route-exploration-plan-v1",
+      "STUDY_VERSION": "1.0.0"
+    },
+    "source/route_policy_lab.py": {
+      "READINESS_SCHEMA_VERSION": "route-readiness-v2"
+    },
+    "source/route_policy_ledger.py": {
+      "EXECUTED_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION": "route-execution-assignment-v1",
+      "LEDGER_SCHEMA_VERSION": 3,
+      "OUTCOME_CONTRACT_SCHEMA_VERSION": "route-outcome-contract-v1",
+      "OUTCOME_MATURITY_SCHEMA_VERSION": "route-outcome-maturity-v1",
+      "SUPPORT_SCHEMA_VERSION": "route-support-v1"
+    },
+    "source/route_policy_protocol.py": {
+      "POPULATION_SCHEMA_VERSION": "route-study-population-v1",
+      "PROTOCOL_BUILD_INPUT_SCHEMA_VERSION": "route-study-protocol-build-input-v1",
+      "PROTOCOL_SCHEMA_VERSION": "route-study-protocol-preflight-v1",
+      "PROTOCOL_VERSION": "1.0.0",
+      "RANDOMNESS_SCHEMA_VERSION": "route-study-randomness-v1",
+      "REVIEW_BUNDLE_SCHEMA_VERSION": "route-study-review-bundle-v1",
+      "REVIEW_BUNDLE_VERSION": "1.0.0",
+      "STATEFUL_DESIGN_SCHEMA_VERSION": "route-stateful-design-screen-v1",
+      "STOPPING_SCHEMA_VERSION": "route-study-stopping-v1",
+      "TARGET_POLICY_CLASS_SCHEMA_VERSION": "route-target-policy-class-v1"
+    },
+    "source/route_policy_shadow_registry.py": {
+      "SHADOW_ASSIGNMENT_ALGORITHM": "hkdf-sha256-hmac-sha256-whole-policy-bps-v1",
+      "SHADOW_ASSIGNMENT_COMMITMENT_SCHEMA_VERSION": "route-study-shadow-assignment-commitment-v1",
+      "SHADOW_ASSIGNMENT_MANIFEST_SCHEMA_VERSION": "route-study-shadow-assignment-manifest-v1",
+      "SHADOW_ASSIGNMENT_REVEAL_SCHEMA_VERSION": "route-study-shadow-assignment-reveal-v1",
+      "SHADOW_BLOCK_ID": 0,
+      "SHADOW_CAMPAIGN_CLOSURE_SCHEMA_VERSION": "route-study-shadow-campaign-closure-v1",
+      "SHADOW_CAMPAIGN_SEAL_SCHEMA_VERSION": "route-study-shadow-campaign-seal-v1",
+      "SHADOW_CANDIDATE_ALLOCATION_BPS": 5000,
+      "SHADOW_CANONICALIZATION": "rfc8785-jcs-restricted-ijson-integer-v1",
+      "SHADOW_DESIGN_BINDING_SCHEMA_VERSION": "route-study-shadow-design-binding-v1",
+      "SHADOW_LEGACY_BUNDLE_ENCODING": "route-review-bundle-v1-python-sorted-compact-utf8",
+      "SHADOW_PUBLIC_PACKAGE_SCHEMA_VERSION": "route-study-shadow-public-package-v1",
+      "SHADOW_REGISTRY_EVENT_SCHEMA_VERSION": "route-study-shadow-registry-event-v1",
+      "SHADOW_REGISTRY_SCHEMA_VERSION": 1,
+      "SHADOW_REGISTRY_SNAPSHOT_SCHEMA_VERSION": "route-study-shadow-registry-snapshot-v1",
+      "SHADOW_SCHEMA_OBJECTS_SHA256": "fe12a50841e5f983adce9ef1eb4ebf6635ab079f8c0043f4ca68500b38f9a04c",
+      "SHADOW_SEED_CAPSULE_SCHEMA_VERSION": "route-study-shadow-seed-capsule-v1",
+      "SHADOW_SEED_REVEAL_SCHEMA_VERSION": "route-study-shadow-seed-reveal-v1",
+      "SHADOW_TOTAL_ALLOCATION_BPS": 10000
+    }
+  },
+  "entrypoints": {
+    "desktop": "source/supermix_multimodel_desktop_app.py",
+    "route_shadow_console": "source/route_policy_shadow_cli.py",
+    "route_study_console": "source/route_policy_protocol_cli.py",
+    "web": "source/supermix_multimodel_web_app.py"
+  },
+  "expected_windows_artifacts": {
+    "desktop_executable": "SupermixStudioDesktop.exe",
+    "installer": "SupermixStudioDesktopSetup.exe",
+    "route_shadow_console": "SupermixRouteShadow.exe",
+    "route_study_console": "SupermixRouteStudy.exe"
+  },
+  "legacy_compatibility_tree": "runtime_python",
+  "modules": [
+    {
+      "path": "source/route_policy_ledger.py",
+      "sha256": "d7fe4b95922448484fde62c5f0889ea9cd6d292871aa8d22de4355274492dcf9",
+      "size_bytes": 111375
+    },
+    {
+      "path": "source/route_policy_lab.py",
+      "sha256": "2e888ed9b400de692ed8589e44b86b71e70ebfd7e2a50a552eb91f4192fb5632",
+      "size_bytes": 57994
+    },
+    {
+      "path": "source/route_policy_explorer.py",
+      "sha256": "4d0790b104ffb94017f7f6fb9f2dbbd9c0757fed89059b4794267907e81430e5",
+      "size_bytes": 62438
+    },
+    {
+      "path": "source/route_policy_protocol.py",
+      "sha256": "8fc25b420e549ba5755e75e4de630d19102f629f80b774e481916641f45654ff",
+      "size_bytes": 61648
+    },
+    {
+      "path": "source/route_policy_shadow_registry.py",
+      "sha256": "6208e89a1495417c9f22b01aef6a5328fa92746e6a44e09d9eafa997bdb3e670",
+      "size_bytes": 103163
+    },
+    {
+      "path": "source/route_policy_study_cli.py",
+      "sha256": "7de1204145c837a1a445a71801ade37f5feee4a359bf72b6bd5815ace45fb3c0",
+      "size_bytes": 5973
+    },
+    {
+      "path": "source/route_policy_protocol_cli.py",
+      "sha256": "1bfcfd81d5b17235ec2f08607ee9d9edf172a03ff366548beca038d88ee4698e",
+      "size_bytes": 5925
+    },
+    {
+      "path": "source/route_policy_shadow_cli.py",
+      "sha256": "48f9157e28b66553a5e6857f97f51d9d8abba3fe20ef01c650d0a45e5607fc0a",
+      "size_bytes": 13330
+    },
+    {
+      "path": "source/multimodel_runtime.py",
+      "sha256": "0f1c179d5b5b9541b37f048bf0b937571d3b88fdd2aa4364d078f8a4578c51b9",
+      "size_bytes": 266501
+    },
+    {
+      "path": "source/supermix_multimodel_web_app.py",
+      "sha256": "7883be70e6547292c1d86f56441f9a4732682e96d848c948e7ece634416f2e5a",
+      "size_bytes": 160699
+    },
+    {
+      "path": "source/supermix_multimodel_desktop_app.py",
+      "sha256": "f3e679df20096ee170ec9fcacaaf65119c57137c52bba6a8fb0700c3823e1be9",
+      "size_bytes": 11632
+    }
+  ],
+  "package_guards": {
+    "automatic_policy_promotion_available": false,
+    "route_ledger_requires_executed_assignment_namespace": true,
+    "route_protocol_activation_available": false,
+    "route_protocol_assignment_implementation_available": false,
+    "route_rehearsal_writes_ledger": false,
+    "route_review_bundle_authenticity_proof_available": false,
+    "route_review_bundle_full_source_reconstruction": true,
+    "route_review_bundle_trusted_timestamp_available": false,
+    "route_shadow_assignment_executes_routes": false,
+    "route_shadow_authenticity_proof_available": false,
+    "route_shadow_private_seed_persisted_before_reveal": false,
+    "route_shadow_registry_available": true,
+    "route_shadow_trusted_timestamp_available": false
+  },
+  "schema_version": "supermix-studio-runtime-manifest-v1"
+}

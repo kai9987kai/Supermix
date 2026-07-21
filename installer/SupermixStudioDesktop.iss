@@ -5,7 +5,7 @@
   #define MyAppExeName "SupermixStudioDesktop.exe"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "2026.03.27"
+  #define MyAppVersion "2026.07.18"
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\dist\SupermixStudioDesktop"
@@ -23,9 +23,11 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher=Supermix
-DefaultDirName={autopf}\Supermix Studio
+DefaultDirName={localappdata}\Programs\Supermix Studio
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=..\assets\supermix_qwen_icon.ico
 WizardStyle=modern
