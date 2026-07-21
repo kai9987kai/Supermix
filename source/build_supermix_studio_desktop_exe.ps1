@@ -1,6 +1,6 @@
 param(
   [string]$Name = "SupermixStudioDesktop",
-  [string]$ModelsDir = "C:\Users\kai99\Desktop\models",
+  [string]$ModelsDir = "",
   [switch]$SkipDependencyInstall
 )
 
@@ -9,6 +9,15 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
+if (-not $ModelsDir) {
+  $ModelsDir = if ($env:SUPERMIX_MODELS_DIR) {
+    $env:SUPERMIX_MODELS_DIR
+  } else {
+    Join-Path $env:USERPROFILE "Desktop\models"
+  }
+}
+$ModelsDir = (Resolve-Path -LiteralPath $ModelsDir -ErrorAction Stop).Path
+
 $PythonExe = Join-Path $RepoRoot ".venv-dml\Scripts\python.exe"
 if (-not (Test-Path $PythonExe)) {
   throw "Expected Python environment at $PythonExe"
@@ -16,6 +25,11 @@ if (-not (Test-Path $PythonExe)) {
 
 if (-not $SkipDependencyInstall) {
   & $PythonExe -m pip install pywebview pyinstaller pillow sympy | Out-Host
+}
+
+& $PythonExe "source\generate_studio_runtime_manifest.py" --check
+if ($LASTEXITCODE -ne 0) {
+  throw "The checked Studio runtime manifest is stale. Regenerate and review it before packaging."
 }
 
 python "source\generate_desktop_branding.py" | Out-Host
@@ -29,6 +43,7 @@ $BaseModelDir = $BaseModelDir.Trim()
 $ModelsStageDir = Join-Path $RepoRoot "build\studio_models_stage"
 $BaseModelStageDir = Join-Path $RepoRoot "build\studio_base_model_stage"
 $BundleManifestPath = Join-Path $RepoRoot "output\supermix_studio_bundled_models_manifest.json"
+$RuntimeManifestPath = Join-Path $RepoRoot "source\studio_runtime_manifest.json"
 $BundledModelKeys = @(
   "v40_benchmax",
   "omni_collective_v41",
@@ -106,6 +121,9 @@ if (-not (Test-Path $SummaryPath)) {
 }
 
 try {
+  New-Item -ItemType Directory -Path "build\studio_desktop_spec" -Force | Out-Null
+  New-Item -ItemType Directory -Path "build\route_study_cli" -Force | Out-Null
+  New-Item -ItemType Directory -Path "build\route_shadow_cli" -Force | Out-Null
   $PyInstallerArgs = @(
     "-m", "PyInstaller",
     "--noconfirm",
@@ -129,6 +147,8 @@ try {
     "--add-data", "$BaseModelStageDir;bundled_base_model",
     "--add-data", "$SummaryPath;output",
     "--add-data", "$BundleManifestPath;output",
+    "--add-data", "$RuntimeManifestPath;output",
+    "--specpath", "build\studio_desktop_spec",
     "source\supermix_multimodel_desktop_app.py"
   )
 
@@ -141,7 +161,55 @@ try {
   }
 
   $ExePath = Join-Path $RepoRoot "dist\$Name\$Name.exe"
+  $RouteStudyCliName = "SupermixRouteStudy"
+  $RouteStudyCliArgs = @(
+    "-m", "PyInstaller",
+    "--noconfirm",
+    "--clean",
+    "--onefile",
+    "--console",
+    "--name", $RouteStudyCliName,
+    "--paths", "source",
+    "--distpath", "dist\$Name",
+    "--workpath", "build\route_study_cli",
+    "--specpath", "build\route_study_cli",
+    "source\route_policy_protocol_cli.py"
+  )
+  Write-Host "Building $RouteStudyCliName prompt-free protocol console"
+  & $PythonExe @RouteStudyCliArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "Route study console build failed."
+  }
+  $RouteStudyCliPath = Join-Path $RepoRoot "dist\$Name\$RouteStudyCliName.exe"
+  if (-not (Test-Path $RouteStudyCliPath)) {
+    throw "Expected route study console at $RouteStudyCliPath"
+  }
+  $RouteShadowCliName = "SupermixRouteShadow"
+  $RouteShadowCliArgs = @(
+    "-m", "PyInstaller",
+    "--noconfirm",
+    "--clean",
+    "--onefile",
+    "--console",
+    "--name", $RouteShadowCliName,
+    "--paths", "source",
+    "--distpath", "dist\$Name",
+    "--workpath", "build\route_shadow_cli",
+    "--specpath", "build\route_shadow_cli",
+    "source\route_policy_shadow_cli.py"
+  )
+  Write-Host "Building $RouteShadowCliName shadow-only commitment console"
+  & $PythonExe @RouteShadowCliArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "Route shadow console build failed."
+  }
+  $RouteShadowCliPath = Join-Path $RepoRoot "dist\$Name\$RouteShadowCliName.exe"
+  if (-not (Test-Path $RouteShadowCliPath)) {
+    throw "Expected route shadow console at $RouteShadowCliPath"
+  }
   Write-Host "Build complete: $ExePath"
+  Write-Host "Protocol console complete: $RouteStudyCliPath"
+  Write-Host "Shadow registry console complete: $RouteShadowCliPath"
 }
 finally {
   if (Test-Path $ModelsStageDir) { Remove-Item -Recurse -Force $ModelsStageDir }

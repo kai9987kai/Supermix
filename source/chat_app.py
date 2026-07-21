@@ -4,7 +4,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 import torch
@@ -74,166 +74,6 @@ MAX_RUNTIME_REASONING_CYCLES = 64
 DEFAULT_ADAPTIVE_EXIT_TOL = 1e-3
 DEFAULT_AUTO_COMPUTE_CONFIDENCE = 0.55
 DEFAULT_AUTO_COMPUTE_ENTROPY = 1.85
-
-
-def _coerce_optional_positive_int(value, default: Optional[int] = None, max_value: Optional[int] = None) -> Optional[int]:
-    if value is None or value == "":
-        return default
-    try:
-        coerced = int(value)
-    except (TypeError, ValueError):
-        return default
-    coerced = max(1, coerced)
-    if max_value is not None:
-        coerced = min(int(max_value), coerced)
-    return coerced
-
-
-def _coerce_nonnegative_float(value, default: Optional[float] = None, max_value: Optional[float] = None) -> Optional[float]:
-    if value is None or value == "":
-        return default
-    try:
-        coerced = float(value)
-    except (TypeError, ValueError):
-        return default
-    coerced = max(0.0, coerced)
-    if max_value is not None:
-        coerced = min(float(max_value), coerced)
-    return coerced
-
-
-def _coerce_bool(value, default: bool = False) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "on", "enable", "enabled"}:
-        return True
-    if text in {"0", "false", "no", "n", "off", "disable", "disabled"}:
-        return False
-    return bool(default)
-
-
-def _model_forward_accepts_kwarg(model, name: str) -> bool:
-    try:
-        sig = inspect.signature(model.forward)
-    except (TypeError, ValueError, AttributeError):
-        return False
-    if name in sig.parameters:
-        return True
-    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-
-
-def model_supports_runtime_compute(model) -> bool:
-    return any(
-        _model_forward_accepts_kwarg(model, key)
-        for key in ("reasoning_cycles", "adaptive_compute", "exit_tol")
-    )
-
-
-def _tensorish_to_float(value) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        if isinstance(value, torch.Tensor):
-            if value.numel() == 0:
-                return None
-            return float(value.detach().float().mean().item())
-        return float(value)
-    except (TypeError, ValueError, RuntimeError):
-        return None
-
-
-def _first_module_attr_float(model, attr_name: str) -> Optional[float]:
-    if hasattr(model, attr_name):
-        value = _tensorish_to_float(getattr(model, attr_name))
-        if value is not None:
-            return value
-    if hasattr(model, "modules"):
-        for module in model.modules():
-            if module is model or not hasattr(module, attr_name):
-                continue
-            value = _tensorish_to_float(getattr(module, attr_name))
-            if value is not None:
-                return value
-    return None
-
-
-def get_last_cycles_used(model) -> Optional[float]:
-    return _first_module_attr_float(model, "last_cycles_used")
-
-
-def collect_runtime_compute_metrics(
-    model,
-    *,
-    requested_reasoning_cycles: Optional[int] = None,
-    adaptive_compute: bool = False,
-    exit_tol: Optional[float] = None,
-    applied_kwargs: Optional[Dict[str, object]] = None,
-) -> Dict[str, object]:
-    metrics: Dict[str, object] = {
-        "supported": model_supports_runtime_compute(model),
-        "requested_reasoning_cycles": requested_reasoning_cycles,
-        "max_reasoning_cycles": MAX_RUNTIME_REASONING_CYCLES,
-        "adaptive_compute": bool(adaptive_compute),
-        "exit_tol": exit_tol,
-        "applied": bool(applied_kwargs),
-        "applied_kwargs": dict(applied_kwargs or {}),
-    }
-    cycles_used = get_last_cycles_used(model)
-    if cycles_used is not None:
-        metrics["cycles_used"] = round(cycles_used, 4)
-    for attr_name, key in (
-        ("last_ponder_cost", "ponder_cost"),
-        ("last_consistency_loss", "consistency_loss"),
-        ("last_gating_entropy", "gating_entropy"),
-    ):
-        value = _first_module_attr_float(model, attr_name)
-        if value is not None:
-            metrics[key] = round(value, 6)
-    return metrics
-
-
-def forward_with_runtime_compute(
-    model,
-    x,
-    *,
-    reasoning_cycles: Optional[int] = None,
-    adaptive_compute: bool = False,
-    exit_tol: Optional[float] = None,
-    return_diagnostics: bool = False,
-):
-    requested_cycles = _coerce_optional_positive_int(
-        reasoning_cycles,
-        default=None,
-        max_value=MAX_RUNTIME_REASONING_CYCLES,
-    )
-    adaptive = _coerce_bool(adaptive_compute, default=False)
-    resolved_exit_tol = _coerce_nonnegative_float(
-        DEFAULT_ADAPTIVE_EXIT_TOL if exit_tol is None else exit_tol,
-        default=DEFAULT_ADAPTIVE_EXIT_TOL,
-    )
-    applied_kwargs: Dict[str, object] = {}
-    if requested_cycles is not None and _model_forward_accepts_kwarg(model, "reasoning_cycles"):
-        applied_kwargs["reasoning_cycles"] = requested_cycles
-    if _model_forward_accepts_kwarg(model, "adaptive_compute"):
-        applied_kwargs["adaptive_compute"] = adaptive
-    if resolved_exit_tol is not None and _model_forward_accepts_kwarg(model, "exit_tol"):
-        applied_kwargs["exit_tol"] = resolved_exit_tol
-
-    out = model(x, **applied_kwargs)
-    if return_diagnostics:
-        return out, collect_runtime_compute_metrics(
-            model,
-            requested_reasoning_cycles=requested_cycles,
-            adaptive_compute=adaptive,
-            exit_tol=resolved_exit_tol,
-            applied_kwargs=applied_kwargs,
-        )
-    return out
 
 
 def resolve_runtime_compute_cycles(cycles, default: Optional[List[int]] = None, limit: int = 8) -> List[int]:
@@ -375,6 +215,11 @@ def select_auto_runtime_compute_budget(
 
 _FOLLOWUP_QUERY_RE = re.compile(r"\b(it|that|this|they|them|same|previous|above|more|continue|deeper|expand)\b", re.I)
 VALID_RUNTIME_MODEL_SIZES = SUPPORTED_MODEL_SIZES
+MAX_RUNTIME_REASONING_CYCLES = 64
+DEFAULT_ADAPTIVE_EXIT_ENTROPY = 0.2
+DEFAULT_PREDICTION_STABILITY_PATIENCE = 2
+DEFAULT_PREDICTION_STABILITY_TOL = 5e-3
+AUTO_REASONING_CYCLE_BUCKETS = (1, 3, 8, 16)
 
 
 def _build_db_query(user: str, history: List[Tuple[str, str]], memory_rows: List[Dict], max_turns: int = 2) -> str:
@@ -449,6 +294,297 @@ def resolve_runtime_model_size(requested_model_size: str, meta_model_size: str, 
     return resolved_model_size, warning
 
 
+def _coerce_optional_positive_int(
+    value: Any,
+    max_value: Optional[int] = None,
+    *,
+    default: Optional[int] = None,
+) -> Optional[int]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        if stripped in {"", "default", "none", "off", "auto"}:
+            return default
+        value = stripped
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    parsed = max(1, parsed)
+    if max_value is not None:
+        parsed = min(parsed, max(1, int(max_value)))
+    return parsed
+
+
+def _is_auto_reasoning_cycles(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().lower() in {"auto", "adaptive", "smart"}
+
+
+def _format_reasoning_cycles_setting(value: Any) -> Any:
+    if _is_auto_reasoning_cycles(value):
+        return "auto"
+    return _coerce_optional_positive_int(value, MAX_RUNTIME_REASONING_CYCLES) or "default"
+
+
+def estimate_auto_reasoning_cycles(context: str, max_value: Optional[int] = None) -> Dict[str, Any]:
+    text = str(context or "")
+    lowered = text.lower()
+    reasons: List[str] = []
+    score = 0
+
+    char_count = len(text)
+    if char_count >= 1600:
+        score += 3
+        reasons.append("long_context")
+    elif char_count >= 700:
+        score += 2
+        reasons.append("medium_context")
+    elif char_count >= 280:
+        score += 1
+        reasons.append("short_context")
+
+    if re.search(r"```|traceback|exception|error|bug|fix|debug|refactor|class\s+|def\s+|function|import\s+|select\s+", lowered):
+        score += 2
+        reasons.append("code_or_debug")
+    if re.search(r"\b(prove|derive|equation|calculate|solve|theorem|complexity|probability|optimi[sz]e|benchmarks?)\b|[=+\-*/^]{2,}", lowered):
+        score += 2
+        reasons.append("math_or_verification")
+    if re.search(r"\b(compare|tradeoff|plan|architect|design|multi-step|step by step|analy[sz]e|research|evidence)\b", lowered):
+        score += 1
+        reasons.append("deliberation")
+    if re.search(r"\b(agent|tool|browser|github|file|tests?|verify|integration|runtime)\b", lowered):
+        score += 1
+        reasons.append("tool_or_runtime")
+    if re.search(r"\b(quick|brief|concise|short answer|one line)\b", lowered):
+        score -= 1
+        reasons.append("brevity_requested")
+
+    if score <= 0:
+        cycles = AUTO_REASONING_CYCLE_BUCKETS[0]
+    elif score <= 2:
+        cycles = AUTO_REASONING_CYCLE_BUCKETS[1]
+    elif score <= 4:
+        cycles = AUTO_REASONING_CYCLE_BUCKETS[2]
+    else:
+        cycles = AUTO_REASONING_CYCLE_BUCKETS[3]
+    cycles = _coerce_optional_positive_int(cycles, max_value) or AUTO_REASONING_CYCLE_BUCKETS[0]
+
+    return {
+        "mode": "auto",
+        "score": int(score),
+        "reasons": reasons or ["simple_prompt"],
+        "cycles": int(cycles),
+    }
+
+
+def _coerce_nonnegative_float(value: Any, default: float, max_value: Optional[float] = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(default)
+    parsed = max(0.0, parsed)
+    if max_value is not None:
+        parsed = min(parsed, float(max_value))
+    return parsed
+
+
+def _coerce_nonnegative_int(value: Any, default: int, max_value: Optional[int] = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    parsed = max(0, parsed)
+    if max_value is not None:
+        parsed = min(parsed, max(0, int(max_value)))
+    return parsed
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on", "y", "enable", "enabled"}:
+            return True
+        if text in {"0", "false", "no", "off", "n", "disable", "disabled"}:
+            return False
+    return bool(default)
+
+
+def _model_forward_accepts_kwarg(model: Any, kwarg: str) -> bool:
+    forward = getattr(model, "forward", None)
+    if forward is None:
+        return False
+    try:
+        params = inspect.signature(forward).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    for param in params:
+        if param.kind == inspect.Parameter.VAR_KEYWORD or param.name == kwarg:
+            return True
+    return False
+
+
+def model_supports_runtime_compute(model: Any) -> bool:
+    return any(
+        _model_forward_accepts_kwarg(model, key)
+        for key in ("reasoning_cycles", "adaptive_compute", "exit_tol")
+    )
+
+
+def _to_optional_scalar(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "detach"):
+            return float(value.detach().cpu().item())
+        return float(value)
+    except (TypeError, ValueError, RuntimeError):
+        return None
+
+
+def collect_runtime_compute_metrics(
+    model: Any,
+    *,
+    requested_reasoning_cycles: Optional[int] = None,
+    adaptive_compute: bool = False,
+    exit_tol: Optional[float] = None,
+    applied_kwargs: Optional[Dict[str, object]] = None,
+) -> Dict[str, Any]:
+    metrics: Dict[str, Any] = {
+        "cycles_used": None,
+        "ponder_cost": None,
+        "consistency_loss": None,
+        "gating_entropy": None,
+        "prediction_streak": None,
+        "prediction_confidence_delta": None,
+        "exit_reason": None,
+    }
+    attr_map = {
+        "last_cycles_used": "cycles_used",
+        "last_ponder_cost": "ponder_cost",
+        "last_consistency_loss": "consistency_loss",
+        "last_gating_entropy": "gating_entropy",
+        "last_prediction_streak": "prediction_streak",
+        "last_prediction_confidence_delta": "prediction_confidence_delta",
+    }
+    modules = list(model.modules()) if hasattr(model, "modules") else [model]
+    for module in modules:
+        for attr, key in attr_map.items():
+            if metrics[key] is not None:
+                continue
+            scalar = _to_optional_scalar(getattr(module, attr, None))
+            if scalar is not None:
+                metrics[key] = round(scalar, 6)
+        if metrics["exit_reason"] is None:
+            reason = getattr(module, "last_exit_reason", None)
+            if isinstance(reason, str) and reason.strip():
+                metrics["exit_reason"] = reason.strip()
+    metrics.update({
+        "supported": model_supports_runtime_compute(model),
+        "requested_reasoning_cycles": requested_reasoning_cycles,
+        "max_reasoning_cycles": MAX_RUNTIME_REASONING_CYCLES,
+        "adaptive_compute": bool(adaptive_compute),
+        "exit_tol": exit_tol,
+        "applied": bool(applied_kwargs),
+        "applied_kwargs": dict(applied_kwargs or {}),
+    })
+    return metrics
+
+
+def get_last_cycles_used(model: Any) -> Optional[float]:
+    return collect_runtime_compute_metrics(model).get("cycles_used")
+
+
+def forward_with_runtime_compute(
+    model: Any,
+    x: torch.Tensor,
+    reasoning_cycles: Any = None,
+    adaptive_compute: Any = False,
+    exit_tol: Any = 1e-3,
+    exit_entropy_threshold: Any = DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+    prediction_stability_patience: Any = DEFAULT_PREDICTION_STABILITY_PATIENCE,
+    prediction_stability_tol: Any = DEFAULT_PREDICTION_STABILITY_TOL,
+    auto_reasoning_context: str = "",
+    return_diagnostics: Optional[bool] = None,
+):
+    """Forward a model while applying optional v50 runtime-compute controls.
+
+    Legacy model variants ignore these controls because their forward signatures
+    do not accept them. This keeps the runtime knobs safe for mixed checkpoints.
+    """
+    auto_policy: Optional[Dict[str, Any]] = None
+    if _is_auto_reasoning_cycles(reasoning_cycles):
+        auto_policy = estimate_auto_reasoning_cycles(
+            auto_reasoning_context,
+            MAX_RUNTIME_REASONING_CYCLES,
+        )
+        cycles = int(auto_policy["cycles"])
+    else:
+        cycles = _coerce_optional_positive_int(reasoning_cycles, MAX_RUNTIME_REASONING_CYCLES)
+    adaptive = _coerce_bool(adaptive_compute)
+    tol = _coerce_nonnegative_float(exit_tol, 1e-3)
+    entropy_threshold = _coerce_nonnegative_float(
+        exit_entropy_threshold,
+        DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+    )
+    stability_patience = _coerce_nonnegative_int(
+        prediction_stability_patience,
+        DEFAULT_PREDICTION_STABILITY_PATIENCE,
+        MAX_RUNTIME_REASONING_CYCLES,
+    )
+    stability_tol = _coerce_nonnegative_float(
+        prediction_stability_tol,
+        DEFAULT_PREDICTION_STABILITY_TOL,
+    )
+    kwargs: Dict[str, Any] = {}
+
+    if cycles is not None and _model_forward_accepts_kwarg(model, "reasoning_cycles"):
+        kwargs["reasoning_cycles"] = cycles
+    if adaptive and _model_forward_accepts_kwarg(model, "adaptive_compute"):
+        kwargs["adaptive_compute"] = True
+        if _model_forward_accepts_kwarg(model, "exit_tol"):
+            kwargs["exit_tol"] = tol
+        if _model_forward_accepts_kwarg(model, "exit_entropy_threshold"):
+            kwargs["exit_entropy_threshold"] = entropy_threshold
+        if _model_forward_accepts_kwarg(model, "prediction_stability_patience"):
+            kwargs["prediction_stability_patience"] = stability_patience
+        if _model_forward_accepts_kwarg(model, "prediction_stability_tol"):
+            kwargs["prediction_stability_tol"] = stability_tol
+
+    output = model(x, **kwargs) if kwargs else model(x)
+    metrics = collect_runtime_compute_metrics(
+        model,
+        requested_reasoning_cycles=cycles,
+        adaptive_compute=adaptive,
+        exit_tol=tol,
+        applied_kwargs=kwargs,
+    )
+    diagnostics = {
+        "requested_reasoning_cycles": cycles,
+        "selected_reasoning_cycles": cycles,
+        "reasoning_budget_mode": "auto" if auto_policy is not None else ("manual" if cycles is not None else "default"),
+        "auto_reasoning_policy": auto_policy,
+        "max_reasoning_cycles": MAX_RUNTIME_REASONING_CYCLES,
+        "adaptive_compute": adaptive,
+        "exit_tol": tol,
+        "exit_entropy_threshold": entropy_threshold,
+        "prediction_stability_patience": stability_patience,
+        "prediction_stability_tol": stability_tol,
+        "applied": bool(kwargs),
+        "applied_kwargs": dict(kwargs),
+        **metrics,
+    }
+    if return_diagnostics is False:
+        return output
+    return output, diagnostics
+
+
 def _default_expansion_dim_for_model_size(model_size: str) -> int:
     if model_size in THIRD_EXPANSION_DIM_MODEL_SIZES:
         return 1024
@@ -484,12 +620,16 @@ def _print_chat_help() -> None:
     print("  /clear              Clear in-memory conversation history")
     print("  /style <mode>       Set style: auto|balanced|creative|concise|analyst")
     print("  /creativity <0-1>   Set creative rewrite strength")
+    print("  /cycles <n|auto|default> Set runtime reasoning cycles for future turns")
+    print("  /adaptive on|off    Toggle v50 convergence early-exit")
+    print("  /exit_tol <float>   Set v50 adaptive-compute convergence tolerance")
+    print("  /exit_entropy <f>   Set v50 adaptive-compute entropy exit threshold")
+    print("  /stability <n>      Stable prediction cycles required (0 disables)")
+    print("  /stability_tol <f>  Maximum confidence drift across the stable streak")
     print("  /top <n>            Show top reranked candidates each turn (0 disables)")
     print("  /timing on|off      Toggle per-turn timing output")
-    print("  /cycles <n|auto>    Set v50 reasoning cycles (auto uses model default)")
-    print("  /adaptive on|off    Toggle adaptive early-exit compute")
-    print("  /exit_tol <float>   Set adaptive exit tolerance")
     print("  /auto_compute on|off Toggle confidence/entropy based cycle selection")
+    print("  /auto_targets <confidence> <entropy> Set auto-compute selection gates")
     print("  /memory on|off      Toggle memory retrieval/writes for this session")
     print("  /db on|off          Toggle local LLM DB retrieval for this session")
     print("  /config             Print current runtime config")
@@ -512,6 +652,41 @@ def main():
     ap.add_argument("--fifth_expansion_dim", type=int, default=None)
     ap.add_argument("--sixth_expansion_dim", type=int, default=None)
     ap.add_argument("--adapter_dropout", type=float, default=None)
+    ap.add_argument(
+        "--reasoning_cycles",
+        type=str,
+        default=None,
+        help="Optional runtime reasoning cycles, or 'auto' to choose from prompt difficulty; omit for checkpoint default.",
+    )
+    ap.add_argument(
+        "--adaptive_compute",
+        action="store_true",
+        help="Enable v50 convergence early-exit during inference when the model supports it.",
+    )
+    ap.add_argument(
+        "--adaptive_exit_tol",
+        type=float,
+        default=1e-3,
+        help="Convergence tolerance for v50 adaptive compute.",
+    )
+    ap.add_argument(
+        "--adaptive_exit_entropy",
+        type=float,
+        default=DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+        help="Prediction entropy threshold for v50 adaptive compute.",
+    )
+    ap.add_argument(
+        "--prediction_stability_patience",
+        type=int,
+        default=DEFAULT_PREDICTION_STABILITY_PATIENCE,
+        help="Stable full-output predictions required before adaptive exit (0 disables).",
+    )
+    ap.add_argument(
+        "--prediction_stability_tol",
+        type=float,
+        default=DEFAULT_PREDICTION_STABILITY_TOL,
+        help="Maximum confidence drift allowed across a stable prediction streak.",
+    )
     ap.add_argument("--device", default="auto")
     ap.add_argument(
         "--device_preference",
@@ -583,23 +758,6 @@ def main():
         "--show_timing",
         action="store_true",
         help="Print per-turn timing breakdown (memory/db/inference/total).",
-    )
-    ap.add_argument(
-        "--reasoning_cycles",
-        type=int,
-        default=None,
-        help=f"Override v50 recursive reasoning cycles per inference (1-{MAX_RUNTIME_REASONING_CYCLES}; default uses model setting).",
-    )
-    ap.add_argument(
-        "--adaptive_compute",
-        action="store_true",
-        help="Enable v50 adaptive early exit during inference when supported.",
-    )
-    ap.add_argument(
-        "--adaptive_exit_tol",
-        type=float,
-        default=DEFAULT_ADAPTIVE_EXIT_TOL,
-        help="Latent-convergence tolerance for adaptive early exit.",
     )
     ap.add_argument(
         "--auto_compute",
@@ -754,12 +912,15 @@ def main():
     session_started_at = time.time()
     turn_count = 0
     last_turn_timing: Dict[str, float] = {}
-    last_compute_metrics: Dict[str, object] = {}
-    args.reasoning_cycles = _coerce_optional_positive_int(
-        args.reasoning_cycles,
-        default=None,
-        max_value=MAX_RUNTIME_REASONING_CYCLES,
-    )
+    last_compute_metrics: Dict[str, Any] = {}
+    if _is_auto_reasoning_cycles(args.reasoning_cycles):
+        args.reasoning_cycles = "auto"
+    else:
+        args.reasoning_cycles = _coerce_optional_positive_int(
+            args.reasoning_cycles,
+            default=None,
+            max_value=MAX_RUNTIME_REASONING_CYCLES,
+        )
     args.adaptive_compute = bool(args.adaptive_compute)
     args.adaptive_exit_tol = _coerce_nonnegative_float(
         args.adaptive_exit_tol,
@@ -768,17 +929,33 @@ def main():
     args.auto_compute = bool(args.auto_compute)
     args.auto_compute_confidence = max(0.0, min(1.0, float(args.auto_compute_confidence)))
     args.auto_compute_entropy = max(0.0, float(args.auto_compute_entropy))
+    args.adaptive_exit_entropy = _coerce_nonnegative_float(
+        args.adaptive_exit_entropy,
+        DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+    )
+    args.prediction_stability_patience = _coerce_nonnegative_int(
+        args.prediction_stability_patience,
+        DEFAULT_PREDICTION_STABILITY_PATIENCE,
+        MAX_RUNTIME_REASONING_CYCLES,
+    )
+    args.prediction_stability_tol = _coerce_nonnegative_float(
+        args.prediction_stability_tol,
+        DEFAULT_PREDICTION_STABILITY_TOL,
+    )
 
     print(f"\n{TerminalColors.SYSTEM}--- Session Info ---")
     print(f"Loaded: {Path(args.weights).name} [{resolved_model_size}] | Available labels: {len(available_labels)}")
     print(f"Device: {device_info.get('resolved', args.device)} | Threads intra={torch.get_num_threads()} interop={torch.get_num_interop_threads()}")
     print(f"Feature mode: {feature_mode}{feature_mode_note} | Style mode: {args.style_mode} (creativity={max(0.0, min(1.0, float(args.creativity))):.2f})")
+    compute_support = "yes" if model_supports_runtime_compute(model) else "no"
     print(
         "Runtime compute: "
-        f"supported={'yes' if model_supports_runtime_compute(model) else 'no'} | "
-        f"cycles={args.reasoning_cycles if args.reasoning_cycles is not None else 'model default'} | "
-        f"adaptive={'on' if args.adaptive_compute else 'off'} | "
-        f"exit_tol={float(args.adaptive_exit_tol):.6g} | "
+        f"supported={compute_support} cycles={_format_reasoning_cycles_setting(args.reasoning_cycles)} "
+        f"adaptive={'on' if bool(args.adaptive_compute) else 'off'} "
+        f"exit_tol={_coerce_nonnegative_float(args.adaptive_exit_tol, DEFAULT_ADAPTIVE_EXIT_TOL):.4g} "
+        f"exit_entropy={_coerce_nonnegative_float(args.adaptive_exit_entropy, DEFAULT_ADAPTIVE_EXIT_ENTROPY):.4g} "
+        f"stability={_coerce_nonnegative_int(args.prediction_stability_patience, DEFAULT_PREDICTION_STABILITY_PATIENCE)} "
+        f"stability_tol={_coerce_nonnegative_float(args.prediction_stability_tol, DEFAULT_PREDICTION_STABILITY_TOL):.4g} "
         f"auto={'on' if args.auto_compute else 'off'}"
     )
     
@@ -827,6 +1004,16 @@ def main():
                         f"top_debug={int(args.show_top_responses)} timing={'on' if show_timing else 'off'}"
                     )
                     print(
+                        f"  compute_supported={'yes' if model_supports_runtime_compute(model) else 'no'} "
+                        f"cycles={_format_reasoning_cycles_setting(args.reasoning_cycles)} "
+                        f"adaptive={'on' if bool(args.adaptive_compute) else 'off'} "
+                        f"exit_tol={_coerce_nonnegative_float(args.adaptive_exit_tol, 1e-3):.4g} "
+                        f"exit_entropy={_coerce_nonnegative_float(args.adaptive_exit_entropy, DEFAULT_ADAPTIVE_EXIT_ENTROPY):.4g} "
+                        f"stability={_coerce_nonnegative_int(args.prediction_stability_patience, DEFAULT_PREDICTION_STABILITY_PATIENCE)} "
+                        f"stability_tol={_coerce_nonnegative_float(args.prediction_stability_tol, DEFAULT_PREDICTION_STABILITY_TOL):.4g} "
+                        f"auto={'on' if args.auto_compute else 'off'}"
+                    )
+                    print(
                         f"  memory={'on' if session_memory_enabled else 'off'} "
                         f"(db={'ready' if memory_db is not None else 'missing'}) | "
                         f"llm_db={'on' if session_db_enabled else 'off'} "
@@ -858,21 +1045,24 @@ def main():
                         f"show_top_responses={int(args.show_top_responses)}"
                     )
                     print(
+                        f"  compute_supported={'yes' if model_supports_runtime_compute(model) else 'no'} "
+                        f"cycles={_format_reasoning_cycles_setting(args.reasoning_cycles)} "
+                        f"adaptive={'on' if bool(args.adaptive_compute) else 'off'} "
+                        f"exit_tol={_coerce_nonnegative_float(args.adaptive_exit_tol, 1e-3):.4g} "
+                        f"exit_entropy={_coerce_nonnegative_float(args.adaptive_exit_entropy, DEFAULT_ADAPTIVE_EXIT_ENTROPY):.4g} "
+                        f"stability={_coerce_nonnegative_int(args.prediction_stability_patience, DEFAULT_PREDICTION_STABILITY_PATIENCE)} "
+                        f"stability_tol={_coerce_nonnegative_float(args.prediction_stability_tol, DEFAULT_PREDICTION_STABILITY_TOL):.4g} "
+                        f"auto={'on' if args.auto_compute else 'off'} "
+                        f"auto_conf={float(args.auto_compute_confidence):.3f} "
+                        f"auto_entropy={float(args.auto_compute_entropy):.3f}"
+                    )
+                    print(
                         f"  memory={'on' if session_memory_enabled else 'off'} top_k={int(args.memory_top_k)} "
                         f"pool={int(args.memory_pool_size)} score_scale={float(args.memory_score_scale):.3f}"
                     )
                     print(
                         f"  llm_db={'on' if session_db_enabled else 'off'} top_k={int(args.db_top_k)} "
                         f"score_scale={float(args.db_score_scale):.3f}"
-                    )
-                    print(
-                        f"  runtime_compute_supported={'yes' if model_supports_runtime_compute(model) else 'no'} "
-                        f"cycles={args.reasoning_cycles if args.reasoning_cycles is not None else 'model default'} "
-                        f"adaptive={'on' if args.adaptive_compute else 'off'} "
-                        f"exit_tol={float(args.adaptive_exit_tol):.6g} "
-                        f"auto={'on' if args.auto_compute else 'off'} "
-                        f"auto_conf={float(args.auto_compute_confidence):.3f} "
-                        f"auto_entropy={float(args.auto_compute_entropy):.3f}"
                     )
                 elif cmd == "style":
                     if arg not in {"auto", "balanced", "creative", "concise", "analyst"}:
@@ -886,6 +1076,68 @@ def main():
                         print(f"{TerminalColors.SYSTEM}Creativity set to {float(args.creativity):.2f}.{TerminalColors.RESET}")
                     except Exception:
                         print(f"{TerminalColors.SYSTEM}Usage: /creativity 0.0-1.0{TerminalColors.RESET}")
+                elif cmd == "cycles":
+                    raw_cycles = arg.strip().lower()
+                    if raw_cycles in {"auto", "adaptive", "smart"}:
+                        args.reasoning_cycles = "auto"
+                        print(f"{TerminalColors.SYSTEM}Reasoning cycles set to auto.{TerminalColors.RESET}")
+                    else:
+                        cycles = _coerce_optional_positive_int(arg)
+                        if cycles is None and raw_cycles not in {"", "default", "off", "none"}:
+                            print(f"{TerminalColors.SYSTEM}Usage: /cycles <positive-int|auto|default>{TerminalColors.RESET}")
+                            continue
+                        args.reasoning_cycles = cycles
+                        label = cycles if cycles is not None else "default"
+                        print(f"{TerminalColors.SYSTEM}Reasoning cycles set to {label}.{TerminalColors.RESET}")
+                elif cmd == "adaptive":
+                    if arg.lower() in {"on", "1", "true"}:
+                        args.adaptive_compute = True
+                    elif arg.lower() in {"off", "0", "false"}:
+                        args.adaptive_compute = False
+                    else:
+                        print(f"{TerminalColors.SYSTEM}Usage: /adaptive on|off{TerminalColors.RESET}")
+                        continue
+                    print(f"{TerminalColors.SYSTEM}Adaptive compute {'enabled' if args.adaptive_compute else 'disabled'}.{TerminalColors.RESET}")
+                elif cmd == "exit_tol":
+                    try:
+                        args.adaptive_exit_tol = _coerce_nonnegative_float(arg, args.adaptive_exit_tol)
+                        print(f"{TerminalColors.SYSTEM}Adaptive exit tolerance set to {float(args.adaptive_exit_tol):.4g}.{TerminalColors.RESET}")
+                    except Exception:
+                        print(f"{TerminalColors.SYSTEM}Usage: /exit_tol <float>{TerminalColors.RESET}")
+                elif cmd == "exit_entropy":
+                    try:
+                        args.adaptive_exit_entropy = _coerce_nonnegative_float(
+                            arg,
+                            args.adaptive_exit_entropy,
+                        )
+                        print(f"{TerminalColors.SYSTEM}Adaptive exit entropy set to {float(args.adaptive_exit_entropy):.4g}.{TerminalColors.RESET}")
+                    except Exception:
+                        print(f"{TerminalColors.SYSTEM}Usage: /exit_entropy <float>{TerminalColors.RESET}")
+                elif cmd == "stability":
+                    try:
+                        args.prediction_stability_patience = _coerce_nonnegative_int(
+                            arg,
+                            args.prediction_stability_patience,
+                            MAX_RUNTIME_REASONING_CYCLES,
+                        )
+                        print(
+                            f"{TerminalColors.SYSTEM}Prediction stability patience set to "
+                            f"{int(args.prediction_stability_patience)}.{TerminalColors.RESET}"
+                        )
+                    except Exception:
+                        print(f"{TerminalColors.SYSTEM}Usage: /stability <nonnegative-int>{TerminalColors.RESET}")
+                elif cmd == "stability_tol":
+                    try:
+                        args.prediction_stability_tol = _coerce_nonnegative_float(
+                            arg,
+                            args.prediction_stability_tol,
+                        )
+                        print(
+                            f"{TerminalColors.SYSTEM}Prediction stability tolerance set to "
+                            f"{float(args.prediction_stability_tol):.4g}.{TerminalColors.RESET}"
+                        )
+                    except Exception:
+                        print(f"{TerminalColors.SYSTEM}Usage: /stability_tol <float>{TerminalColors.RESET}")
                 elif cmd == "top":
                     try:
                         args.show_top_responses = max(0, int(arg))
@@ -901,37 +1153,6 @@ def main():
                         print(f"{TerminalColors.SYSTEM}Usage: /timing on|off{TerminalColors.RESET}")
                         continue
                     print(f"{TerminalColors.SYSTEM}Per-turn timing {'enabled' if show_timing else 'disabled'}.{TerminalColors.RESET}")
-                elif cmd in {"cycles", "reasoning_cycles"}:
-                    if arg.lower() in {"", "auto", "default", "model"}:
-                        args.reasoning_cycles = None
-                    else:
-                        parsed_cycles = _coerce_optional_positive_int(
-                            arg,
-                            default=None,
-                            max_value=MAX_RUNTIME_REASONING_CYCLES,
-                        )
-                        if parsed_cycles is None:
-                            print(f"{TerminalColors.SYSTEM}Usage: /cycles <1-{MAX_RUNTIME_REASONING_CYCLES}|auto>{TerminalColors.RESET}")
-                            continue
-                        args.reasoning_cycles = parsed_cycles
-                    shown = args.reasoning_cycles if args.reasoning_cycles is not None else "model default"
-                    print(f"{TerminalColors.SYSTEM}Reasoning cycles set to {shown}.{TerminalColors.RESET}")
-                elif cmd == "adaptive":
-                    if arg.lower() in {"on", "1", "true", "yes"}:
-                        args.adaptive_compute = True
-                    elif arg.lower() in {"off", "0", "false", "no"}:
-                        args.adaptive_compute = False
-                    else:
-                        print(f"{TerminalColors.SYSTEM}Usage: /adaptive on|off{TerminalColors.RESET}")
-                        continue
-                    print(f"{TerminalColors.SYSTEM}Adaptive compute {'enabled' if args.adaptive_compute else 'disabled'}.{TerminalColors.RESET}")
-                elif cmd in {"exit_tol", "adaptive_exit_tol"}:
-                    parsed_tol = _coerce_nonnegative_float(arg, default=None)
-                    if parsed_tol is None:
-                        print(f"{TerminalColors.SYSTEM}Usage: /exit_tol <nonnegative float>{TerminalColors.RESET}")
-                        continue
-                    args.adaptive_exit_tol = parsed_tol
-                    print(f"{TerminalColors.SYSTEM}Adaptive exit tolerance set to {float(args.adaptive_exit_tol):.6g}.{TerminalColors.RESET}")
                 elif cmd in {"auto_compute", "auto"}:
                     if arg.lower() in {"on", "1", "true", "yes"}:
                         args.auto_compute = True
@@ -1038,15 +1259,18 @@ def main():
                 )
                 effective_reasoning_cycles = auto_compute_plan.get("selected_reasoning_cycles")
             with torch.no_grad():
-                logits_tensor, last_compute_metrics = forward_with_runtime_compute(
+                model_out, last_compute_metrics = forward_with_runtime_compute(
                     model,
                     x,
                     reasoning_cycles=effective_reasoning_cycles,
                     adaptive_compute=args.adaptive_compute,
                     exit_tol=args.adaptive_exit_tol,
-                    return_diagnostics=True,
+                    exit_entropy_threshold=args.adaptive_exit_entropy,
+                    prediction_stability_patience=args.prediction_stability_patience,
+                    prediction_stability_tol=args.prediction_stability_tol,
+                    auto_reasoning_context=context,
                 )
-                logits = logits_tensor[0, 0]  # (10,)
+                logits = model_out[0, 0]  # (10,)
             if auto_compute_plan is not None:
                 last_compute_metrics["auto_compute_plan"] = auto_compute_plan
             t_infer += max(0.0, time.perf_counter() - _t)
@@ -1209,7 +1433,10 @@ def main():
                         f"supported={last_compute_metrics.get('supported')} "
                         f"requested={requested} cycles_used={last_compute_metrics.get('cycles_used', 'n/a')} "
                         f"adaptive={last_compute_metrics.get('adaptive_compute')} "
-                        f"applied={last_compute_metrics.get('applied')}{plan_suffix}"
+                        f"applied={last_compute_metrics.get('applied')} "
+                        f"ponder={last_compute_metrics.get('ponder_cost')} "
+                        f"gate_entropy={last_compute_metrics.get('gating_entropy')} "
+                        f"exit={last_compute_metrics.get('exit_reason')}{plan_suffix}"
                     )
                 
     finally:

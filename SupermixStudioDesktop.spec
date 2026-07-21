@@ -1,32 +1,74 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""Portable PyInstaller template for a prepared Supermix Studio build tree.
+
+The normal build script stages models and a base model under ``build/`` before
+invoking PyInstaller.  Environment variables can override those locations for
+release builders without embedding a developer machine path in this file.
+"""
+
+import os
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\build\\studio_models_stage', 'bundled_models'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\build\\studio_base_model_stage', 'bundled_base_model'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\benchmark_all_models_common_plus_summary_20260403.json', 'output'), ('C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\output\\supermix_studio_bundled_models_manifest.json', 'output')]
+
+repo_root = Path(SPECPATH).resolve()
+
+
+def data_if_present(path, destination, *, required=False):
+    candidate = Path(path).expanduser().resolve()
+    if candidate.exists():
+        return [(str(candidate), destination)]
+    if required:
+        raise FileNotFoundError(f"required Studio packaging input is missing: {candidate}")
+    return []
+
+
+models_stage = os.environ.get(
+    "SUPERMIX_STUDIO_MODELS_STAGE",
+    str(repo_root / "build" / "studio_models_stage"),
+)
+base_model_stage = os.environ.get(
+    "SUPERMIX_STUDIO_BASE_MODEL_STAGE",
+    str(repo_root / "build" / "studio_base_model_stage"),
+)
+benchmark_summary = os.environ.get("SUPERMIX_STUDIO_BENCHMARK_SUMMARY", "")
+bundle_manifest = os.environ.get(
+    "SUPERMIX_STUDIO_BUNDLE_MANIFEST",
+    str(repo_root / "output" / "supermix_studio_bundled_models_manifest.json"),
+)
+runtime_manifest = repo_root / "source" / "studio_runtime_manifest.json"
+
+datas = [(str(repo_root / "assets"), "assets")]
+datas += data_if_present(models_stage, "bundled_models", required=True)
+datas += data_if_present(base_model_stage, "bundled_base_model", required=True)
+if benchmark_summary:
+    datas += data_if_present(benchmark_summary, "output", required=True)
+datas += data_if_present(bundle_manifest, "output", required=True)
+datas += data_if_present(runtime_manifest, "output", required=True)
+
 binaries = []
 hiddenimports = []
-tmp_ret = collect_all('webview')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('flask')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('werkzeug')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('PIL')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('sympy')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('mpmath')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('safetensors')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('transformers')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('peft')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+for package in (
+    "webview",
+    "flask",
+    "werkzeug",
+    "PIL",
+    "sympy",
+    "mpmath",
+    "safetensors",
+    "transformers",
+    "peft",
+):
+    package_datas, package_binaries, package_hiddenimports = collect_all(package)
+    datas += package_datas
+    binaries += package_binaries
+    hiddenimports += package_hiddenimports
 
 
 a = Analysis(
-    ['source\\supermix_multimodel_desktop_app.py'],
-    pathex=['source'],
+    [str(repo_root / "source" / "supermix_multimodel_desktop_app.py")],
+    pathex=[str(repo_root / "source")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -44,7 +86,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='SupermixStudioDesktop',
+    name="SupermixStudioDesktop",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -55,7 +97,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix_27\\assets\\supermix_qwen_icon.ico'],
+    icon=[str(repo_root / "assets" / "supermix_qwen_icon.ico")],
 )
 coll = COLLECT(
     exe,
@@ -64,5 +106,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='SupermixStudioDesktop',
+    name="SupermixStudioDesktop",
 )

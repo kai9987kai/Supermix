@@ -413,10 +413,12 @@ class ImageVariantEngine:
         finally:
             self.text_engine.clear(session_id)
 
-    def _build_final_prompt(self, original_prompt: str, style: str, use_text_refiner: bool) -> Dict[str, str]:
+    def _build_final_prompt(self, original_prompt: str, style: str, use_text_refiner: bool) -> Dict[str, Any]:
         base = _cleanup_prompt(original_prompt)
         refined = ""
+        refiner_model_calls = 0
         if use_text_refiner and self.text_engine.status().get("loaded"):
+            refiner_model_calls = 1
             try:
                 candidate = self._refine_prompt_with_text_model(base)
                 if _prompt_is_related(base, candidate):
@@ -429,7 +431,12 @@ class ImageVariantEngine:
         final_prompt = ", ".join(extras) if extras else base
         if "high detail" not in final_prompt.lower():
             final_prompt = f"{final_prompt}, high detail, coherent composition"
-        return {"base_prompt": base, "refined_prompt": refined, "prompt_used": final_prompt}
+        return {
+            "base_prompt": base,
+            "refined_prompt": refined,
+            "prompt_used": final_prompt,
+            "refiner_model_calls": refiner_model_calls,
+        }
 
     def generate_image(
         self,
@@ -499,6 +506,8 @@ class ImageVariantEngine:
             "seed": seed_value,
             "guidance_scale": guidance_value,
             "timing_ms": total_ms,
+            "refiner_model_calls": int(prompt_payload.get("refiner_model_calls") or 0),
+            "model_calls": 1 + int(prompt_payload.get("refiner_model_calls") or 0),
         }
         meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
@@ -512,6 +521,8 @@ class ImageVariantEngine:
             "metadata_path": str(meta_path),
             "image_url": f"/generated/{image_path.name}",
             "timing_ms": total_ms,
+            "refiner_model_calls": int(prompt_payload.get("refiner_model_calls") or 0),
+            "model_calls": 1 + int(prompt_payload.get("refiner_model_calls") or 0),
         }
         with self.lock:
             self.recent_images = [result, *self.recent_images[:5]]

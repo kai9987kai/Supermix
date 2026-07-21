@@ -79,9 +79,6 @@ try:
     from omni_collective_v6_model import OmniCollectiveEngineV6
     from omni_collective_v7_model import OmniCollectiveEngineV7
     from omni_collective_v8_model import OmniCollectiveEngineV8
-    from omni_collective_v46_model import OmniCollectiveEngineV46
-    from omni_collective_v42_model import OmniCollectiveEngineV42
-    from omni_collective_v41_model import OmniCollectiveEngineV41
     from protein_folding_model import ProteinFoldingEngine
     from three_d_generation_model import ThreeDGenerationEngine
 except ImportError:  # pragma: no cover
@@ -89,11 +86,33 @@ except ImportError:  # pragma: no cover
     from .omni_collective_v6_model import OmniCollectiveEngineV6
     from .omni_collective_v7_model import OmniCollectiveEngineV7
     from .omni_collective_v8_model import OmniCollectiveEngineV8
-    from .omni_collective_v46_model import OmniCollectiveEngineV46
-    from .omni_collective_v42_model import OmniCollectiveEngineV42
-    from .omni_collective_v41_model import OmniCollectiveEngineV41
     from .protein_folding_model import ProteinFoldingEngine
     from .three_d_generation_model import ThreeDGenerationEngine
+
+# Optional V4x components
+try:
+    from omni_collective_v46_model import OmniCollectiveEngineV46
+except ImportError:
+    try:
+        from .omni_collective_v46_model import OmniCollectiveEngineV46
+    except ImportError:
+        OmniCollectiveEngineV46 = None
+
+try:
+    from omni_collective_v42_model import OmniCollectiveEngineV42
+except ImportError:
+    try:
+        from .omni_collective_v42_model import OmniCollectiveEngineV42
+    except ImportError:
+        OmniCollectiveEngineV42 = None
+
+try:
+    from omni_collective_v41_model import OmniCollectiveEngineV41
+except ImportError:
+    try:
+        from .omni_collective_v41_model import OmniCollectiveEngineV41
+    except ImportError:
+        OmniCollectiveEngineV41 = None
 
 
 NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")

@@ -1,5 +1,6 @@
 import argparse
 import gc
+import heapq
 import hashlib
 import json
 import math
@@ -75,6 +76,9 @@ class PreferencePair:
     reasoning_score: float = 0.0
     creativity_score: float = 0.0
     knowledge_density_score: float = 0.0
+    verifier_score: float = 0.0
+    rule_reward: float = 0.0
+    verifier_difficulty: float = 0.0
     is_followup: bool = False
 
 
@@ -126,9 +130,12 @@ def _normalize_chat_pair_metadata(raw_metadata: Optional[Dict[str, object]]) -> 
 
 def _extract_chat_pair_metadata(record: Dict[str, object]) -> Dict[str, object]:
     raw_meta: Dict[str, object] = {}
+    nested_metadata = record.get("metadata")
+    if isinstance(nested_metadata, dict):
+        raw_meta.update(nested_metadata)
     for raw_key, raw_value in record.items():
         key = _coerce_text(raw_key)
-        if not key or key in {"user", "assistant", "messages"}:
+        if not key or key in {"user", "assistant", "messages", "metadata"}:
             continue
         if key == "source":
             key = "record_source"
@@ -823,6 +830,81 @@ def _looks_like_reasoning_prompt(text: str) -> bool:
         return False
     hits = sum(1 for k in REASONING_PROMPT_KEYWORDS if k in low)
     return hits >= 1
+
+
+def _metadata_number(metadata: Dict[str, object], *keys: str) -> Optional[float]:
+    if not isinstance(metadata, dict):
+        return None
+    lowered = {str(k).strip().lower(): v for k, v in metadata.items()}
+    for key in keys:
+        raw = lowered.get(str(key).strip().lower())
+        if raw is None:
+            continue
+        if isinstance(raw, bool):
+            return 1.0 if raw else 0.0
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _normalize_metric_0_1(value: Optional[float]) -> float:
+    if value is None:
+        return 0.0
+    parsed = float(value)
+    if parsed > 10.0:
+        parsed = parsed / 100.0
+    elif parsed > 1.0:
+        parsed = parsed / 10.0
+    return float(max(0.0, min(1.0, parsed)))
+
+
+def _normalize_rule_reward(value: Optional[float]) -> float:
+    if value is None:
+        return 0.0
+    parsed = float(value)
+    if parsed > 10.0 or parsed < -10.0:
+        parsed = parsed / 100.0
+    elif parsed > 1.0 or parsed < -1.0:
+        parsed = parsed / 10.0
+    return float(max(-1.0, min(1.0, parsed)))
+
+
+def _chat_pair_verifier_metrics(pair: ChatPair) -> Dict[str, float]:
+    metadata = pair.metadata if isinstance(pair.metadata, dict) else {}
+    tests_passed = _metadata_number(metadata, "tests_passed", "passed_tests")
+    tests_total = _metadata_number(metadata, "tests_total", "total_tests")
+    pass_rate: Optional[float] = None
+    if tests_passed is not None and tests_total is not None and tests_total > 0:
+        pass_rate = float(tests_passed) / float(max(1.0, tests_total))
+
+    verifier_score = max(
+        _normalize_metric_0_1(_metadata_number(metadata, "verifier_score", "test_pass_rate", "pass_rate")),
+        _normalize_metric_0_1(pass_rate),
+        _normalize_metric_0_1(_metadata_number(metadata, "verified_correct", "verified")),
+    )
+    rule_reward = _normalize_rule_reward(
+        _metadata_number(metadata, "rule_reward", "verifiable_reward", "reward", "verifier_reward")
+    )
+    difficulty = max(
+        _normalize_metric_0_1(
+            _metadata_number(metadata, "test_difficulty", "verifier_difficulty", "difficulty", "problem_difficulty")
+        ),
+        0.0,
+    )
+    verifier_bonus = (
+        0.16 * verifier_score
+        + 0.08 * max(0.0, rule_reward)
+        + 0.08 * verifier_score * difficulty
+        - 0.12 * max(0.0, -rule_reward)
+    )
+    return {
+        "verifier_score": float(verifier_score),
+        "rule_reward": float(rule_reward),
+        "verifier_difficulty": float(difficulty),
+        "verifier_bonus": float(max(-0.12, min(0.34, verifier_bonus))),
+    }
 
 
 def _iter_clean_pairs_from_jsonl(
@@ -2377,6 +2459,9 @@ def build_preference_rows(
                 "reasoning_score": float(max(0.0, pair.reasoning_score)),
                 "creativity_score": float(max(0.0, pair.creativity_score)),
                 "knowledge_density_score": float(max(0.0, pair.knowledge_density_score)),
+                "verifier_score": float(max(0.0, min(1.0, pair.verifier_score))),
+                "rule_reward": float(max(-1.0, min(1.0, pair.rule_reward))),
+                "verifier_difficulty": float(max(0.0, min(1.0, pair.verifier_difficulty))),
                 "is_followup": bool(pair.is_followup),
                 "pair_tokens": int(len(chosen["input_ids"]) + len(rejected["input_ids"])),
             }
@@ -2399,6 +2484,9 @@ def _preference_row_rescore_weight(
     reasoning_score = max(0.0, float(row.get("reasoning_score", 0.0)))
     creativity_score = max(0.0, float(row.get("creativity_score", 0.0)))
     knowledge_density_score = max(0.0, float(row.get("knowledge_density_score", 0.0)))
+    verifier_score = max(0.0, min(1.0, float(row.get("verifier_score", 0.0))))
+    rule_reward = max(-1.0, min(1.0, float(row.get("rule_reward", 0.0))))
+    verifier_difficulty = max(0.0, min(1.0, float(row.get("verifier_difficulty", 0.0))))
     followup_bonus = 0.04 if bool(row.get("is_followup", False)) else 0.0
 
     easy_focus = 0.84 + 0.46 * min(1.0, quality_gap / 0.24)
@@ -2417,7 +2505,14 @@ def _preference_row_rescore_weight(
     )
     prompt_focus = 0.96 + 0.04 * min(2.5, prompt_complexity)
     selection_focus = 1.0 + 0.03 * min(4.0, selection_score)
-    raw_weight = base_weight * difficulty_focus * novelty_focus * prompt_focus * selection_focus
+    verifier_focus = (
+        1.0
+        + 0.10 * verifier_score
+        + 0.06 * verifier_score * verifier_difficulty
+        + 0.05 * max(0.0, rule_reward)
+        - 0.08 * max(0.0, -rule_reward)
+    )
+    raw_weight = base_weight * difficulty_focus * novelty_focus * prompt_focus * selection_focus * verifier_focus
     return float(max(0.1, raw_weight))
 
 
@@ -2889,6 +2984,11 @@ def _sft_pair_selection_score(
     conversation_signal = max(0.0, float(alignment.conversation))
     creativity_signal = max(0.0, float(alignment.creativity))
     prompt_complexity = min(1.0, float(_prompt_complexity_score(pair.user)) / 1.35)
+    verifier_metrics = _chat_pair_verifier_metrics(pair)
+    verifier_score = float(verifier_metrics.get("verifier_score", 0.0))
+    rule_reward = float(verifier_metrics.get("rule_reward", 0.0))
+    verifier_difficulty = float(verifier_metrics.get("verifier_difficulty", 0.0))
+    verifier_bonus = float(verifier_metrics.get("verifier_bonus", 0.0))
     word_count = max(1, _word_token_count(assistant))
 
     if word_count <= 18:
@@ -2912,6 +3012,7 @@ def _sft_pair_selection_score(
         utility += 0.05
     if "quality_anchor" in str(pair.source or "").lower():
         utility += 0.03
+    utility += verifier_bonus
 
     difficulty = min(
         1.0,
@@ -2920,6 +3021,8 @@ def _sft_pair_selection_score(
         + 0.18 * min(1.0, float(word_count) / 180.0)
         + 0.18 * quality_signal,
     )
+    if verifier_score > 0.0 or rule_reward != 0.0:
+        difficulty = max(difficulty, 0.35 * prompt_complexity + 0.65 * verifier_difficulty)
 
     score = utility
     mode_norm = str(mode).strip().lower()
@@ -2939,6 +3042,10 @@ def _sft_pair_selection_score(
         "prompt_complexity": float(prompt_complexity),
         "difficulty": float(difficulty),
         "compactness": float(compactness),
+        "verifier_score": float(verifier_score),
+        "rule_reward": float(rule_reward),
+        "verifier_difficulty": float(verifier_difficulty),
+        "verifier_bonus": float(verifier_bonus),
         "words": float(word_count),
         "utility": float(utility),
         "score": float(score),
@@ -3051,9 +3158,20 @@ def _select_sft_coverage_greedy(
     keep_n: int,
     budget_mode: str,
     budget_power: float,
+    token_budget: Optional[float] = None,
+    min_keep: int = 0,
+    max_keep: int = 0,
 ) -> List[Tuple[float, float, ChatPair, Dict[str, float]]]:
+    """Select a quality-anchored coverage set with exact lazy greedy updates.
+
+    Coverage gains only decrease as buckets become represented, so cached
+    marginal scores are valid upper bounds. A heap therefore preserves the
+    exact greedy choice without rescoring every remaining row on every pick.
+    """
+    if not scored:
+        return []
     keep_n = max(1, min(len(scored), int(keep_n)))
-    remaining = list(scored)
+    entries = list(scored)
     selected: List[Tuple[float, float, ChatPair, Dict[str, float]]] = []
     seen_sources: set = set()
     seen_groups: set = set()
@@ -3061,6 +3179,12 @@ def _select_sft_coverage_greedy(
     seen_lengths: set = set()
     token_mode = str(budget_mode).strip().lower() == "tokens"
     budget_power = max(0.0, min(1.0, float(budget_power)))
+    token_budget_limit = None if token_budget is None else max(0.0, float(token_budget))
+    min_keep = max(0, min(keep_n, int(min_keep)))
+    max_keep = max(0, min(keep_n, int(max_keep)))
+    if max_keep > 0:
+        max_keep = max(max_keep, min_keep)
+    selected_tokens = 0.0
 
     def _marginal_score(entry: Tuple[float, float, ChatPair, Dict[str, float]]) -> float:
         _budget_value, score, _pair, metrics = entry
@@ -3081,21 +3205,42 @@ def _select_sft_coverage_greedy(
         marginal = float(score) + coverage_gain * (0.70 + 0.30 * quality_signal)
         if token_mode:
             tokens = max(8.0, float(metrics.get("estimated_tokens", 0.0)))
-            marginal = marginal / math.pow(tokens, budget_power)
+            marginal /= math.pow(tokens, budget_power)
         return float(marginal)
 
-    while remaining and len(selected) < keep_n:
-        best_idx = max(
-            range(len(remaining)),
-            key=lambda idx: (_marginal_score(remaining[idx]), remaining[idx][1], -idx),
-        )
-        entry = remaining.pop(best_idx)
+    heap = [
+        (-_marginal_score(entry), -float(entry[1]), idx)
+        for idx, entry in enumerate(entries)
+    ]
+    heapq.heapify(heap)
+    while heap and len(selected) < keep_n:
+        if max_keep > 0 and len(selected) >= max_keep:
+            break
+        _neg_cached, _neg_base, idx = heapq.heappop(heap)
+        entry = entries[idx]
+        current = _marginal_score(entry)
+        entry_tokens = max(0.0, float(entry[3].get("estimated_tokens", 0.0)))
+        if token_budget_limit is not None:
+            must_keep = not selected or len(selected) < min_keep
+            under_budget = (selected_tokens + entry_tokens) <= token_budget_limit
+            if not must_keep and not under_budget:
+                # Remaining budget only shrinks, so this row can never become
+                # feasible later and must not update the represented buckets.
+                continue
+        current_key = (current, float(entry[1]), -idx)
+        if heap:
+            next_idx = int(heap[0][2])
+            next_upper_key = (-float(heap[0][0]), -float(heap[0][1]), -next_idx)
+            if current_key < next_upper_key:
+                heapq.heappush(heap, (-current, -float(entry[1]), idx))
+                continue
         selected.append(entry)
         metrics = entry[3]
         seen_sources.add(str(metrics.get("source_key", "")))
         seen_groups.add(str(metrics.get("group_key", "")))
         seen_styles.add(str(metrics.get("style_key", "")))
         seen_lengths.add(str(metrics.get("length_key", "")))
+        selected_tokens += entry_tokens
     return selected
 
 
@@ -3204,28 +3349,41 @@ def _select_sft_training_pairs(
     if budget_mode == "tokens" and keep_ratio < 0.999:
         token_budget = max(0.0, total_estimated_tokens * keep_ratio)
         min_keep_target = min(min_keep, total) if min_keep > 0 else 0
-        for entry in scored:
-            if max_keep > 0 and len(selected) >= max_keep:
-                break
-            entry_tokens = float(entry[3].get("estimated_tokens", 0.0))
-            must_keep = len(selected) < max(1, min_keep_target)
-            under_budget = (selected_estimated_tokens + entry_tokens) <= token_budget
-            if not selected or must_keep or under_budget:
-                selected.append(entry)
-                selected_estimated_tokens += entry_tokens
-        if min_keep_target > 0 and len(selected) < min_keep_target:
-            selected_ids = {id(entry[2]) for entry in selected}
+        if mode == "coverage_topk":
+            selected = _select_sft_coverage_greedy(
+                scored,
+                keep_n=total,
+                budget_mode=budget_mode,
+                budget_power=budget_power,
+                token_budget=token_budget,
+                min_keep=min_keep_target,
+                max_keep=max_keep,
+            )
+        else:
             for entry in scored:
-                if id(entry[2]) in selected_ids:
-                    continue
-                selected.append(entry)
-                selected_estimated_tokens += float(entry[3].get("estimated_tokens", 0.0))
-                selected_ids.add(id(entry[2]))
-                if len(selected) >= min_keep_target:
+                if max_keep > 0 and len(selected) >= max_keep:
                     break
-        if not selected:
-            selected = [scored[0]]
-            selected_estimated_tokens = float(selected[0][3].get("estimated_tokens", 0.0))
+                entry_tokens = float(entry[3].get("estimated_tokens", 0.0))
+                must_keep = len(selected) < max(1, min_keep_target)
+                under_budget = (selected_estimated_tokens + entry_tokens) <= token_budget
+                if not selected or must_keep or under_budget:
+                    selected.append(entry)
+                    selected_estimated_tokens += entry_tokens
+            if min_keep_target > 0 and len(selected) < min_keep_target:
+                selected_ids = {id(entry[2]) for entry in selected}
+                for entry in scored:
+                    if id(entry[2]) in selected_ids:
+                        continue
+                    selected.append(entry)
+                    selected_estimated_tokens += float(entry[3].get("estimated_tokens", 0.0))
+                    selected_ids.add(id(entry[2]))
+                    if len(selected) >= min_keep_target:
+                        break
+            if not selected:
+                selected = [scored[0]]
+        selected_estimated_tokens = float(
+            sum(float(entry[3].get("estimated_tokens", 0.0)) for entry in selected)
+        )
     else:
         keep_n = total
         if keep_ratio < 0.999:
@@ -3261,6 +3419,8 @@ def _select_sft_training_pairs(
         f"quality={_mean('quality', scored):.3f}->{_mean('quality', selected):.3f} "
         f"density={_mean('density', scored):.3f}->{_mean('density', selected):.3f} "
         f"reason={_mean('reasoning', scored):.3f}->{_mean('reasoning', selected):.3f} "
+        f"verifier={_mean('verifier_score', scored):.3f}->{_mean('verifier_score', selected):.3f} "
+        f"rule_reward={_mean('rule_reward', scored):.3f}->{_mean('rule_reward', selected):.3f} "
         f"difficulty={_mean('difficulty', scored):.3f}->{_mean('difficulty', selected):.3f} "
         f"compactness={_mean('compactness', scored):.3f}->{_mean('compactness', selected):.3f} "
         f"words={_mean('words', scored):.1f}->{_mean('words', selected):.1f} "
@@ -3813,17 +3973,26 @@ def _preference_selection_score(
     reasoning_score = max(0.0, float(pair.reasoning_score))
     creativity_score = max(0.0, float(pair.creativity_score))
     knowledge_density_score = max(0.0, float(pair.knowledge_density_score))
+    verifier_score = max(0.0, min(1.0, float(pair.verifier_score)))
+    rule_reward = max(-1.0, min(1.0, float(pair.rule_reward)))
+    verifier_difficulty = max(0.0, min(1.0, float(pair.verifier_difficulty)))
+    verifier_bonus = (
+        0.16 * verifier_score
+        + 0.08 * max(0.0, rule_reward)
+        + 0.08 * verifier_score * verifier_difficulty
+        - 0.12 * max(0.0, -rule_reward)
+    )
     followup_bonus = 0.10 if bool(pair.is_followup) else 0.0
 
     if mode == "margin_topk":
-        return float(base_weight * (quality_gap + 0.35 * rejected_similarity + 0.08 * prompt_complexity))
+        return float(base_weight * (quality_gap + 0.35 * rejected_similarity + 0.08 * prompt_complexity + verifier_bonus))
 
     if mode == "capacity_aware":
         target = max(0.0, min(1.0, float(hardness_target)))
         bw = max(0.05, float(hardness_bandwidth))
         z = (rejected_similarity - target) / bw
         hardness_window = math.exp(-0.5 * z * z)
-        return float(base_weight * hardness_window * (quality_gap + 0.12 * prompt_complexity + 0.05))
+        return float(base_weight * hardness_window * (quality_gap + 0.12 * prompt_complexity + verifier_bonus + 0.05))
 
     if mode == "innovation_mix":
         target = max(0.0, min(1.0, float(hardness_target)))
@@ -3840,7 +4009,7 @@ def _preference_selection_score(
         return float(
             base_weight
             * (0.35 + 0.65 * hardness_window)
-            * (quality_gap + 0.12 * prompt_complexity + novelty_bonus + 0.05)
+            * (quality_gap + 0.12 * prompt_complexity + novelty_bonus + verifier_bonus + 0.05)
         )
 
     if mode == "coverage_margin":
@@ -3858,7 +4027,7 @@ def _preference_selection_score(
         return float(
             base_weight
             * (0.25 + 0.75 * hardness_window)
-            * (quality_gap + 0.14 * prompt_complexity + novelty_bonus + 0.05)
+            * (quality_gap + 0.14 * prompt_complexity + novelty_bonus + verifier_bonus + 0.05)
         )
 
     return float(max(0.25, pair.weight))
@@ -3938,8 +4107,11 @@ def _select_preference_coverage_greedy(
     scored: Sequence[Tuple[float, PreferencePair]],
     keep_n: int,
 ) -> List[PreferencePair]:
+    """Select preference pairs with exact lazy-greedy coverage updates."""
+    if not scored:
+        return []
     keep_n = max(1, min(len(scored), int(keep_n)))
-    remaining = list(scored)
+    entries = list(scored)
     selected: List[PreferencePair] = []
     seen_signatures: set = set()
     seen_styles: set = set()
@@ -3972,12 +4144,23 @@ def _select_preference_coverage_greedy(
             coverage_gain += 0.04
         return float(score + coverage_gain * quality_anchor)
 
-    while remaining and len(selected) < keep_n:
-        best_idx = max(
-            range(len(remaining)),
-            key=lambda idx: (_marginal_score(remaining[idx]), remaining[idx][0], -idx),
-        )
-        _score, pair = remaining.pop(best_idx)
+    heap = [
+        (-_marginal_score(entry), -float(entry[0]), idx)
+        for idx, entry in enumerate(entries)
+    ]
+    heapq.heapify(heap)
+    while heap and len(selected) < keep_n:
+        _neg_cached, _neg_base, idx = heapq.heappop(heap)
+        entry = entries[idx]
+        current = _marginal_score(entry)
+        current_key = (current, float(entry[0]), -idx)
+        if heap:
+            next_idx = int(heap[0][2])
+            next_upper_key = (-float(heap[0][0]), -float(heap[0][1]), -next_idx)
+            if current_key < next_upper_key:
+                heapq.heappush(heap, (-current, -float(entry[0]), idx))
+                continue
+        _score, pair = entry
         selected.append(pair)
         seen_signatures.add(_prompt_signature(pair.user)[:96] or "<empty>")
         seen_styles.add(_preference_pair_style_bucket(pair))
@@ -4679,6 +4862,18 @@ def build_preference_pairs_with_generation(
                 pair_weight *= float(max(0.7, coding_focus_boost))
             if prompt_is_reasoning:
                 pair_weight *= float(max(0.7, reasoning_focus_boost))
+            verifier_metrics = _chat_pair_verifier_metrics(pair)
+            verifier_score = float(verifier_metrics.get("verifier_score", 0.0))
+            rule_reward = float(verifier_metrics.get("rule_reward", 0.0))
+            verifier_difficulty = float(verifier_metrics.get("verifier_difficulty", 0.0))
+            if verifier_score > 0.0 or rule_reward != 0.0:
+                pair_weight *= (
+                    1.0
+                    + 0.08 * verifier_score
+                    + 0.05 * verifier_score * verifier_difficulty
+                    + 0.04 * max(0.0, rule_reward)
+                    - 0.06 * max(0.0, -rule_reward)
+                )
             pair_weight = float(max(0.75, min(3.25, pair_weight)))
             out.append(
                 PreferencePair(
@@ -4693,6 +4888,9 @@ def build_preference_pairs_with_generation(
                     reasoning_score=float(max(0.0, float(chosen_alignment.reasoning))),
                     creativity_score=float(max(0.0, float(chosen_alignment.creativity))),
                     knowledge_density_score=float(max(0.0, float(chosen_density))),
+                    verifier_score=float(verifier_score),
+                    rule_reward=float(rule_reward),
+                    verifier_difficulty=float(verifier_difficulty),
                     is_followup=bool(chosen_alignment.is_followup),
                 )
             )

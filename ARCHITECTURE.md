@@ -1,6 +1,7 @@
-# Architecture Guide: Supermix_27
+# Architecture Guide: Supermix
 
-This document provides an in-depth technical overview of the Supermix_27 model architecture, training pipeline, and design decisions.
+This document provides an in-depth technical overview of the Supermix model
+architecture, training pipeline, runtime surfaces, and design decisions.
 
 ---
 
@@ -35,9 +36,121 @@ This document provides an in-depth technical overview of the Supermix_27 model a
 ```
 
 The project is split into three main deployment surfaces:
-- **`source/`**: All training scripts, model definitions, dataset builders, and benchmarks.
-- **`runtime_python/`**: A self-contained copy of the inference-critical files with the production checkpoint.
+- **`source/`**: Active training code and the packaged multimodel Supermix Studio
+  runtime, including the route evidence/control plane.
+- **`runtime_python/`**: A legacy self-contained compatibility runtime. Its
+  generated `model_variants.py` stays synchronized, but it is not the active
+  multimodel Studio packaging tree.
 - **`web_static/`**: A static HTML/JS interface for GitHub Pages deployment (metadata retrieval only, no `.pth` inference).
+
+The Windows Studio build packages
+`source/supermix_multimodel_desktop_app.py` and includes a separate
+`SupermixRouteStudy.exe` review console plus a separate
+`SupermixRouteShadow.exe` commitment/reveal console.
+`source/studio_runtime_manifest.json` binds the active entrypoints, route schema
+versions, and module digests so source-only drift is detected before packaging.
+
+The route-study control plane has four intentionally separate artifact classes:
+
+1. an adjacent-route rehearsal plan for one prompt-specific post-filter support
+   stratum;
+2. a prompt-free stateful protocol draft that inventories one or more compatible
+   strata without assigning or executing them;
+3. a `route-study-review-bundle-v1` portable review bundle containing the full
+   canonical source plans and closed builder options;
+4. a shadow-only whole-policy assignment registry that consumes a fully
+   reconstructable review bundle without writing the executed-decision ledger.
+
+Bundle verification reconstructs the protocol byte-for-byte from its source
+plans. Standalone protocol audit remains structural because the compact draft
+does not embed those plans. Neither verification level supplies authenticity,
+a trusted timestamp, causal identification, random assignment, or permission to
+activate; those remain separate external gates.
+
+The shadow registry is implemented by `source/route_policy_shadow_registry.py`
+and stored separately at `memory/route-policy-shadow-registry.sqlite3`; it does
+not share tables or lifecycle semantics with `route-policy-ledger.sqlite3`. A
+campaign design binding freezes one sticky session-cluster assignment unit and
+exactly two whole-policy arms at 5,000 basis points each:
+`incumbent_source_policy` binds the complete source-policy cohort, while
+`candidate_target_policy` binds the complete target-policy class. The
+prompt-specific route actions carried by source strata describe where support
+exists; they are not treatment arms and are never pooled into a whole-policy
+assignment set.
+
+Those bindings are declarative policy-class manifests, not executable-code
+attestations. V1 also treats the private cluster identifier as an opaque byte
+string after input validation; it does not prove cluster-map membership or
+canonicalize aliases. Executable artifact binding and cluster-map governance
+remain separate prerequisites outside this registry.
+
+The commitment/reveal flow is deliberately one way:
+
+1. `seal` fully reconstructs the review bundle, generates 256 seed bits from the
+   operating-system CSPRNG, binds the seed commitment into a committed copy of
+   the bundle, and writes a public campaign seal;
+2. the seed material is written first to a separately handled private capsule
+   and is absent from the registry before reveal;
+3. `commit` derives a study-scoped cluster pseudonym internally and appends only
+   an opaque assignment-reveal commitment, withholding the chosen arm;
+4. `close` freezes the commitment count and prevents further enrollment;
+5. only then can `reveal` persist the public seed opening, after which `verify`
+   reconstructs the frozen assignments and checks their commitments.
+
+Registry artifacts use a strict, JCS-informed canonical JSON subset: duplicate
+keys and non-finite values fail closed, registry numbers are I-JSON-safe
+integers, and object keys are ASCII for portable ordering. RFC 5869
+extract-and-expand derives context-separated identity and assignment keys;
+HMAC-SHA-256 derives pseudonyms and whole-policy draw buckets. These mechanics
+make local reconstruction deterministic. They do not prove unbiased enrollment,
+independent seed custody, nonce-grinding resistance, anonymity, cluster
+independence, non-anticipation, finite carryover, or a valid interference model.
+
+All registry mutations require `SupermixRouteShadow.exe`. The Studio server
+exposes only `GET /api/route_shadow_registry/status`, so the browser can verify
+and display campaign state and the event chain but cannot seal, enroll, close,
+reveal, or verify assignments. The executed route ledger rejects shadow and
+rehearsal flags plus reserved shadow commitment namespaces. Any non-null
+executed assignment evidence must use the closed
+`route-execution-assignment-v1:<sha256>` namespace, so the registry's bare
+commitment digest cannot pass logging-support validation. This is a local type
+boundary, not authenticated provenance against a hostile caller.
+
+The Studio server defaults to the loopback interface (`127.0.0.1`); listening
+on another interface is an explicit operator choice and does not add
+authentication. The browser response is always `Cache-Control: no-store`.
+Within one process, an audited status snapshot is reused only while the durable
+database and non-empty WAL stat signature are unchanged; any observed change or
+concurrent-write race forces another full read-only audit.
+
+SQLite `BEGIN IMMEDIATE` transactions, append-only triggers, immutable closure
+and reveal rows, campaign-order indexes, and a domain-separated event hash chain
+protect normal local operation. Read-only snapshots audit those schema objects,
+verify an exact schema-definition fingerprint, reconstruct every stored artifact,
+and require the event inventory to match the evidence tables. Assignment
+verification preflights the frozen closure, public seed opening, and each
+commitment projection; processed mismatches remain verification failures. This
+remains a local file controlled by the host: there is no signer,
+trusted clock, external witness, verifiable-data-structure receipt, consistency
+or inclusion proof, or transparency service. The registry never invokes a
+model, chooses a live route, records an executed propensity, performs causal
+inference, activates a policy, or enables automatic promotion.
+
+`runtime_python/model_variants.py` is a generated snapshot of the canonical
+architecture registry. After changing `source/model_variants.py`, refresh and
+verify the standalone runtime with:
+
+```bash
+python source/sync_runtime_model_variants.py
+python source/sync_runtime_model_variants.py --check
+```
+
+The v51 prediction-stability verifier uses top-1 persistence plus confidence
+range to decide an inference-only early exit. It also computes a top-k
+Jensen-Shannon drift diagnostic over consecutive full-prefix output
+distributions, retaining all non-top-k mass in one bucket. That value is
+non-causal, shadow telemetry: it is exposed by the benchmark but is not an exit
+condition, router input, or activation signal.
 
 ---
 

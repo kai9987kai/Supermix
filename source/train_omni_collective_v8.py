@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import warnings
 import zipfile
 from collections import defaultdict
 from datetime import datetime
@@ -273,8 +274,21 @@ def _restore_scheduler_state_v8(
             ),
         )
         if resumed_steps > 0:
-            for _ in range(resumed_steps):
-                scheduler.step()
+            # Cursor restoration is not a training step. Jump directly so a large
+            # legacy checkpoint does not replay every historical scheduler step.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"Detected call of `lr_scheduler\.step\(\)` before `optimizer\.step\(\)`.*",
+                    category=UserWarning,
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"The epoch parameter in `scheduler\.step\(\)` was not necessary.*",
+                    category=UserWarning,
+                )
+                scheduler.step(resumed_steps)
+            scheduler._step_count = resumed_steps + 1
         print(
             json.dumps(
                 {

@@ -1,6 +1,7 @@
-# Contributing to Supermix_27
+# Contributing to Supermix
 
-Thank you for your interest in contributing to Supermix_27! This guide explains how to get started, the code conventions we follow, and how to submit your changes.
+Thank you for contributing to Supermix. This guide covers the active source,
+legacy compatibility, test, and packaging contracts.
 
 ---
 
@@ -19,7 +20,7 @@ Thank you for your interest in contributing to Supermix_27! This guide explains 
 ### Repository Structure
 
 ```
-Supermix_27/
+Supermix/
 ├── source/                     # Training, model definitions, dataset builders
 │   ├── run.py                  # ChampionNet backbone definition
 │   ├── model_variants.py       # All classifier head variants
@@ -28,9 +29,9 @@ Supermix_27/
 │   ├── device_utils.py         # Cross-platform device selection
 │   ├── benchmark.py            # Evaluation benchmarks
 │   └── build_*.py              # Dataset construction scripts
-├── runtime_python/             # Self-contained inference runtime
-│   ├── chat_web_app.py         # Production web server
-│   └── *.pth                   # Production checkpoint
+├── runtime_python/             # Legacy self-contained compatibility runtime
+├── source/supermix_multimodel_web_app.py     # Active Studio web runtime
+├── source/supermix_multimodel_desktop_app.py # Active packaged Studio entrypoint
 ├── web_static/                 # GitHub Pages static UI
 ├── MODEL_CARD_V28.md           # Model card with benchmarks
 ├── ARCHITECTURE.md             # Technical architecture deep-dive
@@ -58,7 +59,14 @@ Supermix_27/
 
 4. **Register in `finetune_chat.py`**: Add your variant to the `--model_size` choices.
 
-5. **Update documentation**: Add your variant to `MODEL_CARD_V28.md` and `ARCHITECTURE.md`.
+5. **Refresh the standalone runtime snapshot**:
+
+   ```bash
+   python source/sync_runtime_model_variants.py
+   python source/sync_runtime_model_variants.py --check
+   ```
+
+6. **Update documentation**: Add your variant to `MODEL_CARD_V28.md` and `ARCHITECTURE.md`.
 
 ### Adding a New Dataset
 
@@ -116,18 +124,32 @@ docs(model_card): fill in v28 benchmark results
 
 ## Testing
 
-Currently the project does not have a formal test suite. When contributing:
+The project has a formal pytest suite and focused runtime quality workflow. When contributing:
 
-1. **Smoke test** your changes by running a short training session:
+1. Run the focused tests for the files you changed, then run the full suite:
+
+   ```bash
+   python -m pytest -q
+   ```
+
+2. For active Studio runtime or route-control changes, verify the checked
+   distribution contract and generated model-variant snapshot:
+
+   ```bash
+   python source/generate_studio_runtime_manifest.py --check
+   python source/sync_runtime_model_variants.py --check
+   ```
+
+3. **Smoke test** training-specific changes with a short training session:
    ```bash
    python source/finetune_chat.py --data source/conversation_data.smoke_manifest.json \
        --data_manifest source/conversation_data.smoke_manifest.json \
        --model_size <your_variant> --epochs 1 --batch_size 32
    ```
 
-2. **Verify weight loading** from existing checkpoints to ensure backward compatibility.
+4. **Verify weight loading** from existing checkpoints to ensure backward compatibility.
 
-3. **Run benchmarks** if applicable:
+5. **Run benchmarks** if applicable:
    ```bash
    python source/benchmark.py
    ```

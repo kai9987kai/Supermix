@@ -475,15 +475,862 @@ Repo changes:
 - The training monitor research board now surfaces the selected run's top regression, prompt preview, and tuned/reference preview, and adds a direct `Open selected samples` action.
 - Older aggregate-only benchmark artifacts remain readable; the monitor now explicitly reports when a run needs a rerun to generate detailed sample traces instead of showing a blank state.
 
-## July 2026: Runtime Test-Time Compute Controls
+## June 2026: Runtime Test-Time Compute Controls
 
 Repo changes:
 
-- Added `forward_with_runtime_compute(...)` to `source/chat_app.py` and the packaged `runtime_python/chat_app.py`. The helper introspects `model.forward(...)`, forwards only supported v50 kwargs, and caps user-supplied `reasoning_cycles` at 64 for predictable latency.
-- Exposed `--reasoning_cycles`, `--adaptive_compute`, and `--adaptive_exit_tol` in terminal chat, plus interactive `/cycles`, `/adaptive`, and `/exit_tol` commands.
-- Added source and packaged web controls for reasoning cycles and adaptive compute; `/api/chat` now returns a `compute` diagnostics object with support/applied flags, `cycles_used`, and available v50 head metrics.
-- Added `/api/compute_sweep` and a browser `Sweep` button that compare multiple test-time compute budgets for the draft prompt without mutating chat history. Each row reports latency, realized cycles, predicted label, confidence, entropy, and compute diagnostics.
-- Added `auto_compute` for web chat: the runtime can probe a small cycle ladder, choose the earliest budget that meets confidence/entropy targets, then run the normal response path at that selected budget.
-- Promoted compute-budget evaluation into shared `chat_app.py` helpers and exposed terminal `--auto_compute`, `/auto_compute`, and `/auto_targets` so browser and terminal runtimes can both use confidence/entropy based budget selection.
-- Hardened the packaged runtime web renderer to use DOM/textContent for chat and candidate text instead of injecting raw response HTML.
-- Added `test_runtime_compute_controls.py` to verify backward compatibility with legacy models, supported-kwarg forwarding, diagnostics, and the Flask API path.
+- Exposed the v50 `CognitiveLeapExpertHead` test-time compute path in the terminal and web chat runtimes:
+  - `--reasoning_cycles` / `/cycles` selects extra recursive inference depth.
+  - `--adaptive_compute` / `/adaptive` enables convergence early-exit.
+  - `--adaptive_exit_tol` / `/exit_tol` controls the early-exit tolerance.
+  - `--adaptive_exit_entropy` / `/exit_entropy` controls the entropy-based
+    early-exit threshold.
+- Added `forward_with_runtime_compute(...)` in `source/chat_app.py` and synced it to `runtime_python/chat_app.py`. The helper introspects the model `forward(...)` signature, so these knobs are applied only to variants that support them and are ignored safely by older checkpoints.
+- Runtime requests are capped at `MAX_RUNTIME_REASONING_CYCLES` to prevent
+  accidental runaway API/CLI calls while still allowing deeper-than-default
+  controlled experiments.
+- Updated `source/chat_web_app.py` and `runtime_python/chat_web_app.py` to accept per-request `reasoning_cycles`, `adaptive_compute`, `adaptive_exit_tol`, and `adaptive_exit_entropy`, and to return `compute` diagnostics plus `timing_ms.cycles_used`.
+- `compute` diagnostics now include `ponder_cost`, `consistency_loss`, and
+  `gating_entropy` when the active model exposes those buffers.
+- Added `test_runtime_compute_controls.py` covering supported-model forwarding, legacy-model no-op behavior, `/api/chat` payload forwarding, cycle capping, entropy-threshold forwarding, and diagnostics extraction.
+- Added a compute-sweep experiment path in `source/chat_web_app.py` and
+  `runtime_python/chat_web_app.py`: `/api/compute_sweep` compares multiple
+  reasoning-cycle budgets for the same draft prompt without mutating chat
+  history, and both browser UIs expose it through a `Sweep` button. Each row
+  reports latency, realized cycles, predicted label, confidence, entropy, and
+  compute diagnostics.
+- Added `auto_compute` for web chat: the runtime can probe a small cycle ladder,
+  choose the earliest budget that meets confidence/entropy targets, then run the
+  normal response path at that selected budget.
+- Promoted compute-budget evaluation into shared `chat_app.py` helpers and
+  exposed terminal `--auto_compute`, `/auto_compute`, and `/auto_targets` so
+  browser and terminal runtimes can both use confidence/entropy-based budget
+  selection.
+- Hardened the packaged runtime web renderer to use DOM/textContent for chat and
+  candidate text instead of injecting raw response HTML.
+
+Rationale:
+
+- Recent adaptive test-time compute and latent/recurrent reasoning work argues for controllable inference budgets instead of a single fixed-depth runtime. The v50 architecture already had that mechanism; this change makes it reachable from the actual app surfaces and observable during local experiments.
+
+## July 2026: Adaptive Runtime Routing Feedback
+
+Additional primary sources reviewed:
+
+1. ParetoBandit: Budget-Paced Adaptive Routing for Non-Stationary LLM Serving
+   https://arxiv.org/abs/2604.00136
+2. Adaptive LLM Routing under Budget Constraints
+   https://arxiv.org/abs/2508.21141
+3. LLM Routing with Dueling Feedback
+   https://arxiv.org/html/2510.00841v1
+4. SeqRoute: Global Budget-Aware Sequential LLM Routing
+   https://arxiv.org/abs/2605.25424
+
+Repo changes:
+
+- Added recency-weighted route-feedback summaries with geometric forgetting so
+  recent route quality regressions can override stale positive feedback.
+- Added route economics capture for agent-mode usage, including estimated and
+  actual model-call, tool-call, cost, and latency units.
+- The auto agent router now uses session-scoped feedback to downgrade routes
+  with recent adaptive regressions, pace high-cost routes under budget profiles,
+  and prefer neighboring routes with stronger quality-cost evidence when enough
+  relevant samples exist.
+- Added optional target-route session pacing via
+  `auto_session_budget_target_routes`, so a fixed session budget can be spread
+  across an expected number of future route decisions instead of only reacting
+  when the remaining budget is already tight.
+- Added a non-mutating route-plan preview path via `preview_route_plan(...)` and
+  `/api/route_plan`, allowing the web UI to inspect the selected route,
+  estimated cost, feedback adjustment, and session-budget adjustment before any
+  model inference or memory writes happen.
+- Route-plan previews now include `route_alternatives`, a compact cost estimate
+  table for each eligible route mode, so the UI can expose the local routing
+  frontier before spending inference calls.
+- Added `route_frontier` preview metadata that annotates candidate routes with
+  heuristic/adaptive quality estimates, budget-fit status, Pareto-frontier
+  labels, stable frontier ranks, and a recommended route for the current budget
+  profile without changing the actual execution route.
+- Route-frontier budget state now separates remaining-session fit from
+  route-horizon pacing fit, exposing `remaining_cost_units`,
+  `pacing_cap_cost_units`, and `effective_cap_cost_units` so the UI can
+  distinguish hard budget exhaustion from deliberate pacing preservation.
+- Candidate frontier rows now include a `budget_blocker` classification
+  (`remaining_budget`, `pacing_cap`, or none), and all-over-cap previews use
+  separate recommendation reasons for hard budget exhaustion versus route-horizon
+  pacing preservation.
+- Candidate frontier rows now expose `estimated_quality_cost_score`,
+  `quality_cost_source`, and `quality_evidence_status`; complete adaptive
+  quality-cost evidence can drive balanced/fast/deep route-frontier ranking,
+  while incomplete cost samples, regressions, and non-finite telemetry fall back
+  to heuristic cost-adjusted estimates.
+- Route-frontier previews now distinguish raw `pareto_frontier` candidates from
+  `budget_feasible_pareto_frontier` candidates, so a high-quality route can
+  remain visible as an efficient tradeoff without being mistaken for a route that
+  fits the current session or pacing budget.
+- Merged the missing v41/v42 Omni Collective continuation source from the
+  sibling `Supermix_27` checkout into the active `Supermix` tree: v41/v42 engine
+  wrappers, blueprint/prep scripts, smoke/frontier train scripts, run launchers,
+  and focused tests. Generated build outputs, checkpoints, dataset shards, and
+  stale package artifacts were intentionally left out of the merge.
+- Hardened route-planning estimates with bounded numeric setting coercion for
+  loop budgets, web-search budgets, and web-search result limits so malformed UI
+  or API values cannot turn a dry-run route preview into a server error.
+- The web app exposes route quality, average cost, latency, feedback controls,
+  route health, dry-run route planning, and a distinct Pareto-style trace pill
+  for cost-aware adaptive route changes.
+
+Notes:
+
+- This is a compact engineering adaptation of online routing ideas, not a full
+  contextual-bandit implementation. It stays prompt/session scoped, blocks
+  unrelated recent-feedback fallback from changing new prompts, requires actual
+  cost evidence for adaptive quality-cost comparisons, and lets explicit session
+  budget pacing make the final route-depth decision. The route-count horizon is a
+  lightweight global-budget adaptation inspired by sequential-routing work; it
+  does not attempt to solve the full online planning problem.
+
+## July 2026: v51 Cognitive Leap Ultra + Completion Build
+
+Primary sources reviewed:
+
+1. MiMo-V2-Flash Technical Report (efficient MoE, hybrid attention, and MTP)
+   https://arxiv.org/abs/2601.02780
+2. Scaling Test-time Compute for LLM Agents
+   https://arxiv.org/abs/2506.12928
+3. Rethinking Optimal Verification Granularity for Compute-Efficient Test-Time
+   Scaling
+   https://arxiv.org/abs/2505.11730
+4. Trust but Verify! A Survey on Verification Design for Test-time Scaling
+   https://arxiv.org/abs/2508.16665
+
+Repo changes and verified build path:
+
+- Added the v51 `cognitive_leap_ultra_expert`: a recurrent mixture-of-cores,
+  cross-latent attention, deep-supervised refinement head with ACT,
+  convergence, and entropy-based inference halting.
+- Added a controlled v51 trainer/benchmark and a metadata materializer so a
+  trained checkpoint can move directly into the terminal and browser runtimes.
+- Kept per-request reasoning budgets, adaptive exits, non-mutating compute
+  sweeps, and compute diagnostics available through the canonical runtime and
+  its root compatibility entry point.
+- Completed a bounded CPU training/build run, reloaded the emitted checkpoint,
+  and exercised it through the browser UI and `/api/chat` runtime path.
+- Replaced linear legacy scheduler replay in the v8 resume fallback with a
+  constant-time cursor restore, preserving the learning-rate position without
+  dummy optimizer updates or scheduler-order warnings.
+
+Research boundary:
+
+- The v51 head is a compact adaptation of sparse expert routing and adaptive
+  test-time reasoning for this classifier-backed architecture. It is not a
+  reproduction of MiMo-V2-Flash's full autoregressive hybrid SWA/global-attention
+  backbone or its MTP decoding stack.
+- Verifier-guided candidate search and larger-scale autoregressive training are
+  useful benchmark-gated follow-ons, not capabilities claimed by this build.
+
+## July 2026: Prediction-Stability Verifier for Local Test-Time Scaling
+
+Additional primary sources reviewed:
+
+1. Adaptive Test-Time Compute Allocation for Reasoning LLMs via Constrained
+   Policy Optimization
+   https://arxiv.org/abs/2604.14853
+2. ThinkBooster: A Unified Framework for Seamless Test-Time Scaling of LLM
+   Reasoning
+   https://arxiv.org/abs/2606.06915
+3. LATTS: Locally Adaptive Test-Time Scaling
+   https://arxiv.org/abs/2509.20368
+4. Step-level Verifier-guided Hybrid Test-Time Scaling for Large Language Models
+   https://arxiv.org/abs/2507.15512
+
+Repo changes:
+
+- Added an inference-only full-output verifier to the v51 recurrent head. At
+  each cycle it constructs the output that would be returned if reasoning
+  stopped at that point, then tracks the top prediction and confidence range.
+- Adaptive inference can now stop when the prediction remains unchanged for a
+  configurable patience window and confidence drift stays below a configurable
+  tolerance. This criterion is separate from latent convergence, low entropy,
+  and ACT remaining-mass exits.
+- Added `prediction_stability_patience` and `prediction_stability_tol` across
+  the shared runtime helper, terminal commands, source web API/UI, packaged
+  runtime web API/UI, materialized metadata, diagnostics, and launch profile.
+- Compute diagnostics now report `exit_reason`, `prediction_streak`, and
+  `prediction_confidence_delta`, making the allocation decision inspectable.
+- Restored `context_mix_v4` in the packaged `runtime_python` feature pipeline
+  and aligned its optimized imperative matcher with source semantics, so the
+  same v51 metadata no longer silently downgrades to `context_mix_v3` outside
+  the source launcher.
+- Added `source/benchmark_v51_prediction_stability.py`, which compares fixed
+  and adaptive policies as request-sized inference rather than hiding local
+  exits inside one large batch.
+
+First serving-style checkpoint result (64 held-out requests, CPU):
+
+| policy | accuracy | mean cycles | mean latency |
+|---|---:|---:|---:|
+| fixed 3 cycles | 0.125 | 3.0 | 84.828 ms |
+| stability verifier, max 8 | 0.125 | 2.0 | 72.167 ms |
+
+- Prediction agreement was 100%; every request exited with
+  `prediction_stable` at cycle 2.
+- This reduced recurrent cycles by 33.3% and measured mean latency by 14.9% on
+  that serving slice without changing accuracy. The result is a runtime
+  efficiency result on a small synthetic checkpoint, not a general reasoning
+  quality claim.
+
+## July 2026: Preference-Aware Routing with Calibrated Evidence
+
+Additional primary sources reviewed:
+
+1. RouteLLM: Learning to Route LLMs from Preference Data (ICLR 2025)
+   https://proceedings.iclr.cc/paper_files/paper/2025/hash/5503a7c69d48a2f86fc00b3dc09de686-Abstract-Conference.html
+2. Learning to Route LLMs from Bandit Feedback: One Policy, Many Trade-offs (BaRP, 2025)
+   https://arxiv.org/abs/2510.07429
+3. Learning to Route LLMs from Implicit Cost-Performance Preferences via Meta-Learning (2026)
+   https://arxiv.org/abs/2606.06178
+4. UCCI: Calibrated Uncertainty for Cost-Optimal LLM Cascade Routing (2026)
+   https://arxiv.org/abs/2605.18796
+5. Correlation-Aware Contextual Bandits with Surrogate Rewards for LLM Routing (2026)
+   https://arxiv.org/abs/2607.09015
+
+Repo changes:
+
+- Replaced binary-only route corrections with a controlled feedback taxonomy:
+  `good`, `bad_quality`, `needs_deeper`, `too_costly`, and `too_slow`.
+- Split feedback into quality, depth, cost-pressure, and latency-pressure axes.
+  Cost or latency complaints therefore no longer teach the router that an
+  otherwise useful answer was low quality, while `needs_deeper` can request one
+  higher route without poisoning quality estimates.
+- Added recency-weighted effective sample sizes and Wilson-shaped heuristic
+  evidence bands for observed route quality. These are descriptive recent-signal
+  gates, not nominal 90% confidence intervals: with decay `0.6`, Kish effective
+  sample size approaches a ceiling of `(1 + 0.6) / (1 - 0.6) = 4` even as raw
+  feedback grows. Risk-adjusted quality/cost comparisons use these bands when
+  both neighboring modes have established recent evidence.
+  Emerging mean evidence can still influence routing after the existing
+  minimum-evidence and quality-delta gates; sparse or unrelated fallback
+  feedback cannot directly reroute an unmatched prompt.
+- Exposed confidence bounds, evidence status, preference direction, cost, and
+  latency in route health. The dry-run route planner additionally exposes the
+  Pareto frontier and risk-adjusted scores.
+- Connected the main multimodel runtime to v51 reasoning-cycle and adaptive-exit
+  controls. Auto routing now supplies its prompt-derived compute budget to the
+  selected backend, while explicit per-request settings still take precedence.
+- Added checkpoint `runtime_defaults` handling with clean reload semantics and
+  surfaced compute telemetry (cycles used, exit reason, and prediction drift)
+  in the multimodel trace.
+- Made absent standalone-CLI compute flags inherit checkpoint metadata instead
+  of accidentally overriding it with library defaults; explicit command-line
+  values still have highest precedence.
+- Layered exact lazy-greedy marginal coverage onto the Qwen SFT and preference
+  rarity priors. SFT pair-budget and feasibility-aware token-budget coverage,
+  plus preference pair-budget coverage, now use heap upper bounds to reduce
+  redundant rescoring while preserving deterministic quality-anchored choices.
+- Replaced the packaged model-variant proxy with a self-contained source
+  snapshot, added an isolated-import regression test and deterministic sync
+  checker, and wired the runtime parity gates into GitHub Actions.
+
+Research boundary:
+
+- This is an inspectable, session-scoped engineering adaptation of
+  preference-aware and uncertainty-aware routing. It is not a trained
+  generalist router, a Bayesian posterior over model utility, or an online
+  contextual-bandit regret guarantee.
+- Recency-weighted Wilson-shaped bounds are used as heuristic evidence gates,
+  not as nominal coverage or proof that sparse, adaptive user feedback is
+  statistically independent. Larger offline replay sets and randomized policy
+  evaluation remain benchmark-gated follow-ons.
+
+## July 2026: Honest Route Policy Evidence Lab
+
+Additional primary sources reviewed:
+
+1. Confident Off-Policy Evaluation and Selection through Self-Normalized Importance Weighting (AISTATS 2021)
+   https://proceedings.mlr.press/v130/kuzborskij21a.html
+2. Anytime-valid Off-policy Inference for Contextual Bandits (ICML 2021)
+   https://proceedings.mlr.press/v139/karampatziakis21a.html
+3. Improved Offline Contextual Bandits with Second-Order Bounds: Betting and Freezing (COLT 2025)
+   https://proceedings.mlr.press/v291/ryu25a.html
+4. Oracle-Efficient Pessimism: Offline Policy Optimization in Contextual Bandits (AISTATS 2024)
+   https://proceedings.mlr.press/v238/wang24a.html
+5. Conservative Contextual Bandits with Interleaving (ICML 2023)
+   https://proceedings.mlr.press/v202/takemura23a.html
+
+Repo changes:
+
+- Added immutable shadow threshold profiles (`efficiency`, `balanced`, and
+  `quality_first`) plus a pure replay module in `source/route_policy_lab.py`.
+- Replay joins usage and feedback only by exact server route ID. It reports
+  coverage, candidate agreement, observed approval, cost, and latency only for
+  rows where the candidate action matches the action that actually ran.
+  Changed actions receive no imputed reward.
+- The runtime now returns the same UUID route ID that it writes to usage
+  memory. Browser feedback sends only that ID, the controlled feedback intent,
+  and an optional note; prompt, mode, model, policy, and economics are recovered
+  from the server usage row. Repeated feedback for one route becomes an
+  idempotent revision instead of an accidental duplicate.
+- Route logs now carry policy/version and feature-schema identifiers, the
+  safety-filtered eligible set, exact post-filter action probabilities,
+  decision context, and the chosen action's logging propensity. The current
+  policy is explicitly marked deterministic with a one-hot vector.
+- Added a read-only Route Policy Lab panel and API. Its promotion gate remains
+  `shadow_only` and blocks automatic promotion when valid randomized overlap is
+  absent. Even propensity-ready rows require a separately validated off-policy
+  estimator and review; readiness alone is not an estimate.
+- Session JSON writes now replace an on-disk temporary file atomically, reducing
+  the chance that an interrupted write destroys the policy evidence ledger.
+
+Research boundary:
+
+- Historical deterministic logs do not identify outcomes for unchosen routes.
+  The Policy Lab therefore labels its results associational and does not claim
+  inverse-propensity, doubly robust, causal, or high-probability policy value.
+- Explicit `needs_deeper`, `too_costly`, and `too_slow` feedback remains useful
+  as direct one-step user intent. It is separate from policy-promotion evidence.
+- A future opt-in explorer must randomize only between safety-filtered adjacent
+  routes, record exact post-filter propensities before execution, retain failed
+  routes, and evaluate with session-clustered pessimistic bounds before any
+  promotion path can be enabled.
+
+## July 2026: Durable Failure-Aware Route Evidence
+
+Additional primary sources reviewed:
+
+1. Off-Policy Evaluation for Recommendations with Missing-Not-At-Random Rewards (2025 preprint)
+   https://arxiv.org/abs/2502.08993
+2. Conservative Contextual Bandits: Beyond Linear Representations (ICLR 2025)
+   https://proceedings.iclr.cc/paper_files/paper/2025/hash/dbca58f35bddc6e4003b2dd80e42f838-Abstract-Conference.html
+3. Off-Policy Evaluation for Ranking Policies under Deterministic Logging Policies (ICLR 2026)
+   https://arxiv.org/abs/2603.21485
+4. Logging Policy Design for Off-Policy Evaluation (2026 preprint)
+   https://arxiv.org/abs/2605.15108
+5. Anytime-valid Optimal Policy Identification (2026 preprint)
+   https://arxiv.org/abs/2606.17515
+
+Repo changes:
+
+- Added `source/route_policy_ledger.py`, a schema-versioned SQLite WAL ledger
+  with short transactions and atomic per-session sequence allocation. Only a
+  domain-separated session hash is stored; raw session IDs and prompt text are
+  excluded from the durable database.
+- Route decisions now commit an `inflight` row after final capability, safety,
+  and session-budget filtering but before inference. Successes and exceptions
+  transition that row separately, so backend, economics, memory, and
+  serialization failures no longer disappear from the evidence base.
+- Abrupt process termination intentionally leaves an `inflight` row rather than
+  inventing a failure outcome. The Policy Lab exposes completed, failed, and
+  in-flight counts separately.
+- Explicit feedback is appended as an idempotent, route-ID-keyed revision. A
+  missing response remains `unknown`; approval is always shown alongside
+  terminal feedback coverage instead of treating silence as neutral or bad.
+- The existing JSON store remains a bounded compatibility mirror for adaptive
+  route preferences. The durable ledger is the lifecycle source of truth and
+  the Policy Lab remains read-only and `shadow_only`.
+
+Research boundary:
+
+- The new ledger fixes survivorship and join integrity, but the current route
+  probabilities are still deterministic one-hot vectors. It therefore improves
+  traceable associational diagnostics without enabling IPS, SNIPS, doubly
+  robust, causal, regret, or anytime-valid policy-superiority claims.
+- Exploration remains disabled (`epsilon = 0`). Known post-filter randomized
+  probabilities, overlap, versioned bounded outcomes, and a separately modeled
+  feedback-observation process are prerequisites for future causal evaluation.
+- Runtime reliability, quality, latency, and cost remain separate outcomes. A
+  cheap or fast failure can never compensate for a reliability or safety floor.
+
+## July 2026: Durable Support Envelope + Policy Readiness Certificate v2
+
+Additional primary sources reviewed:
+
+1. Anytime-valid Optimal Policy Identification (2026 preprint)
+   https://arxiv.org/abs/2606.17515
+2. Off-Policy Evaluation for Recommendations with Missing-Not-At-Random Rewards (2025 preprint)
+   https://arxiv.org/abs/2502.08993
+3. Off-Policy Confidence Sequences (COLT 2025)
+   https://proceedings.mlr.press/v291/ryu25a.html
+4. Supplementary Outcomes for Off-Policy Evaluation (ICLR 2025)
+   https://proceedings.iclr.cc/paper_files/paper/2025/hash/098491b37deebbe6c007e69815729e09-Abstract-Conference.html
+
+Design contract:
+
+- A versioned durable support envelope binds each route decision to its final
+  post-filter candidate set, normalized logging distribution, chosen
+  propensity, policy and feature-schema identities, and canonical support
+  fingerprints before execution. It is an audit contract; it does not enable a
+  different route-selection policy.
+- A read-only readiness certificate reports schema validity, lifecycle and
+  feedback-observation coverage, empirical action overlap, propensity floors,
+  and diagnostic effective sample size (ESS). Each failed check remains an
+  explicit reason code instead of being averaged into a single favorable score.
+- The certificate fails closed unless evidence comes from a reconciled durable
+  lifecycle window, meets its declared valid-route floor, and reproduces the
+  versioned support envelope, chosen propensity, assignment commitment, and
+  candidate/distribution fingerprints. The bounded JSON mirror is descriptive
+  compatibility data only and can never satisfy lifecycle readiness.
+- Explicit feedback now commits to SQLite before the JSON compatibility mirror.
+  Content-derived idempotency coalesces only an immediately adjacent identical
+  retry; an explicit request ID is matched across the route's full revision
+  history. A mirror failure returns an accepted-but-pending reconciliation
+  status instead of losing or duplicating the durable acknowledgement.
+- The current behavior policy remains deterministic with one-hot propensities.
+  Consistent with recent work on deterministic logging, these rows cannot
+  identify counterfactual outcomes for unchosen routes and therefore cannot
+  produce an off-policy value estimate.
+- Missing feedback remains `unknown`. Because reward observation can be
+  missing-not-at-random (MNAR), silence is neither a negative label nor evidence
+  that observation is independent of route choice; observation coverage is
+  reported separately by lifecycle state and action. A scalar observation
+  propensity is not enough to clear this gate unless its observation policy and
+  outcome definition are both versioned.
+
+Research and deployment boundary:
+
+- The certificate computes no IPS, SNIPS, doubly robust, causal, regret, or
+  anytime-valid policy-value estimate. Passing structural checks means only
+  that a separately validated evaluator could receive better-formed input.
+- Exploration remains disabled (`epsilon = 0`), deployment remains
+  `shadow_only`, and automatic promotion remains forbidden. Any future opt-in
+  randomized policy requires an independently reviewed safety-filtered
+  assignment mechanism, bounded outcome contract, and evaluation protocol.
+- Propensity, route-count, session-count, coverage, and ESS thresholds are
+  diagnostics for a declared cohort. They expose weak support and unstable
+  weights, but no fixed ESS threshold is a universal statistical guarantee or
+  proof of policy superiority.
+
+## July 2026: Fail-Closed Route Outcome Contract v1
+
+Additional primary sources reviewed:
+
+1. Off-Policy Evaluation under Nonignorable Missing Data (ICML 2025)
+   https://proceedings.mlr.press/v267/wang25dt.html
+2. A General Framework for Off-Policy Learning with Partially-Observed Reward
+   (ICLR 2025)
+   https://proceedings.iclr.cc/paper_files/paper/2025/hash/098491b37deebbe6c007e69815729e09-Abstract-Conference.html
+3. Clarifying Uncertainty Quantification in Off-Policy Evaluation: Beyond
+   Effective Sample Sizes, Towards Confidence Intervals (ICML 2026 DEMO)
+   https://openreview.net/pdf?id=FuuLorZ6NQ
+4. Beyond the Training Distribution: Evaluating Predictions Under Distribution
+   Shift and Selection Bias (2026 preprint)
+   https://arxiv.org/abs/2606.14506
+5. Anytime-valid Optimal Policy Identification (2026 preprint)
+   https://arxiv.org/abs/2606.17515
+6. Logging Policy Design for Off-Policy Evaluation (2026 preprint)
+   https://arxiv.org/abs/2605.15108
+7. Off-Policy Evaluation for Ranking Policies under Deterministic Logging
+   Policies (ICLR 2026)
+   https://arxiv.org/abs/2603.21485
+
+Implementation contract:
+
+- Readiness now checks the entire fixed-as-of durable population, not only the
+  feedback join. Missing or duplicate route IDs, orphan feedback, unevaluable
+  usage rows, inconsistent terminal states, or a mismatch between chosen and
+  executed route fail closed with explicit population/execution reason codes.
+- A versioned, prompt-free decision-record fingerprint binds the immutable
+  policy identity, decision context, selected action, eligible set, and support
+  projection committed before execution. The snapshot recomputes it rather than
+  trusting stored metadata; migrated v1 records remain explicitly legacy.
+- Session JSON filenames combine a safe display slug with a full session digest.
+  Legacy files migrate only when their embedded session identity matches, while
+  atomic replacement, transactional schema migration, and one-transaction
+  evidence snapshots prevent collisions or mixed-revision projections.
+- Feedback retries without an explicit request ID coalesce only when the newest
+  revision has identical content. Explicit request IDs remain globally stable
+  across the same route's revision history, so an older retry cannot create a
+  new revision and reusing its ID with different content fails closed.
+- Route Outcome Contract v1 precommits versioned definitions and observation
+  semantics for route success, measured cost, measured latency, and user quality.
+  Completion records only outcomes actually available; failure records failure
+  and measured elapsed time without fabricating cost, while quality remains
+  unknown until explicit quality feedback is observed. Canonical hashes and
+  decision-start timing are reverified on replay, and missing, late, posthoc, or
+  tampered contracts fail the existing outcome-evidence readiness check.
+- Maturity telemetry reports per-outcome precommit/observation coverage and the
+  share of legacy posthoc contracts. It is diagnostic evidence hygiene for a
+  declared fixed-as-of cohort, not an estimator or promotion score.
+
+Research and deployment boundary:
+
+- Fixed-as-of coverage telemetry is not an observation model. It does not
+  identify why quality was observed, correct selective labels or covariate
+  shift, or turn missing feedback into a reward; supplementary outcomes require
+  their own validated relationship to the target outcome.
+- ESS diagnoses weight concentration. It is not confidence-interval width,
+  empirical coverage, estimator error, or a universal cross-estimator measure
+  of uncertainty.
+- The lab still computes no OPE or policy-value estimate, and it enables no
+  automatic promotion. Deployment remains `shadow_only`, including when all
+  structural checks pass.
+- Contracts reconstructed for legacy decisions after their outcomes are known
+  are posthoc compatibility records. They cannot satisfy pre-execution contract
+  maturity, causal identification, or anytime-valid policy-selection claims.
+
+## July 2026: Bounded-Exposure Adjacent-Route Rehearsal v1
+
+Additional primary sources reviewed:
+
+1. Logging Policy Design for Off-Policy Evaluation (2026 preprint)
+   https://arxiv.org/abs/2605.15108
+2. Conservative Contextual Bandits: Beyond Linear Representations (ICLR 2025)
+   https://proceedings.iclr.cc/paper_files/paper/2025/hash/dbca58f35bddc6e4003b2dd80e42f838-Abstract-Conference.html
+3. Clarifying Uncertainty Quantification in Off-Policy Evaluation: Beyond
+   Effective Sample Sizes, Towards Confidence Intervals (ICML 2026 DEMO)
+   https://openreview.net/pdf?id=FuuLorZ6NQ
+4. Off-Policy Evaluation under Nonignorable Missing Data (ICML 2025)
+   https://proceedings.mlr.press/v267/wang25dt.html
+5. Anytime-valid Optimal Policy Identification (2026 preprint)
+   https://arxiv.org/abs/2606.17515
+
+Implementation contract:
+
+- The read-only planner consumes the final capability- and budget-filtered route
+  candidates plus a strict source contract. That contract binds the source
+  policy ID/version, feature schema, support schema, candidate-set hash,
+  deterministic distribution hash, and Route Outcome Contract schema into the
+  draft charter hash.
+- The planner rehearses a fixed incumbent-heavy distribution over the incumbent
+  and at most its two nearest feasible neighbors; excluded and non-adjacent
+  routes receive no probability. `adjacent` is an ordinal exposure heuristic,
+  not a target-aware optimal logging-policy claim.
+- A 10% alternate allocation is split across the enrolled neighbors. With two
+  neighbors this gives each a 5% planned propensity, matching the Policy Lab's
+  current structural probability floor. This is a design diagnostic, not a
+  claim that 5% is statistically sufficient.
+- The canonical hash also binds the ordered candidate/exclusion projection,
+  exact probability vector, repeated-stratum horizon, response-rate and
+  target-label scenarios, resource envelope, and fail-closed causal boundaries.
+  It contains no prompt or session text and performs no ledger, memory, RNG, or
+  inference operation.
+- A deterministic nonce-based primitive exists only to inspect replayable draw
+  mechanics. Its output is a non-ledger rehearsal receipt and non-ledger support
+  proposal. Caller-selected nonces are grindable; no seed was committed before
+  assignment, no immutable assignment unit was sealed, and the receipt is not a
+  randomization commitment or executed propensity record. The runtime never
+  calls this primitive.
+- The browser and terminal surfaces expose the same planning semantics. Both
+  label the output rehearsal-only, keep execution and evidence writes off, and
+  expose expected cost, latency-tier exposure, alternate propensity, expected
+  traffic, and a simultaneous label-traffic scenario for a declared response
+  rate.
+
+Research and deployment boundary:
+
+- For one alternate the target-label forecast inverts an exact binomial tail.
+  For two alternates it inverts the exact joint multinomial probability that
+  every alternate reaches the target; the displayed confidence is simultaneous,
+  not the weaker marginal confidence for one preselected alternate.
+- Expected assignments and the constant-response scenario hypothetically repeat
+  the same prompt-specific support stratum. They are not a campaign forecast,
+  statistical power, estimator precision, confidence in policy value, or
+  evidence that feedback is missing at random. A live campaign would require a
+  frozen population/context distribution and an identified observation process.
+- ESS remains an overlap and weight-concentration diagnostic. It is not a
+  universal uncertainty measure, and the planner computes no ESS, IPS, SNIPS,
+  doubly robust estimate, confidence sequence, regret bound, or policy value.
+- Reserving most planned mass for the incumbent is an operational exposure cap.
+  It is not the high-probability baseline-performance guarantee established by
+  conservative contextual-bandit algorithms, whose modeling assumptions are
+  not satisfied by the current heuristic route-quality signals.
+- Activation is explicitly blocked until a target-policy class and estimand,
+  outcome/observation/maturity contract, population scope, preassignment seed
+  commitment and unique immutable unit, session carryover/interference strategy,
+  resource and stopping rules, and external estimator/review are sealed. The
+  cited logging-policy design is one-step; Supermix's stateful session behavior
+  is not assumed away.
+- Rehearsed probabilities are never written as executed propensities. Existing
+  deterministic rows remain a separate `auto-route-v2` cohort, automatic
+  promotion remains forbidden, and deployment remains `shadow_only`.
+
+## July 2026: Stateful Route Experiment Preflight v1
+
+Additional primary sources reviewed:
+
+1. Anytime-Valid Off-Policy Inference for Contextual Bandits (Journal of Data
+   Science, 2024)
+   https://jds.acm.org/files/JDS_Issue3_Paper1.pdf
+2. Semiparametric Efficient Inference in Adaptive Experiments (CLeaR 2024)
+   https://proceedings.mlr.press/v236/cook24a.html
+3. Cluster-Adaptive Network A/B Testing (JMLR 2024)
+   https://www.jmlr.org/papers/v25/22-0192.html
+4. Data-Driven Switchback Experiments (2024 preprint)
+   https://arxiv.org/abs/2406.06768
+5. Clustered Switchback Experiments (2023 preprint)
+   https://arxiv.org/abs/2312.15574
+6. Sequentially-Rerandomized Switchback Experiments (2026 preprint)
+   https://arxiv.org/abs/2604.02489
+7. Logging Policy Design for Off-Policy Evaluation (2026 preprint)
+   https://arxiv.org/abs/2605.15108
+8. Off-Policy Evaluation under Nonignorable Missing Data (ICML 2025)
+   https://proceedings.mlr.press/v267/wang25dt.html
+
+Implementation contract:
+
+- `route_policy_protocol.py` wraps one or more valid adjacent-route rehearsal
+  plans without changing explorer-v1 or invalidating its strict hashes. The
+  wrapper is order-invariant across unique support strata and requires one
+  common source policy/schema cohort.
+- The protocol hash freezes a versioned target-policy threshold class, admitted
+  support-stratum hashes, a prompt-free population rule and session-hash cluster
+  schema, fixed cluster/route ceilings, an outcome-independent analysis schedule,
+  the four Route Outcome Contract hashes, and every stateful design declaration.
+- Route-level campaign randomization is screened out in v1. The only design
+  screens are sticky session-cluster assignment and clustered switchbacks. The
+  latter exposes block and washout declarations; the protocol draft itself does
+  not assign either mode.
+- Carryover, interference, and temporal variation use closed enums rather than
+  free text. Unknowns remain incomplete; declarations remain unvalidated. A
+  compatible declaration set can reach only `assumptions_declared_unvalidated`,
+  never a causal-design certificate or activation state.
+- A seed commitment can be bound as a lowercase digest, but the protocol draft
+  never generates or reveals its seed and does not implement HMAC assignment.
+  The separate shadow registry described below is the only component that opens
+  this later workflow; caller-selected nonces remain prohibited.
+- The browser and `route_policy_protocol_cli.py` expose the same canonical
+  preflight. The CLI can audit hash integrity and fail-closed boundaries. The
+  Windows Studio packaging contract includes this console as
+  `SupermixRouteStudy.exe` and binds module/schema hashes in
+  `studio_runtime_manifest.json`.
+
+Research and deployment boundary:
+
+- Stateful routing can change later context, memory, and user behavior. A
+  one-turn contextual-bandit estimator is therefore not silently extended to a
+  session-level causal claim. Sticky clustering reduces within-session treatment
+  switching; it does not prove that the cluster captures shared memory or all
+  cross-cluster exposure.
+- Switchback frequency and washout are bias-variance and identification choices.
+  Declaring them does not establish finite carryover, rapid mixing, a valid
+  interference graph, or unbiased exposure contrasts.
+- Anytime-valid inference needs its own theorem-level conditions, including
+  predictable exact propensities, support, bounded outcomes, and a frozen policy
+  family/alpha budget. Optional-stopping validity would not itself establish
+  causal identification, missing-at-random feedback, or deployment safety.
+- Missing ratings remain unknown. The cited MNAR method requires specific
+  dropout, state-sufficiency, positivity, response-model, and shadow-variable
+  assumptions that sparse voluntary ratings do not automatically satisfy.
+- The draft retains all eight activation blockers. It performs no I/O, ledger
+  write, assignment, inference, OPE, winner selection, or automatic promotion.
+  Independent scientific review and external implementation remain mandatory.
+
+## July 2026: Portable Route Protocol Review Bundle v1
+
+Additional integrity and transparency sources reviewed:
+
+1. An Architecture for Trustworthy and Transparent Digital Supply Chains,
+   RFC 9943 (June 2026)
+   https://www.rfc-editor.org/rfc/rfc9943.html
+2. CBOR Object Signing and Encryption (COSE) Receipts, RFC 9942 (June 2026)
+   https://www.rfc-editor.org/rfc/rfc9942.html
+3. Certificate Transparency Version 2.0, RFC 9162
+   https://www.rfc-editor.org/rfc/rfc9162.pdf
+4. Rekor transparency-log architecture
+   https://docs.sigstore.dev/logging/overview/
+5. Logging Policy Design for Off-Policy Evaluation (2026 preprint)
+   https://arxiv.org/abs/2605.15108
+
+Implementation contract:
+
+- The compact protocol audit now checks strict nested schemas and frozen v1
+  semantics for source inventories, population declarations, stateful design,
+  outcome contracts, stopping rules, randomness, blocker statuses, external
+  evaluation, prompt-free guarantees, and causal boundaries. Rehashing a draft
+  after enabling outcome-dependent stopping, promotion, validation claims, or
+  altered outcome definitions no longer passes.
+- Compact drafts intentionally omit complete source plans, so their verifier is
+  labeled `structural_without_source_plans`. A digest alone cannot prove that a
+  claimed study hash came from the canonical explorer.
+- `route-study-review-bundle-v1` carries every canonical prompt-free source plan,
+  the complete closed builder option set, and the resulting protocol. Full audit
+  validates each explorer plan, canonicalizes ordering, rebuilds the protocol,
+  requires exact equality, and then verifies the separate bundle hash. Its
+  verification label is `full_source_bound_reconstruction`.
+- Runtime and browser bundle endpoints accept only the shared closed protocol
+  input schema. Prompt, raw session, and free-text fields fail closed. Browser
+  requests are capped at 2 MiB and 100 strata; the core/console contract retains
+  the 1,000-stratum ceiling.
+- The Studio browser keeps source strata only in ephemeral client memory. It can
+  add/remove compatible strata, build/download a bundle, and import either a
+  bundle or closed build input for server-side reconstruction. It never pools
+  heterogeneous strata without predeclared population weights.
+- `SupermixRouteStudy.exe --example-bundle` and `--audit-bundle` expose the same
+  contract, and Windows CI reconstructs a frozen two-stratum bundle.
+
+Integrity and deployment boundary:
+
+- Full reconstruction proves internal semantic conformance, not authorship or
+  historical existence. RFC 9943, RFC 9942, and Certificate Transparency
+  distinguish an artifact digest from a signed receipt backed by a verifiable
+  append-only data structure. Supermix has no signature, trusted timestamp,
+  external witness, inclusion proof, or consistency proof in this increment.
+- A valid bundle still does not validate cluster independence, carryover,
+  interference, feedback missingness, support under live execution, or any
+  causal estimand. Logging-policy choice can materially change OPE error; an
+  internally consistent review artifact cannot repair unsupported actions.
+- The portable bundle by itself seals or registers nothing. It generates no
+  seed, assigns no cluster, executes no route, writes no evidence, estimates no
+  policy value, and leaves all eight activation blockers active. The separate
+  shadow registry below can consume only this source-bound artifact; it does not
+  turn bundle verification into a transparency receipt or activation approval.
+
+## July 2026: Shadow Whole-Policy Commitment/Reveal Registry v1
+
+Additional primary sources reviewed:
+
+1. JSON Canonicalization Scheme (JCS), RFC 8785
+   https://www.rfc-editor.org/rfc/rfc8785.html
+2. HMAC-based Extract-and-Expand Key Derivation Function (HKDF), RFC 5869
+   https://www.rfc-editor.org/rfc/rfc5869.html
+3. An Architecture for Trustworthy and Transparent Digital Supply Chains,
+   RFC 9943 (June 2026)
+   https://www.rfc-editor.org/rfc/rfc9943.html
+4. CBOR Object Signing and Encryption (COSE) Receipts, RFC 9942 (June 2026)
+   https://www.rfc-editor.org/rfc/rfc9942.html
+5. Analysis of Two-Stage Rollout Designs with Clustering for Causal Inference
+   under Network Interference (AISTATS / PMLR 258, 2025)
+   https://proceedings.mlr.press/v258/cortez-rodriguez25a.html
+6. Randomization Tests in Switchback Experiments (2026 preprint)
+   https://arxiv.org/abs/2602.23257
+
+Implementation contract:
+
+- `route_policy_shadow_registry.py` owns a schema-v1 SQLite database separate
+  from the executed route-decision ledger. The Studio runtime locates it at
+  `memory/route-policy-shadow-registry.sqlite3`; no registry artifact is
+  eligible for Policy Lab/OPE input or an executed logging-support row.
+- Sealing first performs full source-bound reconstruction of a
+  `route-study-review-bundle-v1`. The resulting design binding and assignment
+  manifest freeze exactly two 50/50 whole-policy arms:
+  `incumbent_source_policy`, bound to the source-policy cohort, and
+  `candidate_target_policy`, bound to the target-policy class. Prompt-specific
+  `eligible_actions` remain support-stratum metadata and cannot silently become
+  cluster-level treatment arms.
+- `SupermixRouteShadow.exe seal` obtains 256 bits from the operating-system
+  CSPRNG, commits the seed to the design, and writes the seed capsule as a
+  separate exclusively-created file before the public package enters SQLite.
+  POSIX writes enforce mode `0600`; Windows installs a protected single-user
+  DACL on the empty file and verifies it before writing, after `fsync`, and on
+  later reads. Any Windows ACL failure deletes the new capsule without writing
+  seed bytes. The registry contains no seed material before explicit
+  post-closure reveal, and command output never prints the seed. Backup,
+  transfer, and independent custody remain operator responsibilities.
+- `commit` accepts only the exact canonical `session-hash-v1` digest: 64
+  lowercase hexadecimal characters produced by `hash_session_identity`. It
+  rejects raw identifiers and alternate spellings without normalization,
+  derives a study-scoped HMAC pseudonym internally, and persists neither the
+  session hash nor the chosen arm. It appends only the pseudonym and an opaque
+  assignment-reveal commitment. Pseudonymity is not anonymity, especially once
+  the seed is public and an observer can test candidate session hashes.
+- `close` atomically freezes the enrolled commitment count and blocks later
+  commitments. `reveal` is rejected until closure, verifies the seed opening,
+  and then persists it. Bounded `verify` batches reconstruct each whole-policy
+  arm and append a matched or mismatched reveal record. Registry state therefore
+  advances from accepting commitments, through closed and seed-revealed, to
+  reveal verification complete without affecting inference.
+- The assignment algorithm uses RFC 5869 extract-and-expand with separate
+  context strings for identity and assignment keys, then HMAC-SHA-256 for the
+  study pseudonym and integer basis-point draw. The registry's canonical
+  artifact subset is informed by RFC 8785: duplicate keys, non-finite values,
+  floating-point registry fields, non-ASCII object keys, and integers outside
+  the I-JSON-safe range fail closed. This constrained profile avoids claiming
+  general cross-language JCS conformance for arbitrary imported bundle JSON.
+- SQLite WAL, `BEGIN IMMEDIATE`, foreign keys, immutable-row triggers, closure
+  guards, campaign-order indexes, and a domain-separated event hash chain protect
+  normal concurrent local use. Read-only snapshots also audit required schema
+  objects plus their exact definition fingerprint, reconstruct every stored
+  artifact, and match event artifacts to evidence rows. Reveal verification
+  preflights closure and seed artifacts, validates each commitment projection,
+  and only reports completion after a passing whole-campaign audit. The executed
+  ledger independently rejects shadow/rehearsal flags,
+  `ledger_eligible=false`, non-`route-support-v1` envelopes, reserved shadow
+  assignment-commitment namespaces, and every non-null commitment outside the
+  closed `route-execution-assignment-v1:<sha256>` namespace. For randomized
+  execution, schema v4 additionally requires `issue_execution_assignment()` to
+  append a nonce-sealed, route/session/policy/context/support-bound record in
+  the same ledger before `begin_decision()` can verify and bind it exactly once.
+  A namespace-shaped caller string or wrapped shadow hash therefore fails
+  closed. This establishes local append-only provenance, not proof that the
+  upstream sampler was statistically honest or that a host administrator did
+  not replace the ledger.
+- All mutations are local-console operations. The Studio browser has only the
+  read-only `GET /api/route_shadow_registry/status` endpoint and can refresh
+  campaign state, commitment/reveal counts, and chain verification. It has no
+  seal, commit, close, seed-reveal, or assignment-verification control.
+  CLI `status` uses SQLite read-only mode as well. The server defaults to
+  `127.0.0.1`; remote binding is an explicit unauthenticated operator choice.
+  Browser responses are `Cache-Control: no-store`, while the server reuses a
+  full audit only until the database or non-empty WAL signature changes.
+
+Research and deployment boundary:
+
+- A seed commitment and deterministic reconstruction show that stored reveals
+  match the sealed local inputs. They do not show that enrollment was complete
+  or unbiased, that the custodian did not inspect or regenerate material before
+  publication, or that seed custody was independent. No shadow assignment is a
+  live route choice or an executed propensity.
+- The 2025 clustering analysis exhibits a bias-variance tradeoff under network
+  interference: cutting interference edges and balancing cluster covariates are
+  not generally the same objective. Binding a declared session cluster does not
+  validate that cluster, identify its interference graph, or license the paper's
+  estimator for Supermix.
+- The 2026 switchback randomization-test framework requires a known assignment
+  mechanism and, for its causal effects, non-anticipation and a finite carryover
+  horizon. Supermix v1 implements sticky session-cluster shadow commitments, not
+  switchback execution or those tests; diagnostics and verified reveals do not
+  establish the required assumptions.
+- RFC 9943 and RFC 9942 describe signed statements, verifiable data structures,
+  transparency services, and signed receipts. This registry has none of those.
+  A host administrator can replace the database or remove its triggers, the
+  local clock is untrusted, and the event chain has no external anchor, signer,
+  witness, inclusion proof, consistency proof, or anti-equivocation service.
+- The registry performs no model inference, live assignment, route execution,
+  outcome collection, OPE, causal or policy-value estimation, winner selection,
+  activation, or automatic promotion. All existing review and activation
+  blockers remain in force after a clean verification.
+- The target arm's v2 policy-class manifest binds its source feature schema,
+  closed extraction rules, thresholds, action order, tie-breaking, and fallback
+  semantics. It still does not bind executable runtime code or a code-artifact
+  digest. Canonical session hashes remain private inputs; v1 validates their
+  syntax and schema but not external cluster-map membership or independence.
+  Those controls remain external prerequisites, not properties implied by a
+  verified registry.
+
+## July 2026: v51 prediction-stability pilot and distribution-drift shadow metric
+
+Recent primary sources reviewed:
+
+1. LESS Is More: Adaptive Early Exit for Diffusion Language Models
+   https://arxiv.org/abs/2606.16908
+2. Stop When Reasoning Converges: Adaptive Test-Time Scaling with PUMA
+   https://arxiv.org/abs/2605.17672
+3. LLMRouterBench: A Massive Benchmark and Unified Framework for LLM Routing
+   https://arxiv.org/abs/2601.07206
+4. TwinRouterBench: A Systematic Benchmark for Dynamic LLM Routing
+   https://arxiv.org/abs/2605.18859
+
+Implementation and pilot evidence:
+
+- `benchmark_v51_prediction_stability.py` now records top-k Jensen-Shannon
+  divergence between consecutive full-prefix output distributions. The shared
+  top-k support is chosen from the midpoint distribution and all remaining
+  probability is retained in one `other` bucket. This is diagnostic telemetry
+  only: it cannot trigger an exit or change a model answer.
+- A CPU pilot screened five stopping configurations over three unseen seeds and
+  32 examples per seed (480 requests total). Patience 2 / tolerance 0.005 kept
+  96/96 prediction agreement and zero observed accuracy delta while using 2.135
+  mean cycles, a 28.8% reduction from the three-cycle baseline. Patience 1
+  changed one prediction and is rejected. Stricter patience/tolerance settings
+  increased work without improving observed agreement.
+- Latency measurements were not counterbalanced, so they are screening evidence
+  rather than a release claim. The next gate is 512 held-out examples over eight
+  fresh seeds with zero disagreements, no negative per-seed accuracy delta, at
+  least 20% mean cycle reduction, and positive median latency reduction before
+  changing any runtime default.
+- The research transfer remains provisional. LESS studies diffusion language
+  models, PUMA combines semantic convergence with answer verification, and the
+  router benchmarks emphasize held-out dynamic evaluation plus strong simple
+  baselines. Supermix therefore exposes distribution drift as a shadow metric
+  beside its existing output-persistence verifier rather than treating a new
+  paper or a small pilot as activation evidence.
