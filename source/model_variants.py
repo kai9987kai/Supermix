@@ -53,6 +53,7 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "neurogenesis_expert",
     "cognitive_expert",
     "cognitive_leap_expert",
+    "cognitive_leap_ultra_expert",
     "transcendent_expert",
     "omniversal_expert",
     "fractal_expert",
@@ -702,7 +703,7 @@ class GatedExpertClassifierHead(nn.Module):
             nn.Linear(1024 + (i * 512), out_dim, bias=False) for i in range(n_experts)
         ])
         self.activations = [F.silu, F.gelu, F.mish, F.relu, F.selu, torch.tanh]
-        
+
         self.gate = nn.Linear(in_dim, n_experts, bias=False)
         self.noise_gate = nn.Linear(in_dim, n_experts, bias=False)
         self.alpha = nn.Parameter(torch.tensor(0.0))
@@ -724,7 +725,7 @@ class GatedExpertClassifierHead(nn.Module):
 
     def forward(self, x):
         base_logits = F.linear(x, self.weight, self.bias)
-        
+
         # Gating logic with Noisy Top-K
         clean_logits = self.gate(x)
         if self.training:
@@ -744,15 +745,15 @@ class GatedExpertClassifierHead(nn.Module):
             out = self.experts_down[i](self.dropout(self.activations[i](self.experts_up[i](x))))
             expert_outputs.append(out)
         expert_stack = torch.stack(expert_outputs, dim=-2) # (B, T, N, D)
-        
+
         # Gather top experts
         # We need to broadcast the indices for gather
         gather_idx = top_idx.unsqueeze(-1).expand(*top_idx.shape, base_logits.shape[-1])
         selected_experts = torch.gather(expert_stack, -2, gather_idx) # (B, T, K, D)
-        
+
         expert_logits = (selected_experts * top_weights.unsqueeze(-1)).sum(dim=-2)
         calib = self.calibration(x)
-        
+
         return base_logits + self.alpha * expert_logits + self.theta * calib
 
 
@@ -1035,12 +1036,12 @@ class DeepExpertClassifierHead(nn.Module):
         # Routing mechanism
         self.gate = nn.Linear(in_dim, n_experts, bias=False)
         self.noise_gate = nn.Linear(in_dim, n_experts, bias=False)
-        
+
         # Aux-free load balancing terms
         # These biases are added to the routing logits during training.
         # They don't require gradients; we update them manually.
         self.register_buffer("expert_bias", torch.zeros(n_experts))
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.calibration = nn.Linear(in_dim, out_dim, bias=True)
         self.theta = nn.Parameter(torch.tensor(0.0))
@@ -1145,11 +1146,11 @@ class ExpertChoiceClassifierHead(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
-        
+
         self.n_experts = n_experts
         # How many tokens an expert will pick, relative to average token load per expert
         self.capacity_factor = capacity_factor
-        
+
         # Routed Experts
         self.experts_up = nn.ModuleList([
             nn.Linear(in_dim, 1024 + (i * 256), bias=False) for i in range(n_experts)
@@ -1162,10 +1163,10 @@ class ExpertChoiceClassifierHead(nn.Module):
         self.expert_norms = nn.ModuleList([nn.LayerNorm(out_dim) for _ in range(n_experts)])
 
         # Routing mechanism: Token-to-expert affinity
-        # We need a score for each (token, expert) pair. 
+        # We need a score for each (token, expert) pair.
         self.gate = nn.Linear(in_dim, n_experts, bias=False)
         self.noise_gate = nn.Linear(in_dim, n_experts, bias=False)
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.calibration = nn.Linear(in_dim, out_dim, bias=True)
         self.theta = nn.Parameter(torch.tensor(0.0))
@@ -1215,33 +1216,33 @@ class ExpertChoiceClassifierHead(nn.Module):
         expert_to_token_probs = token_to_expert_probs.t()  # (n_experts, BT)
 
         expert_outputs = torch.zeros((BT, base_logits.shape[-1]), device=x.device, dtype=x.dtype)
-        
-        # We need a scaling factor later. If an expert picks a token, its output is scaled by 
+
+        # We need a scaling factor later. If an expert picks a token, its output is scaled by
         # the token_to_expert_prob.
-        
+
         # 2. Each expert processes its top tokens
         for i in range(self.n_experts):
             probs_i = expert_to_token_probs[i]  # (BT,)
-            
+
             # Select top-k tokens for this expert
             top_probs, top_token_idx = torch.topk(probs_i, k=expert_capacity, dim=0)  # (capacity,)
-            
+
             # Gather tokens
             selected_tokens = x_flat[top_token_idx]  # (capacity, D)
-            
+
             # Process through expert i
             act = self.activations[i]
             out = self.experts_down[i](self.dropout(act(self.experts_up[i](selected_tokens))))
             out = self.expert_norms[i](out)  # (capacity, out_dim)
-            
+
             # Scale by routing probability
             out = out * top_probs.unsqueeze(-1)  # (capacity, out_dim)
-            
+
             # Add to the global output buffer using `scatter_add_` or index_add
-            # out is (capacity, out_dim). top_token_idx is (capacity,). 
+            # out is (capacity, out_dim). top_token_idx is (capacity,).
             # expert_outputs is (BT, out_dim).
             expert_outputs.index_add_(0, top_token_idx, out)
-            
+
         expert_outputs = expert_outputs.view(*shape_prefix, -1)
         calib = self.calibration(x)
 
@@ -1302,7 +1303,7 @@ class SmarterExpertClassifierHead(nn.Module):
         # 4. Routing Mechanism (Sigma Gating)
         self.gate = nn.Linear(in_dim, n_experts, bias=False)
         self.register_buffer("expert_bias", torch.zeros(n_experts))
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.calibration = nn.Linear(in_dim, out_dim, bias=True)
         self.theta = nn.Parameter(torch.tensor(0.0))
@@ -1315,16 +1316,16 @@ class SmarterExpertClassifierHead(nn.Module):
         if fan_in != 0:
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
-        
+
         nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
         nn.init.zeros_(self.shared_down.weight)
-        
+
         for i in range(self.n_experts):
             nn.init.kaiming_uniform_(self.experts_up[i].weight, a=math.sqrt(5))
             nn.init.zeros_(self.experts_down[i].weight)
             nn.init.normal_(self.lora_down[i].weight, std=0.02)
             nn.init.zeros_(self.lora_up[i].weight)
-        
+
         nn.init.normal_(self.gate.weight, std=0.02)
         nn.init.zeros_(self.calibration.weight)
         nn.init.zeros_(self.calibration.bias)
@@ -1344,9 +1345,9 @@ class SmarterExpertClassifierHead(nn.Module):
             gate_logits = clean_logits + self.expert_bias
         else:
             gate_logits = clean_logits
-        
+
         # Sigma activation
-        gate_scores = torch.sigmoid(gate_logits) 
+        gate_scores = torch.sigmoid(gate_logits)
 
         all_expert_logits = []
         for i in range(self.n_experts):
@@ -1354,9 +1355,9 @@ class SmarterExpertClassifierHead(nn.Module):
             lora = self.lora_up[i](self.lora_down[i](x_flat))
             out = self.expert_norms[i](core + lora)
             all_expert_logits.append(out)
-        
-        expert_stack = torch.stack(all_expert_logits, dim=1) 
-        routed_out = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=1) 
+
+        expert_stack = torch.stack(all_expert_logits, dim=1)
+        routed_out = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=1)
 
         if self.training:
             with torch.no_grad():
@@ -1392,28 +1393,28 @@ class CrossAttentionFusion(nn.Module):
         self.k_proj = nn.Linear(out_dim, out_dim, bias=False)
         self.v_proj = nn.Linear(out_dim, out_dim, bias=False)
         self.out_proj = nn.Linear(out_dim, out_dim, bias=False)
-        
+
         self.fusion_weight = nn.Linear(out_dim, 1)
 
     def forward(self, x):
         # x: (B, T, N, D)
         B, T, N, D = x.shape
         x_flat = x.view(B * T, N, D)
-        
+
         q = self.q_proj(x_flat).view(B * T, N, self.n_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x_flat).view(B * T, N, self.n_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x_flat).view(B * T, N, self.n_heads, self.head_dim).transpose(1, 2)
 
         attn = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)
         attn = F.softmax(attn, dim=-1)
-        
+
         out = (attn @ v).transpose(1, 2).reshape(B * T, N, D)
         out = self.out_proj(out)
-        
+
         # Weighted reduction to single D-dim vector per token
         scores = torch.sigmoid(self.fusion_weight(out)) # (B*T, N, 1)
         fused = (out * scores).sum(dim=1) / (scores.sum(dim=1) + 1e-6)
-        
+
         return fused.view(B, T, D)
 
 
@@ -1489,7 +1490,7 @@ class ThoughtExpertClassifierHead(nn.Module):
         self.reasoning_cells = nn.ModuleList([
             ReasoningCell(in_dim, inner_dim=512, dropout=dropout) for _ in range(reasoning_steps)
         ])
-        
+
         # 5. Iterative Routing (Sigma Gating)
         self.gates = nn.ModuleList([
             nn.Linear(in_dim, n_experts, bias=False) for _ in range(reasoning_steps)
@@ -1498,7 +1499,7 @@ class ThoughtExpertClassifierHead(nn.Module):
 
         # 6. Cross-Expert Attention Fusion
         self.cross_attn = CrossAttentionFusion(out_dim=out_dim, n_branches=n_experts, n_heads=2)
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.calibration = nn.Linear(in_dim, out_dim, bias=True)
         self.theta = nn.Parameter(torch.tensor(0.0))
@@ -1511,19 +1512,19 @@ class ThoughtExpertClassifierHead(nn.Module):
         if fan_in != 0:
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
-        
+
         nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
         nn.init.zeros_(self.shared_down.weight)
-        
+
         for i in range(self.n_experts):
             nn.init.kaiming_uniform_(self.experts_up[i].weight, a=math.sqrt(5))
             nn.init.zeros_(self.experts_down[i].weight)
             nn.init.normal_(self.lora_down[i].weight, std=0.02)
             nn.init.zeros_(self.lora_up[i].weight)
-        
+
         for g in self.gates:
             nn.init.normal_(g.weight, std=0.02)
-        
+
         nn.init.zeros_(self.calibration.weight)
         nn.init.zeros_(self.calibration.bias)
 
@@ -1531,7 +1532,7 @@ class ThoughtExpertClassifierHead(nn.Module):
         base_logits = F.linear(x, self.weight, self.bias)
         shape_prefix = x.shape[:-1]
         x_flat = x.reshape(-1, x.shape[-1])
-        
+
         # Shared Anchor processing
         shared_out = self.shared_norm(self.shared_down(self.dropout(F.silu(self.shared_up(x_flat)))))
 
@@ -1542,30 +1543,30 @@ class ThoughtExpertClassifierHead(nn.Module):
             lora = self.lora_up[i](self.lora_down[i](x_flat))
             out = self.expert_norms[i](core + lora)
             all_expert_logits.append(out)
-        expert_stack = torch.stack(all_expert_logits, dim=1) 
+        expert_stack = torch.stack(all_expert_logits, dim=1)
 
         # Iterative Reasoning Loop
         current_features = x_flat
         total_routed_out = 0
-        
+
         for step in range(self.reasoning_steps):
             # 1. Refine features
             current_features = self.reasoning_cells[step](current_features)
-            
+
             # 2. Gate experts based on refined features
             gate_logits = self.gates[step](current_features)
             if self.training:
                 gate_logits = gate_logits + self.expert_bias
             gate_scores = torch.sigmoid(gate_logits) # (B*T, n_experts)
-            
+
             # 3. Fuse experts for this step
             step_out = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=1)
-            
+
             # 4. Attention-based cross-expert correction (residual)
             # Re-weight experts with attention to find hidden correlations
             # Shape: expert_stack is (BT, N, D), we need (BT, 1, N, D) for CrossAttentionFusion
             attn_fused = self.cross_attn(expert_stack.unsqueeze(1)).squeeze(1)
-            
+
             total_routed_out = total_routed_out + step_out + 0.1 * attn_fused
 
             if self.training:
@@ -1650,7 +1651,7 @@ class RecursiveThoughtExpertHead(nn.Module):
         self.exit_gates = nn.ModuleList([
             nn.Linear(in_dim, 1) for _ in range(reasoning_steps)
         ])
-        
+
         # 5. Multi-Head Sigma Gating (Flattened for registration)
         self.gates = nn.ModuleList([
             nn.Linear(in_dim, n_experts, bias=False) for _ in range(reasoning_steps * n_heads)
@@ -1659,7 +1660,7 @@ class RecursiveThoughtExpertHead(nn.Module):
 
         # 6. Cross-Expert Attention Fusion
         self.cross_attn = CrossAttentionFusion(out_dim=out_dim, n_branches=n_experts, n_heads=2)
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.calibration = nn.Linear(in_dim, out_dim, bias=True)
         self.theta = nn.Parameter(torch.tensor(0.0))
@@ -1672,21 +1673,21 @@ class RecursiveThoughtExpertHead(nn.Module):
         if fan_in != 0:
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
-        
+
         nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
         nn.init.zeros_(self.shared_down.weight)
         nn.init.kaiming_uniform_(self.local_up.weight, a=math.sqrt(5))
         nn.init.zeros_(self.local_down.weight)
-        
+
         for i in range(self.n_experts):
             nn.init.kaiming_uniform_(self.experts_up[i].weight, a=math.sqrt(5))
             nn.init.normal_(self.experts_down[i].weight, std=0.01) # Small initial signal
             nn.init.normal_(self.lora_down[i].weight, std=0.02)
             nn.init.zeros_(self.lora_up[i].weight)
-        
+
         for g in self.gates:
             nn.init.normal_(g.weight, std=0.02)
-        
+
         for e in self.exit_gates:
             nn.init.constant_(e.bias, -3.0) # Start with low exit prob
 
@@ -1697,7 +1698,7 @@ class RecursiveThoughtExpertHead(nn.Module):
         base_logits = F.linear(x, self.weight, self.bias)
         shape_prefix = x.shape[:-1]
         x_flat = x.reshape(-1, x.shape[-1])
-        
+
         # 1. Global Shared Expert
         shared_out = self.shared_norm(self.shared_down(self.dropout(F.silu(self.shared_up(x_flat)))))
         # 2. Local Shared Expert
@@ -1710,19 +1711,19 @@ class RecursiveThoughtExpertHead(nn.Module):
             lora = self.lora_up[i](self.lora_down[i](x_flat))
             out = self.expert_norms[i](core + lora)
             all_expert_logits.append(out)
-        expert_stack = torch.stack(all_expert_logits, dim=1) 
+        expert_stack = torch.stack(all_expert_logits, dim=1)
 
         # Iterative Reasoning Loop with ACE
         current_features = x_flat
         total_routed_out = torch.zeros_like(expert_stack[:, 0, :])
         cumulative_exit_prob = torch.zeros(x_flat.shape[0], 1, device=x.device)
         depth_count = 0
-        
+
         for step in range(self.reasoning_steps):
             depth_count += 1
             # A. Refine features
             current_features = self.reasoning_cells[step](current_features)
-            
+
             # B. Multi-Head Sigma Gating
             head_logits = []
             for h in range(self.n_heads):
@@ -1730,24 +1731,24 @@ class RecursiveThoughtExpertHead(nn.Module):
                 head_logits.append(self.gates[idx](current_features))
             # Average head logits (Sigma Gating)
             gate_logits = torch.stack(head_logits, dim=0).mean(dim=0)
-            
+
             if self.training:
                 gate_logits = gate_logits + self.expert_bias
             gate_scores = torch.sigmoid(gate_logits) # (B*T, n_experts)
-            
+
             # C. ACE: Early Exit check
             exit_logit = self.exit_gates[step](current_features)
             exit_prob = torch.sigmoid(exit_logit) # (B*T, 1)
-            
+
             # D. Fuse experts for this step
             step_out = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=1)
-            
+
             # E. Attention-based cross-expert correction
             attn_fused = self.cross_attn(expert_stack.unsqueeze(1)).squeeze(1)
-            
+
             # Weighted contribution based on current depth
             total_routed_out = total_routed_out + (1.0 - cumulative_exit_prob) * (step_out + 0.1 * attn_fused)
-            
+
             # Update cumulative exit probability
             cumulative_exit_prob = cumulative_exit_prob + (1.0 - cumulative_exit_prob) * exit_prob
 
@@ -1756,7 +1757,7 @@ class RecursiveThoughtExpertHead(nn.Module):
                     target_load = 1.0 / self.n_experts
                     actual_load = gate_scores.mean(dim=0)
                     self.expert_bias.add_(0.01 * (target_load - actual_load))
-            
+
             # Early exit condition
             if not self.training and cumulative_exit_prob.mean() > 0.9:
                 break
@@ -1785,10 +1786,10 @@ class ChampionNetRecursiveExpert(nn.Module):
         base = ChampionNet()
         layers = [base.layers[i] for i in range(10)]
         layers.append(RecursiveThoughtExpertHead(
-            256, 10, 
-            n_experts=n_experts, 
-            reasoning_steps=reasoning_steps, 
-            lora_rank=lora_rank, 
+            256, 10,
+            n_experts=n_experts,
+            reasoning_steps=reasoning_steps,
+            lora_rank=lora_rank,
             dropout=dropout
         ))
         layers.append(base.layers[11])
@@ -1851,7 +1852,7 @@ class ReflexiveThoughtExpertHead(nn.Module):
 
     def forward(self, x):
         base_logits = F.linear(x, self.weight, self.bias)
-        
+
         # --- Initial Pass ---
         gate_init = torch.softmax(self.initial_gate(x), dim=-1) # (B, T, E)
         init_outs = []
@@ -1860,12 +1861,12 @@ class ReflexiveThoughtExpertHead(nn.Module):
             init_outs.append(self.initial_norms[i](self.initial_down[i](h)))
         init_stack = torch.stack(init_outs, dim=-2) # (B, T, E, D)
         init_fused = (init_stack * gate_init.unsqueeze(-1)).sum(dim=-2)
-        
+
         # Intermediate prediction
         inter_logits = base_logits + self.alpha * init_fused
-        
+
         # --- Critique Pass ---
-        crit_in = torch.cat([x, inter_logits], dim=-1) 
+        crit_in = torch.cat([x, inter_logits], dim=-1)
         gate_crit = torch.softmax(self.critique_gate(crit_in), dim=-1)
         crit_outs = []
         for i in range(self.n_experts):
@@ -1873,7 +1874,7 @@ class ReflexiveThoughtExpertHead(nn.Module):
             crit_outs.append(self.critique_norms[i](self.critique_down[i](h)))
         crit_stack = torch.stack(crit_outs, dim=-2)
         crit_fused = (crit_stack * gate_crit.unsqueeze(-1)).sum(dim=-2)
-        
+
         # Final prediction
         return inter_logits + self.beta * crit_fused
 
@@ -2153,17 +2154,17 @@ class TreeOfThoughtExpertHead(nn.Module):
         self.n_action_experts = n_action_experts
         self.beam_size = beam_size
         self.reasoning_steps = reasoning_steps
-        
+
         # Base projection
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
-        
+
         # 1. Global Shared Expert (always-on)
         self.shared_up = nn.Linear(in_dim, 2048, bias=False)
         self.shared_down = nn.Linear(2048, out_dim, bias=False)
         self.shared_norm = nn.LayerNorm(out_dim)
         self.shared_scale = nn.Parameter(torch.tensor(1.0))
-        
+
         # 2. Value Network (Scorer)
         # Evaluates the "goodness" of a latent state.
         self.value_net = nn.Sequential(
@@ -2172,7 +2173,7 @@ class TreeOfThoughtExpertHead(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(512, 1)
         )
-        
+
         # 3. Action MoE (Proposer)
         # We use a set of experts that propose feature modifications
         self.action_up = nn.ModuleList([
@@ -2184,12 +2185,12 @@ class TreeOfThoughtExpertHead(nn.Module):
         self.action_norms = nn.ModuleList([
             nn.LayerNorm(in_dim) for _ in range(n_action_experts)
         ])
-        
+
         # Final projection from feature to out_dim
         self.final_up = nn.Linear(in_dim, 1024, bias=False)
         self.final_down = nn.Linear(1024, out_dim, bias=False)
         self.final_norm = nn.LayerNorm(out_dim)
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))  # tree scale
         self.dropout = nn.Dropout(dropout)
         self.reset_parameters()
@@ -2200,20 +2201,20 @@ class TreeOfThoughtExpertHead(nn.Module):
         if fan_in != 0:
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
-            
+
         nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
         nn.init.normal_(self.shared_down.weight, std=0.01)
-        
+
         for p in self.value_net.parameters():
             if p.dim() > 1:
                 nn.init.kaiming_uniform_(p, a=math.sqrt(5))
             else:
                 nn.init.zeros_(p)
-                
+
         for i in range(self.n_action_experts):
             nn.init.kaiming_uniform_(self.action_up[i].weight, a=math.sqrt(5))
             nn.init.normal_(self.action_down[i].weight, std=0.01)
-            
+
         nn.init.kaiming_uniform_(self.final_up.weight, a=math.sqrt(5))
         nn.init.normal_(self.final_down.weight, std=0.01)
 
@@ -2221,65 +2222,65 @@ class TreeOfThoughtExpertHead(nn.Module):
         N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
         shape_prefix = x.shape[:-1]
         x_flat = x.reshape(N, self.in_dim)
-        
+
         base_logits = F.linear(x_flat, self.weight, self.bias)
-        
+
         # 1. Shared Expert
         shared_out = self.shared_norm(
             self.shared_down(self.dropout(F.silu(self.shared_up(x_flat))))
         )
-        
+
         # 2. Tree-of-Thought Search
         # Initial beam state: K=1
         beam_states = x_flat.unsqueeze(1) # (N, 1, D)
-        
+
         for step in range(self.reasoning_steps):
             K = beam_states.shape[1]
-            
+
             # A. Expansion: Each action expert proposes a modification to every state in the beam
             nk_states = beam_states.reshape(N * K, self.in_dim)
-            
+
             candidates = []
             for i in range(self.n_action_experts):
                 h = self.dropout(F.gelu(self.action_up[i](nk_states)))
                 delta = self.action_norms[i](self.action_down[i](h))
                 new_state = nk_states + delta
                 candidates.append(new_state)
-                
+
             # Stack candidates
             cand_stack = torch.stack(candidates, dim=1)
             cand_stack = cand_stack.reshape(N, K * self.n_action_experts, self.in_dim)
-            
+
             # B. Evaluation (Value Network)
             flat_cands = cand_stack.reshape(N * K * self.n_action_experts, self.in_dim)
             scores = self.value_net(flat_cands).squeeze(-1) # (N * K * M)
             scores = scores.reshape(N, K * self.n_action_experts) # (N, K*M)
-            
+
             # C. Selection (Beam Search)
             K_next = min(self.beam_size, K * self.n_action_experts)
-            
+
             topk_scores, topk_indices = torch.topk(scores, k=K_next, dim=1) # (N, K_next)
-            
+
             expanded_indices = topk_indices.unsqueeze(-1).expand(-1, -1, self.in_dim)
             beam_states = torch.gather(cand_stack, 1, expanded_indices) # (N, K_next, D)
-            
+
         # 3. Aggregation across the final beam
         final_K = beam_states.shape[1]
         flat_final = beam_states.reshape(N * final_K, self.in_dim)
-        
+
         h_final = self.dropout(F.silu(self.final_up(flat_final)))
         final_preds = self.final_norm(self.final_down(h_final)) # (N * final_K, out_dim)
         final_preds = final_preds.reshape(N, final_K, self.out_dim) # (N, K, out_dim)
-        
+
         final_scores = self.value_net(flat_final).squeeze(-1).reshape(N, final_K) # (N, K)
         agg_weights = torch.softmax(final_scores, dim=1) # (N, K)
-        
+
         tree_fused = (final_preds * agg_weights.unsqueeze(-1)).sum(dim=1)
-        
+
         base_logits = base_logits.view(*shape_prefix, -1)
         shared_out = shared_out.view(*shape_prefix, -1)
         tree_fused = tree_fused.view(*shape_prefix, -1)
-        
+
         return (
             base_logits
             + self.shared_scale * shared_out
@@ -2743,7 +2744,7 @@ class DeliberativeAlignmentExpertHead(nn.Module):
             write_scores = torch.sigmoid(self.mem_write_gate(write_q))  # (N, M)
             # Differentiable soft memory update: weighted retrieval from write signal
             mem_retrieval = torch.matmul(write_scores, self.memory_values)  # (N, D)
-            # Inject memory write contribution into draft features for next step  
+            # Inject memory write contribution into draft features for next step
             for d in range(self.n_drafts):
                 draft_features[d] = draft_features[d] + 0.1 * mem_retrieval
 
@@ -2897,7 +2898,7 @@ class OmniscientSynergyExpertHead(nn.Module):
         ])
         self.expert_acts = [expert_acts_fns[i % len(expert_acts_fns)] for i in range(n_experts)]
         self.expert_norms = nn.ModuleList([nn.LayerNorm(out_dim) for _ in range(n_experts)])
-        
+
         # Bayesian Routers (predicts mean and log-variance for expert weighting)
         self.route_mu = nn.ModuleList([
             nn.Linear(in_dim, n_experts, bias=False) for _ in range(reasoning_steps)
@@ -2920,7 +2921,7 @@ class OmniscientSynergyExpertHead(nn.Module):
         self.node_halt_gates = nn.ModuleList([
             nn.Linear(in_dim, 1, bias=True) for _ in range(reasoning_steps)
         ])
-        
+
         # Final Node Fusion
         self.node_fusion_q = nn.Linear(out_dim, out_dim, bias=False)
         self.node_fusion_k = nn.Linear(out_dim, out_dim, bias=False)
@@ -2928,7 +2929,7 @@ class OmniscientSynergyExpertHead(nn.Module):
 
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.dropout = nn.Dropout(dropout)
-        
+
         # Divergence temperature for Bayesian routing during inference
         self.register_buffer("temperature", torch.tensor(0.2))
 
@@ -2954,17 +2955,17 @@ class OmniscientSynergyExpertHead(nn.Module):
             nn.init.kaiming_uniform_(self.got_q[step].weight, a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.got_k[step].weight, a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.got_k[step].weight, a=math.sqrt(5))
-            
+
             nn.init.normal_(self.route_mu[step].weight, std=0.02)
             nn.init.normal_(self.route_logvar[step].weight, std=0.02)
             nn.init.constant_(self.route_logvar[step].bias, -2.0) # start with low variance
-            
+
             for p in self.critique_net[step].parameters():
                 if p.dim() > 1: nn.init.kaiming_uniform_(p, a=math.sqrt(5))
                 else: nn.init.zeros_(p)
-                
+
             nn.init.constant_(self.node_halt_gates[step].bias, -2.0)
-            
+
         nn.init.kaiming_uniform_(self.node_fusion_q.weight, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.node_fusion_k.weight, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.node_fusion_v.weight, a=math.sqrt(5))
@@ -2994,7 +2995,7 @@ class OmniscientSynergyExpertHead(nn.Module):
         for i in range(self.n_nodes):
             noise = torch.randn_like(x_flat) * 0.05
             nodes.append(x_flat + knowledge_context + noise)
-            
+
         node_stack = torch.stack(nodes, dim=1) # (N, V, D)
         node_cumulative_halt = torch.zeros(N, self.n_nodes, 1, device=x.device)
         total_node_preds = torch.zeros(N, self.n_nodes, self.out_dim, device=x.device)
@@ -3009,42 +3010,42 @@ class OmniscientSynergyExpertHead(nn.Module):
         kl_loss = 0.0
 
         for step in range(self.reasoning_steps):
-            
+
             # A. Graph Attention: Nodes exchange information
             q_got = self.got_q[step](node_stack) # (N, V, D)
             k_got = self.got_k[step](node_stack) # (N, V, D)
             v_got = self.got_v[step](node_stack) # (N, V, D)
-            
+
             got_attn = torch.bmm(q_got, k_got.transpose(1, 2)) * self.knowledge_scale # (N, V, V)
             got_attn = self.dropout(torch.softmax(got_attn, dim=-1))
             got_updates = torch.bmm(got_attn, v_got) # (N, V, D)
-            
+
             node_stack = self.got_norm[step](node_stack + got_updates)
-            
+
             # B. Meta-Cognitive Critique
             # Global view of the graph spots logic errors, broadcasts correction
             global_state = node_stack.reshape(N, -1) # (N, V*D)
             global_correction = self.critique_net[step](global_state) # (N, D)
-            
+
             # Apply correction to all active nodes
             node_stack = node_stack + global_correction.unsqueeze(1)
-            
+
             # C. Stochastic Bayesian MoE Routing & Halting
             step_node_preds = []
             step_halt_probs = []
-            
+
             for v in range(self.n_nodes):
                 node_feat = node_stack[:, v, :] # (N, D)
-                
+
                 # Halt eval
                 halt_prob = torch.sigmoid(self.node_halt_gates[step](node_feat)) # (N, 1)
                 step_halt_probs.append(halt_prob)
-                
-                # Bayesian Routing 
+
+                # Bayesian Routing
                 mu = self.route_mu[step](node_feat) # (N, E)
                 logvar = self.route_logvar[step](node_feat) # (N, E)
                 var = torch.exp(logvar)
-                
+
                 if self.training:
                     # Reparameterization trick: sample routing weights
                     eps = torch.randn_like(mu)
@@ -3057,7 +3058,7 @@ class OmniscientSynergyExpertHead(nn.Module):
                     sample = mu + eps * torch.sqrt(var) * self.temperature
 
                 gate_scores = torch.sigmoid(sample) # (N, E)
-                
+
                 # Execute experts and fusion
                 routed = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=1) # (N, D_out)
                 step_node_preds.append(routed)
@@ -3065,14 +3066,14 @@ class OmniscientSynergyExpertHead(nn.Module):
             # D. Accumulate Predictions
             step_preds_stack = torch.stack(step_node_preds, dim=1) # (N, V, D_out)
             step_halts_stack = torch.stack(step_halt_probs, dim=1) # (N, V, 1)
-            
+
             remaining = 1.0 - node_cumulative_halt
             total_node_preds = total_node_preds + remaining * step_preds_stack
             node_cumulative_halt = node_cumulative_halt + remaining * step_halts_stack
-            
+
             if not self.training and node_cumulative_halt.mean() > 0.95:
                 break
-                
+
         # Optional: return KL loss to be added to total loss via an attribute
         self.last_kl_loss = kl_loss * 0.001
 
@@ -3080,7 +3081,7 @@ class OmniscientSynergyExpertHead(nn.Module):
         fusion_q = self.node_fusion_q(total_node_preds).mean(dim=1, keepdim=True) # (N, 1, D_out)
         fusion_k = self.node_fusion_k(total_node_preds) # (N, V, D_out)
         fusion_v = self.node_fusion_v(total_node_preds) # (N, V, D_out)
-        
+
         pool_attn = torch.bmm(fusion_q, fusion_k.transpose(1, 2)) * (self.out_dim**-0.5) # (N, 1, V)
         pool_attn = torch.softmax(pool_attn, dim=-1)
         fused_got_out = torch.bmm(pool_attn, fusion_v).squeeze(1) # (N, D_out)
@@ -3513,7 +3514,7 @@ class CognitiveSingularityExpertHead(nn.Module):
         self.path_projs = nn.ModuleList([
             nn.Linear(in_dim, in_dim, bias=False) for _ in range(n_hypotheses)
         ])
-        
+
         # 4. Latent Tree-Search Value Network
         # Evaluates the "goodness" or logical consistency of a hypothesis
         self.value_net = nn.Sequential(
@@ -3530,7 +3531,7 @@ class CognitiveSingularityExpertHead(nn.Module):
 
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.dropout = nn.Dropout(dropout)
-        
+
         # Track orthogonal penalty loss for debugging/regularization
         self.register_buffer("last_ortho_loss", torch.tensor(0.0))
 
@@ -3559,7 +3560,7 @@ class CognitiveSingularityExpertHead(nn.Module):
                 nn.init.normal_(layer.weight, std=0.01)
                 if layer.bias is not None:
                     nn.init.zeros_(layer.bias)
-                    
+
         # Output of hypernetwork should be initialized small to prevent explosion
         nn.init.normal_(self.hypernet[-1].weight, std=0.001)
 
@@ -3605,18 +3606,18 @@ class CognitiveSingularityExpertHead(nn.Module):
         attn = torch.softmax(attn, dim=-1) # (N, M)
         mem_retrieval = torch.matmul(attn, self.memory_matrix) # (N, mem_dim)
         mem_context = self.mem_read_out(mem_retrieval) # (N, in_dim)
-        
+
         # 3. Hypernetwork Weight Generation
         # Context is x_flat + episodic memory recall
         hyper_input = torch.cat([x_flat, mem_context], dim=-1) # (N, 2*in_dim)
         generated_weights = self.hypernet(hyper_input) # (N, W)
-        
+
         w1_size = self.in_dim * self.hyper_dim
         w2_size = self.hyper_dim * self.out_dim
-        
+
         w1_flat = generated_weights[:, :w1_size]
         w2_flat = generated_weights[:, w1_size:]
-        
+
         # Reshape generated weights: (N, hyper_dim, in_dim) and (N, out_dim, hyper_dim)
         W1 = w1_flat.view(N, self.hyper_dim, self.in_dim)
         W2 = w2_flat.view(N, self.out_dim, self.hyper_dim)
@@ -3628,14 +3629,14 @@ class CognitiveSingularityExpertHead(nn.Module):
         for k in range(self.n_hypotheses):
             h_in = self.path_projs[k](x_flat) # (N, D)
             hypotheses.append(h_in)
-            
+
             # Execute dynamically generated expert layer 1: (N, hyper_dim)
             h_hidden = self.dropout(F.gelu(torch.bmm(W1, h_in.unsqueeze(-1)).squeeze(-1)))
-            
+
             # Execute dynamically generated expert layer 2: (N, out_dim)
             h_out = torch.bmm(W2, h_hidden.unsqueeze(-1)).squeeze(-1)
             custom_outs.append(h_out)
-            
+
         hypotheses_stack = torch.stack(hypotheses, dim=1) # (N, K, D)
         custom_outs_stack = torch.stack(custom_outs, dim=1) # (N, K, D_out)
 
@@ -3648,40 +3649,40 @@ class CognitiveSingularityExpertHead(nn.Module):
         values = self.value_net(custom_outs_stack).squeeze(-1) # (N, K)
         # Select best hypotheses (softmax converts to probabilities)
         path_probs = torch.softmax(values, dim=-1) # (N, K)
-        
+
         # 6. Causal Logic Refinement
         # Enforce that the top hypotheses are logically coherent sequences
         causal_in = custom_outs_stack # (N, K, D_out)
         q = self.causal_q(causal_in)
         k = self.causal_k(causal_in)
         v = self.causal_v(causal_in)
-        
+
         # Masked attention (causal path flow)
         causal_attn = torch.bmm(q, k.transpose(1, 2)) / math.sqrt(self.out_dim)
         mask = torch.tril(torch.ones(self.n_hypotheses, self.n_hypotheses, device=x.device))
         causal_attn = causal_attn.masked_fill(mask == 0, float('-inf'))
         causal_attn = self.dropout(torch.softmax(causal_attn, dim=-1))
-        
+
         refined_hypotheses = self.causal_norm(causal_in + torch.bmm(causal_attn, v)) # (N, K, D_out)
-        
+
         # 7. Episodic Memory Write
         # Write the selected (highest value) path logic back to memory for future steps
         best_path_idx = path_probs.argmax(dim=-1) # (N)
         best_h_in = hypotheses_stack[torch.arange(N), best_path_idx] # (N, D)
-        
+
         write_gates = torch.sigmoid(self.mem_write_gate(best_h_in)) # (N, M)
         write_data = self.mem_write_data(best_h_in) # (N, mem_dim)
-        
+
         # Differentiable update to parameter matrix
         # This operates as a residual accumulation gradient update during training
         # For true recurrent state changes across tokens, an external hidden state is needed,
         # but the Parameter acts as a static "long term episodic registry"
         mem_update = torch.matmul(write_gates.t(), write_data) / (write_gates.sum(dim=0, keepdim=True).t() + 1e-6)
-        
+
         # Add to predictions
         # Weigh refined hypotheses by their tree-search value
         fused_cognitive = (refined_hypotheses * path_probs.unsqueeze(-1)).sum(dim=1) # (N, D_out)
-        
+
         # Add a residual from the memory write operation so write heads receive gradients
         fused_write = self.mem_write_proj(write_data * write_gates.mean(dim=-1, keepdim=True))
         fused_cognitive = fused_cognitive + 0.1 * fused_write
@@ -4052,33 +4053,33 @@ class ODEFunc(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(dim * 2, dim * 2)
         )
-        
+
         # Entanglement Routing approximations
         self.q_proj = nn.Linear(dim * 2, dim)
         self.k_proj = nn.Linear(dim * 2, dim)
         self.v_proj = nn.Linear(dim * 2, dim * 2)
-        
+
     def forward(self, t: torch.Tensor, z: torch.Tensor):
         # z is (N, dim*2) representing complex state [Real, Imag]
         N, D2 = z.shape
         D = D2 // 2
-        
+
         # 1. Neural Mechanics Step
         t_tensor = t.expand(N, 1)
         z_t = torch.cat([z, t_tensor], dim=-1)
         dz_dt_base = self.net(z_t) # (N, D*2)
-        
+
         # 2. Entanglement Routing
         # Instead of dot product similarity, we use a cheap pseudo-Kronecker entanglement
         q = self.q_proj(z) # (N, D)
         k = self.k_proj(z) # (N, D)
         v = self.v_proj(z) # (N, D*2)
-        
+
         # Entangle Q and K via element-wise multiplication (diagonal of Kronecker)
         # then non-linear mix
         entangled = torch.relu(q * k).sum(dim=-1, keepdim=True) / math.sqrt(D) # (N, 1)
         routing_update = torch.sigmoid(entangled) * v # (N, D*2)
-        
+
         return dz_dt_base + 0.1 * routing_update
 
 
@@ -4086,7 +4087,7 @@ class OmniversalQuantumExpertHead(nn.Module):
     """
     Generation v24: Omniversal Quantum Simulation Expert
     (Complex Superposition + Neural ODE + Holographic HRR + Entanglement)
-    
+
     Abandons discrete real-valued layers for Continuous-Time Complex integration.
     Allows mutual contradiction handling via wave interference before Measurement Collapse.
     """
@@ -4102,7 +4103,7 @@ class OmniversalQuantumExpertHead(nn.Module):
         self.out_dim = out_dim
         self.ode_steps = ode_steps      # Discretization steps for Euler integrator
         self.complex_dim = in_dim       # Operate in complex space of size in_dim
-        
+
         # Base projection (backward-compatible residual)
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
@@ -4112,20 +4113,20 @@ class OmniversalQuantumExpertHead(nn.Module):
         self.shared_down = nn.Linear(2048, out_dim, bias=False)
         self.shared_norm = nn.LayerNorm(out_dim)
         self.shared_scale = nn.Parameter(torch.tensor(1.0))
-        
+
         # ═══ 1. Quantum Lift (Measurement Prep) ═══
         # Lifts Real-valued input to Complex-valued Wavefunction (Real, Imag)
         self.real_lift = nn.Linear(in_dim, self.complex_dim)
         self.imag_lift = nn.Linear(in_dim, self.complex_dim)
-        
+
         # ═══ 2. Holographic Knowledge Binding (HRR Context) ═══
         # Global holographic memory trace (learnable contextual superposition)
         self.holographic_memory = nn.Parameter(torch.randn(self.complex_dim * 2))
-        
+
         # ═══ 3. Continuous-Time Neural ODE ═══
         # Defines the continuous derivative of the complex thought process
         self.ode_func = ODEFunc(dim=self.complex_dim, dropout=dropout)
-        
+
         # ═══ 4. Measurement Collapse ═══
         # Collapses the final Complex state back into distinct Real-valued logic (logits)
         self.measurement_proj = nn.Sequential(
@@ -4133,7 +4134,7 @@ class OmniversalQuantumExpertHead(nn.Module):
             nn.GELU(),
             nn.Linear(256, out_dim)
         )
-        
+
         # Measurement uncertainty modulator (Phase variance modulates confidence)
         self.uncertainty_gate = nn.Linear(self.complex_dim, 1)
 
@@ -4150,24 +4151,24 @@ class OmniversalQuantumExpertHead(nn.Module):
 
         nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
         nn.init.normal_(self.shared_down.weight, std=0.01)
-        
+
         nn.init.kaiming_uniform_(self.real_lift.weight, a=math.sqrt(5))
         nn.init.zeros_(self.real_lift.bias)
         nn.init.kaiming_uniform_(self.imag_lift.weight, a=math.sqrt(5))
         nn.init.zeros_(self.imag_lift.bias)
-        
+
         for m in self.ode_func.modules():
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-                    
+
         for m in self.measurement_proj:
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-                    
+
         nn.init.kaiming_uniform_(self.uncertainty_gate.weight, a=math.sqrt(5))
         nn.init.zeros_(self.uncertainty_gate.bias)
 
@@ -4198,15 +4199,15 @@ class OmniversalQuantumExpertHead(nn.Module):
         # Create Complex Wavefunction: Ψ = Real + i*Imag
         z_real = self.real_lift(x_flat) # (N, D)
         z_imag = self.imag_lift(x_flat) # (N, D)
-        
+
         # Pack into (N, D*2) for compatibility with real-valued PyTorch ops
         z0 = torch.cat([z_real, z_imag], dim=-1) # (N, D*2)
-        
+
         # ═══ PHASE 2: Holographic Knowledge Binding ═══
         # Bind the current state with the global holographic memory trace
         memory_expanded = self.holographic_memory.unsqueeze(0).expand(N, -1) # (N, D*2)
         z_bound = self.circular_convolution(z0, memory_expanded) # (N, D*2)
-        
+
         # Add bound knowledge into superposition
         z_t = z0 + 0.1 * z_bound
 
@@ -4215,29 +4216,29 @@ class OmniversalQuantumExpertHead(nn.Module):
         # using a simple Euler integrator (differentiable)
         dt = 1.0 / self.ode_steps
         t = torch.zeros(1, device=x.device)
-        
+
         for _ in range(self.ode_steps):
             # Compute derivative
             dz_dt = self.ode_func(t, z_t)
             # Step forward in continuous time
             z_t = z_t + dz_dt * dt
             t = t + dt
-            
+
         # z_t is now the final complex state at t=1.0
 
         # ═══ PHASE 4: Measurement Collapse ═══
         # Extract Phase and Magnitude to measure uncertainty
         final_real, final_imag = z_t.chunk(2, dim=-1) # (N, D), (N, D)
-        
+
         # Phase = atan2(Imag, Real). Represents conceptual angle/ambiguity.
         phase = torch.atan2(final_imag, final_real + 1e-8) # (N, D)
-        
+
         # Uncertainty is based on phase complexity. High variance = high uncertainty.
         collapse_confidence = torch.sigmoid(self.uncertainty_gate(phase)) # (N, 1)
-        
+
         # Collapse the Complex wavefunction back into Real-valued Action (Logits)
         collapsed_logits = self.measurement_proj(z_t) # (N, out_dim)
-        
+
         # Apply confidence: if uncertainty is high, the model's absolute amplitude drops
         final_quantum_logic = collapsed_logits * collapse_confidence
 
@@ -4285,7 +4286,7 @@ class CellularAutomataGrid(nn.Module):
         self.dim = dim
         self.grid_size = grid_size
         self.ca_steps = ca_steps
-        
+
         # State update network (operates on 3x3 local neighborhood)
         self.update_net = nn.Sequential(
             nn.Conv2d(dim, dim * 2, kernel_size=3, padding=1),
@@ -4300,16 +4301,16 @@ class CellularAutomataGrid(nn.Module):
         N = x.shape[0]
         # Reshape flat vector into a 2D grid
         grid = x.view(N, self.dim, self.grid_size, self.grid_size)
-        
+
         for _ in range(self.ca_steps):
             # NCA Update: compute delta
             dx = self.update_net(grid)
-            
+
             # Stochastic update gate (allows cells to preserve state or change)
             update_prob = torch.sigmoid(self.stochastic_gate(grid))
             # In training, we use soft updates. In true NCA this would be stochastic mask.
             grid = grid + update_prob * dx
-            
+
         return grid.view(N, -1)
 
 
@@ -4317,7 +4318,7 @@ class FractalGenesisExpertHead(nn.Module):
     """
     Generation v25: Fractal Genesis Expert
     (Hyperbolic Space + Fractal Graph + Cellular Automata + Self-Assembly)
-    
+
     Transforms reasoning from a flat vector sequence into a dynamically
     spawning hyperbolic computational fractal tree.
     """
@@ -4336,7 +4337,7 @@ class FractalGenesisExpertHead(nn.Module):
         self.fractal_depth = fractal_depth
         self.atoms_count = atoms_count
         self.grid_size = grid_size
-        
+
         # Base Euclidean projection (residual fallback)
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
@@ -4346,12 +4347,12 @@ class FractalGenesisExpertHead(nn.Module):
         self.shared_down = nn.Linear(2048, out_dim, bias=False)
         self.shared_norm = nn.LayerNorm(out_dim)
         self.shared_scale = nn.Parameter(torch.tensor(1.0))
-        
+
         # ═══ 1. Hyperbolic Projection ═══
         # Map Euclidean features to the Poincaré Disk manifold parameters
         self.hyperbolic_proj = nn.Linear(in_dim, in_dim)
         self.curvature = nn.Parameter(torch.tensor(1.0)) # Learned negative curvature c
-        
+
         # ═══ 2. Semantic Self-Assembly ═══
         # Pool of 'Logic Atoms' that dynamically construct the fractal node circuits
         self.logic_atoms = nn.Parameter(torch.randn(atoms_count, in_dim))
@@ -4360,29 +4361,29 @@ class FractalGenesisExpertHead(nn.Module):
             nn.GELU(),
             nn.Linear(in_dim, in_dim)
         )
-        
+
         # ═══ 3. Fractal Graph Recursion & CA ═══
         # Each level of the fractal tree has its own CA grid evolver
         # and a mechanism to spawn K=2 child nodes.
         self.fractal_evolvers = nn.ModuleList([
             CellularAutomataGrid(
-                dim=in_dim // (grid_size**2), 
-                grid_size=grid_size, 
+                dim=in_dim // (grid_size**2),
+                grid_size=grid_size,
                 dropout=dropout
             ) for _ in range(fractal_depth)
         ])
-        
+
         # Node spawn projections: splits a parent node into 2 children
         self.node_spawners = nn.ModuleList([
             nn.Linear(in_dim, in_dim * 2) for _ in range(fractal_depth - 1)
         ])
-        
+
         # ═══ 4. Resonance Collapse Aggregation ═══
         # Collapses 2 children back into a parent via phase resonance
         self.resonance_combiners = nn.ModuleList([
             nn.Linear(in_dim * 2, in_dim) for _ in range(fractal_depth - 1)
         ])
-        
+
         self.final_projection = nn.Sequential(
             nn.Linear(in_dim, 256),
             nn.GELU(),
@@ -4403,27 +4404,27 @@ class FractalGenesisExpertHead(nn.Module):
 
         nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
         nn.init.normal_(self.shared_down.weight, std=0.01)
-        
+
         nn.init.kaiming_uniform_(self.hyperbolic_proj.weight, a=math.sqrt(5))
         nn.init.zeros_(self.hyperbolic_proj.bias)
-        
+
         std = 1.0 / math.sqrt(self.in_dim)
         nn.init.uniform_(self.logic_atoms, -std, std)
-        
+
         for m in self.assembly_net:
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-                    
+
         for m in self.node_spawners:
             nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
             nn.init.zeros_(m.bias)
-            
+
         for m in self.resonance_combiners:
             nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
             nn.init.zeros_(m.bias)
-            
+
         for m in self.final_projection:
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
@@ -4448,23 +4449,23 @@ class FractalGenesisExpertHead(nn.Module):
         # Using arcosh trick
         dist = (2 / sqrt_c) * torch.log(arg + torch.sqrt(arg**2 - 1 + 1e-6))
         return dist
-        
+
     def assemble_node(self, node_state: torch.Tensor) -> torch.Tensor:
         """Dynamically binds logic atoms to the node state using hyperbolic distance."""
         # Map node to hyperbolic space
         c = torch.clamp(F.softplus(self.curvature), min=1e-4) # Ensure c > 0
         h_node = self.exp_map_zero(self.hyperbolic_proj(node_state), c) # (N, D)
         h_atoms = self.exp_map_zero(self.logic_atoms, c) # (A, D)
-        
+
         # Compute pairwise hyperbolic distances: (N, 1, D) and (1, A, D) -> (N, A)
         dists = self.poincare_dist(h_node.unsqueeze(1), h_atoms.unsqueeze(0), c).squeeze(-1)
-        
+
         # Attention over atoms (closer = higher weight)
         atom_weights = torch.softmax(-dists, dim=-1) # (N, A)
-        
+
         # Assemble bounded circuit state
         bound_atoms = torch.matmul(atom_weights, self.logic_atoms) # (N, D)
-        
+
         # Feed back to Euclidean space for processing
         assembled = self.assembly_net(torch.cat([node_state, bound_atoms], dim=-1)) # (N, D)
         return node_state + 0.1 * assembled
@@ -4477,26 +4478,26 @@ class FractalGenesisExpertHead(nn.Module):
         """
         # 1. Self-Assembly: bind logic atoms to current node state
         assembled_node = self.assemble_node(node_state)
-        
+
         # 2. Base case (leaf nodes)
         if depth == 0:
             # Evolve via Cellular Automata and return
             return self.fractal_evolvers[0](assembled_node)
-            
+
         # 3. Recursive step (internal nodes)
         # Spawn two children from current node
         children_raw = self.node_spawners[depth-1](assembled_node) # (N, D*2)
         child_left, child_right = children_raw.chunk(2, dim=-1) # (N, D), (N, D)
-        
+
         # Recurse on children
         evolved_left = self.recursive_fractal_pass(child_left, depth - 1)
         evolved_right = self.recursive_fractal_pass(child_right, depth - 1)
-        
+
         # 4. Resonance Collapse
         # Combine children back into parent. Instead of simple addition, we use
         # a resonance combiner to simulate constructive/destructive logic interference
         combined = self.resonance_combiners[depth-1](torch.cat([evolved_left, evolved_right], dim=-1))
-        
+
         # Finally evolve the combined parent node via its CA grid
         final_node = self.fractal_evolvers[depth](combined + assembled_node)
         return final_node
@@ -4517,7 +4518,7 @@ class FractalGenesisExpertHead(nn.Module):
         # Launch the recursive fractal graph processing from the root
         root_state = x_flat
         final_euclidean_state = self.recursive_fractal_pass(root_state, depth=self.fractal_depth - 1)
-        
+
         # Project back to logits
         fractal_logic = self.final_projection(final_euclidean_state)
 
@@ -4577,11 +4578,11 @@ class SurrogateHeaviside(torch.autograd.Function):
         # Backward pass: Fast sigmoid surrogate gradient
         sgax = (input - threshold) * alpha
         S_dtps = torch.exp(-torch.abs(sgax)) / (1 + torch.exp(-torch.abs(sgax)))**2
-        
+
         grad_input = grad_output * alpha * S_dtps
         grad_threshold = (grad_output * (-alpha) * S_dtps).sum()
         grad_alpha = (grad_output * (input - threshold) * S_dtps).sum()
-        
+
         return grad_input, grad_threshold, grad_alpha
 
 def surrogate_spike(input, threshold, alpha=torch.tensor(2.0)):
@@ -4598,52 +4599,52 @@ class LIFNeuron(nn.Module):
         self.decay = decay
         self.threshold = nn.Parameter(torch.tensor(threshold))
         self.alpha = nn.Parameter(torch.tensor(2.0)) # Surrogate gradient sharpness
-        
+
     def forward(self, x: torch.Tensor, v_mem: torch.Tensor):
         # Update membrane potential: decay previous + integrate new input
         v_mem = v_mem * self.decay + x
-        
+
         # Fire spike if v_mem > threshold
         spike = surrogate_spike(v_mem, self.threshold, self.alpha)
-        
+
         # Soft reset: subtract threshold from membrane if fired
         v_mem = v_mem - spike * self.threshold
-        
+
         return spike, v_mem
 
 class LiquidSynapseMPS(nn.Module):
     """
-    Combines Tensor Networks (1D Matrix Product State approximation) 
+    Combines Tensor Networks (1D Matrix Product State approximation)
     with Liquid Neural Network synaptic dynamics (State-dependent differential scaling).
     """
     def __init__(self, dim: int, rank: int = 16):
         super().__init__()
         self.dim = dim
         self.rank = rank
-        
+
         # Matrix Product State (MPS) core tensors (highly compressed representation of dense weights)
         # Instead of dim x dim, we use (dim x rank) and (rank x dim) to emulate a tensor train
         self.core_1 = nn.Parameter(torch.randn(dim, rank) / math.sqrt(dim))
         self.core_2 = nn.Parameter(torch.randn(rank, dim) / math.sqrt(rank))
-        
+
         # Liquid Synaptic Time Constants (LNN mechanics)
         self.tau = nn.Parameter(torch.ones(dim))
         # Non-linear input processor for the liquid equation
         self.liquid_gate = nn.Linear(dim, dim)
-        
+
     def forward(self, x: torch.Tensor, liquid_state: torch.Tensor, dt: float = 0.1):
         # 1. Tensor Network (MPS) transformation
         # x is (..., dim)
         hidden = torch.matmul(x, self.core_1) # (..., rank)
         mps_transform = torch.matmul(hidden, self.core_2) # (..., dim)
-        
+
         # 2. Liquid Synapse update: dx/dt = -x/tau + S(x, I)
         sensory_input = torch.sigmoid(self.liquid_gate(mps_transform))
-        
+
         # Differential equation Euler step
         d_state = -liquid_state / torch.clamp(F.softplus(self.tau), min=1e-3) + sensory_input
         new_state = liquid_state + d_state * dt
-        
+
         return new_state
 
 
@@ -4651,7 +4652,7 @@ class LiquidSpikingTensorExpertHead(nn.Module):
     """
     Generation v26: Liquid Spiking Tensor Expert
     (Spiking Neural Networks + Liquid Synapses + Test-Time Training + Tensor Networks)
-    
+
     A bio-plausible, highly compressed architectured adapting dynamically during inference.
     """
     def __init__(
@@ -4666,7 +4667,7 @@ class LiquidSpikingTensorExpertHead(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.spiking_steps = spiking_steps
-        
+
         # Base Euclidean projection
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
@@ -4676,20 +4677,20 @@ class LiquidSpikingTensorExpertHead(nn.Module):
         self.shared_down = nn.Linear(2048, out_dim, bias=False)
         self.shared_norm = nn.LayerNorm(out_dim)
         self.shared_scale = nn.Parameter(torch.tensor(1.0))
-        
+
         # ═══ 1. Test-Time Training (TTT) Fast-Weight Module ═══
         # Internal LoRA adapter that updates *during the forward pass*
         self.ttt_lora_A = nn.Parameter(torch.randn(in_dim, 8) / math.sqrt(in_dim))
         self.ttt_lora_B = nn.Parameter(torch.zeros(8, out_dim))
         # Self-supervised auxiliary task (Reconstruct input from bottleneck)
         self.ttt_decoder = nn.Linear(8, in_dim)
-        
+
         # ═══ 2. Liquid Synapse / Tensor Network Core ═══
         self.liquid_synapse = LiquidSynapseMPS(dim=in_dim, rank=mps_rank)
-        
+
         # ═══ 3. Spiking Neural Mechanics (LIF Neurons) ═══
         self.lif_neuron = LIFNeuron(in_features=in_dim)
-        
+
         # ═══ 4. Neuro-Symbolic Thresholding ═══
         self.spike_decoder = nn.Linear(in_dim, out_dim)
 
@@ -4709,10 +4710,10 @@ class LiquidSpikingTensorExpertHead(nn.Module):
 
         nn.init.normal_(self.ttt_lora_B, std=0.01)
         self.lif_neuron.threshold.data.fill_(0.1)
-        
+
         nn.init.kaiming_uniform_(self.ttt_decoder.weight, a=math.sqrt(5))
         nn.init.zeros_(self.ttt_decoder.bias)
-                    
+
         nn.init.kaiming_uniform_(self.spike_decoder.weight, a=math.sqrt(5))
         nn.init.zeros_(self.spike_decoder.bias)
 
@@ -4723,25 +4724,25 @@ class LiquidSpikingTensorExpertHead(nn.Module):
         """
         # Detach x from the global computation graph so inner loop grads don't leak
         x_inner = x.detach().requires_grad_(True)
-        
+
         # Self-supervised forward: Encode using shared representation, decode using aux task
         latent = torch.matmul(x_inner, self.ttt_lora_A)
         reconstruction = self.ttt_decoder(latent)
-        
+
         # Loss: Mean Squared Error representation
         loss = F.mse_loss(reconstruction, x_inner)
-        
+
         # Calculate gradients for the Lora A encoder and aux decoder
         grads = torch.autograd.grad(
-            loss, 
-            [self.ttt_lora_A, self.ttt_decoder.weight, self.ttt_decoder.bias], 
-            create_graph=self.training, 
+            loss,
+            [self.ttt_lora_A, self.ttt_decoder.weight, self.ttt_decoder.bias],
+            create_graph=self.training,
             retain_graph=True
         )
-        
+
         # TTT SGD Step (lr = 0.01). Update only the shared encoder fast-weights.
         fast_lora_A = self.ttt_lora_A - 0.01 * grads[0]
-        
+
         # Compute TTT contribution for this batch using adapted encoder and frozen task-decoder
         ttt_output = torch.matmul(torch.matmul(x, fast_lora_A), self.ttt_lora_B) # (N, out_dim)
         return ttt_output
@@ -4766,17 +4767,17 @@ class LiquidSpikingTensorExpertHead(nn.Module):
         v_mem = torch.zeros_like(x_flat)
         liquid_state = torch.zeros_like(x_flat)
         spike_train_accum = torch.zeros_like(x_flat)
-        
+
         for _ in range(self.spiking_steps):
             # Liquid Synapse (MPS) update
             liquid_state = self.liquid_synapse(x_flat, liquid_state)
-            
+
             # Feed continuously changing liquid state into LIF Neuron
             spike, v_mem = self.lif_neuron(liquid_state, v_mem)
-            
+
             # Accumulate discrete spikes
             spike_train_accum = spike_train_accum + spike
-            
+
         # ═══ 4. Neuro-Symbolic Thresholding ═══
         # Average firing rate decoded back into continuous real logits
         firing_rate = spike_train_accum / self.spiking_steps
@@ -4823,10 +4824,10 @@ class ChampionNetLiquidSpikingExpert(nn.Module):
 class ActiveInferenceExpertHead(nn.Module):
     """
     v27 Active Inference Expert Head based on the Free Energy Principle.
-    It introduces a generative World Model and minimizes Variational Free Energy 
+    It introduces a generative World Model and minimizes Variational Free Energy
     at test time before routing to experts.
     """
-    def __init__(self, in_dim: int = 256, out_dim: int = 10, n_experts: int = 6, 
+    def __init__(self, in_dim: int = 256, out_dim: int = 10, n_experts: int = 6,
                  inference_steps: int = 3, lr: float = 0.1, dropout: float = 0.1):
         super().__init__()
         self.in_dim = in_dim
@@ -4834,17 +4835,17 @@ class ActiveInferenceExpertHead(nn.Module):
         self.n_experts = n_experts
         self.inference_steps = inference_steps
         self.lr = lr
-        
+
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
-        
+
         self.world_model = nn.Linear(in_dim, in_dim, bias=True)
         self.world_prior = nn.Linear(in_dim, in_dim, bias=False)
         self.precision_gate = nn.Linear(in_dim, n_experts * 2, bias=True)
-        
+
         self.experts_up = nn.ModuleList([nn.Linear(in_dim, 1024, bias=False) for _ in range(n_experts)])
         self.experts_down = nn.ModuleList([nn.Linear(1024, out_dim, bias=False) for _ in range(n_experts)])
-        
+
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.dropout = nn.Dropout(dropout)
         self.reset_parameters()
@@ -4866,7 +4867,7 @@ class ActiveInferenceExpertHead(nn.Module):
         base_logits = F.linear(x, self.weight, self.bias)
         original_shape = x.shape
         x_flat = x.view(-1, self.in_dim)
-        
+
         # Test-time inner loop optimization
         with torch.enable_grad():
             z = x_flat.clone().detach().requires_grad_(True)
@@ -4875,27 +4876,27 @@ class ActiveInferenceExpertHead(nn.Module):
                 surprise = F.mse_loss(predicted_state, x_flat, reduction='sum')
                 complexity = F.mse_loss(z, self.world_prior(x_flat), reduction='sum')
                 free_energy = surprise + 0.1 * complexity
-                
+
                 grad_z = torch.autograd.grad(free_energy, z, create_graph=self.training)[0]
                 z = z - self.lr * grad_z
-                
+
         z_final = z
         gating_out = self.precision_gate(z_final)
         mu, logvar = gating_out.chunk(2, dim=-1)
         precision = torch.exp(-logvar)
-        
+
         gate_scores = torch.softmax(mu * precision, dim=-1)
-        
+
         expert_outputs = []
         for i in range(self.n_experts):
             h = F.silu(self.experts_up[i](z_final))
             h = self.dropout(h)
             out = self.experts_down[i](h)
             expert_outputs.append(out)
-            
+
         expert_stack = torch.stack(expert_outputs, dim=-2)
         routed_out = (expert_stack * gate_scores.unsqueeze(-1)).sum(dim=-2)
-        
+
         output = base_logits.view(-1, self.out_dim) + self.alpha * routed_out
         return output.view(*original_shape[:-1], self.out_dim)
 
@@ -5224,13 +5225,13 @@ class StateSpaceExpert(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.d_state = d_state
-        
+
         # State space parameters
         self.A_log = nn.Parameter(torch.empty(d_model, d_state))
         self.B = nn.Parameter(torch.empty(d_model, d_state))
         self.C = nn.Parameter(torch.empty(d_model, d_state))
         self.D = nn.Parameter(torch.zeros(d_model))
-        
+
         self.dt_proj = nn.Linear(d_model, d_model)
         self.dt_min = dt_min
         self.dt_max = dt_max
@@ -5250,25 +5251,25 @@ class StateSpaceExpert(nn.Module):
         # 1. Delta (time scale)
         dt = F.softplus(self.dt_proj(x))
         dt = torch.clamp(dt, min=self.dt_min, max=self.dt_max)
-        
+
         # Continuous A must be negative to be stable
         A = -torch.exp(self.A_log)
-        
+
         # 2. ZOH Discretization for A and B
         # dA = exp(dt * A)
         # dB = (exp(dt * A) - I) / A * B
-        
+
         dA = torch.exp(dt.unsqueeze(-1) * A)
         dB = (dA - 1.0) / (A + 1e-6) * self.B
-        
-        # Initialize sequence hidden state to zeros (assuming per-token routing execution, 
+
+        # Initialize sequence hidden state to zeros (assuming per-token routing execution,
         # this acts like a depth-wise recurrent pass per token)
         h = torch.zeros(x.shape[:-1] + (self.d_model, self.d_state), device=x.device, dtype=x.dtype)
-        
+
         # Step the state 3 times recursively for depth without sequence
         for _ in range(3):
             h = dA * h + dB * x.unsqueeze(-1)
-            
+
         y = (self.C * h).sum(dim=-1) + self.D * x
         return F.silu(y)
 
@@ -5285,24 +5286,24 @@ class HolographicStateSpaceExpertHead(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.n_experts = n_experts
-        
+
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
         self.bias = nn.Parameter(torch.zeros(out_dim))
-        
+
         # Learned holographic associative memory matrix
         self.holographic_memory = nn.Parameter(torch.empty(1, in_dim))
         self.holo_proj = nn.Linear(in_dim, in_dim, bias=False)
-        
+
         self.ssm_experts = nn.ModuleList([StateSpaceExpert(in_dim) for _ in range(n_experts)])
-        
+
         # Adjacency topology router
         # Outputs a (n_experts, n_experts) adjacency matrix per token
         self.topology_router = nn.Linear(in_dim, n_experts * n_experts)
-        
+
         self.out_proj = nn.Linear(in_dim, out_dim, bias=False)
         self.alpha = nn.Parameter(torch.tensor(0.0))
         self.dropout = nn.Dropout(dropout)
-        
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -5324,12 +5325,12 @@ class HolographicStateSpaceExpertHead(nn.Module):
 
     def forward(self, x):
         base_logits = F.linear(x, self.weight, self.bias)
-        
+
         # 1. Holographic Memory Binding
         # Bind the token state x with the learned persistent holographic_memory
         x_bound = self._circular_convolution(x, self.holographic_memory.expand_as(x))
         x_holo = self.holo_proj(x_bound)
-        
+
         # 2. Dynamic Topology Routing
         # B x T x (N*N) -> B x T x N x N
         adj_flat = self.topology_router(x_holo)
@@ -5337,18 +5338,18 @@ class HolographicStateSpaceExpertHead(nn.Module):
         # Convert to a soft permutation matrix via doubly stochastic approximation (Sinkhorn)
         # For simplicity in testing, we use softmax over rows
         adj = torch.softmax(adj_logits, dim=-1)
-        
+
         # 3. State Space Execution Path
         # Instead of parallel execution, we execute iteratively.
         current_state = x_holo
         accum_out = torch.zeros_like(x_holo)
-        
+
         expert_outs = []
         for i in range(self.n_experts):
             h = self.ssm_experts[i](current_state)
             expert_outs.append(h)
         expert_stack = torch.stack(expert_outs, dim=-2) # (..., N_experts, D)
-        
+
         # Route outputs through adjacency.
         # current_state = \sum_j adj[i, j] * expert_stack[j]
         # In a generic formulation, we compute the aggregated state as a mixture.
@@ -5356,19 +5357,19 @@ class HolographicStateSpaceExpertHead(nn.Module):
         for step in range(self.n_experts):
             step_mix = torch.einsum('...ij,...jd->...id', adj, expert_stack)
             # The next state input is the average mixture for the next nodes
-            current_state = step_mix.mean(dim=-2) 
+            current_state = step_mix.mean(dim=-2)
             accum_out = accum_out + current_state
-            
+
             # Re-evaluate experts via recurrence (dynamic routing unrolled)
             expert_outs = []
             for i in range(self.n_experts):
                 h = self.ssm_experts[i](current_state)
                 expert_outs.append(h)
             expert_stack = torch.stack(expert_outs, dim=-2)
-            
+
         final_h = accum_out / self.n_experts
         routed_logits = self.out_proj(self.dropout(final_h))
-        
+
         return base_logits + self.alpha * routed_logits
 
 
@@ -5916,6 +5917,516 @@ class ChampionNetCognitiveLeapExpert(nn.Module):
         return self.layers[10].deep_supervision_loss(targets)
 
 
+class LightweightMHA(nn.Module):
+    """
+    Lightweight Multi-Head Attention for sequence of length 2 (z_l and z_h).
+    """
+    def __init__(self, dim, num_heads=2, dropout=0.1):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=False)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        B, T, C = x.shape
+        qkv = self.qkv(x).reshape(B, T, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # (B, num_heads, T, head_dim)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+
+        x_out = (attn @ v).transpose(1, 2).reshape(B, T, C)
+        x_out = self.proj(x_out)
+        x_out = self.proj_drop(x_out)
+        return x_out
+
+
+class CognitiveLeapUltraExpertHead(nn.Module):
+    """
+    Generation v51: Cognitive Leap Ultra Expert
+    (Tiny Recursive Latent Reasoning with Cross-Attention + Recurrent MoE Core + Entropy Halting)
+    """
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        latent_dim: int = 128,
+        core_dim: int = 256,
+        n_cycles: int = 3,
+        inner_steps: int = 2,
+        max_cycles: int = 16,
+        dropout: float = 0.1,
+        n_cores: int = 4,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.latent_dim = latent_dim
+        self.core_dim = core_dim
+        self.n_cycles = n_cycles
+        self.inner_steps = inner_steps
+        self.max_cycles = max_cycles
+        self.n_cores = n_cores
+
+        # Base projection (backward-compatible)
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
+        self.bias = nn.Parameter(torch.zeros(out_dim))
+
+        # Shared Expert
+        self.shared_up = nn.Linear(in_dim, 2048, bias=False)
+        self.shared_down = nn.Linear(2048, out_dim, bias=False)
+        self.shared_norm = nn.LayerNorm(out_dim)
+        self.shared_scale = nn.Parameter(torch.tensor(1.0))
+
+        # Latent initializers
+        self.thought_init = nn.Linear(in_dim, latent_dim, bias=False)
+        self.answer_init = nn.Linear(in_dim, latent_dim, bias=False)
+
+        # Recurrent MoE Core
+        self.cores = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(in_dim + 2 * latent_dim, core_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(core_dim, latent_dim),
+            ) for _ in range(n_cores)
+        ])
+        self.core_router = nn.Linear(in_dim + 2 * latent_dim, n_cores)
+
+        # Cross-Attention Refinement
+        self.cross_attn = LightweightMHA(latent_dim, num_heads=2, dropout=dropout)
+
+        # Outer answer update
+        self.answer_update = nn.Sequential(
+            nn.Linear(2 * latent_dim, latent_dim),
+            nn.GELU(),
+            nn.Linear(latent_dim, latent_dim),
+        )
+
+        # Hypersphere gains
+        self.latent_gain = nn.Parameter(torch.ones(latent_dim))
+
+        # Cycle conditioning
+        self.cycle_embed = nn.Embedding(max_cycles, latent_dim)
+
+        # ACT-style halting head
+        self.halt_head = nn.Linear(latent_dim, 1)
+
+        # Per-cycle decoder
+        self.decode_head = nn.Linear(latent_dim, out_dim, bias=False)
+
+        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.dropout = nn.Dropout(dropout)
+
+        # Diagnostics / regularizers
+        self.register_buffer("last_ponder_cost", torch.tensor(0.0))
+        self.register_buffer("last_consistency_loss", torch.tensor(0.0))
+        self.register_buffer("last_cycles_used", torch.tensor(0.0))
+        self.register_buffer("last_gating_entropy", torch.tensor(0.0))
+        self.register_buffer("last_prediction_streak", torch.tensor(0.0), persistent=False)
+        self.register_buffer("last_prediction_confidence_delta", torch.tensor(0.0), persistent=False)
+        self.register_buffer(
+            "last_prediction_topk_js_divergence", torch.tensor(0.0), persistent=False
+        )
+        self.register_buffer(
+            "last_prediction_topk_js_divergence_max", torch.tensor(0.0), persistent=False
+        )
+        self.last_exit_reason = "not_run"
+
+        # Per-cycle decode cache for deep improvement supervision
+        self._cycle_logits = []
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        if fan_in != 0:
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+        nn.init.kaiming_uniform_(self.shared_up.weight, a=math.sqrt(5))
+        nn.init.normal_(self.shared_down.weight, std=0.01)
+
+        nn.init.kaiming_uniform_(self.thought_init.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.answer_init.weight, a=math.sqrt(5))
+
+        for core in self.cores:
+            for layer in core:
+                if isinstance(layer, nn.Linear):
+                    nn.init.kaiming_uniform_(layer.weight, a=math.sqrt(5))
+                    if layer.bias is not None:
+                        nn.init.zeros_(layer.bias)
+            nn.init.normal_(core[-1].weight, std=0.01)
+
+        nn.init.kaiming_uniform_(self.core_router.weight, a=math.sqrt(5))
+        if self.core_router.bias is not None:
+            nn.init.zeros_(self.core_router.bias)
+
+        nn.init.kaiming_uniform_(self.cross_attn.qkv.weight, a=math.sqrt(5))
+        nn.init.normal_(self.cross_attn.proj.weight, std=0.01)
+
+        for layer in self.answer_update:
+            if isinstance(layer, nn.Linear):
+                nn.init.kaiming_uniform_(layer.weight, a=math.sqrt(5))
+                if layer.bias is not None:
+                    nn.init.zeros_(layer.bias)
+        nn.init.normal_(self.answer_update[-1].weight, std=0.01)
+
+        nn.init.normal_(self.cycle_embed.weight, std=0.02)
+
+        nn.init.zeros_(self.halt_head.weight)
+        nn.init.constant_(self.halt_head.bias, -1.0)
+
+        nn.init.normal_(self.decode_head.weight, std=0.01)
+
+    def _sphere_norm(self, z):
+        return F.normalize(z, p=2, dim=-1) * self.latent_gain
+
+    def deep_supervision_loss(self, targets):
+        if not self._cycle_logits:
+            raise RuntimeError(
+                "deep_supervision_loss requires a training-mode forward pass first"
+            )
+        targets_flat = targets.reshape(-1)
+        n = len(self._cycle_logits)
+        weights = torch.arange(
+            1, n + 1, device=targets_flat.device, dtype=self._cycle_logits[0].dtype
+        )
+        weights = weights / weights.sum()
+        loss = torch.zeros((), device=targets_flat.device, dtype=self._cycle_logits[0].dtype)
+        for w, logits in zip(weights, self._cycle_logits):
+            loss = loss + w * F.cross_entropy(logits, targets_flat)
+        return loss
+
+    @staticmethod
+    def _topk_js_divergence(
+        previous_probs: torch.Tensor,
+        current_probs: torch.Tensor,
+        top_k: int,
+    ) -> torch.Tensor:
+        """Return per-row top-k Jensen-Shannon drift with an other-mass bucket."""
+
+        k = min(max(1, int(top_k)), int(previous_probs.shape[-1]))
+        midpoint = 0.5 * (previous_probs + current_probs)
+        indices = midpoint.topk(k, dim=-1).indices
+        previous_top = previous_probs.gather(-1, indices)
+        current_top = current_probs.gather(-1, indices)
+        previous_other = (1.0 - previous_top.sum(dim=-1, keepdim=True)).clamp_min(0.0)
+        current_other = (1.0 - current_top.sum(dim=-1, keepdim=True)).clamp_min(0.0)
+        previous_compact = torch.cat([previous_top, previous_other], dim=-1)
+        current_compact = torch.cat([current_top, current_other], dim=-1)
+        compact_midpoint = 0.5 * (previous_compact + current_compact)
+        epsilon = torch.finfo(previous_compact.dtype).tiny
+
+        def _kl(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+            terms = left * (
+                torch.log(left.clamp_min(epsilon))
+                - torch.log(right.clamp_min(epsilon))
+            )
+            return terms.sum(dim=-1)
+
+        return 0.5 * (
+            _kl(previous_compact, compact_midpoint)
+            + _kl(current_compact, compact_midpoint)
+        )
+
+    def forward(
+        self,
+        x,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: bool = False,
+        exit_tol: float = 1e-3,
+        exit_entropy_threshold: float = 0.2,
+        prediction_stability_patience: int = 2,
+        prediction_stability_tol: float = 5e-3,
+        prediction_stability_top_k: int = 5,
+    ):
+        N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
+        shape_prefix = x.shape[:-1]
+        x_flat = x.reshape(N, self.in_dim)
+
+        base_logits = F.linear(x_flat, self.weight, self.bias)
+
+        # Global Shared Expert
+        shared_out = self.shared_norm(
+            self.shared_down(self.dropout(F.silu(self.shared_up(x_flat))))
+        )
+
+        n_cycles = int(reasoning_cycles) if reasoning_cycles is not None else self.n_cycles
+        n_cycles = max(1, n_cycles)
+
+        # Initialize latents on the hypersphere
+        z_l = self._sphere_norm(self.thought_init(x_flat))
+        z_h = self._sphere_norm(self.answer_init(x_flat))
+
+        cycle_logits = []
+        halt_probs = []
+        gate_probs_list = []
+        remaining = torch.ones(N, 1, device=x_flat.device, dtype=x_flat.dtype)
+        ponder = torch.zeros(N, 1, device=x_flat.device, dtype=x_flat.dtype)
+        consistency = torch.zeros((), device=x_flat.device, dtype=x_flat.dtype)
+        prev_z_h = None
+        cycles_used = n_cycles
+        stability_patience = max(0, int(prediction_stability_patience))
+        stability_tol = max(0.0, float(prediction_stability_tol))
+        use_prediction_stability = adaptive_compute and not self.training and stability_patience > 0
+        weighted_recursive = torch.zeros(N, self.out_dim, device=x_flat.device, dtype=x_flat.dtype)
+        previous_prediction = None
+        prediction_streak = torch.zeros(N, device=x_flat.device, dtype=torch.long)
+        stable_confidence_min = None
+        stable_confidence_max = None
+        prediction_confidence_delta = torch.zeros(N, device=x_flat.device, dtype=x_flat.dtype)
+        prediction_topk_js_divergence = torch.zeros(
+            N, device=x_flat.device, dtype=x_flat.dtype
+        )
+        prediction_topk_js_divergence_max = torch.zeros_like(
+            prediction_topk_js_divergence
+        )
+        previous_prediction_distribution = None
+        exit_reason = "max_cycles"
+
+        for t in range(n_cycles):
+            cycle_idx = min(t, self.max_cycles - 1)
+            cycle_vec = self.cycle_embed.weight[cycle_idx].unsqueeze(0)
+            z_l_cond = z_l + cycle_vec
+
+            # Inner scratchpad refinement (weight-tied recurrent MoE core)
+            for _ in range(self.inner_steps):
+                core_in = torch.cat([x_flat, z_l_cond, z_h], dim=-1)
+                gate_logits = self.core_router(core_in)
+                gate_probs = F.softmax(gate_logits, dim=-1)
+                gate_probs_list.append(gate_probs)
+
+                # Route to recurrent cores
+                core_outs = torch.stack([core(core_in) for core in self.cores], dim=1)  # (N, n_cores, latent_dim)
+                core_update = (core_outs * gate_probs.unsqueeze(-1)).sum(dim=1)  # (N, latent_dim)
+
+                z_l_cond = self._sphere_norm(z_l_cond + core_update)
+            z_l = z_l_cond
+
+            # Attention-Based Cross-Latent Gating
+            z_seq = torch.stack([z_l, z_h], dim=1)  # (N, 2, latent_dim)
+            z_seq = z_seq + self.cross_attn(z_seq)
+            z_l_refined = z_seq[:, 0, :]
+            z_h_refined = z_seq[:, 1, :]
+
+            # Outer answer refinement
+            z_h = self._sphere_norm(
+                z_h_refined + self.answer_update(torch.cat([z_l_refined, z_h_refined], dim=-1))
+            )
+
+            logits = self.decode_head(z_h)
+            cycle_logits.append(logits)
+
+            # Prediction entropy
+            probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+
+            # Latent-convergence measurement
+            if prev_z_h is not None:
+                delta = (z_h - prev_z_h).pow(2).mean()
+                consistency = consistency + delta
+            else:
+                delta = None
+            prev_z_h = z_h
+
+            # Treat the full prefix output as an internal verifier. If its top
+            # prediction and confidence stabilize, more recurrent work is not
+            # buying a meaningfully different answer for this request.
+            prediction_stable = False
+            if use_prediction_stability:
+                prefix_recursive = weighted_recursive + remaining * logits
+                prefix_output = (
+                    base_logits
+                    + self.shared_scale * shared_out
+                    + (self.alpha + 1e-4) * prefix_recursive
+                )
+                prefix_probs = F.softmax(prefix_output, dim=-1)
+                if previous_prediction_distribution is not None:
+                    prediction_topk_js_divergence = self._topk_js_divergence(
+                        previous_prediction_distribution,
+                        prefix_probs,
+                        prediction_stability_top_k,
+                    )
+                    prediction_topk_js_divergence_max = torch.maximum(
+                        prediction_topk_js_divergence_max,
+                        prediction_topk_js_divergence,
+                    )
+                previous_prediction_distribution = prefix_probs
+                prediction_confidence, prediction = prefix_probs.max(dim=-1)
+                if previous_prediction is None:
+                    prediction_streak = torch.ones_like(prediction_streak)
+                    stable_confidence_min = prediction_confidence
+                    stable_confidence_max = prediction_confidence
+                else:
+                    same_prediction = prediction.eq(previous_prediction)
+                    prediction_streak = torch.where(
+                        same_prediction,
+                        prediction_streak + 1,
+                        torch.ones_like(prediction_streak),
+                    )
+                    stable_confidence_min = torch.where(
+                        same_prediction,
+                        torch.minimum(stable_confidence_min, prediction_confidence),
+                        prediction_confidence,
+                    )
+                    stable_confidence_max = torch.where(
+                        same_prediction,
+                        torch.maximum(stable_confidence_max, prediction_confidence),
+                        prediction_confidence,
+                    )
+                prediction_confidence_delta = stable_confidence_max - stable_confidence_min
+                previous_prediction = prediction
+                stable_mask = (
+                    prediction_streak >= stability_patience
+                ) & (
+                    prediction_confidence_delta <= stability_tol
+                )
+                prediction_stable = bool(stable_mask.all().item())
+
+            # Inference-only verifier and convergence exits. Prediction
+            # stability is checked first so diagnostics identify the new path
+            # when multiple exit criteria become true on the same cycle.
+            converged = False
+            if adaptive_compute and not self.training:
+                if prediction_stable:
+                    converged = True
+                    exit_reason = "prediction_stable"
+                elif delta is not None and delta.item() < exit_tol:
+                    converged = True
+                    exit_reason = "latent_converged"
+                elif entropy.mean().item() < exit_entropy_threshold:
+                    converged = True
+                    exit_reason = "low_entropy"
+                elif remaining.mean().item() < 0.05:
+                    converged = True
+                    exit_reason = "halt_mass"
+
+            # Differentiable ACT halting
+            h_t = torch.sigmoid(self.halt_head(z_h))  # (N, 1)
+            if t == n_cycles - 1 or converged:
+                p_t = remaining
+                halt_probs.append(p_t)
+                ponder = ponder + p_t * float(t + 1)
+                cycles_used = t + 1
+                break
+            p_t = remaining * h_t
+            remaining = remaining * (1.0 - h_t)
+            halt_probs.append(p_t)
+            ponder = ponder + p_t * float(t + 1)
+            if use_prediction_stability:
+                weighted_recursive = weighted_recursive + p_t * logits
+
+        self.last_cycles_used = torch.tensor(
+            float(cycles_used), device=x_flat.device
+        )
+        self.last_prediction_streak = prediction_streak.float().mean()
+        self.last_prediction_confidence_delta = prediction_confidence_delta.mean()
+        self.last_prediction_topk_js_divergence = (
+            prediction_topk_js_divergence.mean().detach()
+        )
+        self.last_prediction_topk_js_divergence_max = (
+            prediction_topk_js_divergence_max.mean().detach()
+        )
+        self.last_exit_reason = exit_reason
+
+        # Calculate gating entropy for MoE cores
+        if gate_probs_list:
+            all_gate_probs = torch.stack(gate_probs_list, dim=0)  # (Steps, N, n_cores)
+            mean_gate_probs = all_gate_probs.mean(dim=(0, 1))  # (n_cores,)
+            gating_entropy = -torch.sum(mean_gate_probs * torch.log(mean_gate_probs + 1e-9))
+        else:
+            gating_entropy = torch.tensor(0.0, device=x_flat.device)
+
+        if self.training:
+            self.last_ponder_cost = ponder.mean()
+            self.last_consistency_loss = consistency / max(1, cycles_used - 1)
+            self.last_gating_entropy = gating_entropy
+            self._cycle_logits = cycle_logits
+        else:
+            self.last_gating_entropy = gating_entropy
+            self._cycle_logits = []
+
+        # Halting-weighted mixture of per-cycle decodes
+        logits_stack = torch.stack(cycle_logits, dim=1)  # (N, T, out_dim)
+        probs_stack = torch.stack(halt_probs, dim=1)  # (N, T, 1)
+        recursive_out = (logits_stack * probs_stack).sum(dim=1)  # (N, out_dim)
+
+        output = (
+            base_logits
+            + self.shared_scale * shared_out
+            + (self.alpha + 1e-4) * recursive_out
+        )
+
+        return output.view(*shape_prefix, -1)
+
+
+class ChampionNetCognitiveLeapUltraExpert(nn.Module):
+    """
+    Backbone-compatible model with CognitiveLeapUltraExpertHead (v51).
+    """
+    def __init__(
+        self,
+        latent_dim: int = 128,
+        core_dim: int = 256,
+        n_cycles: int = 3,
+        inner_steps: int = 2,
+        max_cycles: int = 16,
+        dropout: float = 0.1,
+        n_cores: int = 4,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(CognitiveLeapUltraExpertHead(
+            256, 10,
+            latent_dim=latent_dim,
+            core_dim=core_dim,
+            n_cycles=n_cycles,
+            inner_steps=inner_steps,
+            max_cycles=max_cycles,
+            dropout=dropout,
+            n_cores=n_cores,
+        ))
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(
+        self,
+        x,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: bool = False,
+        exit_tol: float = 1e-3,
+        exit_entropy_threshold: float = 0.2,
+        prediction_stability_patience: int = 2,
+        prediction_stability_tol: float = 5e-3,
+        prediction_stability_top_k: int = 5,
+    ):
+        for layer in self.layers:
+            if isinstance(layer, CognitiveLeapUltraExpertHead):
+                x = layer(
+                    x,
+                    reasoning_cycles=reasoning_cycles,
+                    adaptive_compute=adaptive_compute,
+                    exit_tol=exit_tol,
+                    exit_entropy_threshold=exit_entropy_threshold,
+                    prediction_stability_patience=prediction_stability_patience,
+                    prediction_stability_tol=prediction_stability_tol,
+                    prediction_stability_top_k=prediction_stability_top_k,
+                )
+            else:
+                x = layer(x)
+        return x
+
+    def deep_supervision_loss(self, targets):
+        return self.layers[10].deep_supervision_loss(targets)
+
+
 class ChampionNetHierarchicalExpert(nn.Module):
     """
     Backbone-compatible model with HierarchicalMoEClassifierHead.
@@ -6013,10 +6524,10 @@ class ChampionNetThoughtExpert(nn.Module):
         base = ChampionNet()
         layers = [base.layers[i] for i in range(10)]
         layers.append(ThoughtExpertClassifierHead(
-            256, 10, 
-            n_experts=n_experts, 
-            reasoning_steps=reasoning_steps, 
-            lora_rank=lora_rank, 
+            256, 10,
+            n_experts=n_experts,
+            reasoning_steps=reasoning_steps,
+            lora_rank=lora_rank,
             dropout=dropout
         ))
         layers.append(base.layers[11])
@@ -6401,6 +6912,8 @@ def build_model(
         return ChampionNetCognitiveExpert(dropout=dropout)
     if model_size == "cognitive_leap_expert":
         return ChampionNetCognitiveLeapExpert(dropout=dropout)
+    if model_size == "cognitive_leap_ultra_expert":
+        return ChampionNetCognitiveLeapUltraExpert(dropout=dropout)
     if model_size == "transcendent_expert":
         return ChampionNetTranscendentExpert(dropout=dropout)
     if model_size == "omniversal_expert":
@@ -6711,7 +7224,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             "layers.10.down_proj.weight",
             "layers.10.layer_scale.gamma",
         })
-        
+
         # Robust loading: if checkpoint is not megalarge, strip head keys to avoid mismatch
         ckpt_size = detect_model_size_from_state_dict(state_dict)
         if ckpt_size != "megalarge":
@@ -6719,7 +7232,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in mega_allowed]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -6736,14 +7249,14 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             "layers.10.alpha", "layers.10.calibration.weight",
             "layers.10.calibration.bias", "layers.10.theta",
         }
-        
+
         ckpt_size = detect_model_size_from_state_dict(state_dict)
         if ckpt_size != "ultra_expert":
             filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -6768,14 +7281,14 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             allowed_missing.add(f"{head_pref}expert_norms.{i}.bias")
             allowed_missing.add(f"{head_pref}lora_down.{i}.weight")
             allowed_missing.add(f"{head_pref}lora_up.{i}.weight")
-            
+
         ckpt_size = detect_model_size_from_state_dict(state_dict)
         if ckpt_size != "hierarchical_expert":
             filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -6784,7 +7297,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         head_pref = "layers.10."
         allowed_missing = {
             f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
-            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias", 
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
             f"{head_pref}shared_scale", f"{head_pref}expert_bias",
             f"{head_pref}alpha", f"{head_pref}calibration.weight",
             f"{head_pref}calibration.bias", f"{head_pref}theta",
@@ -6814,7 +7327,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -6823,10 +7336,10 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         head_pref = "layers.10."
         allowed_missing = {
             f"{head_pref}shared_up.weight", f"{head_pref}shared_down.weight",
-            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias", 
+            f"{head_pref}shared_norm.weight", f"{head_pref}shared_norm.bias",
             f"{head_pref}shared_scale", f"{head_pref}expert_bias",
             f"{head_pref}local_up.weight", f"{head_pref}local_down.weight",
-            f"{head_pref}local_norm.weight", f"{head_pref}local_norm.bias", 
+            f"{head_pref}local_norm.weight", f"{head_pref}local_norm.bias",
             f"{head_pref}local_scale",
             f"{head_pref}alpha", f"{head_pref}calibration.weight",
             f"{head_pref}calibration.bias", f"{head_pref}theta",
@@ -6859,7 +7372,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -6888,7 +7401,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -7226,6 +7739,29 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
+    if model_size == "cognitive_leap_ultra_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            key
+            for key in model.state_dict().keys()
+            if key.startswith(head_pref) and key not in {f"{head_pref}weight", f"{head_pref}bias"}
+        }
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        if ckpt_size != "cognitive_leap_ultra_expert":
+            filtered_sd = {
+                k: v
+                for k, v in state_dict.items()
+                if not (k.startswith(head_pref) and k not in [f"{head_pref}weight", f"{head_pref}bias"])
+            }
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
+        unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
+        return missing_filtered, unexpected_filtered
+
 
     if model_size == "neurogenesis_expert":
         head_pref = "layers.10."
@@ -7293,7 +7829,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
     if model_size == "deep_expert":
         allowed_missing = {
             "layers.10.shared_up.weight", "layers.10.shared_down.weight",
-            "layers.10.shared_norm.weight", "layers.10.shared_norm.bias", 
+            "layers.10.shared_norm.weight", "layers.10.shared_norm.bias",
             "layers.10.shared_scale", "layers.10.expert_bias",
             "layers.10.gate.weight", "layers.10.noise_gate.weight",
             "layers.10.alpha", "layers.10.calibration.weight",
@@ -7304,14 +7840,14 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             allowed_missing.add(f"layers.10.experts_down.{i}.weight")
             allowed_missing.add(f"layers.10.expert_norms.{i}.weight")
             allowed_missing.add(f"layers.10.expert_norms.{i}.bias")
-            
+
         ckpt_size = detect_model_size_from_state_dict(state_dict)
         if ckpt_size != "deep_expert":
             filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -7327,14 +7863,14 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             allowed_missing.add(f"layers.10.experts_down.{i}.weight")
             allowed_missing.add(f"layers.10.expert_norms.{i}.weight")
             allowed_missing.add(f"layers.10.expert_norms.{i}.bias")
-            
+
         ckpt_size = detect_model_size_from_state_dict(state_dict)
         if ckpt_size != "expert_choice":
             filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -7342,9 +7878,9 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
     if model_size == "smarter_expert":
         allowed_missing = {
             "layers.10.shared_up.weight", "layers.10.shared_down.weight",
-            "layers.10.shared_norm.weight", "layers.10.shared_norm.bias", 
+            "layers.10.shared_norm.weight", "layers.10.shared_norm.bias",
             "layers.10.shared_scale", "layers.10.expert_bias",
-            "layers.10.gate.weight", "layers.10.alpha", 
+            "layers.10.gate.weight", "layers.10.alpha",
             "layers.10.calibration.weight", "layers.10.calibration.bias", "layers.10.theta",
         }
         for i in range(8):
@@ -7354,14 +7890,14 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
             allowed_missing.add(f"layers.10.expert_norms.{i}.bias")
             allowed_missing.add(f"layers.10.lora_down.{i}.weight")
             allowed_missing.add(f"layers.10.lora_up.{i}.weight")
-            
+
         ckpt_size = detect_model_size_from_state_dict(state_dict)
         if ckpt_size != "smarter_expert":
             filtered_sd = {k: v for k, v in state_dict.items() if not (k.startswith("layers.10.") and k not in ["layers.10.weight", "layers.10.bias"])}
             incompatible = model.load_state_dict(filtered_sd, strict=False)
         else:
             incompatible = model.load_state_dict(state_dict, strict=False)
-            
+
         missing_filtered = [k for k in incompatible.missing_keys if k and k not in allowed_missing]
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
@@ -7874,7 +8410,7 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         if "layers.10.expert_norms.0.weight" in state_dict:
             return "expert_choice"
         return "ultra_expert"
-    
+
     if "layers.10.halt_gates.0.weight" in state_dict and "layers.10.proposal_gates.0.weight" in state_dict:
         return "metacognitive_expert"
     if "layers.10.value_net.0.weight" in state_dict and "layers.10.action_up.0.weight" in state_dict:
@@ -7883,6 +8419,8 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "omniscient_expert"
     if "layers.10.hypernet.0.weight" in state_dict and "layers.10.memory_matrix" in state_dict:
         return "cognitive_expert"
+    if "layers.10.core_router.weight" in state_dict and "layers.10.cross_attn.qkv.weight" in state_dict:
+        return "cognitive_leap_ultra_expert"
     if "layers.10.recur_core.0.weight" in state_dict and "layers.10.halt_head.weight" in state_dict:
         return "cognitive_leap_expert"
     if "layers.10.denoiser.0.0.weight" in state_dict and "layers.10.world_transition.0.weight" in state_dict:
