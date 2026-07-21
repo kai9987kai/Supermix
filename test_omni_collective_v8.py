@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -232,14 +233,18 @@ def test_restore_scheduler_state_v8_falls_back_for_legacy_state():
         "_get_lr_called_within_step": False,
         "_last_lr": [0.6],
     }
-    resumed_steps = train_v8._restore_scheduler_state_v8(
-        scheduler,
-        legacy_state,
-        optimizer_steps_done=0,
-        stage_name="stage1",
-        checkpoint_source=Path("legacy.pt"),
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        resumed_steps = train_v8._restore_scheduler_state_v8(
+            scheduler,
+            legacy_state,
+            optimizer_steps_done=0,
+            stage_name="stage1",
+            checkpoint_source=Path("legacy.pt"),
+        )
     assert resumed_steps == 5
+    assert scheduler.last_epoch == 5
+    assert scheduler._step_count == 6
     assert float(optimizer.param_groups[0]["lr"]) < 1.0
 
 
