@@ -72,6 +72,17 @@ def _import_preference_selection_helpers():
     return PreferencePair, _select_preference_pairs
 
 
+def _import_verifier_helpers():
+    from source.qwen_supermix_pipeline import (
+        ChatPair,
+        PreferencePair,
+        _chat_pair_verifier_metrics,
+        build_preference_rows,
+    )
+
+    return ChatPair, PreferencePair, _chat_pair_verifier_metrics, build_preference_rows
+
+
 def _import_split_and_io_helpers():
     from source.qwen_supermix_pipeline import ChatPair, load_saved_chat_pairs, save_jsonl, split_train_eval
 
@@ -673,24 +684,33 @@ def test_sft_coverage_selection_keeps_rare_high_quality_group():
     ) = _import_pipeline()
     pairs = [
         ChatPair(
-            user="Explain binary search step by step and give the time complexity.",
+            user="Explain binary search and its time complexity.",
             assistant=(
-                "Check the midpoint, discard the half that cannot contain the target, and repeat. "
-                "Because each comparison halves the remaining range, binary search runs in O(log n) time."
+                "Binary search works on a sorted array by comparing the middle element "
+                "with the target. If they match, the search ends. Otherwise, the half where "
+                "the target cannot lie is discarded. Each step halves the search space, "
+                "so the algorithm runs in O(log n) time."
             ),
             source="conversation_data.coding_knowledge_2026_02_19.jsonl",
         ),
         ChatPair(
-            user="Explain merge sort step by step and give the time complexity.",
+            user="Explain merge sort and its time complexity.",
             assistant=(
-                "Split the array recursively, sort each half, and merge the sorted halves. "
-                "The merge work is linear per level, so merge sort runs in O(n log n) time."
+                "Merge sort splits an array in half recursively until each sub-array has "
+                "one element. It then merges adjacent sub-arrays in sorted order. Since "
+                "each level of merging processes all n elements and there are log n levels, "
+                "the total time complexity is O(n log n)."
             ),
             source="conversation_data.coding_knowledge_2026_02_19.jsonl",
         ),
         ChatPair(
-            user="What happened on July 20, 1969?",
-            assistant="Apollo 11 landed on the Moon, and Neil Armstrong became the first person to walk on it.",
+            user="Describe the Apollo 11 Moon landing.",
+            assistant=(
+                "Apollo 11 was the first crewed mission to land on the Moon. On July 20, "
+                "1969, Neil Armstrong and Buzz Aldrin descended to the lunar surface while "
+                "Michael Collins orbited overhead. Armstrong became the first human to walk "
+                "on the Moon, calling it a giant leap for mankind."
+            ),
             source="conversation_data.world_events_2026_02_19.jsonl",
             metadata={"event_id": "apollo_11_moon_landing", "topic": "space_history"},
         ),
@@ -744,10 +764,10 @@ def test_preference_coverage_margin_preserves_style_diversity():
             quality_gap=0.34,
             rejected_similarity=0.44,
             prompt_complexity=0.66,
-            conversation_score=0.18,
-            reasoning_score=0.79,
-            creativity_score=0.06,
-            knowledge_density_score=0.86,
+            conversation_score=0.10,
+            reasoning_score=0.42,
+            creativity_score=0.04,
+            knowledge_density_score=0.44,
         ),
         PreferencePair(
             user="Write a creative but concise reflection on learning algorithms.",
@@ -757,9 +777,9 @@ def test_preference_coverage_margin_preserves_style_diversity():
             quality_gap=0.30,
             rejected_similarity=0.40,
             prompt_complexity=0.60,
-            conversation_score=0.58,
+            conversation_score=0.92,
             reasoning_score=0.22,
-            creativity_score=0.94,
+            creativity_score=0.96,
             knowledge_density_score=0.28,
         ),
     ]
@@ -785,6 +805,355 @@ def test_preference_coverage_margin_preserves_style_diversity():
     assert creative_prompt not in {pair.user for pair in margin_selected}, "Margin selection should keep the stronger duplicate technical cluster"
     assert creative_prompt in {pair.user for pair in coverage_selected}, "Coverage-aware preference selection should preserve the rarer creative pair"
     print("  [ok] coverage_margin keeps style-diverse preference pairs")
+
+
+def test_sft_lazy_greedy_coverage_avoids_redundant_clusters():
+    from source.qwen_supermix_pipeline import ChatPair, _select_sft_coverage_greedy
+
+    first = ChatPair(user="Explain search.", assistant="Use a midpoint and halve the interval.", source="coding")
+    duplicate = ChatPair(user="Explain sorting.", assistant="Split, order, and merge the intervals.", source="coding")
+    diverse = ChatPair(user="Write a moon vignette.", assistant="Silver dust rose beneath a quiet lander.", source="creative")
+    common = {
+        "source_key": "coding",
+        "group_key": "algorithms",
+        "style_key": "reasoning",
+        "length_key": "short",
+        "quality_signal": 1.0,
+        "estimated_tokens": 24.0,
+    }
+    scored = [
+        (1.00, 1.00, first, dict(common)),
+        (0.99, 0.99, duplicate, dict(common)),
+        (
+            0.80,
+            0.80,
+            diverse,
+            {
+                "source_key": "creative",
+                "group_key": "lunar_fiction",
+                "style_key": "creative",
+                "length_key": "medium",
+                "quality_signal": 1.0,
+                "estimated_tokens": 28.0,
+            },
+        ),
+    ]
+
+    selected = _select_sft_coverage_greedy(scored, keep_n=2, budget_mode="pairs", budget_power=0.5)
+    selected_pairs = [entry[2] for entry in selected]
+
+    assert selected_pairs == [first, diverse]
+    print("  [ok] lazy-greedy SFT coverage avoids a redundant second cluster row")
+
+
+def test_sft_token_budget_coverage_uses_lazy_greedy(monkeypatch):
+    import source.qwen_supermix_pipeline as pipeline
+
+    pairs = [
+        pipeline.ChatPair(
+            user="Explain binary search briefly.",
+            assistant="Check the midpoint and discard half of the sorted interval each step.",
+            source="coding",
+        ),
+        pipeline.ChatPair(
+            user="Explain merge sort briefly.",
+            assistant="Split recursively, then merge sorted halves in linear work per level.",
+            source="coding",
+        ),
+        pipeline.ChatPair(
+            user="Write a concise lunar vignette.",
+            assistant="Silver dust rose beneath the lander as Earth watched from a black sky.",
+            source="creative",
+        ),
+    ]
+    original = pipeline._select_sft_coverage_greedy
+    calls = []
+
+    def recording_selector(
+        scored,
+        keep_n,
+        budget_mode,
+        budget_power,
+        token_budget=None,
+        min_keep=0,
+        max_keep=0,
+    ):
+        calls.append((keep_n, budget_mode, budget_power, token_budget))
+        return original(
+            scored,
+            keep_n,
+            budget_mode,
+            budget_power,
+            token_budget=token_budget,
+            min_keep=min_keep,
+            max_keep=max_keep,
+        )
+
+    monkeypatch.setattr(pipeline, "_select_sft_coverage_greedy", recording_selector)
+    selected = pipeline._select_sft_training_pairs(
+        pairs,
+        strategy="coverage_topk",
+        keep_ratio=0.60,
+        min_keep=0,
+        max_keep=0,
+        hardness_target=0.56,
+        hardness_bandwidth=0.30,
+        budget_mode="tokens",
+        budget_power=0.5,
+    )
+
+    assert selected
+    assert len(calls) == 1
+    assert calls[0][:3] == (len(pairs), "tokens", 0.5)
+    assert calls[0][3] is not None
+    print("  [ok] token-budget coverage is ordered by lazy-greedy marginals")
+
+
+def test_sft_token_budget_lazy_greedy_does_not_cover_skipped_rows():
+    from source.qwen_supermix_pipeline import ChatPair, _select_sft_coverage_greedy
+
+    first = ChatPair(user="Anchor", assistant="Anchor answer", source="anchor")
+    too_large = ChatPair(user="Large rare", assistant="Large rare answer", source="rare")
+    feasible_rare = ChatPair(user="Small rare", assistant="Small rare answer", source="rare")
+    feasible_duplicate = ChatPair(user="Duplicate", assistant="Duplicate answer", source="anchor")
+    common = {
+        "quality_signal": 1.0,
+        "source_key": "anchor",
+        "group_key": "common",
+        "style_key": "reasoning",
+        "length_key": "short",
+        "estimated_tokens": 5.0,
+    }
+    rare = {
+        "quality_signal": 1.0,
+        "source_key": "rare",
+        "group_key": "rare-event",
+        "style_key": "creative",
+        "length_key": "medium",
+    }
+    scored = [
+        (2.0, 2.0, first, dict(common)),
+        (1.1, 1.1, too_large, {**rare, "estimated_tokens": 6.0}),
+        (0.2, 0.2, feasible_rare, {**rare, "estimated_tokens": 5.0}),
+        (0.8, 0.8, feasible_duplicate, dict(common)),
+    ]
+
+    selected = _select_sft_coverage_greedy(
+        scored,
+        keep_n=len(scored),
+        budget_mode="tokens",
+        budget_power=0.0,
+        token_budget=10.0,
+    )
+
+    assert [entry[2] for entry in selected] == [first, feasible_rare]
+    print("  [ok] infeasible rows do not consume lazy-greedy coverage credit")
+
+
+def test_preference_lazy_greedy_coverage_avoids_redundant_styles():
+    from source.qwen_supermix_pipeline import PreferencePair, _select_preference_coverage_greedy
+
+    first = PreferencePair(
+        user="Explain the algorithm.",
+        chosen="It halves the search interval after each midpoint comparison.",
+        rejected="It searches efficiently.",
+        quality_gap=0.45,
+        rejected_similarity=0.40,
+        reasoning_score=0.90,
+        knowledge_density_score=0.70,
+    )
+    duplicate = PreferencePair(
+        user="Explain the algorithm.",
+        chosen="It repeatedly eliminates half of the sorted search range.",
+        rejected="It is a good algorithm.",
+        quality_gap=0.45,
+        rejected_similarity=0.40,
+        reasoning_score=0.88,
+        knowledge_density_score=0.68,
+    )
+    diverse = PreferencePair(
+        user="Write a tiny lunar image.",
+        chosen="Moonlight pooled like silver water around the lander.",
+        rejected="The moon looked nice.",
+        quality_gap=0.45,
+        rejected_similarity=0.40,
+        creativity_score=0.96,
+        conversation_score=0.60,
+    )
+    selected = _select_preference_coverage_greedy(
+        [(1.00, first), (0.99, duplicate), (0.78, diverse)],
+        keep_n=2,
+    )
+
+    assert selected == [first, diverse]
+    print("  [ok] lazy-greedy preference coverage avoids a redundant second style")
+
+
+def test_sft_selection_uses_verifier_reward_for_hard_math_code_rows():
+    (
+        _build_lr_lambda,
+        _LengthBucketBatchSampler,
+        _pair_knowledge_density_score,
+        _select_sft_training_pairs,
+        _counterfactual_reject_variants,
+        ChatPair,
+    ) = _import_pipeline()
+    del _build_lr_lambda, _LengthBucketBatchSampler, _pair_knowledge_density_score, _counterfactual_reject_variants
+
+    verified = ChatPair(
+        user="Solve 17 * 19 and explain the modular arithmetic check.",
+        assistant="17 * 19 = 323. A quick check is 323 mod 17 = 0 and 323 mod 19 = 0, so the product is consistent.",
+        source="math_verifier.jsonl",
+        metadata={
+            "verifier_score": 1.0,
+            "rule_reward": 1.0,
+            "test_difficulty": 0.95,
+            "tests_passed": 8,
+            "tests_total": 8,
+        },
+    )
+    unverified = ChatPair(
+        user="Explain binary search and its time complexity.",
+        assistant=(
+            "Binary search compares the midpoint of a sorted array with the target and discards the impossible half. "
+            "Repeating this halves the search space each step, so the runtime is O(log n)."
+        ),
+        source="coding_knowledge.jsonl",
+    )
+
+    selected = _select_sft_training_pairs(
+        [unverified, verified],
+        strategy="utility_topk",
+        keep_ratio=0.5,
+        min_keep=1,
+        max_keep=1,
+        hardness_target=0.45,
+        hardness_bandwidth=0.25,
+    )
+
+    assert selected == [verified], "Verifier-backed hard math row should win a tight SFT selection budget"
+    print("  [ok] verifier reward boosts hard SFT rows")
+
+
+def test_preference_selection_uses_verifier_reward_margin():
+    PreferencePair, _select_preference_pairs = _import_preference_selection_helpers()
+    verified = PreferencePair(
+        user="Write a tested Python function for modular exponentiation.",
+        chosen="Use pow(base, exp, mod), validate mod is positive, and return the computed residue.",
+        rejected="Loop over multiplication without checking the modulus.",
+        weight=1.0,
+        quality_gap=0.22,
+        rejected_similarity=0.30,
+        prompt_complexity=1.0,
+        reasoning_score=0.45,
+        knowledge_density_score=0.45,
+        verifier_score=1.0,
+        rule_reward=1.0,
+        verifier_difficulty=0.90,
+    )
+    unverified = PreferencePair(
+        user="Explain merge sort briefly.",
+        chosen="Merge sort recursively splits an array, sorts each half, and merges sorted halves in O(n log n).",
+        rejected="Merge sort repeatedly scans the array until it looks sorted.",
+        weight=1.0,
+        quality_gap=0.34,
+        rejected_similarity=0.30,
+        prompt_complexity=1.0,
+        reasoning_score=0.30,
+        knowledge_density_score=0.30,
+    )
+
+    selected = _select_preference_pairs(
+        [unverified, verified],
+        strategy="margin_topk",
+        keep_ratio=0.5,
+        min_keep=1,
+        max_keep=1,
+        hardness_target=0.45,
+        hardness_bandwidth=0.25,
+    )
+
+    assert selected == [verified], "Verifier-backed preference pair should survive tight margin selection"
+    print("  [ok] verifier reward boosts preference-pair selection")
+
+
+def test_verifier_metadata_normalization_and_nested_jsonl_loading():
+    ChatPair, _PreferencePair, _chat_pair_verifier_metrics, _build_preference_rows = _import_verifier_helpers()
+    del _PreferencePair, _build_preference_rows
+    _SplitPair, _split_train_eval, save_jsonl, load_saved_chat_pairs = _import_split_and_io_helpers()
+    del _SplitPair, _split_train_eval
+    from source.qwen_supermix_pipeline import load_jsonl_pairs
+
+    pair = ChatPair(
+        user="Solve 2x + 3 = 7.",
+        assistant="Subtract 3 to get 2x = 4, so x = 2.",
+        source="math_verifier.jsonl",
+        metadata={"tests_passed": 8, "tests_total": 10, "rule_reward": 75, "verifier_difficulty": 0.4},
+    )
+    metrics = _chat_pair_verifier_metrics(pair)
+    assert abs(metrics["verifier_score"] - 0.8) < 1e-9
+    assert abs(metrics["rule_reward"] - 0.75) < 1e-9
+    assert abs(metrics["verifier_difficulty"] - 0.4) < 1e-9
+
+    negative = ChatPair(
+        user="Return the exact result of a unit test.",
+        assistant="The test failed.",
+        metadata={"rule_reward": -50},
+    )
+    neg_metrics = _chat_pair_verifier_metrics(negative)
+    assert abs(neg_metrics["rule_reward"] + 0.5) < 1e-9
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "verifier_pairs.jsonl"
+        path.write_text(
+            (
+                '{"user":"Solve 3+4.","assistant":"7","source":"math.jsonl",'
+                '"metadata":{"tests_passed":1,"tests_total":1,"rule_reward":1.0,'
+                '"verifier_difficulty":0.4}}\n'
+            ),
+            encoding="utf-8",
+        )
+        loaded = load_saved_chat_pairs(path)
+
+    assert loaded[0].metadata["tests_passed"] == 1
+    assert loaded[0].metadata["rule_reward"] == 1.0
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "raw_verifier_pairs.jsonl"
+        path.write_text(
+            (
+                '{"user":"Solve 8+5.","assistant":"8 + 5 = 13.","source":"math_raw.jsonl",'
+                '"metadata":{"tests_passed":1,"tests_total":1,"rule_reward":1.0,'
+                '"verifier_difficulty":0.5}}\n'
+            ),
+            encoding="utf-8",
+        )
+        raw_loaded = load_jsonl_pairs([str(path)], max_records=10, min_chars=1)
+
+    assert raw_loaded[0].metadata["tests_passed"] == 1
+    assert raw_loaded[0].metadata["record_source"] == "math_raw.jsonl"
+    print("  [ok] verifier metadata normalizes and nested JSONL metadata loads")
+
+
+def test_preference_rows_preserve_verifier_fields():
+    _ChatPair, PreferencePair, _chat_pair_verifier_metrics, build_preference_rows = _import_verifier_helpers()
+    del _ChatPair, _chat_pair_verifier_metrics
+    pair = PreferencePair(
+        user="Solve the checked example.",
+        chosen="The checked answer is correct.",
+        rejected="The answer is probably correct.",
+        verifier_score=0.9,
+        rule_reward=0.8,
+        verifier_difficulty=0.6,
+    )
+
+    rows = build_preference_rows(_ToyTokenizer(), [pair], max_length=256)
+
+    assert len(rows) == 1
+    assert rows[0]["verifier_score"] == 0.9
+    assert rows[0]["rule_reward"] == 0.8
+    assert rows[0]["verifier_difficulty"] == 0.6
+    print("  [ok] preference rows preserve verifier fields")
 
 
 def test_benchmark_sample_comparison_ranks_worst_regressions_first():
@@ -946,6 +1315,12 @@ def run_all():
         ("Scoped token-budget SFT selection", test_sft_scoped_selection_only_trims_teacher_subset),
         ("Coverage-aware SFT selection", test_sft_coverage_selection_keeps_rare_high_quality_group),
         ("Coverage-aware preference selection", test_preference_coverage_margin_preserves_style_diversity),
+        ("Lazy-greedy SFT coverage", test_sft_lazy_greedy_coverage_avoids_redundant_clusters),
+        ("Lazy-greedy preference coverage", test_preference_lazy_greedy_coverage_avoids_redundant_styles),
+        ("Verifier-aware SFT selection", test_sft_selection_uses_verifier_reward_for_hard_math_code_rows),
+        ("Verifier-aware preference selection", test_preference_selection_uses_verifier_reward_margin),
+        ("Verifier metadata normalization", test_verifier_metadata_normalization_and_nested_jsonl_loading),
+        ("Verifier preference row fields", test_preference_rows_preserve_verifier_fields),
         ("Benchmark sample comparison", test_benchmark_sample_comparison_ranks_worst_regressions_first),
         ("Auto eval split grouping", test_split_train_eval_auto_groups_metadata_events),
         ("Chat-pair metadata roundtrip", test_save_jsonl_round_trips_pair_metadata),
