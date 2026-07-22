@@ -182,6 +182,15 @@ def test_prediction_stability_verifier_controls_early_exit():
         head._topk_js_divergence(identical, identical, top_k=2),
         torch.zeros(1),
     )
+    generator = torch.Generator().manual_seed(510301)
+    previous = torch.softmax(torch.randn(256, 10, generator=generator), dim=-1)
+    current = torch.softmax(
+        torch.log(previous) + 1e-5 * torch.randn(256, 10, generator=generator),
+        dim=-1,
+    )
+    near_identical_js = head._topk_js_divergence(previous, current, top_k=5)
+    assert torch.isfinite(near_identical_js).all()
+    assert bool((near_identical_js >= 0.0).all().item())
 
     with torch.no_grad():
         full_output = model(

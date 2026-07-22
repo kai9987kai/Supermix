@@ -237,8 +237,10 @@ def _distribution_distances(
     total_variation = float(
         (0.5 * torch.sum(torch.abs(fixed_distribution - adaptive_distribution))).item()
     )
-    # Floating-point cancellation can produce a tiny negative JS value.
-    if js_divergence < 0.0 and js_divergence > -1e-15:
+    # JSD is nonnegative by definition. Float32 cancellation can produce a
+    # small negative value for nearly identical distributions; retain a strict
+    # bound so materially invalid telemetry still fails closed.
+    if -1e-6 < js_divergence < 0.0:
         js_divergence = 0.0
     return (
         _nonnegative_finite_float(js_divergence, label="distribution JSD"),

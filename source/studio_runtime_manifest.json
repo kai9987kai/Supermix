@@ -87,8 +87,8 @@
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "71431d25603106a0c7c5dcb6e5830bf53d8767713a0ac90c60bc29f1765d68ad",
-      "size_bytes": 375096
+      "sha256": "ac97e91f5374ddcd9c755c2761a95105316903018bca9d46499c1dd18beab214",
+      "size_bytes": 375378
     },
     {
       "path": "source/route_policy_ledger.py",
@@ -177,8 +177,8 @@
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "71431d25603106a0c7c5dcb6e5830bf53d8767713a0ac90c60bc29f1765d68ad",
-      "size_bytes": 375096
+      "sha256": "ac97e91f5374ddcd9c755c2761a95105316903018bca9d46499c1dd18beab214",
+      "size_bytes": 375378
     },
     {
       "path": "runtime_python/run.py",

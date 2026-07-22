@@ -6143,10 +6143,16 @@ class CognitiveLeapUltraExpertHead(nn.Module):
             )
             return terms.sum(dim=-1)
 
-        return 0.5 * (
-            _kl(previous_compact, compact_midpoint)
-            + _kl(current_compact, compact_midpoint)
-        )
+        # JSD is nonnegative by definition. Float32 cancellation can leave a
+        # few negative nanonats for nearly identical distributions, which must
+        # not turn shadow telemetry into an inference failure.
+        return (
+            0.5
+            * (
+                _kl(previous_compact, compact_midpoint)
+                + _kl(current_compact, compact_midpoint)
+            )
+        ).clamp_min(0.0)
 
     @staticmethod
     def _normalize_prediction_class_indices(
