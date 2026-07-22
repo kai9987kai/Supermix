@@ -42,7 +42,9 @@ from chat_app import (
     DEFAULT_AUTO_COMPUTE_CONFIDENCE,
     DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
     DEFAULT_AUTO_COMPUTE_ENTROPY,
+    DEFAULT_PREDICTION_STABILITY_MARGIN,
     DEFAULT_PREDICTION_STABILITY_PATIENCE,
+    DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     DEFAULT_PREDICTION_STABILITY_TOL,
     evaluate_runtime_compute_budgets,
     forward_with_runtime_compute,
@@ -153,6 +155,85 @@ def _finite_float(value: Any, *, label: str) -> float:
     return number
 
 
+def _nonnegative_finite_float(value: Any, *, label: str) -> float:
+    number = _finite_float(value, label=label)
+    if number < 0.0:
+        raise ValueError(f"{label} must be nonnegative, got {value!r}")
+    return number
+
+
+def _observed_prediction_margin_summary(
+    values: Sequence[float],
+) -> Dict[str, Any]:
+    """Summarize final-call margins; the minimum is the safety-facing value."""
+
+    if not values:
+        return {
+            "metric": "top_1_minus_top_2_probability",
+            "observation_count": 0,
+            "minimum": None,
+            "mean": None,
+            "maximum": None,
+        }
+    tensor = torch.tensor(list(values), dtype=torch.float64)
+    return {
+        "metric": "top_1_minus_top_2_probability",
+        "observation_count": len(values),
+        "minimum": round(float(tensor.min().item()), 8),
+        "mean": round(float(tensor.mean().item()), 8),
+        "maximum": round(float(tensor.max().item()), 8),
+    }
+
+
+def _observed_prediction_decision_margin_summary(
+    values: Sequence[float],
+) -> Dict[str, Any]:
+    """Summarize the rank-boundary margin used by the active verifier."""
+
+    if not values:
+        return {
+            "metric": "minimum_adjacent_probability_gap_through_rank_depth",
+            "observation_count": 0,
+            "minimum": None,
+            "mean": None,
+            "maximum": None,
+        }
+    tensor = torch.tensor(list(values), dtype=torch.float64)
+    return {
+        "metric": "minimum_adjacent_probability_gap_through_rank_depth",
+        "observation_count": len(values),
+        "minimum": round(float(tensor.min().item()), 8),
+        "mean": round(float(tensor.mean().item()), 8),
+        "maximum": round(float(tensor.max().item()), 8),
+    }
+
+
+def _prediction_margin_from_compute(compute: Mapping[str, Any]) -> float | None:
+    if compute.get("prediction_verifier_active") is not True:
+        return None
+    value = compute.get("prediction_margin")
+    if value is None:
+        return None
+    return _nonnegative_finite_float(
+        value,
+        label="observed prediction stability margin",
+    )
+
+
+def _prediction_decision_margin_from_compute(
+    compute: Mapping[str, Any],
+) -> float | None:
+    if compute.get("prediction_verifier_active") is not True:
+        return None
+    value = compute.get("prediction_decision_margin")
+    if value is None:
+        return None
+    return _nonnegative_finite_float(
+        value,
+        label="observed prediction decision margin",
+    )
+
+
 def _synchronize_for_timing(device: torch.device) -> None:
     device_type = str(device).split(":", 1)[0].lower()
     if device_type == "cuda" and torch.cuda.is_available():
@@ -189,12 +270,18 @@ def legacy_v1_auto_compute_forward(
     exit_entropy_threshold: Any = DEFAULT_ADAPTIVE_EXIT_ENTROPY,
     prediction_stability_patience: Any = DEFAULT_PREDICTION_STABILITY_PATIENCE,
     prediction_stability_tol: Any = DEFAULT_PREDICTION_STABILITY_TOL,
+    prediction_stability_margin: Any = DEFAULT_PREDICTION_STABILITY_MARGIN,
+    prediction_stability_rank_depth: Any = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     auto_reasoning_context: str = "",
     distribution_top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
 ) -> Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]:
     """Execute the retired v1 probe-all/select/rerun controller literally."""
 
     del distribution_top_k  # The v1 selector had no distribution-stability input.
+    stability_margin = _nonnegative_finite_float(
+        prediction_stability_margin,
+        label="prediction stability margin",
+    )
     rows = evaluate_runtime_compute_budgets(
         model,
         x,
@@ -202,6 +289,11 @@ def legacy_v1_auto_compute_forward(
         cycles=cycles,
         adaptive_compute=bool(adaptive_compute),
         exit_tol=exit_tol,
+        exit_entropy_threshold=exit_entropy_threshold,
+        prediction_stability_patience=prediction_stability_patience,
+        prediction_stability_tol=prediction_stability_tol,
+        prediction_stability_margin=stability_margin,
+        prediction_stability_rank_depth=prediction_stability_rank_depth,
     )
     selection = select_auto_runtime_compute_budget(
         rows,
@@ -218,6 +310,9 @@ def legacy_v1_auto_compute_forward(
         exit_entropy_threshold=exit_entropy_threshold,
         prediction_stability_patience=prediction_stability_patience,
         prediction_stability_tol=prediction_stability_tol,
+        prediction_stability_margin=stability_margin,
+        prediction_stability_rank_depth=prediction_stability_rank_depth,
+        prediction_class_indices=available_labels,
         auto_reasoning_context=auto_reasoning_context,
     )
     plan = {
@@ -290,6 +385,8 @@ def benchmark_requests(
     exit_entropy_threshold: float = DEFAULT_ADAPTIVE_EXIT_ENTROPY,
     prediction_stability_patience: int = DEFAULT_PREDICTION_STABILITY_PATIENCE,
     prediction_stability_tol: float = DEFAULT_PREDICTION_STABILITY_TOL,
+    prediction_stability_margin: float = DEFAULT_PREDICTION_STABILITY_MARGIN,
+    prediction_stability_rank_depth: int = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     distribution_top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
     order_offset: int = 0,
     legacy_fn: Callable[..., Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]]
@@ -323,10 +420,17 @@ def benchmark_requests(
         "prediction_stability_tol": _finite_float(
             prediction_stability_tol, label="prediction stability tolerance"
         ),
+        "prediction_stability_margin": _nonnegative_finite_float(
+            prediction_stability_margin,
+            label="prediction stability margin",
+        ),
+        "prediction_stability_rank_depth": int(prediction_stability_rank_depth),
         "distribution_top_k": int(distribution_top_k),
     }
     if settings["prediction_stability_patience"] < 0:
         raise ValueError("prediction_stability_patience must be nonnegative")
+    if settings["prediction_stability_rank_depth"] < 0:
+        raise ValueError("prediction_stability_rank_depth must be nonnegative")
     if settings["distribution_top_k"] <= 0:
         raise ValueError("distribution_top_k must be positive")
 
@@ -344,6 +448,10 @@ def benchmark_requests(
 
     legacy_latencies: List[float] = []
     progressive_latencies: List[float] = []
+    legacy_prediction_margins: List[float] = []
+    progressive_prediction_margins: List[float] = []
+    legacy_prediction_decision_margins: List[float] = []
+    progressive_prediction_decision_margins: List[float] = []
     measurement_orders: Counter[str] = Counter()
     selected_cycle_pairs: Counter[str] = Counter()
     selected_cycle_disagreements = 0
@@ -362,12 +470,22 @@ def benchmark_requests(
         fn: Callable[..., Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]],
         sample: torch.Tensor,
         values: List[float],
+        observed_margins: List[float],
+        observed_decision_margins: List[float],
     ) -> Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]:
         _synchronize_for_timing(sample.device)
         started = time.perf_counter()
         result = fn(model, sample, labels, **settings)
         _synchronize_for_timing(sample.device)
         values.append((time.perf_counter() - started) * 1000.0)
+        observed_margin = _prediction_margin_from_compute(result[1])
+        if observed_margin is not None:
+            observed_margins.append(observed_margin)
+        observed_decision_margin = _prediction_decision_margin_from_compute(
+            result[1]
+        )
+        if observed_decision_margin is not None:
+            observed_decision_margins.append(observed_decision_margin)
         return result
 
     for index in range(request_count):
@@ -375,16 +493,36 @@ def benchmark_requests(
         legacy_first = (index + int(order_offset)) % 2 == 0
         if legacy_first:
             measurement_orders["legacy_then_progressive"] += 1
-            legacy_result = timed_call(legacy, sample, legacy_latencies)
+            legacy_result = timed_call(
+                legacy,
+                sample,
+                legacy_latencies,
+                legacy_prediction_margins,
+                legacy_prediction_decision_margins,
+            )
             progressive_result = timed_call(
-                progressive, sample, progressive_latencies
+                progressive,
+                sample,
+                progressive_latencies,
+                progressive_prediction_margins,
+                progressive_prediction_decision_margins,
             )
         else:
             measurement_orders["progressive_then_legacy"] += 1
             progressive_result = timed_call(
-                progressive, sample, progressive_latencies
+                progressive,
+                sample,
+                progressive_latencies,
+                progressive_prediction_margins,
+                progressive_prediction_decision_margins,
             )
-            legacy_result = timed_call(legacy, sample, legacy_latencies)
+            legacy_result = timed_call(
+                legacy,
+                sample,
+                legacy_latencies,
+                legacy_prediction_margins,
+                legacy_prediction_decision_margins,
+            )
 
         legacy_output, _legacy_compute, legacy_plan = legacy_result
         progressive_output, _progressive_compute, progressive_plan = (
@@ -505,12 +643,28 @@ def benchmark_requests(
             "strategy": "probe_all_select_and_rerun",
             "correct_predictions": legacy_correct,
             "forward_evaluations": legacy_forward_evaluations,
+            "observed_prediction_margin": _observed_prediction_margin_summary(
+                legacy_prediction_margins
+            ),
+            "observed_prediction_decision_margin": (
+                _observed_prediction_decision_margin_summary(
+                    legacy_prediction_decision_margins
+                )
+            ),
             "latency": legacy_latency,
         },
         "progressive": {
             "strategy": "progressive_accepted_probe",
             "correct_predictions": progressive_correct,
             "forward_evaluations": progressive_forward_evaluations,
+            "observed_prediction_margin": _observed_prediction_margin_summary(
+                progressive_prediction_margins
+            ),
+            "observed_prediction_decision_margin": (
+                _observed_prediction_decision_margin_summary(
+                    progressive_prediction_decision_margins
+                )
+            ),
             "latency": progressive_latency,
         },
         "comparison": {
@@ -556,6 +710,14 @@ def aggregate_results(seed_results: Sequence[Mapping[str, Any]]) -> Dict[str, An
     per_seed_latency_reductions: List[float] = []
     per_seed: List[Dict[str, Any]] = []
     seen_seeds: set[int] = set()
+    legacy_margin_observations = 0
+    progressive_margin_observations = 0
+    legacy_decision_margin_observations = 0
+    progressive_decision_margin_observations = 0
+    minimum_legacy_prediction_margin = math.inf
+    minimum_progressive_prediction_margin = math.inf
+    minimum_legacy_prediction_decision_margin = math.inf
+    minimum_progressive_prediction_decision_margin = math.inf
 
     for seed_result in seed_results:
         seed = int(seed_result["seed"])
@@ -582,6 +744,81 @@ def aggregate_results(seed_results: Sequence[Mapping[str, Any]]) -> Dict[str, An
         legacy = metrics["legacy_v1"]
         progressive = metrics["progressive"]
         comparison = metrics["comparison"]
+        legacy_margin = legacy.get("observed_prediction_margin", {})
+        progressive_margin = progressive.get("observed_prediction_margin", {})
+        legacy_decision_margin = legacy.get(
+            "observed_prediction_decision_margin", {}
+        )
+        progressive_decision_margin = progressive.get(
+            "observed_prediction_decision_margin", {}
+        )
+        legacy_margin_count = int(legacy_margin.get("observation_count", 0))
+        progressive_margin_count = int(
+            progressive_margin.get("observation_count", 0)
+        )
+        legacy_margin_minimum = legacy_margin.get("minimum")
+        progressive_margin_minimum = progressive_margin.get("minimum")
+        legacy_decision_margin_count = int(
+            legacy_decision_margin.get("observation_count", 0)
+        )
+        progressive_decision_margin_count = int(
+            progressive_decision_margin.get("observation_count", 0)
+        )
+        legacy_decision_margin_minimum = legacy_decision_margin.get("minimum")
+        progressive_decision_margin_minimum = progressive_decision_margin.get(
+            "minimum"
+        )
+        if legacy_margin_count < 0 or progressive_margin_count < 0:
+            raise ValueError(f"Seed {seed} margin observation count is invalid")
+        if legacy_margin_count:
+            legacy_margin_minimum = _nonnegative_finite_float(
+                legacy_margin_minimum,
+                label="minimum legacy prediction stability margin",
+            )
+            minimum_legacy_prediction_margin = min(
+                minimum_legacy_prediction_margin,
+                legacy_margin_minimum,
+            )
+            legacy_margin_observations += legacy_margin_count
+        if progressive_margin_count:
+            progressive_margin_minimum = _nonnegative_finite_float(
+                progressive_margin_minimum,
+                label="minimum progressive prediction stability margin",
+            )
+            minimum_progressive_prediction_margin = min(
+                minimum_progressive_prediction_margin,
+                progressive_margin_minimum,
+            )
+            progressive_margin_observations += progressive_margin_count
+        if (
+            legacy_decision_margin_count < 0
+            or progressive_decision_margin_count < 0
+        ):
+            raise ValueError(
+                f"Seed {seed} decision-margin observation count is invalid"
+            )
+        if legacy_decision_margin_count:
+            legacy_decision_margin_minimum = _nonnegative_finite_float(
+                legacy_decision_margin_minimum,
+                label="minimum legacy prediction decision margin",
+            )
+            minimum_legacy_prediction_decision_margin = min(
+                minimum_legacy_prediction_decision_margin,
+                legacy_decision_margin_minimum,
+            )
+            legacy_decision_margin_observations += legacy_decision_margin_count
+        if progressive_decision_margin_count:
+            progressive_decision_margin_minimum = _nonnegative_finite_float(
+                progressive_decision_margin_minimum,
+                label="minimum progressive prediction decision margin",
+            )
+            minimum_progressive_prediction_decision_margin = min(
+                minimum_progressive_prediction_decision_margin,
+                progressive_decision_margin_minimum,
+            )
+            progressive_decision_margin_observations += (
+                progressive_decision_margin_count
+            )
         legacy_latency = _finite_float(
             legacy["latency"]["total_ms"], label="legacy latency"
         )
@@ -652,6 +889,14 @@ def aggregate_results(seed_results: Sequence[Mapping[str, Any]]) -> Dict[str, An
                     seed_latency_reduction, 6
                 ),
                 "measurement_order": dict(order),
+                "minimum_observed_prediction_margin": {
+                    "legacy_v1": legacy_margin_minimum,
+                    "progressive": progressive_margin_minimum,
+                },
+                "minimum_observed_prediction_decision_margin": {
+                    "legacy_v1": legacy_decision_margin_minimum,
+                    "progressive": progressive_decision_margin_minimum,
+                },
             }
         )
 
@@ -730,6 +975,48 @@ def aggregate_results(seed_results: Sequence[Mapping[str, Any]]) -> Dict[str, An
                 total_progressive_latency_ms / total_requests, 6
             ),
             "selected_cycle_pairs": dict(sorted(selected_cycle_pairs.items())),
+            "observed_prediction_margin": {
+                "metric": "top_1_minus_top_2_probability",
+                "legacy_v1": {
+                    "observation_count": legacy_margin_observations,
+                    "minimum": (
+                        round(minimum_legacy_prediction_margin, 8)
+                        if legacy_margin_observations
+                        else None
+                    ),
+                },
+                "progressive": {
+                    "observation_count": progressive_margin_observations,
+                    "minimum": (
+                        round(minimum_progressive_prediction_margin, 8)
+                        if progressive_margin_observations
+                        else None
+                    ),
+                },
+            },
+            "observed_prediction_decision_margin": {
+                "metric": (
+                    "minimum_adjacent_probability_gap_through_rank_depth"
+                ),
+                "legacy_v1": {
+                    "observation_count": legacy_decision_margin_observations,
+                    "minimum": (
+                        round(minimum_legacy_prediction_decision_margin, 8)
+                        if legacy_decision_margin_observations
+                        else None
+                    ),
+                },
+                "progressive": {
+                    "observation_count": (
+                        progressive_decision_margin_observations
+                    ),
+                    "minimum": (
+                        round(minimum_progressive_prediction_decision_margin, 8)
+                        if progressive_decision_margin_observations
+                        else None
+                    ),
+                },
+            },
         },
         "per_seed_summary": per_seed,
         "gates": {
@@ -754,6 +1041,8 @@ def run_benchmark(
     exit_entropy_threshold: float = DEFAULT_ADAPTIVE_EXIT_ENTROPY,
     prediction_stability_patience: int = DEFAULT_PREDICTION_STABILITY_PATIENCE,
     prediction_stability_tol: float = DEFAULT_PREDICTION_STABILITY_TOL,
+    prediction_stability_margin: float = DEFAULT_PREDICTION_STABILITY_MARGIN,
+    prediction_stability_rank_depth: int = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     distribution_top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
     model_loader: Callable[[Path, Any], Any] | None = None,
     task_factory: Callable[..., Tuple[torch.Tensor, torch.Tensor]] | None = None,
@@ -789,6 +1078,15 @@ def run_benchmark(
         raise ValueError("confidence_target must be between 0 and 1")
     if normalized_entropy_target < 0.0:
         raise ValueError("entropy_target must be nonnegative")
+    normalized_prediction_stability_margin = _nonnegative_finite_float(
+        prediction_stability_margin,
+        label="prediction stability margin",
+    )
+    normalized_prediction_stability_rank_depth = int(
+        prediction_stability_rank_depth
+    )
+    if normalized_prediction_stability_rank_depth < 0:
+        raise ValueError("prediction_stability_rank_depth must be nonnegative")
 
     loader = model_loader or _load_model
     task = task_factory or make_chained_task
@@ -812,6 +1110,12 @@ def run_benchmark(
             exit_entropy_threshold=float(exit_entropy_threshold),
             prediction_stability_patience=int(prediction_stability_patience),
             prediction_stability_tol=float(prediction_stability_tol),
+            prediction_stability_margin=(
+                normalized_prediction_stability_margin
+            ),
+            prediction_stability_rank_depth=(
+                normalized_prediction_stability_rank_depth
+            ),
             distribution_top_k=int(distribution_top_k),
             order_offset=seed_index % 2,
         )
@@ -847,6 +1151,12 @@ def run_benchmark(
                 prediction_stability_patience
             ),
             "prediction_stability_tol": float(prediction_stability_tol),
+            "prediction_stability_margin": (
+                normalized_prediction_stability_margin
+            ),
+            "prediction_stability_rank_depth": (
+                normalized_prediction_stability_rank_depth
+            ),
             "distribution_top_k": int(distribution_top_k),
             "counterbalance": (
                 "alternate_per_request_with_alternating_seed_offset"
@@ -922,6 +1232,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PREDICTION_STABILITY_TOL,
     )
     parser.add_argument(
+        "--prediction-stability-margin",
+        "--prediction_stability_margin",
+        dest="prediction_stability_margin",
+        type=float,
+        default=DEFAULT_PREDICTION_STABILITY_MARGIN,
+    )
+    parser.add_argument(
+        "--prediction-stability-rank-depth",
+        "--prediction_stability_rank_depth",
+        dest="prediction_stability_rank_depth",
+        type=int,
+        default=DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+    )
+    parser.add_argument(
         "--distribution-top-k",
         type=int,
         default=DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
@@ -965,6 +1289,10 @@ def main(argv: Iterable[str] | None = None) -> int:
         exit_entropy_threshold=float(args.exit_entropy_threshold),
         prediction_stability_patience=int(args.prediction_stability_patience),
         prediction_stability_tol=float(args.prediction_stability_tol),
+        prediction_stability_margin=float(args.prediction_stability_margin),
+        prediction_stability_rank_depth=int(
+            args.prediction_stability_rank_depth
+        ),
         distribution_top_k=int(args.distribution_top_k),
     )
     encoded = _strict_json(payload)

@@ -743,6 +743,8 @@ class ChampionChatBackend(BaseBackend):
             adaptive_exit_entropy=settings.get("adaptive_exit_entropy"),
             prediction_stability_patience=settings.get("prediction_stability_patience"),
             prediction_stability_tol=settings.get("prediction_stability_tol"),
+            prediction_stability_margin=settings.get("prediction_stability_margin"),
+            prediction_stability_rank_depth=settings.get("prediction_stability_rank_depth"),
             auto_compute=settings.get("auto_compute"),
         )
         return ChatResult(

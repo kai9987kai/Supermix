@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 
 import pytest
@@ -17,6 +16,7 @@ class _CycleModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.calls = []
+        self.prediction_stability_margins = []
 
     def forward(
         self,
@@ -28,6 +28,7 @@ class _CycleModel(torch.nn.Module):
         exit_entropy_threshold=0.2,
         prediction_stability_patience=2,
         prediction_stability_tol=0.005,
+        prediction_stability_margin=0.0,
     ):
         del (
             adaptive_compute,
@@ -35,6 +36,9 @@ class _CycleModel(torch.nn.Module):
             exit_entropy_threshold,
             prediction_stability_patience,
             prediction_stability_tol,
+        )
+        self.prediction_stability_margins.append(
+            float(prediction_stability_margin)
         )
         cycle = int(reasoning_cycles)
         self.calls.append(cycle)
@@ -66,10 +70,21 @@ def _shadow_plan(*, cycles=3, forward_evaluations=2):
     }
 
 
-def _legacy_result(output, *, cycles=3, forward_evaluations=4):
+def _legacy_result(
+    output,
+    *,
+    cycles=3,
+    forward_evaluations=4,
+    margin=0.25,
+    decision_margin=0.125,
+):
     return (
         output,
-        {},
+        {
+            "prediction_margin": margin,
+            "prediction_decision_margin": decision_margin,
+            "prediction_verifier_active": True,
+        },
         {
             "selected_reasoning_cycles": cycles,
             "forward_evaluations": forward_evaluations,
@@ -77,10 +92,21 @@ def _legacy_result(output, *, cycles=3, forward_evaluations=4):
     )
 
 
-def _progressive_result(output, *, cycles=3, forward_evaluations=2):
+def _progressive_result(
+    output,
+    *,
+    cycles=3,
+    forward_evaluations=2,
+    margin=0.25,
+    decision_margin=0.125,
+):
     return (
         output,
-        {},
+        {
+            "prediction_margin": margin,
+            "prediction_decision_margin": decision_margin,
+            "prediction_verifier_active": True,
+        },
         _shadow_plan(cycles=cycles, forward_evaluations=forward_evaluations),
     )
 
@@ -95,6 +121,14 @@ def test_cli_defaults_use_four_held_out_seeds_and_256_requests():
         benchmark.TRAINING_AND_ORIGINAL_TEST_SEEDS
     )
     assert args.cycles == [1, 3, 8]
+    assert (
+        args.prediction_stability_margin
+        == benchmark.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert (
+        args.prediction_stability_rank_depth
+        == benchmark.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH
+    )
 
 
 def test_literal_legacy_v1_and_progressive_accept_same_probe_and_output():
@@ -104,6 +138,8 @@ def test_literal_legacy_v1_and_progressive_accept_same_probe_and_output():
         "cycles": [1, 3, 8],
         "confidence_target": 0.8,
         "entropy_target": 0.0,
+        "adaptive_compute": True,
+        "prediction_stability_margin": 0.125,
     }
 
     legacy_output, _legacy_compute, legacy_plan = (
@@ -116,6 +152,9 @@ def test_literal_legacy_v1_and_progressive_accept_same_probe_and_output():
     )
 
     assert model.calls == [1, 3, 8, 3, 1, 3]
+    # Both controllers receive identical verifier settings; only their probe
+    # scheduling and accepted-output reuse differ.
+    assert model.prediction_stability_margins == [0.125] * 6
     assert legacy_plan["selected_reasoning_cycles"] == 3
     assert progressive_plan["selected_reasoning_cycles"] == 3
     assert legacy_plan["forward_evaluations"] == 4
@@ -171,6 +210,16 @@ def test_request_benchmark_counterbalances_and_counts_forward_reduction(
     assert result["comparison"]["forward_evaluation_reduction_percent"] == 50
     assert result["comparison"]["mean_latency_reduction_percent"] == 0
     assert result["comparison"]["exact_output_tensor_disagreement_count"] == 0
+    assert result["legacy_v1"]["observed_prediction_margin"]["minimum"] == 0.25
+    assert result["progressive"]["observed_prediction_margin"]["minimum"] == 0.25
+    assert (
+        result["legacy_v1"]["observed_prediction_decision_margin"]["minimum"]
+        == 0.125
+    )
+    assert (
+        result["progressive"]["observed_prediction_decision_margin"]["minimum"]
+        == 0.125
+    )
     assert result["gates"]["passed"] is True
 
 
@@ -244,11 +293,27 @@ def _fixture_metrics(*, samples, offset, legacy_ms=20.0, progressive_ms=12.0):
         "legacy_v1": {
             "correct_predictions": samples,
             "forward_evaluations": samples * 4,
+            "observed_prediction_margin": {
+                "observation_count": samples,
+                "minimum": 0.25,
+            },
+            "observed_prediction_decision_margin": {
+                "observation_count": samples,
+                "minimum": 0.125,
+            },
             "latency": {"total_ms": legacy_ms, "mean_ms": legacy_ms / samples},
         },
         "progressive": {
             "correct_predictions": samples,
             "forward_evaluations": samples * 2,
+            "observed_prediction_margin": {
+                "observation_count": samples,
+                "minimum": 0.2,
+            },
+            "observed_prediction_decision_margin": {
+                "observation_count": samples,
+                "minimum": 0.1,
+            },
             "latency": {
                 "total_ms": progressive_ms,
                 "mean_ms": progressive_ms / samples,
@@ -298,6 +363,16 @@ def test_aggregate_uses_exact_counts_weighted_work_and_median_seed_latency():
     assert summary["weighted_mean_latency_reduction_percent"] == 28
     assert summary["median_per_seed_latency_reduction_percent"] == 32.5
     assert summary["selected_cycle_pairs"] == {"3->3": 6}
+    assert summary["observed_prediction_margin"] == {
+        "metric": "top_1_minus_top_2_probability",
+        "legacy_v1": {"observation_count": 6, "minimum": 0.25},
+        "progressive": {"observation_count": 6, "minimum": 0.2},
+    }
+    assert summary["observed_prediction_decision_margin"] == {
+        "metric": "minimum_adjacent_probability_gap_through_rank_depth",
+        "legacy_v1": {"observation_count": 6, "minimum": 0.125},
+        "progressive": {"observation_count": 6, "minimum": 0.1},
+    }
 
 
 def test_run_benchmark_loads_checkpoint_once_and_alternates_seed_offsets(tmp_path):
@@ -306,6 +381,8 @@ def test_run_benchmark_loads_checkpoint_once_and_alternates_seed_offsets(tmp_pat
     loads = []
     tasks = []
     offsets = []
+    margins = []
+    rank_depths = []
 
     def loader(path, device):
         loads.append((path, device))
@@ -317,6 +394,8 @@ def test_run_benchmark_loads_checkpoint_once_and_alternates_seed_offsets(tmp_pat
 
     def benchmark_fn(_model, _x, y, **kwargs):
         offsets.append(kwargs["order_offset"])
+        margins.append(kwargs["prediction_stability_margin"])
+        rank_depths.append(kwargs["prediction_stability_rank_depth"])
         return _fixture_metrics(samples=len(y), offset=kwargs["order_offset"])
 
     result = benchmark.run_benchmark(
@@ -334,14 +413,48 @@ def test_run_benchmark_loads_checkpoint_once_and_alternates_seed_offsets(tmp_pat
     assert len(loads) == 1
     assert tasks == [(3, 719), (3, 727), (3, 733)]
     assert offsets == [0, 1, 0]
+    assert margins == [benchmark.DEFAULT_PREDICTION_STABILITY_MARGIN] * 3
+    assert rank_depths == [benchmark.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH] * 3
     assert result["checkpoint"]["sha256"] == hashlib.sha256(
         b"real checkpoint identity"
     ).hexdigest()
     assert result["configuration"]["total_samples"] == 9
+    assert (
+        result["configuration"]["prediction_stability_margin"]
+        == benchmark.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert (
+        result["configuration"]["prediction_stability_rank_depth"]
+        == benchmark.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH
+    )
     assert result["configuration"]["mutual_stability_role"] == (
         "shadow_diagnostic_only"
     )
     assert result["gates"]["passed"] is True
+
+
+def test_inactive_verifier_margins_are_not_reported_as_observed():
+    assert benchmark._prediction_margin_from_compute(
+        {"prediction_verifier_active": False, "prediction_margin": 0.0}
+    ) is None
+    assert benchmark._prediction_margin_from_compute(
+        {"prediction_margin": 0.25}
+    ) is None
+    assert benchmark._prediction_decision_margin_from_compute(
+        {
+            "prediction_verifier_active": False,
+            "prediction_decision_margin": 0.125,
+        }
+    ) is None
+    assert benchmark._prediction_decision_margin_from_compute(
+        {"prediction_decision_margin": 0.125}
+    ) is None
+    assert benchmark._prediction_decision_margin_from_compute(
+        {
+            "prediction_verifier_active": True,
+            "prediction_decision_margin": 0.125,
+        }
+    ) == 0.125
 
 
 @pytest.mark.parametrize("seed", [51, 52])
@@ -414,3 +527,23 @@ def test_main_enforces_gates_and_emits_strict_json(monkeypatch, tmp_path, capsys
 def test_strict_json_rejects_non_finite_values():
     with pytest.raises(ValueError):
         benchmark._strict_json({"bad": float("nan")})
+
+
+@pytest.mark.parametrize("margin", [-0.1, float("nan"), float("inf")])
+def test_run_benchmark_rejects_invalid_prediction_stability_margin(
+    tmp_path, margin
+):
+    weights = tmp_path / "checkpoint.pth"
+    weights.write_bytes(b"checkpoint")
+
+    with pytest.raises(ValueError, match="prediction stability margin"):
+        benchmark.run_benchmark(
+            weights=weights,
+            seeds=[719],
+            samples_per_seed=1,
+            device=torch.device("cpu"),
+            device_info={"resolved": "cpu"},
+            prediction_stability_margin=margin,
+            model_loader=lambda *_args: _BareModel(),
+            provenance={"fixture": True},
+        )

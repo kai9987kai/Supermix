@@ -46,6 +46,8 @@ CONTRACT_CONSTANTS = {
         "AUTO_COMPUTE_PLAN_SCHEMA_VERSION",
         "AUTO_COMPUTE_STRATEGY",
         "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K",
+        "DEFAULT_PREDICTION_STABILITY_MARGIN",
+        "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH",
     ),
     "source/route_policy_ledger.py": (
         "LEDGER_SCHEMA_VERSION",
@@ -219,6 +221,15 @@ def build_manifest(repo_root: Path, *, include_git: bool = False) -> Dict[str, A
             "automatic_policy_promotion_available": False,
             "progressive_auto_compute_accepted_probe_reuse": True,
             "mutual_stability_shadow_can_select_output": False,
+            "prediction_stability_margin_guard_available": True,
+            "prediction_stability_margin_default_is_universal": False,
+            "prediction_stability_rank_depth_guard_available": True,
+            "prediction_stability_rank_depth_default_is_universal": False,
+            "prediction_stability_rank_depth_zero_disables_verifier": True,
+            "prediction_stability_decision_margin_telemetry": True,
+            "prediction_verifier_telemetry_requires_active_verifier": True,
+            "full_output_verifier_includes_post_head_calibration": True,
+            "prediction_stability_verifier_scoped_to_available_labels": True,
         },
     }
     if include_git:

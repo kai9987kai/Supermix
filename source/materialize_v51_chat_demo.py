@@ -135,6 +135,8 @@ def build_demo_metadata(weights: Path, metrics_path: Path) -> Dict[str, Any]:
             "adaptive_exit_entropy": 0.2,
             "prediction_stability_patience": 2,
             "prediction_stability_tol": 0.005,
+            "prediction_stability_margin": 0.0001,
+            "prediction_stability_rank_depth": 3,
         },
         "buckets": buckets,
         "label_priors": {str(i): 0.1 for i in range(10)},
@@ -160,6 +162,8 @@ def check_load(weights: Path, meta: Path) -> Dict[str, Any]:
             "adaptive_exit_entropy": 0.2,
             "prediction_stability_patience": 2,
             "prediction_stability_tol": 0.005,
+            "prediction_stability_margin": 0.0001,
+            "prediction_stability_rank_depth": 3,
         },
     )
     status = engine.load(str(weights), str(meta))
@@ -172,6 +176,8 @@ def check_load(weights: Path, meta: Path) -> Dict[str, Any]:
         adaptive_exit_entropy=0.2,
         prediction_stability_patience=2,
         prediction_stability_tol=0.005,
+        prediction_stability_margin=0.0001,
+        prediction_stability_rank_depth=3,
     )
     return {
         "loaded": status,

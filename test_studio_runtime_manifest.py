@@ -61,6 +61,15 @@ def test_checked_runtime_manifest_is_current_and_complete():
         "automatic_policy_promotion_available": False,
         "progressive_auto_compute_accepted_probe_reuse": True,
         "mutual_stability_shadow_can_select_output": False,
+        "prediction_stability_margin_guard_available": True,
+        "prediction_stability_margin_default_is_universal": False,
+        "prediction_stability_rank_depth_guard_available": True,
+        "prediction_stability_rank_depth_default_is_universal": False,
+        "prediction_stability_rank_depth_zero_disables_verifier": True,
+        "prediction_stability_decision_margin_telemetry": True,
+        "prediction_verifier_telemetry_requires_active_verifier": True,
+        "full_output_verifier_includes_post_head_calibration": True,
+        "prediction_stability_verifier_scoped_to_available_labels": True,
     }
 
 
@@ -71,6 +80,8 @@ def test_manifest_exposes_route_contract_versions_without_importing_runtime():
         "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
         "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
         "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
+        "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0001,
+        "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH": 3,
     }
     assert contracts["source/route_policy_ledger.py"]["OUTCOME_CONTRACT_SCHEMA_VERSION"] == (
         "route-outcome-contract-v1"

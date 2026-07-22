@@ -6,6 +6,11 @@ import os
 sys.path.append(os.path.join(os.getcwd(), 'source'))
 
 from model_variants import ChampionNetCognitiveLeapUltraExpert
+from benchmark_cognitive_leap_ultra_v51 import (
+    DEFAULT_PREDICTION_STABILITY_MARGIN as BENCHMARK_STABILITY_MARGIN,
+    DEFAULT_PREDICTION_STABILITY_RANK_DEPTH as BENCHMARK_STABILITY_RANK_DEPTH,
+    evaluate as benchmark_evaluate,
+)
 
 def test_cognitive_leap_ultra():
     print("Starting smoke test for Cognitive Leap Ultra Expert (v51) architecture...")
@@ -164,6 +169,7 @@ def test_prediction_stability_verifier_controls_early_exit():
     assert head.last_exit_reason == "prediction_stable"
     assert head.last_prediction_streak.item() >= 2
     assert head.last_prediction_confidence_delta.item() >= 0.0
+    assert 0.0 <= head.last_prediction_margin.item() <= 1.0
     assert head.last_prediction_topk_js_divergence.item() >= 0.0
     assert (
         head.last_prediction_topk_js_divergence_max.item()
@@ -190,6 +196,472 @@ def test_prediction_stability_verifier_controls_early_exit():
     assert full_output.shape == stable_output.shape
     assert head.last_cycles_used.item() == 8
     assert head.last_exit_reason in {"max_cycles", "halt_mass"}
+
+
+def test_prediction_stability_margin_guards_ambiguous_early_exit():
+    torch.manual_seed(5103)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.zeros(1, 1, 128)
+    head = model.layers[10]
+    assert not any("last_prediction_margin" in key for key in model.state_dict())
+    assert not any("last_prediction_class_count" in key for key in model.state_dict())
+    assert not any(
+        "last_prediction_class_selection_valid" in key for key in model.state_dict()
+    )
+
+    with torch.no_grad():
+        default_output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+        )
+        default_cycles = head.last_cycles_used.item()
+        default_reason = head.last_exit_reason
+
+        explicit_zero_output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            prediction_stability_margin=0.0,
+        )
+        explicit_zero_cycles = head.last_cycles_used.item()
+        explicit_zero_reason = head.last_exit_reason
+
+        guarded_output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            prediction_stability_margin=1.0,
+        )
+
+    assert torch.equal(default_output, explicit_zero_output)
+    assert default_cycles == explicit_zero_cycles == 2
+    assert default_reason == explicit_zero_reason == "prediction_stable"
+    assert guarded_output.shape == default_output.shape
+    assert head.last_cycles_used.item() > default_cycles
+    assert head.last_exit_reason != "prediction_stable"
+    assert 0.0 <= head.last_prediction_margin.item() < 1.0
+
+
+def test_prediction_verifier_uses_complete_post_head_output():
+    torch.manual_seed(5105)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.randn(1, 1, 128)
+    head = model.layers[10]
+
+    with torch.no_grad():
+        output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+        )
+        final_probabilities = torch.softmax(output[0, 0], dim=-1)
+        top_two = final_probabilities.topk(k=2).values
+        expected_margin = top_two[0] - top_two[1]
+
+    assert head.last_exit_reason == "prediction_stable"
+    assert torch.allclose(head.last_prediction_margin, expected_margin, atol=1e-7)
+
+
+def test_prediction_verifier_scopes_to_available_classes():
+    torch.manual_seed(5106)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.zeros(1, 1, 128)
+    head = model.layers[10]
+
+    # Make an unavailable class dominate the returned logits. The verifier
+    # must still measure prediction, drift, and margin only over classes 0/1.
+    with torch.no_grad():
+        head.weight.zero_()
+        head.bias.zero_()
+        head.bias[0] = 2.0
+        head.bias[9] = 100.0
+        head.shared_scale.zero_()
+
+        scoped_output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            prediction_stability_margin=0.0,
+            prediction_class_indices=[0, 1],
+        )
+        scoped_cycles = head.last_cycles_used.item()
+        scoped_reason = head.last_exit_reason
+        scoped_margin = head.last_prediction_margin.clone()
+
+        class_mask = torch.zeros(10, dtype=torch.bool)
+        class_mask[:2] = True
+        masked_output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            prediction_stability_margin=0.0,
+            prediction_class_indices=class_mask,
+        )
+        masked_margin = head.last_prediction_margin.clone()
+
+    assert scoped_output.argmax(dim=-1).item() == 9
+    assert scoped_reason == "prediction_stable"
+    assert scoped_cycles == 2
+    scoped_probabilities = torch.softmax(scoped_output[0, 0, [0, 1]], dim=-1)
+    expected_margin = scoped_probabilities.max() - scoped_probabilities.min()
+    assert torch.allclose(scoped_margin, expected_margin, atol=1e-7)
+    assert torch.equal(masked_output, scoped_output)
+    assert torch.equal(masked_margin, scoped_margin)
+    assert head.last_prediction_class_count.item() == 2
+    assert bool(head.last_prediction_class_selection_valid.item())
+
+
+def test_prediction_stability_rank_depth_guards_top_k_candidate_boundaries():
+    torch.manual_seed(5109)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.zeros(1, 1, 128)
+    head = model.layers[10]
+    with torch.no_grad():
+        head.weight.zero_()
+        head.bias.fill_(-4.0)
+        head.bias[0] = 4.0
+        head.bias[1] = 2.0
+        head.bias[2] = 1.0
+        head.bias[3] = 0.9999
+        head.shared_scale.zero_()
+        head.decode_head.weight.zero_()
+        head.halt_head.weight.zero_()
+        head.halt_head.bias.fill_(-100.0)
+
+        model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=0.0,
+            prediction_stability_margin=1e-3,
+            prediction_stability_rank_depth=1,
+        )
+        top1_cycles = head.last_cycles_used.item()
+        top1_reason = head.last_exit_reason
+        top1_margin = head.last_prediction_margin.item()
+
+        model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=0.0,
+            exit_entropy_threshold=0.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=0.0,
+            prediction_stability_margin=1e-3,
+            prediction_stability_rank_depth=3,
+        )
+
+    assert top1_reason == "prediction_stable"
+    assert top1_cycles == 2
+    assert top1_margin >= 1e-3
+    assert head.last_exit_reason == "max_cycles"
+    assert head.last_cycles_used.item() == 8
+    assert head.last_prediction_margin.item() >= 1e-3
+    assert head.last_prediction_decision_margin.item() < 1e-3
+    assert head.last_prediction_rank_depth.item() == 3
+
+
+def test_prediction_verifier_all_class_scope_is_bit_identical_to_none():
+    torch.manual_seed(5107)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.randn(2, 1, 128)
+    head = model.layers[10]
+    controls = dict(
+        reasoning_cycles=6,
+        adaptive_compute=True,
+        exit_tol=0.0,
+        exit_entropy_threshold=0.0,
+        prediction_stability_patience=2,
+        prediction_stability_tol=1.0,
+        prediction_stability_margin=0.0,
+    )
+
+    with torch.no_grad():
+        default_output = model(sample, **controls)
+        default_cycles = head.last_cycles_used.clone()
+        default_margin = head.last_prediction_margin.clone()
+        default_js = head.last_prediction_topk_js_divergence.clone()
+
+        complete_indices_output = model(
+            sample,
+            prediction_class_indices=list(reversed(range(10))),
+            **controls,
+        )
+        complete_indices_cycles = head.last_cycles_used.clone()
+        complete_indices_margin = head.last_prediction_margin.clone()
+        complete_indices_js = head.last_prediction_topk_js_divergence.clone()
+
+        complete_mask_output = model(
+            sample,
+            prediction_class_indices=torch.ones(10, dtype=torch.bool),
+            **controls,
+        )
+
+    assert torch.equal(complete_indices_output, default_output)
+    assert torch.equal(complete_mask_output, default_output)
+    assert torch.equal(complete_indices_cycles, default_cycles)
+    assert torch.equal(complete_indices_margin, default_margin)
+    assert torch.equal(complete_indices_js, default_js)
+    assert head.last_prediction_class_count.item() == 10
+    assert bool(head.last_prediction_class_selection_valid.item())
+
+
+def test_invalid_prediction_class_scopes_fail_closed_without_breaking_inference():
+    torch.manual_seed(5108)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.zeros(1, 1, 128)
+    head = model.layers[10]
+    controls = dict(
+        reasoning_cycles=4,
+        adaptive_compute=True,
+        exit_tol=0.0,
+        exit_entropy_threshold=0.0,
+        prediction_stability_patience=2,
+        prediction_stability_tol=1.0,
+        prediction_stability_margin=0.0,
+    )
+    invalid_scopes = (
+        [],
+        [0, 0],
+        [-1, 1],
+        [0, 10],
+        [0.0, 1.0],
+        torch.tensor([[0, 1]]),
+        torch.tensor([True, False]),
+    )
+
+    with torch.no_grad():
+        for invalid_scope in invalid_scopes:
+            output = model(
+                sample,
+                prediction_class_indices=invalid_scope,
+                **controls,
+            )
+            assert output.shape == (1, 1, 10)
+            assert head.last_exit_reason != "prediction_stable"
+            assert head.last_prediction_class_count.item() == 0
+            assert not bool(head.last_prediction_class_selection_valid.item())
+
+        one_class_output = model(
+            sample,
+            prediction_class_indices=[3],
+            **controls,
+        )
+        empty_invalid_output = model(
+            torch.empty(0, 1, 128),
+            prediction_class_indices=[],
+            **controls,
+        )
+
+    assert one_class_output.shape == (1, 1, 10)
+    assert empty_invalid_output.shape == (0, 1, 10)
+    assert head.last_exit_reason != "prediction_stable"
+    assert head.last_prediction_class_count.item() == 0
+    assert not bool(head.last_prediction_class_selection_valid.item())
+
+    with torch.no_grad():
+        model(sample, prediction_class_indices=[3], **controls)
+
+    assert head.last_exit_reason != "prediction_stable"
+    assert head.last_prediction_class_count.item() == 1
+    assert not bool(head.last_prediction_class_selection_valid.item())
+    assert head.last_prediction_margin.item() == 0.0
+
+
+def test_prediction_margin_preserves_empty_batch_and_benchmark_contract():
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+
+    with torch.no_grad():
+        output = model(torch.empty(0, 1, 128), reasoning_cycles=3)
+
+    assert output.shape == (0, 1, 10)
+    assert model.layers[10].last_prediction_margin.item() == 0.0
+    assert model.layers[10].last_prediction_class_count.item() == 10
+    assert bool(model.layers[10].last_prediction_class_selection_valid.item())
+    assert torch.isfinite(model.layers[10].last_prediction_streak)
+    assert torch.isfinite(model.layers[10].last_prediction_confidence_delta)
+    assert torch.isfinite(model.layers[10].last_prediction_topk_js_divergence)
+    assert BENCHMARK_STABILITY_MARGIN == 0.0001
+    assert BENCHMARK_STABILITY_RANK_DEPTH == 3
+
+    sample = torch.randn(2, 1, 128)
+    labels = torch.tensor([0, 1])
+    fixed = benchmark_evaluate(model, sample, labels, torch.device("cpu"))
+    adaptive = benchmark_evaluate(
+        model,
+        sample,
+        labels,
+        torch.device("cpu"),
+        reasoning_cycles=3,
+        adaptive_compute=True,
+        exit_tol=0.0,
+        exit_entropy_threshold=0.0,
+        prediction_stability_patience=2,
+        prediction_stability_tol=1.0,
+        prediction_stability_margin=0.0,
+        prediction_stability_rank_depth=BENCHMARK_STABILITY_RANK_DEPTH,
+    )
+    invalid_scope = benchmark_evaluate(
+        model,
+        sample,
+        labels,
+        torch.device("cpu"),
+        reasoning_cycles=3,
+        adaptive_compute=True,
+        prediction_stability_patience=2,
+        prediction_stability_rank_depth=BENCHMARK_STABILITY_RANK_DEPTH,
+        prediction_class_indices=[0],
+    )
+
+    assert fixed["prediction_verifier_active"] is False
+    assert fixed["prediction_margin"] is None
+    assert fixed["prediction_decision_margin"] is None
+    assert fixed["prediction_rank_depth"] is None
+    assert adaptive["prediction_verifier_active"] is True
+    assert adaptive["prediction_margin"] is not None
+    assert adaptive["prediction_decision_margin"] is not None
+    assert adaptive["prediction_rank_depth"] == BENCHMARK_STABILITY_RANK_DEPTH
+    assert invalid_scope["prediction_verifier_active"] is False
+    assert invalid_scope["prediction_margin"] is None
+    assert invalid_scope["prediction_decision_margin"] is None
+    assert invalid_scope["prediction_rank_depth"] is None
+
+
+def test_prediction_stability_margin_does_not_change_training():
+    torch.manual_seed(5104)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).train()
+    sample = torch.randn(2, 1, 128)
+    head = model.layers[10]
+
+    baseline_output = model(
+        sample,
+        reasoning_cycles=4,
+        adaptive_compute=True,
+        exit_tol=0.0,
+        exit_entropy_threshold=0.0,
+        prediction_stability_patience=2,
+        prediction_stability_tol=1.0,
+        prediction_stability_margin=0.0,
+    )
+    guarded_output = model(
+        sample,
+        reasoning_cycles=4,
+        adaptive_compute=True,
+        exit_tol=0.0,
+        exit_entropy_threshold=0.0,
+        prediction_stability_patience=2,
+        prediction_stability_tol=1.0,
+        prediction_stability_margin=1.0,
+        prediction_class_indices=[0, 1],
+    )
+    invalid_scope_output = model(
+        sample,
+        reasoning_cycles=4,
+        adaptive_compute=True,
+        exit_tol=0.0,
+        exit_entropy_threshold=0.0,
+        prediction_stability_patience=2,
+        prediction_stability_tol=1.0,
+        prediction_stability_margin=1.0,
+        prediction_class_indices=[0, 0],
+    )
+
+    assert torch.equal(baseline_output, guarded_output)
+    assert torch.equal(baseline_output, invalid_scope_output)
+    assert head.last_cycles_used.item() == 4
+    assert head.last_exit_reason == "max_cycles"
+    assert head.last_prediction_margin.item() == 0.0
+    assert not bool(head.last_prediction_class_selection_valid.item())
+    state_keys = model.state_dict().keys()
+    assert not any("last_prediction_class_count" in key for key in state_keys)
+    assert not any("last_prediction_class_selection_valid" in key for key in state_keys)
+    assert not any("last_prediction_decision_margin" in key for key in state_keys)
+    assert not any("last_prediction_rank_depth" in key for key in state_keys)
 
 if __name__ == "__main__":
     try:

@@ -5,7 +5,9 @@
     "source/chat_app.py": {
       "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
       "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
-      "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5
+      "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
+      "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0001,
+      "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH": 3
     },
     "source/route_policy_explorer.py": {
       "REHEARSAL_RECEIPT_SCHEMA_VERSION": "route-exploration-rehearsal-receipt-v1",
@@ -75,18 +77,18 @@
   "modules": [
     {
       "path": "source/chat_app.py",
-      "sha256": "d90ee95c0a1b94a0c70b26e082f8106060dbab9a259b1ba1aab479c6b7237644",
-      "size_bytes": 74732
+      "sha256": "133a13219353447890f0c77d8df128461bba985d05036d0c6be5f204d4854783",
+      "size_bytes": 83928
     },
     {
       "path": "source/chat_web_app.py",
-      "sha256": "6a55a2a103c4c7f0ec3a2d6549f073ef51dbac2bbe0ec6f9383876d97353e487",
-      "size_bytes": 63727
+      "sha256": "338430377b1fd62561d2dbb35324cae4ddc1af68cc66157770e2fcfa7c4a92e2",
+      "size_bytes": 70369
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "d64636c3853313b8870a00c7d24d28912fa412ac28d6124697cda63497f433d4",
-      "size_bytes": 366643
+      "sha256": "71431d25603106a0c7c5dcb6e5830bf53d8767713a0ac90c60bc29f1765d68ad",
+      "size_bytes": 375096
     },
     {
       "path": "source/route_policy_ledger.py",
@@ -130,13 +132,13 @@
     },
     {
       "path": "source/multimodel_runtime.py",
-      "sha256": "f04a5710f936943bb777e10f1c988874bc377fd345c24011c0c766d068b6cfa1",
-      "size_bytes": 263991
+      "sha256": "d5074b4ea1ea483db928f92006251d7cfcc22c62ef4f3a4ede88ee1b9891b832",
+      "size_bytes": 264169
     },
     {
       "path": "source/supermix_multimodel_web_app.py",
-      "sha256": "c9b58ad9cd7f5dce184a294d9e34fbbba6969986a98a2b760be97ada9f2cba8f",
-      "size_bytes": 161182
+      "sha256": "caa016f43eb1c1d91b6d59140381a7b1127392c6afd607c0ac4109b986be9138",
+      "size_bytes": 164215
     },
     {
       "path": "source/supermix_multimodel_desktop_app.py",
@@ -145,13 +147,13 @@
     },
     {
       "path": "runtime_python/chat_app.py",
-      "sha256": "d90ee95c0a1b94a0c70b26e082f8106060dbab9a259b1ba1aab479c6b7237644",
-      "size_bytes": 74732
+      "sha256": "133a13219353447890f0c77d8df128461bba985d05036d0c6be5f204d4854783",
+      "size_bytes": 83928
     },
     {
       "path": "runtime_python/chat_web_app.py",
-      "sha256": "e16573872328ed4f07825a0156f461b951526e8b2f1b360d44a554fb6b8306b8",
-      "size_bytes": 55826
+      "sha256": "58a4d676162d807d18d58380f584d44e33fe77f9d8cc405121d1a4080477f3d9",
+      "size_bytes": 62364
     },
     {
       "path": "runtime_python/chat_pipeline.py",
@@ -175,8 +177,8 @@
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "d64636c3853313b8870a00c7d24d28912fa412ac28d6124697cda63497f433d4",
-      "size_bytes": 366643
+      "sha256": "71431d25603106a0c7c5dcb6e5830bf53d8767713a0ac90c60bc29f1765d68ad",
+      "size_bytes": 375096
     },
     {
       "path": "runtime_python/run.py",
@@ -186,7 +188,16 @@
   ],
   "package_guards": {
     "automatic_policy_promotion_available": false,
+    "full_output_verifier_includes_post_head_calibration": true,
     "mutual_stability_shadow_can_select_output": false,
+    "prediction_stability_decision_margin_telemetry": true,
+    "prediction_stability_margin_default_is_universal": false,
+    "prediction_stability_margin_guard_available": true,
+    "prediction_stability_rank_depth_default_is_universal": false,
+    "prediction_stability_rank_depth_guard_available": true,
+    "prediction_stability_rank_depth_zero_disables_verifier": true,
+    "prediction_stability_verifier_scoped_to_available_labels": true,
+    "prediction_verifier_telemetry_requires_active_verifier": true,
     "progressive_auto_compute_accepted_probe_reuse": true,
     "route_ledger_requires_executed_assignment_namespace": true,
     "route_ledger_requires_issued_execution_assignment_record": true,

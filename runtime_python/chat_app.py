@@ -62,12 +62,37 @@ def load_metadata(path: str) -> Dict:
         return {}
 
 
+def _parse_metadata_buckets(raw: Any) -> Dict[int, List[Dict]]:
+    """Keep only non-empty buckets whose labels address a model output class."""
+
+    buckets: Dict[int, List[Dict]] = {}
+    if not isinstance(raw, dict):
+        return buckets
+    for raw_label, rows in raw.items():
+        if isinstance(raw_label, bool):
+            continue
+        if isinstance(raw_label, int):
+            label = raw_label
+        elif isinstance(raw_label, str) and re.fullmatch(r"[+-]?\d+", raw_label.strip()):
+            try:
+                label = int(raw_label)
+            except (ValueError, OverflowError):
+                continue
+        else:
+            continue
+        if not 0 <= label < MODEL_CLASSES:
+            continue
+        if isinstance(rows, list) and rows:
+            buckets[label] = rows
+    return buckets
+
+
 def _int_or_default(value, default: int) -> int:
     if value is None:
         return int(default)
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, RuntimeError):
         return int(default)
 
 
@@ -130,6 +155,11 @@ def evaluate_runtime_compute_budgets(
     cycles=None,
     adaptive_compute: bool = False,
     exit_tol: Optional[float] = None,
+    exit_entropy_threshold: Any = None,
+    prediction_stability_patience: Any = None,
+    prediction_stability_tol: Any = None,
+    prediction_stability_margin: Any = None,
+    prediction_stability_rank_depth: Any = None,
 ) -> List[Dict[str, object]]:
     labels = list(available_labels) or list(range(MODEL_CLASSES))
     idx_device = x.device if isinstance(x, torch.Tensor) else None
@@ -148,7 +178,13 @@ def evaluate_runtime_compute_budgets(
                 reasoning_cycles=requested_cycles,
                 adaptive_compute=adaptive_compute,
                 exit_tol=resolved_exit_tol,
+                exit_entropy_threshold=exit_entropy_threshold,
+                prediction_stability_patience=prediction_stability_patience,
+                prediction_stability_tol=prediction_stability_tol,
+                prediction_stability_margin=prediction_stability_margin,
                 return_diagnostics=True,
+                prediction_class_indices=labels,
+                prediction_stability_rank_depth=prediction_stability_rank_depth,
             )
             logits = logits_tensor[0, 0]
             avail_logits = logits.index_select(0, idx.to(logits.device))
@@ -223,6 +259,8 @@ MAX_RUNTIME_REASONING_CYCLES = 64
 DEFAULT_ADAPTIVE_EXIT_ENTROPY = 0.2
 DEFAULT_PREDICTION_STABILITY_PATIENCE = 2
 DEFAULT_PREDICTION_STABILITY_TOL = 5e-3
+DEFAULT_PREDICTION_STABILITY_MARGIN = 1e-4
+DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = 3
 AUTO_REASONING_CYCLE_BUCKETS = (1, 3, 8, 16)
 
 
@@ -313,7 +351,7 @@ def _coerce_optional_positive_int(
         value = stripped
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, RuntimeError):
         return default
     parsed = max(1, parsed)
     if max_value is not None:
@@ -385,7 +423,7 @@ def estimate_auto_reasoning_cycles(context: str, max_value: Optional[int] = None
 def _coerce_nonnegative_float(value: Any, default: float, max_value: Optional[float] = None) -> float:
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, RuntimeError):
         parsed = float(default)
     if not math.isfinite(parsed):
         parsed = float(default)
@@ -395,10 +433,40 @@ def _coerce_nonnegative_float(value: Any, default: float, max_value: Optional[fl
     return parsed
 
 
+def _coerce_prediction_stability_margin(
+    value: Any,
+    default: float = DEFAULT_PREDICTION_STABILITY_MARGIN,
+) -> float:
+    """Preserve explicit zero but never turn malformed input into guard-off."""
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError, RuntimeError):
+        return float(default)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        return float(default)
+    return parsed
+
+
+def _coerce_prediction_stability_rank_depth(
+    value: Any,
+    default: int = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+) -> int:
+    """Preserve explicit zero while failing malformed/negative values closed."""
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError, RuntimeError):
+        return int(default)
+    if parsed < 0:
+        return int(default)
+    return parsed
+
+
 def _coerce_nonnegative_int(value: Any, default: int, max_value: Optional[int] = None) -> int:
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, RuntimeError):
         parsed = int(default)
     parsed = max(0, parsed)
     if max_value is not None:
@@ -450,7 +518,7 @@ def _to_optional_scalar(value: Any) -> Optional[float]:
         if hasattr(value, "detach"):
             return float(value.detach().cpu().item())
         return float(value)
-    except (TypeError, ValueError, RuntimeError):
+    except (TypeError, ValueError, OverflowError, RuntimeError):
         return None
 
 
@@ -469,6 +537,11 @@ def collect_runtime_compute_metrics(
         "gating_entropy": None,
         "prediction_streak": None,
         "prediction_confidence_delta": None,
+        "prediction_margin": None,
+        "prediction_decision_margin": None,
+        "prediction_rank_depth": None,
+        "prediction_class_count": None,
+        "prediction_class_selection_valid": None,
         "exit_reason": None,
     }
     attr_map = {
@@ -478,6 +551,11 @@ def collect_runtime_compute_metrics(
         "last_gating_entropy": "gating_entropy",
         "last_prediction_streak": "prediction_streak",
         "last_prediction_confidence_delta": "prediction_confidence_delta",
+        "last_prediction_margin": "prediction_margin",
+        "last_prediction_decision_margin": "prediction_decision_margin",
+        "last_prediction_rank_depth": "prediction_rank_depth",
+        "last_prediction_class_count": "prediction_class_count",
+        "last_prediction_class_selection_valid": "prediction_class_selection_valid",
     }
     modules = list(model.modules()) if hasattr(model, "modules") else [model]
     for module in modules:
@@ -491,6 +569,10 @@ def collect_runtime_compute_metrics(
             reason = getattr(module, "last_exit_reason", None)
             if isinstance(reason, str) and reason.strip():
                 metrics["exit_reason"] = reason.strip()
+    if metrics["prediction_class_selection_valid"] is not None:
+        metrics["prediction_class_selection_valid"] = bool(
+            metrics["prediction_class_selection_valid"]
+        )
     metrics.update({
         "supported": model_supports_runtime_compute(model),
         "requested_reasoning_cycles": requested_reasoning_cycles,
@@ -518,6 +600,9 @@ def forward_with_runtime_compute(
     prediction_stability_tol: Any = DEFAULT_PREDICTION_STABILITY_TOL,
     auto_reasoning_context: str = "",
     return_diagnostics: Optional[bool] = None,
+    prediction_stability_margin: Any = DEFAULT_PREDICTION_STABILITY_MARGIN,
+    prediction_class_indices: Any = None,
+    prediction_stability_rank_depth: Any = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
 ):
     """Forward a model while applying optional v50 runtime-compute controls.
 
@@ -548,6 +633,14 @@ def forward_with_runtime_compute(
         prediction_stability_tol,
         DEFAULT_PREDICTION_STABILITY_TOL,
     )
+    stability_margin = _coerce_prediction_stability_margin(
+        prediction_stability_margin,
+        DEFAULT_PREDICTION_STABILITY_MARGIN,
+    )
+    stability_rank_depth = _coerce_prediction_stability_rank_depth(
+        prediction_stability_rank_depth,
+        DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+    )
     kwargs: Dict[str, Any] = {}
 
     if cycles is not None and _model_forward_accepts_kwarg(model, "reasoning_cycles"):
@@ -562,8 +655,29 @@ def forward_with_runtime_compute(
             kwargs["prediction_stability_patience"] = stability_patience
         if _model_forward_accepts_kwarg(model, "prediction_stability_tol"):
             kwargs["prediction_stability_tol"] = stability_tol
+        if _model_forward_accepts_kwarg(model, "prediction_stability_margin"):
+            kwargs["prediction_stability_margin"] = stability_margin
+        if _model_forward_accepts_kwarg(model, "prediction_stability_rank_depth"):
+            kwargs["prediction_stability_rank_depth"] = stability_rank_depth
+        if (
+            prediction_class_indices is not None
+            and _model_forward_accepts_kwarg(model, "prediction_class_indices")
+        ):
+            if isinstance(prediction_class_indices, torch.Tensor):
+                prediction_class_indices = prediction_class_indices.detach().cpu().tolist()
+            elif isinstance(prediction_class_indices, tuple):
+                prediction_class_indices = list(prediction_class_indices)
+            kwargs["prediction_class_indices"] = prediction_class_indices
 
     output = model(x, **kwargs) if kwargs else model(x)
+    prediction_verifier_active = bool(
+        adaptive
+        and stability_patience > 0
+        and stability_rank_depth > 0
+        and "adaptive_compute" in kwargs
+        and "prediction_stability_patience" in kwargs
+        and "prediction_stability_rank_depth" in kwargs
+    )
     metrics = collect_runtime_compute_metrics(
         model,
         requested_reasoning_cycles=cycles,
@@ -571,6 +685,17 @@ def forward_with_runtime_compute(
         exit_tol=tol,
         applied_kwargs=kwargs,
     )
+    if not prediction_verifier_active:
+        for key in (
+            "prediction_streak",
+            "prediction_confidence_delta",
+            "prediction_margin",
+            "prediction_decision_margin",
+            "prediction_rank_depth",
+            "prediction_class_count",
+            "prediction_class_selection_valid",
+        ):
+            metrics[key] = None
     diagnostics = {
         "requested_reasoning_cycles": cycles,
         "selected_reasoning_cycles": cycles,
@@ -582,6 +707,14 @@ def forward_with_runtime_compute(
         "exit_entropy_threshold": entropy_threshold,
         "prediction_stability_patience": stability_patience,
         "prediction_stability_tol": stability_tol,
+        "prediction_stability_margin": stability_margin,
+        "prediction_stability_rank_depth": stability_rank_depth,
+        "prediction_verifier_active": prediction_verifier_active,
+        "prediction_class_indices": (
+            kwargs.get("prediction_class_indices")
+            if "prediction_class_indices" in kwargs
+            else None
+        ),
         "applied": bool(kwargs),
         "applied_kwargs": dict(kwargs),
         **metrics,
@@ -647,6 +780,8 @@ def progressive_auto_compute_forward(
     prediction_stability_tol: Any = DEFAULT_PREDICTION_STABILITY_TOL,
     auto_reasoning_context: str = "",
     distribution_top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
+    prediction_stability_margin: Any = DEFAULT_PREDICTION_STABILITY_MARGIN,
+    prediction_stability_rank_depth: Any = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
 ) -> Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]:
     """Evaluate auto-compute budgets progressively and reuse the accepted probe.
 
@@ -696,6 +831,9 @@ def progressive_auto_compute_forward(
                 prediction_stability_patience=prediction_stability_patience,
                 prediction_stability_tol=prediction_stability_tol,
                 auto_reasoning_context=auto_reasoning_context,
+                prediction_stability_margin=prediction_stability_margin,
+                prediction_class_indices=labels,
+                prediction_stability_rank_depth=prediction_stability_rank_depth,
             )
             logits = model_out[0, 0]
             available_logits = logits.index_select(0, idx.to(logits.device))
@@ -822,7 +960,7 @@ def compact_auto_compute_plan_metrics(plan: Any) -> Dict[str, Any]:
     rows = plan.get("rows") if isinstance(plan.get("rows"), list) else []
     try:
         selected_index = int(plan.get("selected_index"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, RuntimeError):
         selected_index = -1
     if not 0 <= selected_index < len(rows):
         selected_index = len(rows) - 1
@@ -887,6 +1025,8 @@ def _print_chat_help() -> None:
     print("  /exit_entropy <f>   Set v50 adaptive-compute entropy exit threshold")
     print("  /stability <n>      Stable prediction cycles required (0 disables)")
     print("  /stability_tol <f>  Maximum confidence drift across the stable streak")
+    print("  /stability_margin <f> Minimum top-two probability margin for stable exit")
+    print("  /stability_rank_depth <n> Ordered prediction ranks verified (0 disables)")
     print("  /top <n>            Show top reranked candidates each turn (0 disables)")
     print("  /timing on|off      Toggle per-turn timing output")
     print("  /auto_compute on|off Toggle confidence/entropy based cycle selection")
@@ -947,6 +1087,18 @@ def main():
         type=float,
         default=DEFAULT_PREDICTION_STABILITY_TOL,
         help="Maximum confidence drift allowed across a stable prediction streak.",
+    )
+    ap.add_argument(
+        "--prediction_stability_margin",
+        type=float,
+        default=DEFAULT_PREDICTION_STABILITY_MARGIN,
+        help="Minimum full-output top-two probability margin required for stable exit.",
+    )
+    ap.add_argument(
+        "--prediction_stability_rank_depth",
+        type=int,
+        default=DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+        help="Ordered prediction ranks required to remain stable (0 disables the rank verifier).",
     )
     ap.add_argument("--device", default="auto")
     ap.add_argument(
@@ -1140,15 +1292,7 @@ def main():
     if missing or unexpected:
         raise RuntimeError(f"State dict mismatch. Missing={missing}, Unexpected={unexpected}")
 
-    buckets_raw = meta.get("buckets", {})
-    buckets: Dict[int, List[Dict]] = {}
-    for k, v in buckets_raw.items():
-        try:
-            label = int(k)
-        except ValueError:
-            continue
-        if isinstance(v, list) and v:
-            buckets[label] = v
+    buckets = _parse_metadata_buckets(meta.get("buckets", {}))
 
     available_labels = sorted(buckets.keys())
     if not available_labels:
@@ -1203,6 +1347,14 @@ def main():
         args.prediction_stability_tol,
         DEFAULT_PREDICTION_STABILITY_TOL,
     )
+    args.prediction_stability_margin = _coerce_prediction_stability_margin(
+        args.prediction_stability_margin,
+        DEFAULT_PREDICTION_STABILITY_MARGIN,
+    )
+    args.prediction_stability_rank_depth = _coerce_prediction_stability_rank_depth(
+        args.prediction_stability_rank_depth,
+        DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+    )
 
     print(f"\n{TerminalColors.SYSTEM}--- Session Info ---")
     print(f"Loaded: {Path(args.weights).name} [{resolved_model_size}] | Available labels: {len(available_labels)}")
@@ -1217,6 +1369,8 @@ def main():
         f"exit_entropy={_coerce_nonnegative_float(args.adaptive_exit_entropy, DEFAULT_ADAPTIVE_EXIT_ENTROPY):.4g} "
         f"stability={_coerce_nonnegative_int(args.prediction_stability_patience, DEFAULT_PREDICTION_STABILITY_PATIENCE)} "
         f"stability_tol={_coerce_nonnegative_float(args.prediction_stability_tol, DEFAULT_PREDICTION_STABILITY_TOL):.4g} "
+        f"stability_margin={_coerce_prediction_stability_margin(args.prediction_stability_margin, DEFAULT_PREDICTION_STABILITY_MARGIN):.4g} "
+        f"stability_rank_depth={_coerce_prediction_stability_rank_depth(args.prediction_stability_rank_depth)} "
         f"auto={'on' if args.auto_compute else 'off'}"
     )
     
@@ -1272,6 +1426,8 @@ def main():
                         f"exit_entropy={_coerce_nonnegative_float(args.adaptive_exit_entropy, DEFAULT_ADAPTIVE_EXIT_ENTROPY):.4g} "
                         f"stability={_coerce_nonnegative_int(args.prediction_stability_patience, DEFAULT_PREDICTION_STABILITY_PATIENCE)} "
                         f"stability_tol={_coerce_nonnegative_float(args.prediction_stability_tol, DEFAULT_PREDICTION_STABILITY_TOL):.4g} "
+                        f"stability_margin={_coerce_prediction_stability_margin(args.prediction_stability_margin, DEFAULT_PREDICTION_STABILITY_MARGIN):.4g} "
+                        f"stability_rank_depth={_coerce_prediction_stability_rank_depth(args.prediction_stability_rank_depth)} "
                         f"auto={'on' if args.auto_compute else 'off'}"
                     )
                     print(
@@ -1312,6 +1468,8 @@ def main():
                         f"exit_entropy={_coerce_nonnegative_float(args.adaptive_exit_entropy, DEFAULT_ADAPTIVE_EXIT_ENTROPY):.4g} "
                         f"stability={_coerce_nonnegative_int(args.prediction_stability_patience, DEFAULT_PREDICTION_STABILITY_PATIENCE)} "
                         f"stability_tol={_coerce_nonnegative_float(args.prediction_stability_tol, DEFAULT_PREDICTION_STABILITY_TOL):.4g} "
+                        f"stability_margin={_coerce_prediction_stability_margin(args.prediction_stability_margin, DEFAULT_PREDICTION_STABILITY_MARGIN):.4g} "
+                        f"stability_rank_depth={_coerce_prediction_stability_rank_depth(args.prediction_stability_rank_depth)} "
                         f"auto={'on' if args.auto_compute else 'off'} "
                         f"auto_conf={float(args.auto_compute_confidence):.3f} "
                         f"auto_entropy={float(args.auto_compute_entropy):.3f}"
@@ -1398,6 +1556,26 @@ def main():
                         )
                     except Exception:
                         print(f"{TerminalColors.SYSTEM}Usage: /stability_tol <float>{TerminalColors.RESET}")
+                elif cmd == "stability_margin":
+                    try:
+                        args.prediction_stability_margin = _coerce_prediction_stability_margin(
+                            arg,
+                            args.prediction_stability_margin,
+                        )
+                        print(
+                            f"{TerminalColors.SYSTEM}Prediction stability margin set to "
+                            f"{float(args.prediction_stability_margin):.4g}.{TerminalColors.RESET}"
+                        )
+                    except Exception:
+                        print(f"{TerminalColors.SYSTEM}Usage: /stability_margin <float>{TerminalColors.RESET}")
+                elif cmd == "stability_rank_depth":
+                    args.prediction_stability_rank_depth = _coerce_prediction_stability_rank_depth(
+                        arg,
+                    )
+                    print(
+                        f"{TerminalColors.SYSTEM}Prediction stability rank depth set to "
+                        f"{int(args.prediction_stability_rank_depth)}.{TerminalColors.RESET}"
+                    )
                 elif cmd == "top":
                     try:
                         args.show_top_responses = max(0, int(arg))
@@ -1517,6 +1695,8 @@ def main():
                     prediction_stability_patience=args.prediction_stability_patience,
                     prediction_stability_tol=args.prediction_stability_tol,
                     auto_reasoning_context=context,
+                    prediction_stability_margin=args.prediction_stability_margin,
+                    prediction_stability_rank_depth=args.prediction_stability_rank_depth,
                 )
                 effective_reasoning_cycles = auto_compute_plan.get("selected_reasoning_cycles")
             else:
@@ -1531,6 +1711,9 @@ def main():
                         prediction_stability_patience=args.prediction_stability_patience,
                         prediction_stability_tol=args.prediction_stability_tol,
                         auto_reasoning_context=context,
+                        prediction_stability_margin=args.prediction_stability_margin,
+                        prediction_class_indices=available_labels,
+                        prediction_stability_rank_depth=args.prediction_stability_rank_depth,
                     )
             logits = model_out[0, 0]  # (10,)
             t_infer += max(0.0, time.perf_counter() - _t)

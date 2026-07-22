@@ -19,6 +19,7 @@ class RuntimeAwareModel(nn.Module):
         super().__init__()
         self.calls = []
         self.last_cycles_used = torch.tensor(0.0)
+        self.last_prediction_margin = torch.tensor(0.0)
         self.last_ponder_cost = torch.tensor(0.0)
         self.last_consistency_loss = torch.tensor(0.0)
         self.eval()
@@ -64,6 +65,8 @@ class ProbabilityScheduleModel(nn.Module):
         exit_entropy_threshold=chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY,
         prediction_stability_patience=chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE,
         prediction_stability_tol=chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
+        prediction_stability_margin=chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN,
+        prediction_stability_rank_depth=chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     ):
         cycles = int(reasoning_cycles or 1)
         self.calls.append(
@@ -74,6 +77,8 @@ class ProbabilityScheduleModel(nn.Module):
                 "exit_entropy_threshold": exit_entropy_threshold,
                 "prediction_stability_patience": prediction_stability_patience,
                 "prediction_stability_tol": prediction_stability_tol,
+                "prediction_stability_margin": prediction_stability_margin,
+                "prediction_stability_rank_depth": prediction_stability_rank_depth,
             }
         )
         self.last_cycles_used = torch.tensor(float(cycles))
@@ -86,6 +91,9 @@ class ProbabilityScheduleModel(nn.Module):
             device=x.device,
         )
         probs[0] = probability
+        self.last_prediction_margin = torch.tensor(
+            max(0.0, probability - tail), dtype=torch.float64
+        )
         return torch.log(probs).reshape(1, 1, -1).expand(x.shape[0], x.shape[1], -1)
 
 
@@ -386,6 +394,8 @@ def test_progressive_auto_compute_applies_full_v2_probe_controls():
         exit_entropy_threshold=0.7,
         prediction_stability_patience=4,
         prediction_stability_tol=0.123,
+        prediction_stability_margin=0.0002,
+        prediction_stability_rank_depth=5,
     )
 
     assert model.calls == [
@@ -396,6 +406,8 @@ def test_progressive_auto_compute_applies_full_v2_probe_controls():
             "exit_entropy_threshold": 0.7,
             "prediction_stability_patience": 4,
             "prediction_stability_tol": 0.123,
+            "prediction_stability_margin": 0.0002,
+            "prediction_stability_rank_depth": 5,
         }
     ]
     assert plan["probe_control_scope"] == "full_runtime_controls_v2"
@@ -458,16 +470,50 @@ def test_progressive_auto_compute_sanitizes_non_finite_thresholds():
     model = RuntimeAwareModel()
     x = torch.zeros(1, 1, 128)
 
-    _, _, plan = chat_app.progressive_auto_compute_forward(
+    _, compute, plan = chat_app.progressive_auto_compute_forward(
         model,
         x,
         list(range(chat_app.MODEL_CLASSES)),
         confidence_target=float("nan"),
         entropy_target=float("inf"),
+        prediction_stability_margin=float("nan"),
     )
 
     assert plan["confidence_target"] == chat_app.DEFAULT_AUTO_COMPUTE_CONFIDENCE
     assert plan["entropy_target"] == chat_app.DEFAULT_AUTO_COMPUTE_ENTROPY
+    assert compute["prediction_stability_margin"] == (
+        chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert chat_app._coerce_prediction_stability_margin(-1) == (
+        chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert chat_app._coerce_prediction_stability_margin(float("inf")) == (
+        chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert chat_app._coerce_prediction_stability_margin(0) == 0.0
+
+
+def test_runtime_compute_coercers_fail_safe_on_overflow_and_complex_tensors():
+    huge_integer = 10**10_000
+    complex_tensor = torch.tensor(1 + 2j)
+
+    assert chat_app._coerce_nonnegative_float(huge_integer, 0.25) == 0.25
+    assert chat_app._coerce_prediction_stability_margin(huge_integer) == (
+        chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert chat_app._coerce_nonnegative_float(complex_tensor, 0.5) == 0.5
+    assert chat_app._coerce_prediction_stability_margin(complex_tensor) == (
+        chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert chat_app._coerce_optional_positive_int(
+        complex_tensor,
+        chat_app.MAX_RUNTIME_REASONING_CYCLES,
+        default=3,
+    ) == 3
+    assert chat_app._coerce_nonnegative_int(complex_tensor, 2) == 2
+    assert chat_app._to_optional_scalar(huge_integer) is None
+    assert chat_app._to_optional_scalar(complex_tensor) is None
+    assert chat_app._coerce_prediction_stability_margin(0) == 0.0
 
 
 def test_web_engine_forwards_runtime_compute_controls_without_mutating_contract():
