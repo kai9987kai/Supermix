@@ -1,6 +1,7 @@
 import argparse
 import inspect
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -74,6 +75,9 @@ MAX_RUNTIME_REASONING_CYCLES = 64
 DEFAULT_ADAPTIVE_EXIT_TOL = 1e-3
 DEFAULT_AUTO_COMPUTE_CONFIDENCE = 0.55
 DEFAULT_AUTO_COMPUTE_ENTROPY = 1.85
+AUTO_COMPUTE_PLAN_SCHEMA_VERSION = "runtime-auto-compute-plan-v2"
+AUTO_COMPUTE_STRATEGY = "progressive_accepted_probe"
+DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K = 5
 
 
 def resolve_runtime_compute_cycles(cycles, default: Optional[List[int]] = None, limit: int = 8) -> List[int]:
@@ -383,6 +387,8 @@ def _coerce_nonnegative_float(value: Any, default: float, max_value: Optional[fl
         parsed = float(value)
     except (TypeError, ValueError):
         parsed = float(default)
+    if not math.isfinite(parsed):
+        parsed = float(default)
     parsed = max(0.0, parsed)
     if max_value is not None:
         parsed = min(parsed, float(max_value))
@@ -583,6 +589,261 @@ def forward_with_runtime_compute(
     if return_diagnostics is False:
         return output
     return output, diagnostics
+
+
+def _topk_distribution_js_divergence(
+    previous: torch.Tensor,
+    current: torch.Tensor,
+    top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
+) -> float:
+    """Return midpoint-support JSD while preserving tail probability mass."""
+
+    left = previous.detach().to(dtype=torch.float64).reshape(-1)
+    right = current.detach().to(dtype=torch.float64).reshape(-1)
+    if left.numel() != right.numel() or left.numel() == 0:
+        return 0.0
+    k = min(max(1, int(top_k)), int(left.numel()))
+    midpoint = 0.5 * (left + right)
+    indices = torch.topk(midpoint, k=k).indices
+    left_top = left.index_select(0, indices)
+    right_top = right.index_select(0, indices)
+    left_compact = torch.cat(
+        [left_top, (1.0 - left_top.sum()).clamp_min(0.0).reshape(1)]
+    )
+    right_compact = torch.cat(
+        [right_top, (1.0 - right_top.sum()).clamp_min(0.0).reshape(1)]
+    )
+    compact_midpoint = 0.5 * (left_compact + right_compact)
+    epsilon = torch.finfo(left_compact.dtype).tiny
+
+    def _kl(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return (
+            source
+            * (
+                torch.log(source.clamp_min(epsilon))
+                - torch.log(target.clamp_min(epsilon))
+            )
+        ).sum()
+
+    value = 0.5 * (
+        _kl(left_compact, compact_midpoint)
+        + _kl(right_compact, compact_midpoint)
+    )
+    return round(max(0.0, float(value.item())), 10)
+
+
+def progressive_auto_compute_forward(
+    model: Any,
+    x: torch.Tensor,
+    available_labels: List[int],
+    *,
+    cycles: Any = None,
+    confidence_target: Any = DEFAULT_AUTO_COMPUTE_CONFIDENCE,
+    entropy_target: Any = DEFAULT_AUTO_COMPUTE_ENTROPY,
+    adaptive_compute: Any = False,
+    exit_tol: Any = DEFAULT_ADAPTIVE_EXIT_TOL,
+    exit_entropy_threshold: Any = DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+    prediction_stability_patience: Any = DEFAULT_PREDICTION_STABILITY_PATIENCE,
+    prediction_stability_tol: Any = DEFAULT_PREDICTION_STABILITY_TOL,
+    auto_reasoning_context: str = "",
+    distribution_top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
+) -> Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]:
+    """Evaluate auto-compute budgets progressively and reuse the accepted probe.
+
+    This preserves the v1 selection policy and row order exactly: the first
+    confidence/entropy target wins, otherwise the best-confidence row wins
+    after the full ladder. Probes use the complete current runtime-control set,
+    and the accepted probe output is returned directly, removing the old N+1
+    rerun. Cross-budget persistence and JSD are telemetry only and never select
+    or reject an output.
+    """
+
+    if bool(getattr(model, "training", False)):
+        raise RuntimeError("progressive auto compute requires model.eval()")
+    labels = list(available_labels) or list(range(MODEL_CLASSES))
+    resolved_cycles = resolve_runtime_compute_cycles(cycles)
+    confidence_target = min(
+        1.0,
+        _coerce_nonnegative_float(
+            confidence_target,
+            DEFAULT_AUTO_COMPUTE_CONFIDENCE,
+        ),
+    )
+    entropy_target = _coerce_nonnegative_float(
+        entropy_target,
+        DEFAULT_AUTO_COMPUTE_ENTROPY,
+    )
+    adaptive = _coerce_bool(adaptive_compute)
+    idx = torch.tensor(labels, dtype=torch.long, device=x.device)
+    records: List[Dict[str, Any]] = []
+    cached_outputs: List[torch.Tensor] = []
+    previous_probs: Optional[torch.Tensor] = None
+    previous_label: Optional[int] = None
+    previous_confidence: Optional[float] = None
+    accepted_index: Optional[int] = None
+    reason = "best_confidence"
+
+    for requested_cycles in resolved_cycles:
+        started = time.perf_counter()
+        with torch.no_grad():
+            model_out, compute = forward_with_runtime_compute(
+                model,
+                x,
+                reasoning_cycles=requested_cycles,
+                adaptive_compute=adaptive,
+                exit_tol=exit_tol,
+                exit_entropy_threshold=exit_entropy_threshold,
+                prediction_stability_patience=prediction_stability_patience,
+                prediction_stability_tol=prediction_stability_tol,
+                auto_reasoning_context=auto_reasoning_context,
+            )
+            logits = model_out[0, 0]
+            available_logits = logits.index_select(0, idx.to(logits.device))
+            probs = torch.softmax(available_logits, dim=0)
+            confidence_tensor, predicted_position = torch.max(probs, dim=0)
+            entropy_tensor = -(probs * torch.log(probs.clamp_min(1e-8))).sum()
+        # v1 serialized these values to six decimals before the selector read
+        # them. Keep that boundary exact so values such as 0.5499996 still
+        # satisfy a 0.55 target just as they did before.
+        confidence = round(float(confidence_tensor.item()), 6)
+        entropy = round(float(entropy_tensor.item()), 6)
+        predicted_label = int(labels[int(predicted_position.item())])
+        # Freeze selection latency before shadow-only diagnostics. Otherwise a
+        # costly JSD calculation could alter the legacy fallback tie-break.
+        probe_latency_ms = round((time.perf_counter() - started) * 1000.0, 1)
+        has_previous = previous_probs is not None
+        shadow = {
+            "role": "shadow_diagnostic_only",
+            "metric": "midpoint_support_top_k_jensen_shannon_divergence_nats",
+            "top_k": min(max(1, int(distribution_top_k)), len(labels)),
+            "has_previous_probe": has_previous,
+            "top1_persistent": (
+                bool(previous_label == predicted_label) if has_previous else None
+            ),
+            "confidence_delta": (
+                round(abs(confidence - float(previous_confidence)), 8)
+                if previous_confidence is not None
+                else None
+            ),
+            "js_divergence": (
+                _topk_distribution_js_divergence(
+                    previous_probs,
+                    probs,
+                    distribution_top_k,
+                )
+                if previous_probs is not None
+                else None
+            ),
+            "selection_enabled": False,
+        }
+        row = {
+            "requested_cycles": int(requested_cycles),
+            "latency_ms": probe_latency_ms,
+            "cycles_used": compute.get("cycles_used"),
+            "predicted_label": predicted_label,
+            "confidence": confidence,
+            "entropy": entropy,
+            "confidence_target_met": bool(confidence >= confidence_target),
+            "entropy_target_met": bool(entropy <= entropy_target),
+            "mutual_stability_shadow": shadow,
+            "compute": compute,
+        }
+        records.append(row)
+        cached_outputs.append(model_out)
+
+        if confidence >= confidence_target:
+            accepted_index = len(records) - 1
+            reason = "confidence_target"
+            break
+        if entropy <= entropy_target:
+            accepted_index = len(records) - 1
+            reason = "entropy_target"
+            break
+        previous_probs = probs.detach()
+        previous_label = predicted_label
+        previous_confidence = confidence
+
+    if accepted_index is None:
+        accepted_index = max(
+            range(len(records)),
+            key=lambda index: (
+                float(records[index].get("confidence", 0.0)),
+                -float(records[index].get("entropy", 999.0)),
+                -float(records[index].get("latency_ms", 0.0)),
+            ),
+        )
+
+    selected_row = records[accepted_index]
+    selected_output = cached_outputs[accepted_index]
+    selected_compute = dict(selected_row["compute"])
+    evaluated_cycles = [int(row["requested_cycles"]) for row in records]
+    skipped_cycles = [
+        int(value) for value in resolved_cycles[len(evaluated_cycles) :]
+    ]
+    legacy_forward_evaluations = len(resolved_cycles) + 1
+    forward_evaluations = len(records)
+    plan = {
+        "schema_version": AUTO_COMPUTE_PLAN_SCHEMA_VERSION,
+        "enabled": True,
+        "strategy": AUTO_COMPUTE_STRATEGY,
+        "selected_reasoning_cycles": int(selected_row["requested_cycles"]),
+        "selected_index": int(accepted_index),
+        "accepted_probe_index": int(accepted_index),
+        "reason": reason,
+        "confidence_target": confidence_target,
+        "entropy_target": entropy_target,
+        "candidate_cycles": [int(value) for value in resolved_cycles],
+        "evaluated_cycles": evaluated_cycles,
+        "skipped_cycles": skipped_cycles,
+        "forward_evaluations": forward_evaluations,
+        "legacy_forward_evaluations": legacy_forward_evaluations,
+        "forward_reduction_percent": round(
+            100.0
+            * (legacy_forward_evaluations - forward_evaluations)
+            / max(1, legacy_forward_evaluations),
+            3,
+        ),
+        "reused_probe_output": True,
+        "selection_semantics": "legacy_v1_selection_policy",
+        "probe_control_scope": "full_runtime_controls_v2",
+        "mutual_stability_role": "shadow_diagnostic_only",
+        "rows": records,
+    }
+    selected_compute["auto_compute_plan"] = plan
+    selected_compute["inference_reused"] = True
+    return selected_output, selected_compute, plan
+
+
+def compact_auto_compute_plan_metrics(plan: Any) -> Dict[str, Any]:
+    """Return terminal-safe metrics for the probe that supplied the output."""
+
+    if not isinstance(plan, dict):
+        return {}
+    rows = plan.get("rows") if isinstance(plan.get("rows"), list) else []
+    try:
+        selected_index = int(plan.get("selected_index"))
+    except (TypeError, ValueError):
+        selected_index = -1
+    if not 0 <= selected_index < len(rows):
+        selected_index = len(rows) - 1
+    selected_row = rows[selected_index] if selected_index >= 0 else {}
+    shadow = (
+        selected_row.get("mutual_stability_shadow", {})
+        if isinstance(selected_row, dict)
+        else {}
+    )
+    metrics: Dict[str, Any] = {
+        "auto_selected": plan.get("selected_reasoning_cycles"),
+        "auto_reason": plan.get("reason"),
+        "auto_forwards": (
+            f"{plan.get('forward_evaluations')}/"
+            f"{plan.get('legacy_forward_evaluations')}"
+        ),
+        "auto_reused": bool(plan.get("reused_probe_output")),
+    }
+    if isinstance(shadow, dict) and shadow.get("js_divergence") is not None:
+        metrics["auto_shadow_js"] = shadow.get("js_divergence")
+    return metrics
 
 
 def _default_expansion_dim_for_model_size(model_size: str) -> int:
@@ -1028,8 +1289,7 @@ def main():
                         compact_compute = dict(last_compute_metrics)
                         plan = compact_compute.pop("auto_compute_plan", None)
                         if isinstance(plan, dict):
-                            compact_compute["auto_selected"] = plan.get("selected_reasoning_cycles")
-                            compact_compute["auto_reason"] = plan.get("reason")
+                            compact_compute.update(compact_auto_compute_plan_metrics(plan))
                         print(
                             "  last_compute="
                             + ", ".join(f"{k}={v}" for k, v in compact_compute.items())
@@ -1244,25 +1504,13 @@ def main():
             effective_reasoning_cycles = args.reasoning_cycles
             auto_compute_plan = None
             if args.auto_compute and model_supports_runtime_compute(model):
-                auto_rows = evaluate_runtime_compute_budgets(
+                model_out, last_compute_metrics, auto_compute_plan = progressive_auto_compute_forward(
                     model,
                     x,
                     available_labels,
                     cycles=runtime_auto_compute_cycles(args.reasoning_cycles),
-                    adaptive_compute=args.adaptive_compute,
-                    exit_tol=args.adaptive_exit_tol,
-                )
-                auto_compute_plan = select_auto_runtime_compute_budget(
-                    auto_rows,
                     confidence_target=args.auto_compute_confidence,
                     entropy_target=args.auto_compute_entropy,
-                )
-                effective_reasoning_cycles = auto_compute_plan.get("selected_reasoning_cycles")
-            with torch.no_grad():
-                model_out, last_compute_metrics = forward_with_runtime_compute(
-                    model,
-                    x,
-                    reasoning_cycles=effective_reasoning_cycles,
                     adaptive_compute=args.adaptive_compute,
                     exit_tol=args.adaptive_exit_tol,
                     exit_entropy_threshold=args.adaptive_exit_entropy,
@@ -1270,9 +1518,21 @@ def main():
                     prediction_stability_tol=args.prediction_stability_tol,
                     auto_reasoning_context=context,
                 )
-                logits = model_out[0, 0]  # (10,)
-            if auto_compute_plan is not None:
-                last_compute_metrics["auto_compute_plan"] = auto_compute_plan
+                effective_reasoning_cycles = auto_compute_plan.get("selected_reasoning_cycles")
+            else:
+                with torch.no_grad():
+                    model_out, last_compute_metrics = forward_with_runtime_compute(
+                        model,
+                        x,
+                        reasoning_cycles=effective_reasoning_cycles,
+                        adaptive_compute=args.adaptive_compute,
+                        exit_tol=args.adaptive_exit_tol,
+                        exit_entropy_threshold=args.adaptive_exit_entropy,
+                        prediction_stability_patience=args.prediction_stability_patience,
+                        prediction_stability_tol=args.prediction_stability_tol,
+                        auto_reasoning_context=context,
+                    )
+            logits = model_out[0, 0]  # (10,)
             t_infer += max(0.0, time.perf_counter() - _t)
 
             idx = torch.tensor(available_labels, dtype=torch.long, device=logits.device)
@@ -1424,9 +1684,9 @@ def main():
                     plan = last_compute_metrics.get("auto_compute_plan") if isinstance(last_compute_metrics, dict) else None
                     plan_suffix = ""
                     if isinstance(plan, dict):
-                        plan_suffix = (
-                            f" auto_selected={plan.get('selected_reasoning_cycles')} "
-                            f"reason={plan.get('reason')}"
+                        plan_metrics = compact_auto_compute_plan_metrics(plan)
+                        plan_suffix = " " + " ".join(
+                            f"{key}={value}" for key, value in plan_metrics.items()
                         )
                     print(
                         f"{TerminalColors.SYSTEM}Compute:{TerminalColors.RESET} "

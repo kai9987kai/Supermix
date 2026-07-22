@@ -59,12 +59,19 @@ def test_checked_runtime_manifest_is_current_and_complete():
         "route_shadow_authenticity_proof_available": False,
         "route_shadow_trusted_timestamp_available": False,
         "automatic_policy_promotion_available": False,
+        "progressive_auto_compute_accepted_probe_reuse": True,
+        "mutual_stability_shadow_can_select_output": False,
     }
 
 
 def test_manifest_exposes_route_contract_versions_without_importing_runtime():
     manifest = build_manifest(ROOT)
     contracts = manifest["contracts"]
+    assert contracts["source/chat_app.py"] == {
+        "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
+        "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
+        "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
+    }
     assert contracts["source/route_policy_ledger.py"]["OUTCOME_CONTRACT_SCHEMA_VERSION"] == (
         "route-outcome-contract-v1"
     )

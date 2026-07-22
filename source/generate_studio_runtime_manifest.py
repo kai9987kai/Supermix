@@ -42,6 +42,11 @@ RUNTIME_MODULES = (
 )
 
 CONTRACT_CONSTANTS = {
+    "source/chat_app.py": (
+        "AUTO_COMPUTE_PLAN_SCHEMA_VERSION",
+        "AUTO_COMPUTE_STRATEGY",
+        "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K",
+    ),
     "source/route_policy_ledger.py": (
         "LEDGER_SCHEMA_VERSION",
         "SUPPORT_SCHEMA_VERSION",
@@ -212,6 +217,8 @@ def build_manifest(repo_root: Path, *, include_git: bool = False) -> Dict[str, A
             "route_shadow_authenticity_proof_available": False,
             "route_shadow_trusted_timestamp_available": False,
             "automatic_policy_promotion_available": False,
+            "progressive_auto_compute_accepted_probe_reuse": True,
+            "mutual_stability_shadow_can_select_output": False,
         },
     }
     if include_git:

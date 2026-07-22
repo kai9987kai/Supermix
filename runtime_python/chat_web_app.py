@@ -220,7 +220,7 @@ select, input {
         <div class='row'><label>Adaptive Compute</label><select id='adaptiveCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-        <div class='row'><label>Auto Compute Budget</label><select id='autoCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
+        <div class='row'><label>Progressive Auto Compute</label><select id='autoCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
         <div class='row'><label>Exit Tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div>
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
@@ -301,7 +301,18 @@ function add(kind,text,timing,top,compute){
         const entropy=fmtNum(compute.gating_entropy); if(entropy) parts.push(`gate entropy ${entropy}`);
         const exitEntropy=fmtNum(compute.exit_entropy_threshold); if(exitEntropy) parts.push(`exit entropy ${exitEntropy}`);
         if(compute.auto_reasoning_policy&&Array.isArray(compute.auto_reasoning_policy.reasons)) parts.push(`policy ${compute.auto_reasoning_policy.reasons.slice(0,3).join(',')}`);
-        if(compute.auto_compute_plan) parts.push(`budget ${compute.auto_compute_plan.selected_reasoning_cycles} (${compute.auto_compute_plan.reason})`);
+        if(compute.auto_compute_plan){
+            const plan=compute.auto_compute_plan;
+            parts.push(`budget ${plan.selected_reasoning_cycles} (${plan.reason})`);
+            parts.push(`${plan.forward_evaluations}/${plan.legacy_forward_evaluations} forwards`);
+            if(plan.reused_probe_output) parts.push('probe reused');
+            const rows=Array.isArray(plan.rows)?plan.rows:[];
+            const selectedIndex=Number(plan.selected_index);
+            const selectedRow=Number.isInteger(selectedIndex)&&selectedIndex>=0&&selectedIndex<rows.length?rows[selectedIndex]:(rows.length?rows[rows.length-1]:null);
+            const shadow=selectedRow?selectedRow.mutual_stability_shadow:null;
+            const js=shadow?fmtNum(shadow.js_divergence,6):null;
+            if(js) parts.push(`shadow JSD ${js}`);
+        }
         if(parts.length){
             const c=document.createElement('div');
             c.className='tim';
@@ -833,34 +844,36 @@ class Engine:
             else chat_app._coerce_bool(auto_compute, default=False)
         )
         if auto_enabled and chat_app.model_supports_runtime_compute(model):
-            sweep_rows = self._run_compute_sweep_rows(
-                model=model,
-                x=x,
-                labels=labels,
+            model_out, compute_metrics, compute_plan = chat_app.progressive_auto_compute_forward(
+                model,
+                x,
+                labels,
                 cycles=self._auto_compute_cycles(effective_reasoning_cycles),
-                adaptive=chat_app._coerce_bool(resolved_adaptive_compute, default=False),
+                adaptive_compute=resolved_adaptive_compute,
                 exit_tol=chat_app._coerce_nonnegative_float(
                     resolved_exit_tol,
                     default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
                 ),
-            )
-            compute_plan = self._select_auto_compute_budget(sweep_rows)
-            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
-        with torch.no_grad():
-            model_out, compute_metrics = chat_app.forward_with_runtime_compute(
-                model,
-                x,
-                reasoning_cycles=effective_reasoning_cycles,
-                adaptive_compute=resolved_adaptive_compute,
-                exit_tol=resolved_exit_tol,
                 exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
                 prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
                 prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
                 auto_reasoning_context=context,
             )
-            logits = model_out[0, 0]
-        if compute_plan is not None:
-            compute_metrics["auto_compute_plan"] = compute_plan
+            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
+        else:
+            with torch.no_grad():
+                model_out, compute_metrics = chat_app.forward_with_runtime_compute(
+                    model,
+                    x,
+                    reasoning_cycles=effective_reasoning_cycles,
+                    adaptive_compute=resolved_adaptive_compute,
+                    exit_tol=resolved_exit_tol,
+                    exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                    prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
+                    prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                    auto_reasoning_context=context,
+                )
+        logits = model_out[0, 0]
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)

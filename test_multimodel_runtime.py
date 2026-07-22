@@ -78,6 +78,7 @@ def test_champion_backend_forwards_runtime_compute_controls_and_telemetry() -> N
             "adaptive_exit_entropy": 0.25,
             "prediction_stability_patience": 3,
             "prediction_stability_tol": 0.01,
+            "auto_compute": True,
         },
     )
 
@@ -87,6 +88,7 @@ def test_champion_backend_forwards_runtime_compute_controls_and_telemetry() -> N
     assert captured["adaptive_exit_entropy"] == 0.25
     assert captured["prediction_stability_patience"] == 3
     assert captured["prediction_stability_tol"] == 0.01
+    assert captured["auto_compute"] is True
     assert result.compute == {
         "applied": True,
         "cycles_used": 5.0,

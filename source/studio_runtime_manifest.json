@@ -2,6 +2,11 @@
   "active_runtime_tree": "source",
   "app_version": "2026.07.18",
   "contracts": {
+    "source/chat_app.py": {
+      "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
+      "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
+      "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5
+    },
     "source/route_policy_explorer.py": {
       "REHEARSAL_RECEIPT_SCHEMA_VERSION": "route-exploration-rehearsal-receipt-v1",
       "REHEARSAL_SUPPORT_PROPOSAL_SCHEMA_VERSION": "route-exploration-rehearsal-support-proposal-v1",
@@ -70,13 +75,13 @@
   "modules": [
     {
       "path": "source/chat_app.py",
-      "sha256": "c09e304356673cb49678ffbba4a53b00984659e911dcbfedef3c437aad07a3a7",
-      "size_bytes": 63948
+      "sha256": "d90ee95c0a1b94a0c70b26e082f8106060dbab9a259b1ba1aab479c6b7237644",
+      "size_bytes": 74732
     },
     {
       "path": "source/chat_web_app.py",
-      "sha256": "0750072c52b10616cbd5c7c20e0ed8e335f54804fd863a47fd5824431f2a76ca",
-      "size_bytes": 62635
+      "sha256": "6a55a2a103c4c7f0ec3a2d6549f073ef51dbac2bbe0ec6f9383876d97353e487",
+      "size_bytes": 63727
     },
     {
       "path": "source/model_variants.py",
@@ -125,13 +130,13 @@
     },
     {
       "path": "source/multimodel_runtime.py",
-      "sha256": "0a7eb12fc60494f1b96b763cb98619d75d2b340d903c9abb861683cdd3046f7d",
-      "size_bytes": 263936
+      "sha256": "f04a5710f936943bb777e10f1c988874bc377fd345c24011c0c766d068b6cfa1",
+      "size_bytes": 263991
     },
     {
       "path": "source/supermix_multimodel_web_app.py",
-      "sha256": "f73bd68afa75db328f688066471dd7b1c990047e32257c016cac31237e3ec0c3",
-      "size_bytes": 159501
+      "sha256": "c9b58ad9cd7f5dce184a294d9e34fbbba6969986a98a2b760be97ada9f2cba8f",
+      "size_bytes": 161182
     },
     {
       "path": "source/supermix_multimodel_desktop_app.py",
@@ -140,13 +145,13 @@
     },
     {
       "path": "runtime_python/chat_app.py",
-      "sha256": "c09e304356673cb49678ffbba4a53b00984659e911dcbfedef3c437aad07a3a7",
-      "size_bytes": 63948
+      "sha256": "d90ee95c0a1b94a0c70b26e082f8106060dbab9a259b1ba1aab479c6b7237644",
+      "size_bytes": 74732
     },
     {
       "path": "runtime_python/chat_web_app.py",
-      "sha256": "6ee741f32ffed9e6818eebc33558f777b445415370fd783d1080404e24309122",
-      "size_bytes": 54592
+      "sha256": "e16573872328ed4f07825a0156f461b951526e8b2f1b360d44a554fb6b8306b8",
+      "size_bytes": 55826
     },
     {
       "path": "runtime_python/chat_pipeline.py",
@@ -181,6 +186,8 @@
   ],
   "package_guards": {
     "automatic_policy_promotion_available": false,
+    "mutual_stability_shadow_can_select_output": false,
+    "progressive_auto_compute_accepted_probe_reuse": true,
     "route_ledger_requires_executed_assignment_namespace": true,
     "route_ledger_requires_issued_execution_assignment_record": true,
     "route_protocol_activation_available": false,

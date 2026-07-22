@@ -858,6 +858,14 @@ HTML_TEMPLATE = r"""<!doctype html>
           </select>
         </div>
         <div class="cfg-row">
+          <label>Progressive auto</label>
+          <select class="cfg-input" id="progressiveAutoCompute" style="width:116px" title="Evaluate compute budgets progressively and reuse the accepted probe output">
+            <option value="model" selected>Model / Route</option>
+            <option value="on">Enabled</option>
+            <option value="off">Disabled</option>
+          </select>
+        </div>
+        <div class="cfg-row">
           <label>Session budget</label>
           <input class="cfg-input" type="number" id="sessionBudget" value="0" min="0" max="100000" step="0.5" style="width:90px" title="0 disables session cost pacing">
         </div>
@@ -1415,6 +1423,23 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
     if (compute.prediction_confidence_delta !== undefined && compute.prediction_confidence_delta !== null) {
       bits.push(`<span class="trace-pill">Prediction drift ${escHtml(compute.prediction_confidence_delta)}</span>`);
+    }
+    const plan = compute.auto_compute_plan;
+    if (plan && typeof plan === 'object') {
+      bits.push(`<span class="trace-pill trace-score">Progressive ${escHtml(plan.selected_reasoning_cycles)} cycles</span>`);
+      bits.push(`<span class="trace-pill">${escHtml(plan.forward_evaluations)}/${escHtml(plan.legacy_forward_evaluations)} forwards</span>`);
+      if (plan.reused_probe_output) {
+        bits.push('<span class="trace-pill">Accepted probe reused</span>');
+      }
+      const rows = Array.isArray(plan.rows) ? plan.rows : [];
+      const selectedIndex = Number(plan.selected_index);
+      const selectedRow = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < rows.length
+        ? rows[selectedIndex]
+        : (rows.length ? rows[rows.length - 1] : null);
+      const shadow = selectedRow ? selectedRow.mutual_stability_shadow : null;
+      if (shadow && shadow.js_divergence !== undefined && shadow.js_divergence !== null) {
+        bits.push(`<span class="trace-pill">Shadow JSD ${escHtml(shadow.js_divergence)}</span>`);
+      }
     }
     if (compute.applied === false && compute.supported === false) {
       bits.push('<span class="trace-pill">Compute controls unsupported</span>');
@@ -2240,8 +2265,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     };
     const requestedCycles = el('reasoningCycles').value;
     const requestedAdaptive = el('adaptiveCompute').value;
+    const requestedProgressive = el('progressiveAutoCompute').value;
     if (requestedCycles !== 'model') settings.reasoning_cycles = requestedCycles;
     if (requestedAdaptive !== 'model') settings.adaptive_compute = requestedAdaptive === 'on';
+    if (requestedProgressive !== 'model') settings.auto_compute = requestedProgressive === 'on';
     return {
       session_id: sessionId,
       message: text,
