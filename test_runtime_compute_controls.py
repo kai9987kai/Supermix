@@ -771,6 +771,26 @@ def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
     }
 
 
+def test_root_chat_web_app_compatibility_forwards_compute_helpers():
+    root_entrypoint = Path(__file__).resolve().parent / "chat_web_app.py"
+    spec = importlib.util.spec_from_file_location(
+        "_root_chat_web_app_compatibility_test",
+        root_entrypoint,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._normalize_runtime_compute_defaults(
+        {"prediction_stability_margin": -1}
+    )["prediction_stability_margin"] == chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    assert module._runtime_compute_cli_overrides(Namespace(adaptive_compute=False)) == {
+        "adaptive_compute": False,
+    }
+
+
 def test_runtime_compute_smoke_suite():
     smoke_test_runtime_compute_helper_applies_only_supported_kwargs()
     smoke_test_auto_reasoning_budget_selects_cycles_from_context()
