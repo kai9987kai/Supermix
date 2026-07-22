@@ -80,7 +80,7 @@ def test_manifest_exposes_route_contract_versions_without_importing_runtime():
         "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
         "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
         "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
-        "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0001,
+        "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0005,
         "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH": 3,
     }
     assert contracts["source/route_policy_ledger.py"]["OUTCOME_CONTRACT_SCHEMA_VERSION"] == (

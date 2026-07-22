@@ -6,7 +6,7 @@
       "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
       "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
       "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
-      "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0001,
+      "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0005,
       "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH": 3
     },
     "source/route_policy_explorer.py": {
@@ -77,18 +77,18 @@
   "modules": [
     {
       "path": "source/chat_app.py",
-      "sha256": "133a13219353447890f0c77d8df128461bba985d05036d0c6be5f204d4854783",
-      "size_bytes": 83928
+      "sha256": "210ab471cc97832d6e00c891ff2179941895986b40010cd06f983547c21ac2ea",
+      "size_bytes": 84166
     },
     {
       "path": "source/chat_web_app.py",
-      "sha256": "338430377b1fd62561d2dbb35324cae4ddc1af68cc66157770e2fcfa7c4a92e2",
-      "size_bytes": 70369
+      "sha256": "d50b665b87a99ba6a48a1363a05a46bc6e60e34f8b3a007ec8153cf6968fb1a6",
+      "size_bytes": 70608
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "ac97e91f5374ddcd9c755c2761a95105316903018bca9d46499c1dd18beab214",
-      "size_bytes": 375378
+      "sha256": "849cffd386ca41c081861632f9891516b40f29e53037e5467fd29015b0ddb6a3",
+      "size_bytes": 377061
     },
     {
       "path": "source/route_policy_ledger.py",
@@ -147,13 +147,13 @@
     },
     {
       "path": "runtime_python/chat_app.py",
-      "sha256": "133a13219353447890f0c77d8df128461bba985d05036d0c6be5f204d4854783",
-      "size_bytes": 83928
+      "sha256": "210ab471cc97832d6e00c891ff2179941895986b40010cd06f983547c21ac2ea",
+      "size_bytes": 84166
     },
     {
       "path": "runtime_python/chat_web_app.py",
-      "sha256": "58a4d676162d807d18d58380f584d44e33fe77f9d8cc405121d1a4080477f3d9",
-      "size_bytes": 62364
+      "sha256": "4217b4027e95e0d75a3d57bc6556331eeca14531f81ad37569c9d36536f11eb7",
+      "size_bytes": 62611
     },
     {
       "path": "runtime_python/chat_pipeline.py",
@@ -177,8 +177,8 @@
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "ac97e91f5374ddcd9c755c2761a95105316903018bca9d46499c1dd18beab214",
-      "size_bytes": 375378
+      "sha256": "849cffd386ca41c081861632f9891516b40f29e53037e5467fd29015b0ddb6a3",
+      "size_bytes": 377061
     },
     {
       "path": "runtime_python/run.py",

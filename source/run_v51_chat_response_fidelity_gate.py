@@ -43,8 +43,10 @@ DEFAULT_OUTPUT = DEFAULT_ARTIFACT_DIR / "chat_response_fidelity_gate.json"
 SCHEMA = "v51-chat-response-fidelity-gate-v1"
 FIXED_CYCLES = 3
 ADAPTIVE_MAX_CYCLES = 8
+REQUIRED_RELEASE_DECISION_REFERENCE_CYCLES = 3
 PREDICTION_STABILITY_MARGIN = chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
-REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN = 1e-4
+# Immutable checkpoint/workload-calibrated release literal; not a universal margin.
+REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN = 5e-4
 AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH = int(
     chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH
 )
@@ -69,11 +71,25 @@ CANONICAL_RELEASE_METADATA_SHA256 = (
     "7134c82c96204a9aa8b255642b9b4b1fb84e7e44dbab1c69327fb66838c47f50"
 )
 TOP_CANDIDATE_COUNT = 5
+KNOWN_ADAPTIVE_EXIT_REASONS = frozenset(
+    {
+        "prediction_stable",
+        "decision_reference_budget",
+        "latent_converged",
+        "low_entropy",
+        "halt_mass",
+        "max_cycles",
+    }
+)
 
 if PREDICTION_STABILITY_MARGIN != REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN:
     raise RuntimeError(
         "The authoritative runtime prediction-stability margin is not the "
-        "v51 release value 0.0001"
+        "v51 checkpoint/workload-calibrated release value 0.0005"
+    )
+if FIXED_CYCLES != REQUIRED_RELEASE_DECISION_REFERENCE_CYCLES:
+    raise RuntimeError(
+        "The fixed release budget does not match the trained decision reference"
     )
 if (
     AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH
@@ -454,6 +470,7 @@ def _compute_snapshot(value: Any, *, label: str) -> Dict[str, Any]:
         "prediction_stability_margin",
         "prediction_stability_rank_depth",
         "prediction_rank_depth",
+        "decision_reference_cycles",
         "prediction_streak",
         "prediction_confidence_delta",
         "prediction_margin",
@@ -1164,17 +1181,16 @@ def _mode_contract_violations(
             == float(AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH),
             "observed_prediction_rank_depth_mismatch",
         )
+        decision_reference_cycles = snapshot.get("decision_reference_cycles")
+        require(
+            decision_reference_cycles
+            == float(REQUIRED_RELEASE_DECISION_REFERENCE_CYCLES),
+            "decision_reference_cycles_mismatch",
+        )
         decision_margin = snapshot.get("prediction_decision_margin")
         require(decision_margin is not None, "prediction_decision_margin_missing")
         require(
-            exit_reason
-            in {
-                "prediction_stable",
-                "latent_converged",
-                "low_entropy",
-                "halt_mass",
-                "max_cycles",
-            },
+            exit_reason in KNOWN_ADAPTIVE_EXIT_REASONS,
             "adaptive_exit_reason_unknown",
         )
         if exit_reason == "prediction_stable":
@@ -1182,6 +1198,18 @@ def _mode_contract_violations(
                 decision_margin is not None
                 and float(decision_margin) >= float(PREDICTION_STABILITY_MARGIN),
                 "prediction_stable_decision_margin_below_floor",
+            )
+            require(
+                decision_reference_cycles is not None
+                and cycles_used is not None
+                and float(cycles_used) < float(decision_reference_cycles),
+                "prediction_stable_not_before_reference_budget",
+            )
+        elif exit_reason == "decision_reference_budget":
+            require(
+                decision_reference_cycles is not None
+                and cycles_used == decision_reference_cycles,
+                "decision_reference_budget_cycle_mismatch",
             )
     else:
         require(
@@ -1649,6 +1677,9 @@ def run_gate(
             "violations": contract_violations,
             "required_rank_depth": AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH,
             "required_margin": PREDICTION_STABILITY_MARGIN,
+            "required_decision_reference_cycles": (
+                REQUIRED_RELEASE_DECISION_REFERENCE_CYCLES
+            ),
             "required_adaptive_runtime_defaults": dict(
                 AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS
             ),

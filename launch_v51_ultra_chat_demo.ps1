@@ -60,7 +60,7 @@ try {
         "--adaptive_exit_entropy", "0.2",
         "--prediction_stability_patience", "2",
         "--prediction_stability_tol", "0.005",
-        "--prediction_stability_margin", "0.0001",
+        "--prediction_stability_margin", "0.0005",
         "--prediction_stability_rank_depth", "3"
     ) | ForEach-Object { Quote-ProcessArg $_ }
     $process = Start-Process -FilePath "python" -ArgumentList $args -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr

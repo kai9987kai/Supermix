@@ -5,7 +5,10 @@ import os
 
 sys.path.append(os.path.join(os.getcwd(), 'source'))
 
-from model_variants import ChampionNetCognitiveLeapUltraExpert
+from model_variants import (
+    ChampionNetCognitiveLeapUltraExpert,
+    CognitiveLeapUltraExpertHead,
+)
 from benchmark_cognitive_leap_ultra_v51 import (
     DEFAULT_PREDICTION_STABILITY_MARGIN as BENCHMARK_STABILITY_MARGIN,
     DEFAULT_PREDICTION_STABILITY_RANK_DEPTH as BENCHMARK_STABILITY_RANK_DEPTH,
@@ -116,7 +119,13 @@ def test_cognitive_leap_ultra():
 
     # Evaluate with very high entropy threshold (so it exits immediately)
     with torch.no_grad():
-        model(dummy_input, reasoning_cycles=8, adaptive_compute=True, exit_entropy_threshold=10.0)
+        model(
+            dummy_input,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_entropy_threshold=10.0,
+            prediction_stability_patience=0,
+        )
     cycles_used_early = head.last_cycles_used.item()
     print(f"Cycles used with high entropy exit: {cycles_used_early} / 8 requested")
     assert cycles_used_early < 8, "High entropy exit threshold should stop cycling early"
@@ -167,6 +176,7 @@ def test_prediction_stability_verifier_controls_early_exit():
     assert stable_output.shape == (1, 1, 10)
     assert head.last_cycles_used.item() == 2
     assert head.last_exit_reason == "prediction_stable"
+    assert head.last_decision_reference_cycles.item() == 3
     assert head.last_prediction_streak.item() >= 2
     assert head.last_prediction_confidence_delta.item() >= 0.0
     assert 0.0 <= head.last_prediction_margin.item() <= 1.0
@@ -205,6 +215,173 @@ def test_prediction_stability_verifier_controls_early_exit():
     assert full_output.shape == stable_output.shape
     assert head.last_cycles_used.item() == 8
     assert head.last_exit_reason in {"max_cycles", "halt_mass"}
+
+
+class _ScriptedCycleDecoder(nn.Module):
+    def __init__(self, cycle_logits):
+        super().__init__()
+        self.register_buffer("cycle_logits", torch.tensor(cycle_logits, dtype=torch.float32))
+        self.cursor = 0
+
+    def reset(self):
+        self.cursor = 0
+
+    def forward(self, x):
+        logits = self.cycle_logits[min(self.cursor, len(self.cycle_logits) - 1)]
+        self.cursor += 1
+        return logits.unsqueeze(0).expand(x.shape[0], -1)
+
+
+def test_prediction_verifier_tracks_ordered_rank_tuple_and_blocks_legacy_bypass():
+    head = CognitiveLeapUltraExpertHead(
+        in_dim=4,
+        out_dim=4,
+        latent_dim=4,
+        core_dim=8,
+        n_cycles=3,
+        inner_steps=1,
+        max_cycles=8,
+        dropout=0.0,
+        n_cores=1,
+    ).eval()
+    decoder = _ScriptedCycleDecoder(
+        [
+            [4.0, 3.0, 2.0, 0.0],  # ordered top-3: (0, 1, 2)
+            [4.0, 2.0, 3.0, 0.0],  # ordered top-3: (0, 2, 1)
+            [4.0, 2.0, 3.0, 0.0],
+        ]
+    )
+    head.decode_head = decoder
+    with torch.no_grad():
+        head.weight.zero_()
+        head.bias.zero_()
+        head.shared_scale.zero_()
+        head.alpha.fill_(1.0)
+        head.halt_head.weight.zero_()
+        head.halt_head.bias.fill_(-100.0)
+
+        head(
+            torch.zeros(1, 4),
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            # Both legacy criteria would stop by cycle two if allowed to
+            # bypass the active post-head decision verifier.
+            exit_tol=10.0,
+            exit_entropy_threshold=10.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            prediction_stability_margin=0.0,
+            prediction_stability_rank_depth=3,
+            prediction_output_transform=nn.Identity(),
+        )
+
+    # The unchanged top-1 is insufficient: the cycle-two rank swap resets the
+    # streak, and the request falls back to the trained reference budget.
+    assert head.last_cycles_used.item() == 3
+    assert head.last_exit_reason == "decision_reference_budget"
+    assert head.last_prediction_streak.item() == 2
+    assert head.last_decision_reference_cycles.item() == 3
+
+    with torch.no_grad():
+        decoder.cycle_logits[1:].copy_(
+            decoder.cycle_logits[0].expand_as(decoder.cycle_logits[1:])
+        )
+    decoder.reset()
+    with torch.no_grad():
+        head(
+            torch.zeros(1, 4),
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=10.0,
+            exit_entropy_threshold=10.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            prediction_stability_margin=0.0,
+            prediction_stability_rank_depth=3,
+            prediction_output_transform=nn.Identity(),
+        )
+
+    # A genuinely persistent, ordered rank-3 tuple still earns the intended
+    # confident cycle-two exit.
+    assert head.last_cycles_used.item() == 2
+    assert head.last_exit_reason == "prediction_stable"
+
+    decoder.reset()
+    with torch.no_grad():
+        head(
+            torch.zeros(1, 4),
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=10.0,
+            exit_entropy_threshold=10.0,
+            prediction_stability_patience=0,
+            prediction_stability_rank_depth=3,
+            prediction_output_transform=nn.Identity(),
+        )
+
+    # Disabling the verifier preserves the historical legacy exit behavior.
+    assert head.last_cycles_used.item() == 1
+    assert head.last_exit_reason == "low_entropy"
+
+    decoder.reset()
+    with torch.no_grad():
+        head(
+            torch.zeros(1, 4),
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            exit_tol=10.0,
+            exit_entropy_threshold=10.0,
+            prediction_stability_patience=2,
+            prediction_class_indices=[0],
+            prediction_stability_rank_depth=3,
+            prediction_output_transform=nn.Identity(),
+        )
+
+    # An invalid one-class decision scope fails closed for certification while
+    # leaving the legacy fallback available.
+    assert head.last_cycles_used.item() == 1
+    assert head.last_exit_reason == "low_entropy"
+    assert not bool(head.last_prediction_class_selection_valid.item())
+
+
+def test_uncertified_prediction_falls_back_to_exact_reference_budget_output():
+    torch.manual_seed(5110)
+    model = ChampionNetCognitiveLeapUltraExpert(
+        latent_dim=32,
+        core_dim=64,
+        n_cycles=3,
+        inner_steps=1,
+        n_cores=2,
+        dropout=0.0,
+    ).eval()
+    sample = torch.randn(2, 1, 128)
+    head = model.layers[10]
+
+    with torch.no_grad():
+        reference_output = model(
+            sample,
+            reasoning_cycles=head.n_cycles,
+            adaptive_compute=False,
+        )
+        fallback_output = model(
+            sample,
+            reasoning_cycles=8,
+            adaptive_compute=True,
+            # These permissive legacy signals must not bypass the verifier.
+            exit_tol=10.0,
+            exit_entropy_threshold=10.0,
+            prediction_stability_patience=2,
+            prediction_stability_tol=1.0,
+            # A probability gap cannot exceed one, so this run cannot certify
+            # an early decision.
+            prediction_stability_margin=1.0,
+            prediction_stability_rank_depth=3,
+        )
+
+    assert torch.equal(fallback_output, reference_output)
+    assert head.last_cycles_used.item() == head.n_cycles == 3
+    assert head.last_exit_reason == "decision_reference_budget"
+    assert head.last_decision_reference_cycles.item() == head.n_cycles
 
 
 def test_prediction_stability_margin_guards_ambiguous_early_exit():
@@ -420,8 +597,8 @@ def test_prediction_stability_rank_depth_guards_top_k_candidate_boundaries():
     assert top1_reason == "prediction_stable"
     assert top1_cycles == 2
     assert top1_margin >= 1e-3
-    assert head.last_exit_reason == "max_cycles"
-    assert head.last_cycles_used.item() == 8
+    assert head.last_exit_reason == "decision_reference_budget"
+    assert head.last_cycles_used.item() == head.n_cycles == 3
     assert head.last_prediction_margin.item() >= 1e-3
     assert head.last_prediction_decision_margin.item() < 1e-3
     assert head.last_prediction_rank_depth.item() == 3
@@ -568,7 +745,7 @@ def test_prediction_margin_preserves_empty_batch_and_benchmark_contract():
     assert torch.isfinite(model.layers[10].last_prediction_streak)
     assert torch.isfinite(model.layers[10].last_prediction_confidence_delta)
     assert torch.isfinite(model.layers[10].last_prediction_topk_js_divergence)
-    assert BENCHMARK_STABILITY_MARGIN == 0.0001
+    assert BENCHMARK_STABILITY_MARGIN == 0.0005
     assert BENCHMARK_STABILITY_RANK_DEPTH == 3
 
     sample = torch.randn(2, 1, 128)

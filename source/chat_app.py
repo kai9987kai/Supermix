@@ -259,7 +259,8 @@ MAX_RUNTIME_REASONING_CYCLES = 64
 DEFAULT_ADAPTIVE_EXIT_ENTROPY = 0.2
 DEFAULT_PREDICTION_STABILITY_PATIENCE = 2
 DEFAULT_PREDICTION_STABILITY_TOL = 5e-3
-DEFAULT_PREDICTION_STABILITY_MARGIN = 1e-4
+# Calibrated for the released v51 checkpoint and workload; not a universal margin.
+DEFAULT_PREDICTION_STABILITY_MARGIN = 5e-4
 DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = 3
 AUTO_REASONING_CYCLE_BUCKETS = (1, 3, 8, 16)
 
@@ -539,6 +540,7 @@ def collect_runtime_compute_metrics(
         "prediction_confidence_delta": None,
         "prediction_margin": None,
         "prediction_decision_margin": None,
+        "decision_reference_cycles": None,
         "prediction_rank_depth": None,
         "prediction_class_count": None,
         "prediction_class_selection_valid": None,
@@ -553,6 +555,7 @@ def collect_runtime_compute_metrics(
         "last_prediction_confidence_delta": "prediction_confidence_delta",
         "last_prediction_margin": "prediction_margin",
         "last_prediction_decision_margin": "prediction_decision_margin",
+        "last_decision_reference_cycles": "decision_reference_cycles",
         "last_prediction_rank_depth": "prediction_rank_depth",
         "last_prediction_class_count": "prediction_class_count",
         "last_prediction_class_selection_valid": "prediction_class_selection_valid",
@@ -691,6 +694,7 @@ def forward_with_runtime_compute(
             "prediction_confidence_delta",
             "prediction_margin",
             "prediction_decision_margin",
+            "decision_reference_cycles",
             "prediction_rank_depth",
             "prediction_class_count",
             "prediction_class_selection_valid",

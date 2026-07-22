@@ -229,7 +229,7 @@ select, input {
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
         <div class='row'><label>Stability Patience</label><input id='stabilityPatience' type='number' min='0' max='64' step='1' value='2'></div>
-        <div class='row'><label>Stability Margin</label><input id='stabilityMargin' type='number' min='0' step='0.0001' value='0.0001'></div>
+        <div class='row'><label>Stability Margin</label><input id='stabilityMargin' type='number' min='0' step='0.0001' value='0.0005' title='v51 checkpoint/workload-calibrated default; explicit overrides are supported'></div>
     </div>
     <div class='row'><label>Decision Rank Depth</label><input id='stabilityRankDepth' type='number' min='0' max='10' step='1' value='3'><small style='color:var(--text-dim)'>Verify ordered top ranks; 0 intentionally disables rank verification.</small></div>
     
@@ -298,6 +298,7 @@ function add(kind,text,timing,top,compute){
         if(compute.reasoning_budget_mode==='auto') parts.push('mode auto');
         if(compute.requested_reasoning_cycles!==undefined&&compute.requested_reasoning_cycles!==null) parts.push(`requested ${compute.requested_reasoning_cycles}`);
         if(compute.cycles_used!==undefined&&compute.cycles_used!==null) parts.push(`used ${compute.cycles_used}`);
+        if(compute.decision_reference_cycles!==undefined&&compute.decision_reference_cycles!==null) parts.push(`reference ${compute.decision_reference_cycles}`);
         if(compute.exit_reason) parts.push(`exit ${compute.exit_reason}`);
         const streak=fmtNum(compute.prediction_streak); if(streak) parts.push(`stable ${streak}`);
         const drift=fmtNum(compute.prediction_confidence_delta); if(drift) parts.push(`drift ${drift}`);

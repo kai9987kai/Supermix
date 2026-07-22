@@ -40,9 +40,11 @@ DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = (
     chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH
 )
 DEFAULT_DECISION_TOP_K = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH
+MAX_TOP_K_DISAGREEMENT_EXAMPLES = 32
 KNOWN_ADAPTIVE_EXIT_REASONS = frozenset(
     {
         "prediction_stable",
+        "decision_reference_budget",
         "latent_converged",
         "low_entropy",
         "halt_mass",
@@ -329,6 +331,7 @@ def benchmark_serving_requests(
     adaptive_max_js_drift: List[float] = []
     adaptive_prediction_margins: List[float] = []
     adaptive_decision_margins: List[float] = []
+    adaptive_decision_reference_cycles: List[int] = []
     prediction_stable_decision_margins: List[float] = []
     adaptive_rank_depths: List[int] = []
     adaptive_prediction_class_counts: List[int] = []
@@ -336,6 +339,7 @@ def benchmark_serving_requests(
     absolute_logit_deltas: List[float] = []
     distribution_js_divergences: List[float] = []
     distribution_total_variations: List[float] = []
+    pending_top_k_disagreement_examples: List[Dict[str, Any]] = []
     top_k_order_disagreement_count = 0
     top_k_set_disagreement_count = 0
     resolved_scope: List[int] | None = None
@@ -426,7 +430,7 @@ def benchmark_serving_requests(
         )
         return output
 
-    def run_adaptive(sample: torch.Tensor) -> torch.Tensor:
+    def run_adaptive(sample: torch.Tensor) -> tuple[torch.Tensor, Dict[str, Any]]:
         _synchronize_for_timing(sample.device)
         started = time.perf_counter()
         kwargs = adaptive_kwargs()
@@ -439,29 +443,32 @@ def benchmark_serving_requests(
                 label="adaptive request latency",
             )
         )
-        adaptive_cycles.append(
-            _nonnegative_finite_float(
-                head.last_cycles_used.item(), label="adaptive cycles used"
-            )
+        cycles_used = _nonnegative_finite_float(
+            head.last_cycles_used.item(), label="adaptive cycles used"
         )
-        adaptive_latest_js_drift.append(
-            _nonnegative_finite_float(
-                head.last_prediction_topk_js_divergence.item(),
-                label="latest prediction distribution drift",
-            )
+        adaptive_cycles.append(cycles_used)
+        observed_decision_reference_cycles = _positive_integral_scalar(
+            getattr(head, "last_decision_reference_cycles", None),
+            label="observed decision reference cycles",
         )
-        adaptive_max_js_drift.append(
-            _nonnegative_finite_float(
-                head.last_prediction_topk_js_divergence_max.item(),
-                label="maximum prediction distribution drift",
-            )
+        adaptive_decision_reference_cycles.append(
+            observed_decision_reference_cycles
         )
-        adaptive_prediction_margins.append(
-            _nonnegative_finite_float(
-                head.last_prediction_margin.item(),
-                label="observed prediction stability margin",
-            )
+        latest_js_drift = _nonnegative_finite_float(
+            head.last_prediction_topk_js_divergence.item(),
+            label="latest prediction distribution drift",
         )
+        adaptive_latest_js_drift.append(latest_js_drift)
+        max_js_drift = _nonnegative_finite_float(
+            head.last_prediction_topk_js_divergence_max.item(),
+            label="maximum prediction distribution drift",
+        )
+        adaptive_max_js_drift.append(max_js_drift)
+        observed_prediction_margin = _nonnegative_finite_float(
+            head.last_prediction_margin.item(),
+            label="observed prediction stability margin",
+        )
+        adaptive_prediction_margins.append(observed_prediction_margin)
         observed_decision_margin = _nonnegative_finite_float(
             head.last_prediction_decision_margin.item(),
             label="observed prediction decision margin",
@@ -471,8 +478,17 @@ def benchmark_serving_requests(
         if observed_rank_depth <= 0:
             raise ValueError("observed prediction rank depth must be positive")
         adaptive_rank_depths.append(observed_rank_depth)
-        adaptive_prediction_class_counts.append(
-            read_adaptive_scope_telemetry(label="adaptive request")
+        observed_class_count = read_adaptive_scope_telemetry(
+            label="adaptive request"
+        )
+        adaptive_prediction_class_counts.append(observed_class_count)
+        observed_prediction_streak = _nonnegative_finite_float(
+            head.last_prediction_streak.item(),
+            label="observed prediction stability streak",
+        )
+        observed_confidence_delta = _nonnegative_finite_float(
+            head.last_prediction_confidence_delta.item(),
+            label="observed prediction confidence delta",
         )
         raw_exit_reason = getattr(head, "last_exit_reason", None)
         if not isinstance(raw_exit_reason, str) or not raw_exit_reason.strip():
@@ -483,7 +499,23 @@ def benchmark_serving_requests(
         exit_reasons[exit_reason] += 1
         if exit_reason == "prediction_stable":
             prediction_stable_decision_margins.append(observed_decision_margin)
-        return output
+        request_telemetry = {
+            "adaptive_exit_reason": exit_reason,
+            "adaptive_cycles_used": int(cycles_used),
+            "prediction_margin": round(observed_prediction_margin, 8),
+            "decision_margin": round(observed_decision_margin, 8),
+            "verifier": {
+                "prediction_streak": round(observed_prediction_streak, 8),
+                "confidence_delta": round(observed_confidence_delta, 8),
+                "decision_reference_cycles": observed_decision_reference_cycles,
+                "observed_rank_depth": observed_rank_depth,
+                "observed_class_count": observed_class_count,
+                "class_selection_valid": True,
+                "latest_top_k_js_divergence": round(latest_js_drift, 8),
+                "maximum_top_k_js_divergence": round(max_js_drift, 8),
+            },
+        }
+        return output, request_telemetry
 
     for index in range(len(y)):
         sample = x[index : index + 1]
@@ -491,10 +523,10 @@ def benchmark_serving_requests(
         if fixed_first:
             measurement_orders["fixed_then_adaptive"] += 1
             fixed_output = run_fixed(sample)
-            adaptive_output = run_adaptive(sample)
+            adaptive_output, adaptive_request_telemetry = run_adaptive(sample)
         else:
             measurement_orders["adaptive_then_fixed"] += 1
-            adaptive_output = run_adaptive(sample)
+            adaptive_output, adaptive_request_telemetry = run_adaptive(sample)
             fixed_output = run_fixed(sample)
 
         fixed_logits = _request_logits(fixed_output, label="fixed")
@@ -529,8 +561,22 @@ def benchmark_serving_requests(
         ]
         fixed_predictions.append(fixed_order[0])
         adaptive_predictions.append(adaptive_order[0])
-        top_k_order_disagreement_count += int(fixed_order != adaptive_order)
+        top_k_order_disagreed = fixed_order != adaptive_order
+        top_k_order_disagreement_count += int(top_k_order_disagreed)
         top_k_set_disagreement_count += int(set(fixed_order) != set(adaptive_order))
+        if (
+            top_k_order_disagreed
+            and len(pending_top_k_disagreement_examples)
+            < MAX_TOP_K_DISAGREEMENT_EXAMPLES
+        ):
+            pending_top_k_disagreement_examples.append(
+                {
+                    "sample_index": int(index),
+                    "fixed_ordered_top_k": fixed_order,
+                    "adaptive_ordered_top_k": adaptive_order,
+                    **adaptive_request_telemetry,
+                }
+            )
         absolute_logit_deltas.extend(
             float(value)
             for value in torch.abs(fixed_scoped - adaptive_scoped).tolist()
@@ -549,6 +595,20 @@ def benchmark_serving_requests(
         raise ValueError("y must contain integer class indices")
     if bool(((truth < 0) | (truth >= output_class_count)).any().item()):
         raise ValueError("y contains an out-of-range class index")
+    top_k_disagreement_examples = [
+        {
+            "sample_index": example["sample_index"],
+            "target": int(truth[example["sample_index"]].item()),
+            "fixed_ordered_top_k": example["fixed_ordered_top_k"],
+            "adaptive_ordered_top_k": example["adaptive_ordered_top_k"],
+            "adaptive_exit_reason": example["adaptive_exit_reason"],
+            "adaptive_cycles_used": example["adaptive_cycles_used"],
+            "prediction_margin": example["prediction_margin"],
+            "decision_margin": example["decision_margin"],
+            "verifier": example["verifier"],
+        }
+        for example in pending_top_k_disagreement_examples
+    ]
     fixed_tensor = torch.tensor(fixed_predictions)
     adaptive_tensor = torch.tensor(adaptive_predictions)
     fixed_correct = int((fixed_tensor == truth).sum().item())
@@ -562,6 +622,16 @@ def benchmark_serving_requests(
     mean_cycles = float(
         _finite_values(adaptive_cycles, label="adaptive cycles").mean().item()
     )
+    observed_decision_reference_cycles = sorted(
+        set(adaptive_decision_reference_cycles)
+    )
+    if (
+        len(adaptive_decision_reference_cycles) != request_count
+        or len(observed_decision_reference_cycles) != 1
+    ):
+        raise ValueError(
+            "adaptive verifier must report one consistent decision reference budget"
+        )
     expected_effective_rank_depth = min(
         normalized_rank_depth, max(1, len(resolved_scope) - 1)
     )
@@ -623,6 +693,11 @@ def benchmark_serving_requests(
         "prediction_stability": {
             "adaptive_compute": True,
             "max_cycles": normalized_max_cycles,
+            "decision_reference_cycles": {
+                "metric": "trained_fixed_compute_reference_budget",
+                "observed_values": observed_decision_reference_cycles,
+                "all_requests_reported": True,
+            },
             "exit_tolerance": normalized_exit_tol,
             "exit_entropy_threshold": normalized_exit_entropy_threshold,
             "patience": normalized_patience,
@@ -682,6 +757,16 @@ def benchmark_serving_requests(
                 "top_k": normalized_decision_top_k,
                 "top_k_order_disagreement_count": top_k_order_disagreement_count,
                 "top_k_set_disagreement_count": top_k_set_disagreement_count,
+                "top_k_disagreement_evidence": {
+                    "limit": MAX_TOP_K_DISAGREEMENT_EXAMPLES,
+                    "total_count": top_k_order_disagreement_count,
+                    "recorded_count": len(top_k_disagreement_examples),
+                    "truncated": (
+                        top_k_order_disagreement_count
+                        > len(top_k_disagreement_examples)
+                    ),
+                    "examples": top_k_disagreement_examples,
+                },
                 "absolute_logit_delta": {
                     "mean": round(float(logit_delta_tensor.mean().item()), 12),
                     "max": round(float(logit_delta_tensor.max().item()), 12),
@@ -809,8 +894,10 @@ def main() -> None:
     }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(json.dumps(payload, indent=2))
+    output.write_text(
+        json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    print(json.dumps(payload, indent=2, allow_nan=False))
     print(f"Results written to {output}")
 
 

@@ -135,7 +135,7 @@ def build_demo_metadata(weights: Path, metrics_path: Path) -> Dict[str, Any]:
             "adaptive_exit_entropy": 0.2,
             "prediction_stability_patience": 2,
             "prediction_stability_tol": 0.005,
-            "prediction_stability_margin": 0.0001,
+            "prediction_stability_margin": 0.0005,
             "prediction_stability_rank_depth": 3,
         },
         "buckets": buckets,
@@ -162,7 +162,7 @@ def check_load(weights: Path, meta: Path) -> Dict[str, Any]:
             "adaptive_exit_entropy": 0.2,
             "prediction_stability_patience": 2,
             "prediction_stability_tol": 0.005,
-            "prediction_stability_margin": 0.0001,
+            "prediction_stability_margin": 0.0005,
             "prediction_stability_rank_depth": 3,
         },
     )
@@ -176,7 +176,7 @@ def check_load(weights: Path, meta: Path) -> Dict[str, Any]:
         adaptive_exit_entropy=0.2,
         prediction_stability_patience=2,
         prediction_stability_tol=0.005,
-        prediction_stability_margin=0.0001,
+        prediction_stability_margin=0.0005,
         prediction_stability_rank_depth=3,
     )
     return {

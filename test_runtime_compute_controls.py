@@ -27,6 +27,7 @@ class _RuntimeComputeModel(torch.nn.Module):
         self.register_buffer("last_prediction_confidence_delta", torch.tensor(0.0))
         self.register_buffer("last_prediction_margin", torch.tensor(0.0))
         self.register_buffer("last_prediction_decision_margin", torch.tensor(0.0))
+        self.register_buffer("last_decision_reference_cycles", torch.tensor(3.0))
         self.register_buffer("last_prediction_rank_depth", torch.tensor(1.0))
         self.register_buffer("last_prediction_class_count", torch.tensor(10.0))
         self.register_buffer("last_prediction_class_selection_valid", torch.tensor(1.0))
@@ -211,6 +212,7 @@ def smoke_test_runtime_compute_helper_applies_only_supported_kwargs():
     assert diag["prediction_verifier_active"] is True
     assert diag["prediction_margin"] == 0.25
     assert diag["prediction_decision_margin"] == 0.125
+    assert diag["decision_reference_cycles"] == 3.0
     assert diag["prediction_rank_depth"] == 3.0
     assert recursive.last_rank_depth_arg == 3
     assert diag["exit_reason"] == "prediction_stable"
@@ -252,6 +254,7 @@ def test_prediction_rank_depth_coercion_and_inactive_telemetry_suppression():
             "prediction_confidence_delta",
             "prediction_margin",
             "prediction_decision_margin",
+            "decision_reference_cycles",
             "prediction_rank_depth",
             "prediction_class_count",
             "prediction_class_selection_valid",
@@ -899,11 +902,13 @@ def test_source_and_packaged_web_uis_expose_prediction_stability_margin():
         assert "prediction_stability_rank_depth" in text
         assert "prediction_margin" in text
         assert "prediction_decision_margin" in text
+        assert "decision_reference_cycles" in text
         assert "prediction_verifier_active" in text
         assert "prediction_class_count" in text
         assert "fmtNum(compute.prediction_stability_margin,6)" in text
         assert "margin floor" in text
-        assert "step='0.0001' value='0.0001'" in text
+        assert "step='0.0001' value='0.0005'" in text
+        assert "checkpoint/workload-calibrated default" in text
 
 
 def test_source_and_packaged_web_uis_omit_blank_optional_verifier_inputs_but_preserve_zero():
@@ -946,7 +951,7 @@ class Model(torch.nn.Module):
         exit_entropy_threshold=0.2,
         prediction_stability_patience=2,
         prediction_stability_tol=5e-3,
-        prediction_stability_margin=1e-4,
+        prediction_stability_margin=5e-4,
         prediction_stability_rank_depth=3,
     ):
         logits = torch.zeros(x.shape[0], x.shape[1], 10, device=x.device)

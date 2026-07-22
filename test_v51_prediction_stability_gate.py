@@ -19,8 +19,11 @@ class _StubHead:
         self.last_cycles_used = torch.tensor(2.0)
         self.last_prediction_topk_js_divergence = torch.tensor(0.001)
         self.last_prediction_topk_js_divergence_max = torch.tensor(0.002)
+        self.last_prediction_streak = torch.tensor(2.0)
+        self.last_prediction_confidence_delta = torch.tensor(0.0005)
         self.last_prediction_margin = torch.tensor(0.25)
         self.last_prediction_decision_margin = torch.tensor(0.125)
+        self.last_decision_reference_cycles = torch.tensor(3.0)
         self.last_prediction_rank_depth = torch.tensor(3.0)
         self.last_prediction_class_count = torch.tensor(5.0)
         self.last_prediction_class_selection_valid = torch.tensor(True)
@@ -92,6 +95,11 @@ def test_gate_cli_defaults_to_native_4096_request_matrix():
     assert (
         args.prediction_stability_margin
         == single_seed.DEFAULT_PREDICTION_STABILITY_MARGIN
+    )
+    assert gate.REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN == 5e-4
+    assert (
+        single_seed.DEFAULT_PREDICTION_STABILITY_MARGIN
+        == gate.REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN
     )
     assert args.prediction_stability_rank_depth == 3
     assert args.decision_top_k == 3
@@ -186,6 +194,11 @@ def _fixture_metrics(
         "prediction_stability": {
             "adaptive_compute": True,
             "max_cycles": max_cycles,
+            "decision_reference_cycles": {
+                "metric": "trained_fixed_compute_reference_budget",
+                "observed_values": [fixed_cycles],
+                "all_requests_reported": True,
+            },
             "patience": stability_patience,
             "confidence_tolerance": stability_tolerance,
             "exit_tolerance": exit_tolerance,
@@ -373,6 +386,13 @@ def test_single_seed_benchmark_counterbalances_each_request(
         "top_k": 3,
         "top_k_order_disagreement_count": 0,
         "top_k_set_disagreement_count": 0,
+        "top_k_disagreement_evidence": {
+            "limit": 32,
+            "total_count": 0,
+            "recorded_count": 0,
+            "truncated": False,
+            "examples": [],
+        },
         "absolute_logit_delta": {
             "mean": 0.0,
             "max": 0.0,
@@ -398,6 +418,11 @@ def test_single_seed_benchmark_counterbalances_each_request(
         "tensor_equality_required": False,
     }
     assert result["prediction_stability"]["total_cycles_used"] == 4.0
+    assert result["prediction_stability"]["decision_reference_cycles"] == {
+        "metric": "trained_fixed_compute_reference_budget",
+        "observed_values": [3],
+        "all_requests_reported": True,
+    }
     assert model.adaptive_margins == [
         single_seed.DEFAULT_PREDICTION_STABILITY_MARGIN,
     ] * 3
@@ -466,6 +491,34 @@ def test_single_seed_decision_fidelity_detects_top3_order_set_and_distribution_d
     assert comparison["exact_disagreement_count"] == 1
     assert fidelity["top_k_order_disagreement_count"] == 1
     assert fidelity["top_k_set_disagreement_count"] == 1
+    assert fidelity["top_k_disagreement_evidence"] == {
+        "limit": 32,
+        "total_count": 1,
+        "recorded_count": 1,
+        "truncated": False,
+        "examples": [
+            {
+                "sample_index": 0,
+                "target": 0,
+                "fixed_ordered_top_k": [0, 1, 2],
+                "adaptive_ordered_top_k": [1, 0, 3],
+                "adaptive_exit_reason": "prediction_stable",
+                "adaptive_cycles_used": 2,
+                "prediction_margin": 0.25,
+                "decision_margin": 0.125,
+                "verifier": {
+                    "prediction_streak": 2.0,
+                    "confidence_delta": 0.0005,
+                    "decision_reference_cycles": 3,
+                    "observed_rank_depth": 3,
+                    "observed_class_count": 4,
+                    "class_selection_valid": True,
+                    "latest_top_k_js_divergence": 0.001,
+                    "maximum_top_k_js_divergence": 0.002,
+                },
+            }
+        ],
+    }
     assert fidelity["absolute_logit_delta"]["mean"] == 1.0
     assert fidelity["absolute_logit_delta"]["max"] == 1.0
     assert (
@@ -478,6 +531,61 @@ def test_single_seed_decision_fidelity_detects_top3_order_set_and_distribution_d
         fidelity["distribution_distance"]["total_variation_distance"]["mean"]
         > 0.0
     )
+
+
+def test_single_seed_bounds_deterministic_disagreement_evidence_and_omits_inputs(
+    monkeypatch,
+):
+    ticks = iter(float(index) for index in range(1000))
+    monkeypatch.setattr(single_seed.time, "perf_counter", lambda: next(ticks))
+
+    def run_once():
+        model = _StubModel(
+            fixed_logits=[5.0, 4.0, 3.0, 2.0],
+            adaptive_logits=[4.0, 5.0, 2.0, 3.0],
+        )
+        return single_seed.benchmark_serving_requests(
+            model,
+            torch.zeros(40, 1, 4),
+            torch.arange(40, dtype=torch.long) % 4,
+            fixed_cycles=3,
+            max_cycles=8,
+            stability_patience=2,
+            stability_tol=0.005,
+            distribution_top_k=5,
+        )["comparison"]["decision_fidelity"]["top_k_disagreement_evidence"]
+
+    first = run_once()
+    second = run_once()
+
+    assert first == second
+    assert first["limit"] == single_seed.MAX_TOP_K_DISAGREEMENT_EXAMPLES == 32
+    assert first["total_count"] == 40
+    assert first["recorded_count"] == 32
+    assert first["truncated"] is True
+    assert [example["sample_index"] for example in first["examples"]] == list(
+        range(32)
+    )
+    assert [example["target"] for example in first["examples"][:5]] == [
+        0,
+        1,
+        2,
+        3,
+        0,
+    ]
+    assert set(first["examples"][0]) == {
+        "sample_index",
+        "target",
+        "fixed_ordered_top_k",
+        "adaptive_ordered_top_k",
+        "adaptive_exit_reason",
+        "adaptive_cycles_used",
+        "prediction_margin",
+        "decision_margin",
+        "verifier",
+    }
+    assert "input" not in json.dumps(first).lower()
+    json.dumps(first, allow_nan=False, sort_keys=True)
 
 
 def test_single_seed_rejects_unknown_exit_reason_evidence(monkeypatch):
@@ -497,6 +605,32 @@ def test_single_seed_rejects_unknown_exit_reason_evidence(monkeypatch):
             stability_tol=0.005,
             distribution_top_k=5,
         )
+
+
+def test_single_seed_accepts_decision_reference_budget_exit_evidence(monkeypatch):
+    model = _StubModel()
+    model.layers[10].last_cycles_used = torch.tensor(3.0)
+    model.layers[10].last_exit_reason = "decision_reference_budget"
+    ticks = iter(float(index) for index in range(100))
+    monkeypatch.setattr(single_seed.time, "perf_counter", lambda: next(ticks))
+
+    result = single_seed.benchmark_serving_requests(
+        model,
+        torch.zeros(2, 1, 4),
+        torch.zeros(2, dtype=torch.long),
+        fixed_cycles=3,
+        max_cycles=8,
+        stability_patience=2,
+        stability_tol=0.005,
+        distribution_top_k=5,
+    )
+
+    assert result["prediction_stability"]["exit_reasons"] == {
+        "decision_reference_budget": 2
+    }
+    assert result["prediction_stability"]["decision_reference_cycles"][
+        "observed_values"
+    ] == [3]
 
 
 def test_single_seed_scoped_two_class_verifier_clamps_observed_rank_depth(
@@ -1132,6 +1266,11 @@ def _mutate_path(payload, path, value):
     [
         (("fixed", "cycles"), 4, "fixed cycles"),
         (("prediction_stability", "max_cycles"), 7, "adaptive controls"),
+        (
+            ("prediction_stability", "decision_reference_cycles", "observed_values"),
+            [2],
+            "reference cycles",
+        ),
         (("prediction_stability", "total_cycles_used"), 0, "total cycles"),
         (("prediction_stability", "total_cycles_used"), 17, "total cycles"),
         (("fixed", "latency", "mean_ms"), 0, "fixed latency"),
@@ -1229,6 +1368,11 @@ def test_aggregate_gate_allows_normal_latency_rounding_envelope():
     [
         ("fixed", "adaptive_compute"),
         ("prediction_stability", "adaptive_compute"),
+        (
+            "prediction_stability",
+            "decision_reference_cycles",
+            "all_requests_reported",
+        ),
         ("comparison", "decision_fidelity", "verified_scope", "verified"),
         (
             "comparison",
@@ -1275,6 +1419,26 @@ def test_aggregate_gate_requires_complete_known_exit_reason_evidence(
 
     with pytest.raises(ValueError, match=match):
         _aggregate([{"seed": 641, "metrics": metrics}])
+
+
+def test_aggregate_gate_accepts_decision_reference_budget_exit_reason():
+    metrics = _fixture_metrics(
+        samples=2,
+        fixed_correct=2,
+        adaptive_correct=2,
+        disagreements=0,
+        fixed_cycles=3,
+        adaptive_total_cycles=6,
+        fixed_latency=10,
+        adaptive_latency=8,
+        latency_reduction=20,
+        cycle_reduction=0,
+        exit_reasons={"decision_reference_budget": 2},
+    )
+
+    result = _aggregate([{"seed": 641, "metrics": metrics}])
+
+    assert result["summary"]["decision_reference_cycles"] == 3
 
 
 def test_aggregate_gate_rejects_prediction_stable_margin_below_floor():

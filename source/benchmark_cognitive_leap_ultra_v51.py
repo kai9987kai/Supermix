@@ -33,7 +33,8 @@ from model_variants import ChampionNetCognitiveLeapUltraExpert
 N_CLASSES = 10
 N_OPS = 4
 IN_DIM = 128
-DEFAULT_PREDICTION_STABILITY_MARGIN = 1e-4
+# Calibrated for this v51 checkpoint/workload, not a universal safety threshold.
+DEFAULT_PREDICTION_STABILITY_MARGIN = 5e-4
 DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = 3
 
 

@@ -58,6 +58,15 @@ ISOLATED_VERIFIER_EXIT_ENTROPY = 0.0
 MINIMUM_WEIGHTED_CYCLE_REDUCTION_PERCENT = 20.0
 MINIMUM_MEDIAN_LATENCY_REDUCTION_PERCENT = 0.0
 EXPECTED_RELEASE_MODEL_SIZE = "cognitive_leap_ultra_expert"
+# Immutable checkpoint/workload-calibrated release literal; not a universal margin.
+REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN = 5e-4
+
+
+if DEFAULT_PREDICTION_STABILITY_MARGIN != REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN:
+    raise RuntimeError(
+        "The authoritative runtime prediction-stability margin is not the "
+        "v51 checkpoint/workload-calibrated release value 0.0005"
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -478,6 +487,41 @@ def aggregate_gate_results(
         if seed_adaptive_configuration != expected_adaptive_controls:
             raise ValueError(
                 f"Seed {seed} adaptive controls do not match the configured mode"
+            )
+        reference_budget = adaptive.get("decision_reference_cycles")
+        if not isinstance(reference_budget, Mapping):
+            raise ValueError(
+                f"Seed {seed} decision reference-cycle evidence is missing"
+            )
+        if (
+            reference_budget.get("metric")
+            != "trained_fixed_compute_reference_budget"
+            or not _strict_bool(
+                reference_budget.get("all_requests_reported"),
+                label=f"seed {seed} decision reference-cycle coverage",
+            )
+        ):
+            raise ValueError(
+                f"Seed {seed} decision reference-cycle evidence is invalid"
+            )
+        raw_reference_values = reference_budget.get("observed_values")
+        if isinstance(raw_reference_values, (str, bytes)) or not isinstance(
+            raw_reference_values, Sequence
+        ):
+            raise ValueError(
+                f"Seed {seed} decision reference-cycle values are invalid"
+            )
+        observed_reference_values = [
+            _bounded_count(
+                value,
+                maximum=chat_app.MAX_RUNTIME_REASONING_CYCLES,
+                label=f"seed {seed} decision reference cycles",
+            )
+            for value in raw_reference_values
+        ]
+        if observed_reference_values != [expected_fixed_cycles]:
+            raise ValueError(
+                f"Seed {seed} decision reference cycles do not match the fixed budget"
             )
         if canonical_adaptive_configuration is None:
             canonical_adaptive_configuration = seed_adaptive_configuration
@@ -1053,6 +1097,7 @@ def aggregate_gate_results(
             },
             "prediction_stability_rank_depth": prediction_rank_depth,
             "configured_fixed_cycles": expected_fixed_cycles,
+            "decision_reference_cycles": expected_fixed_cycles,
             "configured_max_cycles": expected_max_cycles,
             "distribution_top_k": expected_distribution_top_k,
             "configured_prediction_stability_margin": (

@@ -36,7 +36,7 @@ class _StubEngine:
             "adaptive_exit_entropy": 0.2,
             "prediction_stability_patience": 2,
             "prediction_stability_tol": 0.005,
-            "prediction_stability_margin": 0.0001,
+            "prediction_stability_margin": 0.0005,
             "prediction_stability_rank_depth": 3,
         }
         self.defaults.update(type(self).runtime_default_overrides)
@@ -100,7 +100,7 @@ class _StubEngine:
             "prediction_stability_tol": self.defaults[
                 "prediction_stability_tol"
             ],
-            "prediction_stability_margin": 0.0001,
+            "prediction_stability_margin": 0.0005,
             "prediction_stability_rank_depth": 3,
             "prediction_verifier_active": adaptive,
             "prediction_class_indices": list(self.available_labels),
@@ -109,6 +109,7 @@ class _StubEngine:
             compute.update(
                 {
                     "prediction_rank_depth": 3,
+                    "decision_reference_cycles": 3,
                     "prediction_decision_margin": 0.1,
                     "prediction_margin": 0.2,
                     "prediction_class_count": len(self.available_labels),
@@ -206,7 +207,9 @@ def test_cli_and_builtin_matrix_are_pinned_to_release_protocol():
     assert Path(args.metadata) == gate.DEFAULT_META
     assert gate.FIXED_CYCLES == 3
     assert gate.ADAPTIVE_MAX_CYCLES == 8
-    assert gate.PREDICTION_STABILITY_MARGIN == 1e-4
+    assert gate.PREDICTION_STABILITY_MARGIN == 5e-4
+    assert gate.REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN == 5e-4
+    assert gate.REQUIRED_RELEASE_DECISION_REFERENCE_CYCLES == 3
     assert gate.AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH == 3
     assert gate.AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS == {
         "adaptive_exit_tol": 0.001,
@@ -323,7 +326,7 @@ def test_gate_uses_isolated_sessions_release_defaults_and_exact_comparisons(tmp_
         "adaptive_exit_entropy": 0.2,
         "prediction_stability_patience": 2.0,
         "prediction_stability_tol": 0.005,
-        "prediction_stability_margin": 0.0001,
+        "prediction_stability_margin": 0.0005,
         "prediction_stability_rank_depth": 3.0,
     }
     assert payload["settings"]["authoritative_adaptive_runtime_defaults"] == {
@@ -340,7 +343,7 @@ def test_gate_uses_isolated_sessions_release_defaults_and_exact_comparisons(tmp_
     for call in engine.calls:
         assert call["response_temperature"] == 0.0
         assert call["auto_compute"] is False
-        assert call["prediction_stability_margin"] == 1e-4
+        assert call["prediction_stability_margin"] == 5e-4
         assert call["show_top_responses"] == 5
         assert "prediction_stability_rank_depth" not in call
     assert payload["source_package_parity"]["passed"] is True
@@ -598,6 +601,44 @@ def test_prediction_stable_exit_requires_decision_margin_floor(tmp_path):
     assert all(row["mode"] == "adaptive" for row in violations)
     assert all(
         "prediction_stable_decision_margin_below_floor" in row["violations"]
+        for row in violations
+    )
+
+
+def test_decision_reference_budget_exit_is_allowed_with_exact_cycle_evidence(
+    tmp_path,
+):
+    _StubEngine.adaptive_compute_overrides = {
+        "exit_reason": "decision_reference_budget",
+        "cycles_used": 3,
+    }
+
+    payload = _run(tmp_path)
+
+    contract = payload["gates"]["checks"][
+        "runtime_release_verifier_contract_observed"
+    ]
+    assert contract["passed"] is True
+    assert contract["required_decision_reference_cycles"] == 3
+    assert payload["summary"]["adaptive_exit_reasons"] == {
+        "decision_reference_budget": gate.CANONICAL_RELEASE_PROMPT_MATRIX_COUNT
+    }
+
+
+def test_decision_reference_budget_exit_rejects_wrong_cycle(tmp_path):
+    _StubEngine.adaptive_compute_overrides = {
+        "exit_reason": "decision_reference_budget",
+        "cycles_used": 2,
+    }
+
+    payload = _run(tmp_path)
+
+    violations = payload["gates"]["checks"][
+        "runtime_release_verifier_contract_observed"
+    ]["violations"]
+    assert all(row["mode"] == "adaptive" for row in violations)
+    assert all(
+        "decision_reference_budget_cycle_mismatch" in row["violations"]
         for row in violations
     )
 

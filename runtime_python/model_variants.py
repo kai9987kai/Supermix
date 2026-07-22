@@ -6043,6 +6043,11 @@ class CognitiveLeapUltraExpertHead(nn.Module):
             "last_prediction_class_selection_valid", torch.tensor(True), persistent=False
         )
         self.register_buffer(
+            "last_decision_reference_cycles",
+            torch.tensor(float(n_cycles)),
+            persistent=False,
+        )
+        self.register_buffer(
             "last_prediction_topk_js_divergence", torch.tensor(0.0), persistent=False
         )
         self.register_buffer(
@@ -6295,8 +6300,9 @@ class CognitiveLeapUltraExpertHead(nn.Module):
             and stability_patience > 0
             and verifier_decision_margin_valid
         )
+        decision_reference_cycles = max(1, int(self.n_cycles))
         weighted_recursive = torch.zeros(N, self.out_dim, device=x_flat.device, dtype=x_flat.dtype)
-        previous_prediction = None
+        previous_prediction_rank_tuple = None
         prediction_streak = torch.zeros(N, device=x_flat.device, dtype=torch.long)
         stable_confidence_min = None
         stable_confidence_max = None
@@ -6394,7 +6400,11 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                         prediction_topk_js_divergence,
                     )
                 previous_prediction_distribution = prefix_probs
-                prediction_confidence, prediction = prefix_probs.max(dim=-1)
+                prediction_confidence, _ = prefix_probs.max(dim=-1)
+                prediction_rank_tuple = prefix_probs.topk(
+                    k=effective_rank_depth,
+                    dim=-1,
+                ).indices
                 margin_verifiable = (
                     verifier_class_selection_valid
                     and int(prefix_probs.shape[-1]) >= 2
@@ -6417,12 +6427,18 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                     prediction_decision_margin = torch.zeros_like(
                         prediction_confidence
                     )
-                if previous_prediction is None:
+                if previous_prediction_rank_tuple is None:
                     prediction_streak = torch.ones_like(prediction_streak)
                     stable_confidence_min = prediction_confidence
                     stable_confidence_max = prediction_confidence
                 else:
-                    same_prediction = prediction.eq(previous_prediction)
+                    # A certified decision preserves the complete ordered
+                    # candidate tuple, not just its top-1 member. Any swap or
+                    # replacement through the requested rank depth restarts
+                    # the persistence window.
+                    same_prediction = prediction_rank_tuple.eq(
+                        previous_prediction_rank_tuple
+                    ).all(dim=-1)
                     prediction_streak = torch.where(
                         same_prediction,
                         prediction_streak + 1,
@@ -6439,7 +6455,7 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                         prediction_confidence,
                     )
                 prediction_confidence_delta = stable_confidence_max - stable_confidence_min
-                previous_prediction = prediction
+                previous_prediction_rank_tuple = prediction_rank_tuple
                 stable_mask = (
                     prediction_streak >= stability_patience
                 ) & (
@@ -6456,22 +6472,33 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                 )
 
             # Inference-only verifier and convergence exits. Prediction
-            # stability is checked first so diagnostics identify the new path
-            # when multiple exit criteria become true on the same cycle.
+            # stability exclusively controls early stopping while its exact
+            # post-head verifier is active. Legacy latent, entropy, and halt
+            # signals remain available only when that verifier is disabled or
+            # invalid, so they cannot bypass a failed decision certificate.
             converged = False
             if adaptive_compute and not self.training:
-                if prediction_stable:
-                    converged = True
-                    exit_reason = "prediction_stable"
-                elif delta is not None and delta.item() < exit_tol:
-                    converged = True
-                    exit_reason = "latent_converged"
-                elif entropy.mean().item() < exit_entropy_threshold:
-                    converged = True
-                    exit_reason = "low_entropy"
-                elif remaining.mean().item() < 0.05:
-                    converged = True
-                    exit_reason = "halt_mass"
+                if use_prediction_stability:
+                    if prediction_stable and (t + 1) < decision_reference_cycles:
+                        converged = True
+                        exit_reason = "prediction_stable"
+                    elif (t + 1) >= decision_reference_cycles:
+                        # The head was trained against ``self.n_cycles``. If
+                        # the verifier cannot certify a strictly earlier
+                        # answer, use that exact reference-budget mixture
+                        # instead of drifting into untrained extra cycles.
+                        converged = True
+                        exit_reason = "decision_reference_budget"
+                else:
+                    if delta is not None and delta.item() < exit_tol:
+                        converged = True
+                        exit_reason = "latent_converged"
+                    elif entropy.mean().item() < exit_entropy_threshold:
+                        converged = True
+                        exit_reason = "low_entropy"
+                    elif remaining.mean().item() < 0.05:
+                        converged = True
+                        exit_reason = "halt_mass"
 
             # Differentiable ACT halting
             h_t = torch.sigmoid(self.halt_head(z_h))  # (N, 1)
@@ -6521,6 +6548,9 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         )
         self.last_prediction_class_selection_valid = torch.tensor(
             bool(verifier_class_selection_valid), device=x_flat.device
+        )
+        self.last_decision_reference_cycles = torch.tensor(
+            float(decision_reference_cycles), device=x_flat.device
         )
         self.last_prediction_topk_js_divergence = (
             prediction_topk_js_divergence.mean().detach()

@@ -19,7 +19,7 @@ def test_v51_demo_metadata_uses_portable_project_paths():
     assert payload["benchmark_metrics"] == "output/benchmark_v51_cognitive_leap_ultra/benchmark_results.json"
     assert payload["runtime_defaults"]["prediction_stability_patience"] == 2
     assert payload["runtime_defaults"]["prediction_stability_tol"] == 0.005
-    assert payload["runtime_defaults"]["prediction_stability_margin"] == 0.0001
+    assert payload["runtime_defaults"]["prediction_stability_margin"] == 0.0005
     assert payload["runtime_defaults"]["prediction_stability_rank_depth"] == 3
     assert "New folder (4)" not in payload["checkpoint_path"]
     assert "New folder (4)" not in payload["benchmark_metrics"]
@@ -44,7 +44,7 @@ def test_v51_demo_check_forwards_released_prediction_stability_margin(monkeypatc
     result = check_load(Path("weights.pth"), Path("meta.json"))
 
     assert result["chat_response"] == "ok"
-    assert calls["defaults"]["prediction_stability_margin"] == 0.0001
-    assert calls["chat"]["prediction_stability_margin"] == 0.0001
+    assert calls["defaults"]["prediction_stability_margin"] == 0.0005
+    assert calls["chat"]["prediction_stability_margin"] == 0.0005
     assert calls["defaults"]["prediction_stability_rank_depth"] == 3
     assert calls["chat"]["prediction_stability_rank_depth"] == 3
