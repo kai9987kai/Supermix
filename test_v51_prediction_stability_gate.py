@@ -143,6 +143,8 @@ def _fixture_metrics(
     max_cycles=8,
     distribution_top_k=5,
     exit_reasons=None,
+    fixed_total_latency=None,
+    adaptive_total_latency=None,
 ):
     if top_k_order_disagreements is None:
         top_k_order_disagreements = disagreements
@@ -152,6 +154,10 @@ def _fixture_metrics(
         scope_indices = [0, 1, 2, 3, 4]
     if exit_reasons is None:
         exit_reasons = {"prediction_stable": samples}
+    if fixed_total_latency is None:
+        fixed_total_latency = fixed_latency * samples
+    if adaptive_total_latency is None:
+        adaptive_total_latency = adaptive_latency * samples
     base_cycles, extra_cycles = divmod(int(adaptive_total_cycles), int(samples))
     cycle_counts = {}
     if samples - extra_cycles:
@@ -172,7 +178,10 @@ def _fixture_metrics(
             "adaptive_compute": False,
             "cycles": fixed_cycles,
             "correct_predictions": fixed_correct,
-            "latency": {"mean_ms": fixed_latency},
+            "latency": {
+                "mean_ms": fixed_latency,
+                "total_ms": fixed_total_latency,
+            },
         },
         "prediction_stability": {
             "adaptive_compute": True,
@@ -233,7 +242,10 @@ def _fixture_metrics(
                 "top_k": distribution_top_k,
                 "role": "shadow_diagnostic_only",
             },
-            "latency": {"mean_ms": adaptive_latency},
+            "latency": {
+                "mean_ms": adaptive_latency,
+                "total_ms": adaptive_total_latency,
+            },
         },
         "comparison": {
             "request_count": samples,
@@ -1126,6 +1138,12 @@ def _mutate_path(payload, path, value):
         (("prediction_stability", "latency", "mean_ms"), 0, "adaptive latency"),
         (("fixed", "latency", "total_ms"), 0, "fixed latency"),
         (("prediction_stability", "latency", "total_ms"), 0, "adaptive latency"),
+        (("fixed", "latency", "total_ms"), 20.01, "inconsistent"),
+        (
+            ("prediction_stability", "latency", "total_ms"),
+            16.01,
+            "inconsistent",
+        ),
         (("fixed", "latency", "mean_ms"), float("nan"), "finite"),
         (
             ("prediction_stability", "latency", "mean_ms"),
@@ -1164,6 +1182,46 @@ def test_aggregate_gate_binds_budgets_latencies_and_release_controls(
 
     with pytest.raises(ValueError, match=match):
         _aggregate([{"seed": 641, "metrics": metrics}])
+
+
+@pytest.mark.parametrize("mode", ["fixed", "prediction_stability"])
+def test_aggregate_gate_requires_total_latency_evidence(mode):
+    metrics = _valid_aggregate_metrics()
+    metrics[mode]["latency"].pop("total_ms")
+
+    with pytest.raises(ValueError, match="missing total_ms"):
+        _aggregate([{"seed": 641, "metrics": metrics}])
+
+
+def test_aggregate_gate_allows_normal_latency_rounding_envelope():
+    metrics = _fixture_metrics(
+        samples=3,
+        fixed_correct=3,
+        adaptive_correct=3,
+        disagreements=0,
+        fixed_cycles=3,
+        adaptive_total_cycles=6,
+        fixed_latency=10.123,
+        adaptive_latency=8.456,
+        fixed_total_latency=30.3704,
+        adaptive_total_latency=25.3694,
+        latency_reduction=16.47,
+        cycle_reduction=33.333,
+    )
+
+    result = _aggregate([{"seed": 641, "metrics": metrics}])
+
+    assert result["gates"]["passed"] is True
+    latency_evidence = result["per_seed_gate_metrics"][0]["latency_consistency"]
+    assert latency_evidence["fixed"][
+        "expected_total_from_rounded_mean_ms"
+    ] == pytest.approx(30.369)
+    assert latency_evidence["adaptive"][
+        "expected_total_from_rounded_mean_ms"
+    ] == pytest.approx(25.368)
+    assert latency_evidence["fixed"][
+        "absolute_rounding_tolerance_ms"
+    ] == pytest.approx(0.001501)
 
 
 @pytest.mark.parametrize(

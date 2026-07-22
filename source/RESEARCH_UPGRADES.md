@@ -646,11 +646,14 @@ Additional primary sources reviewed:
 
 Repo changes:
 
-- Added an inference-only full-output verifier to the v51 recurrent head. At
-  each cycle it constructs the output that would be returned if reasoning
-  stopped at that point, then tracks the top prediction and confidence range.
-- Adaptive inference can now stop when the prediction remains unchanged for a
-  configurable patience window and confidence drift stays below a configurable
+- Added an inference-only post-head verifier to the v51 recurrent head. At each
+  cycle it constructs the exact output that would be returned if reasoning
+  stopped at that point, applies softmax only over the caller's verified
+  allowed-label scope, and tracks the ordered decision boundary through the
+  configured rank depth.
+- Adaptive inference can now stop when the ordered top-k decision remains
+  unchanged for a configurable patience window, its minimum adjacent margin
+  clears the calibrated floor, and confidence drift stays below a configurable
   tolerance. This criterion is separate from latent convergence, low entropy,
   and ACT remaining-mass exits.
 - Added `prediction_stability_patience` and `prediction_stability_tol` across

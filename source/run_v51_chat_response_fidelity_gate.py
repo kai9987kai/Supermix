@@ -17,7 +17,9 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import tempfile
 import time
+from types import MappingProxyType
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence
 
 
@@ -47,14 +49,25 @@ AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH = int(
     chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH
 )
 REQUIRED_RELEASE_PREDICTION_STABILITY_RANK_DEPTH = 3
-AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS = {
-    "adaptive_exit_tol": float(chat_app.DEFAULT_ADAPTIVE_EXIT_TOL),
-    "adaptive_exit_entropy": float(chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
-    "prediction_stability_patience": float(
-        chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE
-    ),
-    "prediction_stability_tol": float(chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
-}
+# Immutable release literals: these deliberately do not derive from chat_app so
+# a coordinated library/default drift cannot redefine what "v51 release" means.
+AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS = MappingProxyType(
+    {
+        "adaptive_exit_tol": 0.001,
+        "adaptive_exit_entropy": 0.2,
+        "prediction_stability_patience": 2.0,
+        "prediction_stability_tol": 0.005,
+    }
+)
+CANONICAL_RELEASE_MODEL_SIZE = "cognitive_leap_ultra_expert"
+CANONICAL_RELEASE_FEATURE_MODE = "context_mix_v4"
+CANONICAL_RELEASE_CLASS_COUNT = 10
+CANONICAL_RELEASE_WEIGHTS_SHA256 = (
+    "664b1779452fe1482389413004d8bce3369f6d8ee15ab8c2c891dc5e382ebae4"
+)
+CANONICAL_RELEASE_METADATA_SHA256 = (
+    "7134c82c96204a9aa8b255642b9b4b1fb84e7e44dbab1c69327fb66838c47f50"
+)
 TOP_CANDIDATE_COUNT = 5
 
 if PREDICTION_STABILITY_MARGIN != REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN:
@@ -99,6 +112,19 @@ DEFAULT_SOURCE_PACKAGE_PARITY_PAIRS = (
         "model_variants",
         SOURCE_DIR / "model_variants.py",
         PROJECT_ROOT / "runtime_python" / "model_variants.py",
+    ),
+)
+
+SURFACE_SPECIFIC_RUNTIME_HASH_PAIRS = (
+    (
+        "chat_web_app",
+        SOURCE_DIR / "chat_web_app.py",
+        PROJECT_ROOT / "runtime_python" / "chat_web_app.py",
+    ),
+    (
+        "chat_pipeline",
+        SOURCE_DIR / "chat_pipeline.py",
+        PROJECT_ROOT / "runtime_python" / "chat_pipeline.py",
     ),
 )
 
@@ -566,6 +592,27 @@ def _effective_adaptive_defaults(engine: Any) -> Dict[str, Any]:
     }
 
 
+def _chat_app_adaptive_defaults() -> Dict[str, float]:
+    return {
+        "adaptive_exit_tol": _finite_float(
+            chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+            label="chat_app default adaptive_exit_tol",
+        ),
+        "adaptive_exit_entropy": _finite_float(
+            chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY,
+            label="chat_app default adaptive_exit_entropy",
+        ),
+        "prediction_stability_patience": _finite_float(
+            chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE,
+            label="chat_app default prediction_stability_patience",
+        ),
+        "prediction_stability_tol": _finite_float(
+            chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
+            label="chat_app default prediction_stability_tol",
+        ),
+    }
+
+
 def _release_adaptive_default_mismatches(
     observed: Mapping[str, Any],
 ) -> Dict[str, Dict[str, float | None]]:
@@ -575,6 +622,350 @@ def _release_adaptive_default_mismatches(
         if actual != required:
             mismatches[key] = {"actual": actual, "required": required}
     return mismatches
+
+
+def _canonical_artifact_identity(
+    weights: Path,
+    metadata: Path,
+) -> Dict[str, Any]:
+    canonical_weights = DEFAULT_WEIGHTS.resolve()
+    canonical_metadata = DEFAULT_META.resolve()
+    canonical_weights_hash = (
+        _sha256_file(canonical_weights) if canonical_weights.is_file() else None
+    )
+    canonical_metadata_hash = (
+        _sha256_file(canonical_metadata) if canonical_metadata.is_file() else None
+    )
+    observed_weights_hash = _sha256_file(weights)
+    observed_metadata_hash = _sha256_file(metadata)
+    weights_path_exact = weights == canonical_weights
+    metadata_path_exact = metadata == canonical_metadata
+    weights_hash_exact = observed_weights_hash == CANONICAL_RELEASE_WEIGHTS_SHA256
+    metadata_hash_exact = observed_metadata_hash == CANONICAL_RELEASE_METADATA_SHA256
+    canonical_files_pinned = (
+        canonical_weights_hash == CANONICAL_RELEASE_WEIGHTS_SHA256
+        and canonical_metadata_hash == CANONICAL_RELEASE_METADATA_SHA256
+    )
+    return {
+        "passed": bool(
+            canonical_files_pinned
+            and weights_path_exact
+            and metadata_path_exact
+            and weights_hash_exact
+            and metadata_hash_exact
+        ),
+        "diagnostic_only": not (
+            weights_path_exact
+            and metadata_path_exact
+            and weights_hash_exact
+            and metadata_hash_exact
+            and canonical_files_pinned
+        ),
+        "observed": {
+            "weights": {
+                "path": str(weights),
+                "sha256": observed_weights_hash,
+                "canonical_path_exact": weights_path_exact,
+                "canonical_hash_exact": weights_hash_exact,
+            },
+            "metadata": {
+                "path": str(metadata),
+                "sha256": observed_metadata_hash,
+                "canonical_path_exact": metadata_path_exact,
+                "canonical_hash_exact": metadata_hash_exact,
+            },
+        },
+        "required": {
+            "weights": {
+                "path": str(canonical_weights),
+                "sha256": CANONICAL_RELEASE_WEIGHTS_SHA256,
+                "current_file_sha256": canonical_weights_hash,
+            },
+            "metadata": {
+                "path": str(canonical_metadata),
+                "sha256": CANONICAL_RELEASE_METADATA_SHA256,
+                "current_file_sha256": canonical_metadata_hash,
+            },
+        },
+        "canonical_default_files_match_pinned_hashes": canonical_files_pinned,
+    }
+
+
+def _record_engine_surface(
+    engine_factory: Callable[..., Any],
+    *,
+    surface: str,
+    device: Any,
+    device_info: Mapping[str, Any],
+    weights: Path,
+    metadata: Path,
+    prompts: Sequence[Mapping[str, str]],
+    module_provenance: Mapping[str, str],
+) -> Dict[str, Any]:
+    constructor_defaults = {
+        "model_size": "auto",
+        "pool_mode": "all",
+        "reasoning_cycles": FIXED_CYCLES,
+        "adaptive_compute": False,
+        "auto_compute": False,
+        "response_temperature": 0.0,
+        "prediction_stability_margin": PREDICTION_STABILITY_MARGIN,
+    }
+    common_kwargs = {
+        "style_mode": "auto",
+        "response_temperature": 0.0,
+        "show_top_responses": TOP_CANDIDATE_COUNT,
+        "auto_compute": False,
+        "prediction_stability_margin": PREDICTION_STABILITY_MARGIN,
+    }
+    engine = engine_factory(device, dict(device_info), dict(constructor_defaults))
+    load_status = engine.load(str(weights), str(metadata))
+    if not isinstance(load_status, Mapping) or load_status.get("ok") is not True:
+        raise ValueError(f"{surface} Engine did not report a successful load")
+    labels = _engine_label_scope(engine, load_status)
+    status_fn = getattr(engine, "status", None)
+    status = status_fn() if callable(status_fn) else None
+    calls: List[Dict[str, Any]] = []
+    for index, case in enumerate(prompts):
+        mode_order = (
+            ("fixed", "adaptive") if index % 2 == 0 else ("adaptive", "fixed")
+        )
+        for mode in mode_order:
+            adaptive = mode == "adaptive"
+            started = time.perf_counter()
+            raw = engine.chat(
+                session_id=(
+                    f"v51-response-fidelity-{surface}-{index + 1:03d}-{mode}"
+                ),
+                user_text=case["prompt"],
+                reasoning_cycles=(ADAPTIVE_MAX_CYCLES if adaptive else FIXED_CYCLES),
+                adaptive_compute=adaptive,
+                **common_kwargs,
+            )
+            snapshot = _response_snapshot(
+                raw,
+                label=f"prompt {case['id']} {surface} {mode}",
+                wall_ms=(time.perf_counter() - started) * 1000.0,
+            )
+            calls.append(
+                {
+                    "prompt_id": case["id"],
+                    "prompt": case["prompt"],
+                    "mode": mode,
+                    "reasoning_cycles": (
+                        ADAPTIVE_MAX_CYCLES if adaptive else FIXED_CYCLES
+                    ),
+                    "snapshot": snapshot,
+                }
+            )
+    return {
+        "surface": surface,
+        "module_provenance": dict(module_provenance),
+        "device_info": dict(device_info),
+        "load_status": {
+            "ok": True,
+            "load_ms": _optional_finite_float(
+                load_status.get("load_ms"), label=f"{surface} load_ms"
+            ),
+            "model_size": str(load_status.get("model_size", "")),
+            "feature_mode": str(load_status.get("feature_mode", "")),
+            "available_labels": _optional_finite_float(
+                load_status.get("available_labels"),
+                label=f"{surface} available_labels",
+            ),
+        },
+        "status": status,
+        "available_labels": labels,
+        "defaults": _effective_adaptive_defaults(engine),
+        "rank_depth": _finite_float(
+            _runtime_release_rank_depth(engine),
+            label=f"{surface} runtime release prediction stability rank depth",
+        ),
+        "calls": calls,
+    }
+
+
+class _PackagedSurfaceReplayEngine:
+    def __init__(
+        self,
+        recording: Mapping[str, Any],
+        device: Any,
+        device_info: Mapping[str, Any],
+        defaults: Mapping[str, Any],
+    ) -> None:
+        self.recording = dict(recording)
+        self.device = device
+        self.device_info = dict(device_info)
+        self.constructor_defaults = dict(defaults)
+        self.defaults = dict(recording["defaults"])
+        self.available_labels = list(recording["available_labels"])
+        self._calls = list(recording["calls"])
+        self._next_call = 0
+
+    def load(self, weights: str, metadata: str) -> Dict[str, Any]:
+        return dict(self.recording["load_status"])
+
+    def status(self) -> Any:
+        return self.recording.get("status")
+
+    def chat(self, **kwargs: Any) -> Dict[str, Any]:
+        if self._next_call >= len(self._calls):
+            raise ValueError("Packaged replay received more calls than recorded")
+        row = self._calls[self._next_call]
+        self._next_call += 1
+        mode = "adaptive" if kwargs.get("adaptive_compute") is True else "fixed"
+        if (
+            kwargs.get("user_text") != row["prompt"]
+            or mode != row["mode"]
+            or int(kwargs.get("reasoning_cycles")) != int(row["reasoning_cycles"])
+        ):
+            raise ValueError("Packaged replay call order or request contract mismatch")
+        snapshot = row["snapshot"]
+        return {
+            "ok": True,
+            "response": snapshot["response"],
+            "style_mode": snapshot["style_mode"],
+            "top_candidates": snapshot["top_candidates"],
+            "compute": snapshot["compute"],
+            "timing_ms": snapshot["timing_ms"],
+            "auto_compute_plan": snapshot["auto_compute_plan"],
+        }
+
+    @property
+    def remaining_calls(self) -> int:
+        return len(self._calls) - self._next_call
+
+
+def _run_packaged_surface_subprocess(
+    *,
+    weights: Path,
+    metadata: Path,
+    prompts: Sequence[Mapping[str, str]],
+    device: Any,
+    device_info: Mapping[str, Any],
+) -> Dict[str, Any]:
+    bootstrap = r"""
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+project_root = Path(sys.argv[1]).resolve()
+config_path = Path(sys.argv[2]).resolve()
+output_path = Path(sys.argv[3]).resolve()
+runtime_dir = (project_root / "runtime_python").resolve()
+sys.path.insert(0, str(runtime_dir))
+
+import chat_app
+import chat_pipeline
+import chat_web_app
+import device_utils
+import model_variants
+
+modules = {
+    "chat_app": chat_app,
+    "chat_pipeline": chat_pipeline,
+    "chat_web_app": chat_web_app,
+    "device_utils": device_utils,
+    "model_variants": model_variants,
+}
+module_paths = {}
+for name, module in modules.items():
+    path = Path(module.__file__).resolve()
+    if runtime_dir not in path.parents:
+        raise RuntimeError(f"{name} resolved outside packaged runtime: {path}")
+    module_paths[name] = str(path)
+
+gate_path = project_root / "source" / "run_v51_chat_response_fidelity_gate.py"
+spec = importlib.util.spec_from_file_location("_v51_packaged_gate_worker", gate_path)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Could not load gate worker: {gate_path}")
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+config = json.loads(config_path.read_text(encoding="utf-8"))
+device, resolved = device_utils.resolve_device(config["device_request"])
+recording = gate._record_engine_surface(
+    gate.Engine,
+    surface="packaged",
+    device=device,
+    device_info=resolved,
+    weights=Path(config["weights"]),
+    metadata=Path(config["metadata"]),
+    prompts=config["prompts"],
+    module_provenance=module_paths,
+)
+output_path.write_text(gate._strict_json(recording) + "\n", encoding="utf-8")
+"""
+    config = {
+        "weights": str(weights),
+        "metadata": str(metadata),
+        "prompts": list(prompts),
+        "device_request": str(device_info.get("resolved", device)),
+    }
+    with tempfile.TemporaryDirectory(prefix="v51-packaged-fidelity-") as temp_dir:
+        temp_root = Path(temp_dir)
+        config_path = temp_root / "config.json"
+        output_path = temp_root / "recording.json"
+        config_path.write_text(
+            json.dumps(config, ensure_ascii=False, allow_nan=False), encoding="utf-8"
+        )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                bootstrap,
+                str(PROJECT_ROOT),
+                str(config_path),
+                str(output_path),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "Packaged fidelity worker failed: "
+                + (completed.stderr.strip() or f"exit {completed.returncode}")
+            )
+        if completed.stdout.strip():
+            raise RuntimeError("Packaged fidelity worker emitted unexpected stdout")
+        if not output_path.is_file():
+            raise RuntimeError("Packaged fidelity worker produced no recording")
+        try:
+            recording = json.loads(output_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Packaged fidelity worker returned invalid JSON") from exc
+    if not isinstance(recording, dict) or recording.get("surface") != "packaged":
+        raise RuntimeError("Packaged fidelity worker returned an invalid recording")
+    return recording
+
+
+def _deterministic_response_evidence(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+    """Exclude wall-clock timing while retaining exact output and compute evidence."""
+
+    return {
+        "response": snapshot.get("response"),
+        "style_mode": snapshot.get("style_mode"),
+        "top_candidates": snapshot.get("top_candidates"),
+        "compute": snapshot.get("compute"),
+        "auto_compute_plan": snapshot.get("auto_compute_plan"),
+    }
+
+
+def _behavior_parity_mismatches(
+    source_snapshot: Mapping[str, Any],
+    packaged_snapshot: Mapping[str, Any],
+) -> List[str]:
+    source_evidence = _deterministic_response_evidence(source_snapshot)
+    packaged_evidence = _deterministic_response_evidence(packaged_snapshot)
+    return [
+        key
+        for key in source_evidence
+        if source_evidence[key] != packaged_evidence.get(key)
+    ]
 
 
 def _engine_label_scope(engine: Any, load_status: Mapping[str, Any]) -> List[int]:
@@ -598,6 +989,84 @@ def _engine_label_scope(engine: Any, load_status: Mapping[str, Any]) -> List[int
     if reported_count != len(labels):
         raise ValueError("Engine label scope does not match the loaded status count")
     return labels
+
+
+def _canonical_model_identity(
+    load_status_by_surface: Mapping[str, Mapping[str, Any]],
+    labels_by_surface: Mapping[str, Sequence[int]],
+    status_by_surface: Mapping[str, Mapping[str, Any]],
+    runtime_defaults_by_surface: Mapping[str, Mapping[str, Any]],
+    rank_depth_by_surface: Mapping[str, float],
+    *,
+    weights: Path,
+    metadata: Path,
+) -> Dict[str, Any]:
+    required = {
+        "model_size": CANONICAL_RELEASE_MODEL_SIZE,
+        "feature_mode": CANONICAL_RELEASE_FEATURE_MODE,
+        "class_count": CANONICAL_RELEASE_CLASS_COUNT,
+        "class_indices": list(range(CANONICAL_RELEASE_CLASS_COUNT)),
+    }
+    surfaces: Dict[str, Dict[str, Any]] = {}
+    for surface, status in load_status_by_surface.items():
+        labels = list(labels_by_surface[surface])
+        engine_status = status_by_surface.get(surface, {})
+        runtime_defaults = runtime_defaults_by_surface[surface]
+        actual = {
+            "model_size": str(status.get("model_size", "")),
+            "feature_mode": str(status.get("feature_mode", "")),
+            "class_count": len(labels),
+            "class_indices": labels,
+        }
+        status_actual = {
+            "loaded": engine_status.get("loaded"),
+            "weights_path_exact": (
+                Path(str(engine_status.get("weights", ""))).resolve() == weights
+            ),
+            "metadata_path_exact": (
+                Path(str(engine_status.get("meta", ""))).resolve() == metadata
+            ),
+            "runtime_compute_supported": engine_status.get(
+                "runtime_compute_supported"
+            ),
+            "sessions": engine_status.get("sessions"),
+            "reasoning_cycles": engine_status.get("reasoning_cycles"),
+            "adaptive_compute": engine_status.get("adaptive_compute"),
+            "auto_compute": engine_status.get("auto_compute"),
+        }
+        required_status = {
+            "loaded": True,
+            "weights_path_exact": True,
+            "metadata_path_exact": True,
+            "runtime_compute_supported": True,
+            "sessions": 0,
+            "reasoning_cycles": FIXED_CYCLES,
+            "adaptive_compute": False,
+            "auto_compute": False,
+        }
+        verifier_defaults_exact = bool(
+            not _release_adaptive_default_mismatches(runtime_defaults)
+            and runtime_defaults.get("prediction_stability_margin")
+            == REQUIRED_RELEASE_PREDICTION_STABILITY_MARGIN
+            and rank_depth_by_surface[surface]
+            == float(REQUIRED_RELEASE_PREDICTION_STABILITY_RANK_DEPTH)
+        )
+        surfaces[surface] = {
+            "passed": bool(
+                actual == required
+                and status_actual == required_status
+                and verifier_defaults_exact
+            ),
+            "actual": actual,
+            "status_actual": status_actual,
+            "status_required": required_status,
+            "verifier_defaults_exact": verifier_defaults_exact,
+        }
+    return {
+        "passed": bool(surfaces) and all(row["passed"] for row in surfaces.values()),
+        "required": required,
+        "surfaces": surfaces,
+    }
 
 
 def _mode_contract_violations(
@@ -748,16 +1217,21 @@ def run_gate(
     device: Any = None,
     device_info: Mapping[str, Any] | None = None,
     engine_factory: Callable[[Any, Dict[str, Any], Dict[str, Any]], Any] | None = None,
+    packaged_engine_factory: Callable[
+        [Any, Dict[str, Any], Dict[str, Any]], Any
+    ]
+    | None = None,
     clock: Callable[[], float] | None = None,
     created_at: str | None = None,
     provenance: Mapping[str, Any] | None = None,
     source_package_parity_pairs: Sequence[tuple[str, Path, Path]] | None = None,
 ) -> Dict[str, Any]:
-    """Run the isolated fixed/adaptive response comparison.
+    """Run isolated fixed/adaptive comparisons on source and packaged engines.
 
-    ``engine_factory`` and ``clock`` are injectable so the protocol can be unit
-    tested without constructing a model.  Production callers use the real
-    source ``chat_web_app.Engine``.
+    Factories and ``clock`` are injectable so the protocol can be unit tested
+    without constructing models. Production callers execute both real Engine
+    implementations. When only ``engine_factory`` is injected, tests use it for
+    both surfaces; production never takes that shortcut.
     """
 
     weights = Path(weights).expanduser().resolve()
@@ -766,10 +1240,14 @@ def run_gate(
         raise FileNotFoundError(f"Weights not found: {weights}")
     if not metadata.is_file():
         raise FileNotFoundError(f"Metadata not found: {metadata}")
+    artifact_identity = _canonical_artifact_identity(weights, metadata)
     normalized_prompts = normalize_prompt_matrix(
         FROZEN_RELEASE_PROMPT_MATRIX if prompts is None else prompts
     )
-    source = dict(prompt_source or {"origin": "builtin", "path": None, "source_file_sha256": None})
+    source = dict(
+        prompt_source
+        or {"origin": "builtin", "path": None, "source_file_sha256": None}
+    )
     matrix_observation = _prompt_matrix_release_observation(
         normalized_prompts, source
     )
@@ -778,8 +1256,47 @@ def run_gate(
         if source_package_parity_pairs is None
         else source_package_parity_pairs
     )
-    resolved_device_info = dict(device_info or {"requested": "injected", "resolved": str(device)})
-    factory = engine_factory or Engine
+    surface_specific_runtime_hashes = _collect_source_package_parity(
+        SURFACE_SPECIFIC_RUNTIME_HASH_PAIRS
+    )
+    surface_specific_runtime_hashes.update(
+        {
+            "required_for_release": False,
+            "role": (
+                "diagnostic_hash_provenance_for_intentionally_surface_specific_files"
+            ),
+        }
+    )
+    resolved_device_info = dict(
+        device_info or {"requested": "injected", "resolved": str(device)}
+    )
+    source_factory = engine_factory or Engine
+    package_factory = packaged_engine_factory
+    packaged_recording: Dict[str, Any] | None = None
+    if package_factory is None:
+        if engine_factory is not None:
+            package_factory = source_factory
+        else:
+            packaged_recording = _run_packaged_surface_subprocess(
+                weights=weights,
+                metadata=metadata,
+                prompts=normalized_prompts,
+                device=device,
+                device_info=resolved_device_info,
+            )
+
+            def package_factory(
+                package_device: Any,
+                package_device_info: Dict[str, Any],
+                package_defaults: Dict[str, Any],
+            ) -> _PackagedSurfaceReplayEngine:
+                assert packaged_recording is not None
+                return _PackagedSurfaceReplayEngine(
+                    packaged_recording,
+                    package_device,
+                    package_device_info,
+                    package_defaults,
+                )
     timer = clock or time.perf_counter
     constructor_defaults = {
         "model_size": "auto",
@@ -790,11 +1307,97 @@ def run_gate(
         "response_temperature": 0.0,
         "prediction_stability_margin": PREDICTION_STABILITY_MARGIN,
     }
-    engine = factory(device, resolved_device_info, constructor_defaults)
-    load_status = engine.load(str(weights), str(metadata))
-    if not isinstance(load_status, Mapping) or load_status.get("ok") is not True:
-        raise ValueError("Engine did not report a successful load")
-    expected_labels = _engine_label_scope(engine, load_status)
+    engines = {
+        "source": source_factory(
+            device, dict(resolved_device_info), dict(constructor_defaults)
+        ),
+        "packaged": package_factory(
+            device, dict(resolved_device_info), dict(constructor_defaults)
+        ),
+    }
+    injected_surface_factories = engine_factory is not None
+    if injected_surface_factories:
+        surface_module_provenance = {
+            "mode": "injected_factories",
+            "source_factory": getattr(
+                source_factory, "__v51_verified_surface__", None
+            ),
+            "packaged_factory": getattr(
+                package_factory, "__v51_verified_surface__", None
+            ),
+        }
+        surface_module_provenance_passed = bool(
+            source_factory is not package_factory
+            and surface_module_provenance["source_factory"] == "source"
+            and surface_module_provenance["packaged_factory"] == "packaged"
+        )
+    else:
+        assert packaged_recording is not None
+        runtime_root = (PROJECT_ROOT / "runtime_python").resolve()
+        packaged_module_paths = dict(
+            packaged_recording.get("module_provenance", {})
+        )
+        required_packaged_modules = {
+            "chat_app",
+            "chat_pipeline",
+            "chat_web_app",
+            "device_utils",
+            "model_variants",
+        }
+        surface_module_provenance_passed = bool(
+            set(packaged_module_paths) == required_packaged_modules
+            and all(
+                runtime_root in Path(path).resolve().parents
+                for path in packaged_module_paths.values()
+            )
+        )
+        surface_module_provenance = {
+            "mode": "isolated_python_child",
+            "python_isolated_flag": True,
+            "packaged_modules": packaged_module_paths,
+        }
+    load_status_by_surface: Dict[str, Mapping[str, Any]] = {}
+    status_by_surface: Dict[str, Mapping[str, Any]] = {}
+    expected_labels_by_surface: Dict[str, List[int]] = {}
+    adaptive_runtime_defaults_by_surface: Dict[str, Dict[str, Any]] = {}
+    adaptive_runtime_default_mismatches_by_surface: Dict[
+        str, Dict[str, Dict[str, float | None]]
+    ] = {}
+    engine_release_rank_depth_by_surface: Dict[str, float] = {}
+    for surface, engine in engines.items():
+        load_status = engine.load(str(weights), str(metadata))
+        if not isinstance(load_status, Mapping) or load_status.get("ok") is not True:
+            raise ValueError(f"{surface} Engine did not report a successful load")
+        load_status_by_surface[surface] = load_status
+        status_fn = getattr(engine, "status", None)
+        raw_status = status_fn() if callable(status_fn) else None
+        status_by_surface[surface] = (
+            dict(raw_status) if isinstance(raw_status, Mapping) else {}
+        )
+        expected_labels_by_surface[surface] = _engine_label_scope(engine, load_status)
+        runtime_defaults = _effective_adaptive_defaults(engine)
+        adaptive_runtime_defaults_by_surface[surface] = runtime_defaults
+        adaptive_runtime_default_mismatches_by_surface[surface] = (
+            _release_adaptive_default_mismatches(runtime_defaults)
+        )
+        engine_release_rank_depth_by_surface[surface] = _finite_float(
+            _runtime_release_rank_depth(engine),
+            label=f"{surface} runtime release prediction stability rank depth",
+        )
+
+    model_identity = _canonical_model_identity(
+        load_status_by_surface,
+        expected_labels_by_surface,
+        status_by_surface,
+        adaptive_runtime_defaults_by_surface,
+        engine_release_rank_depth_by_surface,
+        weights=weights,
+        metadata=metadata,
+    )
+    chat_app_runtime_defaults = _chat_app_adaptive_defaults()
+    chat_app_runtime_default_mismatches = _release_adaptive_default_mismatches(
+        chat_app_runtime_defaults
+    )
 
     common_kwargs = {
         "style_mode": "auto",
@@ -811,43 +1414,100 @@ def run_gate(
     adaptive_cycle_violations = 0
     auto_compute_plan_violations = 0
     contract_violations: List[Dict[str, Any]] = []
-    adaptive_runtime_defaults = _effective_adaptive_defaults(engine)
-    adaptive_runtime_default_mismatches = _release_adaptive_default_mismatches(
-        adaptive_runtime_defaults
-    )
-    engine_release_rank_depth = _finite_float(
-        _runtime_release_rank_depth(engine),
-        label="runtime release prediction stability rank depth",
-    )
+    behavior_parity_violations: List[Dict[str, Any]] = []
 
     for index, case in enumerate(normalized_prompts):
         mode_order = ("fixed", "adaptive") if index % 2 == 0 else ("adaptive", "fixed")
-        mode_results: Dict[str, Dict[str, Any]] = {}
+        surface_results: Dict[str, Dict[str, Dict[str, Any]]] = {
+            "source": {},
+            "packaged": {},
+        }
         for mode in mode_order:
             adaptive = mode == "adaptive"
-            session_id = f"v51-response-fidelity-{index + 1:03d}-{mode}"
-            started = timer()
-            raw = engine.chat(
-                session_id=session_id,
-                user_text=case["prompt"],
-                reasoning_cycles=ADAPTIVE_MAX_CYCLES if adaptive else FIXED_CYCLES,
-                adaptive_compute=adaptive,
-                **common_kwargs,
-            )
-            wall_ms = (timer() - started) * 1000.0
-            mode_results[mode] = _response_snapshot(
-                raw,
-                label=f"prompt {case['id']} {mode}",
-                wall_ms=wall_ms,
-            )
+            for surface, engine in engines.items():
+                session_id = (
+                    f"v51-response-fidelity-{surface}-{index + 1:03d}-{mode}"
+                )
+                started = timer()
+                raw = engine.chat(
+                    session_id=session_id,
+                    user_text=case["prompt"],
+                    reasoning_cycles=(
+                        ADAPTIVE_MAX_CYCLES if adaptive else FIXED_CYCLES
+                    ),
+                    adaptive_compute=adaptive,
+                    **common_kwargs,
+                )
+                wall_ms = (timer() - started) * 1000.0
+                surface_results[surface][mode] = _response_snapshot(
+                    raw,
+                    label=f"prompt {case['id']} {surface} {mode}",
+                    wall_ms=wall_ms,
+                )
 
-        fixed = mode_results["fixed"]
-        adaptive = mode_results["adaptive"]
-        fixed_texts = [row["text"] for row in fixed["top_candidates"]]
-        adaptive_texts = [row["text"] for row in adaptive["top_candidates"]]
-        response_match = fixed["response"] == adaptive["response"]
-        candidates_match = fixed_texts == adaptive_texts
+        per_surface_comparison: Dict[str, Dict[str, bool]] = {}
+        response_match = True
+        candidates_match = True
         mismatch_kinds: List[str] = []
+        for surface, mode_results in surface_results.items():
+            fixed = mode_results["fixed"]
+            adaptive_result = mode_results["adaptive"]
+            fixed_texts = [row["text"] for row in fixed["top_candidates"]]
+            adaptive_texts = [
+                row["text"] for row in adaptive_result["top_candidates"]
+            ]
+            surface_response_match = fixed["response"] == adaptive_result["response"]
+            surface_candidates_match = fixed_texts == adaptive_texts
+            response_match = response_match and surface_response_match
+            candidates_match = candidates_match and surface_candidates_match
+            per_surface_comparison[surface] = {
+                "response_exact_match": surface_response_match,
+                "top_candidate_text_order_exact_match": surface_candidates_match,
+            }
+
+            fixed_cycles = fixed["compute"].get("cycles_used")
+            adaptive_cycles = adaptive_result["compute"].get("cycles_used")
+            if fixed_cycles is None or fixed_cycles != float(FIXED_CYCLES):
+                fixed_cycle_violations += 1
+            if (
+                adaptive_cycles is None
+                or adaptive_cycles <= 0.0
+                or adaptive_cycles > float(ADAPTIVE_MAX_CYCLES)
+            ):
+                adaptive_cycle_violations += 1
+            auto_compute_plan_violations += int(
+                fixed["auto_compute_plan"] is not None
+            )
+            auto_compute_plan_violations += int(
+                adaptive_result["auto_compute_plan"] is not None
+            )
+            for mode, mode_snapshot in (
+                ("fixed", fixed),
+                ("adaptive", adaptive_result),
+            ):
+                mode_violations = _mode_contract_violations(
+                    mode_snapshot["compute"],
+                    mode=mode,
+                    expected_labels=expected_labels_by_surface[surface],
+                    engine_release_rank_depth=(
+                        engine_release_rank_depth_by_surface[surface]
+                    ),
+                    engine_release_defaults=(
+                        adaptive_runtime_defaults_by_surface[surface]
+                    ),
+                )
+                if mode_snapshot["auto_compute_plan"] is not None:
+                    mode_violations.append("auto_compute_plan_present")
+                if mode_violations:
+                    contract_violations.append(
+                        {
+                            "prompt_id": case["id"],
+                            "surface": surface,
+                            "mode": mode,
+                            "violations": mode_violations,
+                        }
+                    )
+
         if not response_match:
             response_mismatches += 1
             mismatch_kinds.append("response_text")
@@ -857,34 +1517,22 @@ def run_gate(
         if mismatch_kinds:
             any_mismatches += 1
 
-        fixed_cycles = fixed["compute"].get("cycles_used")
-        adaptive_cycles = adaptive["compute"].get("cycles_used")
-        if fixed_cycles is None or fixed_cycles != float(FIXED_CYCLES):
-            fixed_cycle_violations += 1
-        if (
-            adaptive_cycles is None
-            or adaptive_cycles <= 0.0
-            or adaptive_cycles > float(ADAPTIVE_MAX_CYCLES)
-        ):
-            adaptive_cycle_violations += 1
-        auto_compute_plan_violations += int(fixed["auto_compute_plan"] is not None)
-        auto_compute_plan_violations += int(adaptive["auto_compute_plan"] is not None)
-        for mode, mode_snapshot in (("fixed", fixed), ("adaptive", adaptive)):
-            mode_violations = _mode_contract_violations(
-                mode_snapshot["compute"],
-                mode=mode,
-                expected_labels=expected_labels,
-                engine_release_rank_depth=engine_release_rank_depth,
-                engine_release_defaults=adaptive_runtime_defaults,
+        behavior_parity_by_mode: Dict[str, Dict[str, Any]] = {}
+        for mode in ("fixed", "adaptive"):
+            parity_mismatches = _behavior_parity_mismatches(
+                surface_results["source"][mode],
+                surface_results["packaged"][mode],
             )
-            if mode_snapshot["auto_compute_plan"] is not None:
-                mode_violations.append("auto_compute_plan_present")
-            if mode_violations:
-                contract_violations.append(
+            behavior_parity_by_mode[mode] = {
+                "passed": not parity_mismatches,
+                "mismatched_fields": parity_mismatches,
+            }
+            if parity_mismatches:
+                behavior_parity_violations.append(
                     {
                         "prompt_id": case["id"],
                         "mode": mode,
-                        "violations": mode_violations,
+                        "mismatched_fields": parity_mismatches,
                     }
                 )
 
@@ -892,16 +1540,28 @@ def run_gate(
             {
                 **case,
                 "measurement_order": list(mode_order),
-                "fixed": fixed,
-                "adaptive": adaptive,
+                # Source aliases preserve the original artifact shape.
+                "fixed": surface_results["source"]["fixed"],
+                "adaptive": surface_results["source"]["adaptive"],
+                "surfaces": surface_results,
                 "comparison": {
                     "response_exact_match": response_match,
                     "top_candidate_text_order_exact_match": candidates_match,
                     "mismatch_kinds": mismatch_kinds,
+                    "by_surface": per_surface_comparison,
+                    "source_package_behavior_parity": behavior_parity_by_mode,
                 },
             }
         )
 
+    engine_defaults_passed = not any(
+        adaptive_runtime_default_mismatches_by_surface.values()
+    )
+    packaged_engine = engines["packaged"]
+    packaged_recording_consumed = bool(
+        not isinstance(packaged_engine, _PackagedSurfaceReplayEngine)
+        or packaged_engine.remaining_calls == 0
+    )
     checks = {
         "zero_response_text_mismatches": {
             "passed": response_mismatches == 0,
@@ -920,10 +1580,38 @@ def run_gate(
             "observed": matrix_observation["observed"],
             "required": matrix_observation["required"],
         },
+        "canonical_default_checkpoint_and_metadata_identity": {
+            "passed": artifact_identity["passed"],
+            "diagnostic_only": artifact_identity["diagnostic_only"],
+            "observed": artifact_identity["observed"],
+            "required": artifact_identity["required"],
+            "canonical_default_files_match_pinned_hashes": artifact_identity[
+                "canonical_default_files_match_pinned_hashes"
+            ],
+        },
+        "canonical_model_runtime_identity": model_identity,
+        "isolated_source_packaged_module_provenance": {
+            "passed": surface_module_provenance_passed,
+            "evidence": surface_module_provenance,
+        },
         "source_package_runtime_exact_parity": {
             "passed": source_package_parity["passed"],
             "method": source_package_parity["method"],
             "pair_count": len(source_package_parity["pairs"]),
+        },
+        "source_package_engine_exact_behavior_parity": {
+            "passed": (
+                not behavior_parity_violations and packaged_recording_consumed
+            ),
+            "timing_excluded_as_nondeterministic": True,
+            "compared_fields": list(
+                _deterministic_response_evidence(
+                    prompt_results[0]["surfaces"]["source"]["fixed"]
+                )
+            ),
+            "violation_count": len(behavior_parity_violations),
+            "violations": behavior_parity_violations,
+            "packaged_recording_consumed": packaged_recording_consumed,
         },
         "fixed_runs_used_exactly_3_cycles": {
             "passed": fixed_cycle_violations == 0,
@@ -941,14 +1629,19 @@ def run_gate(
             "passed": auto_compute_plan_violations == 0,
             "violations": auto_compute_plan_violations,
         },
-        "authoritative_chat_app_adaptive_runtime_defaults": {
-            "passed": not adaptive_runtime_default_mismatches,
-            "actual": {
-                key: adaptive_runtime_defaults.get(key)
-                for key in AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS
-            },
+        "canonical_chat_app_adaptive_defaults_unchanged": {
+            "passed": not chat_app_runtime_default_mismatches,
+            "actual": chat_app_runtime_defaults,
             "required": dict(AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS),
-            "mismatches": adaptive_runtime_default_mismatches,
+            "mismatches": chat_app_runtime_default_mismatches,
+        },
+        "authoritative_chat_app_adaptive_runtime_defaults": {
+            "passed": engine_defaults_passed,
+            "actual_by_surface": adaptive_runtime_defaults_by_surface,
+            "required": dict(AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS),
+            "mismatches_by_surface": (
+                adaptive_runtime_default_mismatches_by_surface
+            ),
         },
         "runtime_release_verifier_contract_observed": {
             "passed": not contract_violations,
@@ -959,17 +1652,45 @@ def run_gate(
             "required_adaptive_runtime_defaults": dict(
                 AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS
             ),
-            "required_class_indices": expected_labels,
+            "required_class_indices": list(range(CANONICAL_RELEASE_CLASS_COUNT)),
         },
     }
     all_checks_passed = all(bool(row["passed"]) for row in checks.values())
 
-    fixed_total_timings = [row["fixed"]["timing_ms"]["total"] for row in prompt_results]
-    adaptive_total_timings = [row["adaptive"]["timing_ms"]["total"] for row in prompt_results]
-    fixed_cycles_values = [row["fixed"]["compute"].get("cycles_used") for row in prompt_results]
-    adaptive_cycles_values = [row["adaptive"]["compute"].get("cycles_used") for row in prompt_results]
-    fixed_exits = Counter(str(row["fixed"]["compute"].get("exit_reason", "unknown")) for row in prompt_results)
-    adaptive_exits = Counter(str(row["adaptive"]["compute"].get("exit_reason", "unknown")) for row in prompt_results)
+    surface_summaries: Dict[str, Dict[str, Any]] = {}
+    for surface in engines:
+        fixed_rows = [row["surfaces"][surface]["fixed"] for row in prompt_results]
+        adaptive_rows = [
+            row["surfaces"][surface]["adaptive"] for row in prompt_results
+        ]
+        fixed_exits = Counter(
+            str(row["compute"].get("exit_reason", "unknown")) for row in fixed_rows
+        )
+        adaptive_exits = Counter(
+            str(row["compute"].get("exit_reason", "unknown"))
+            for row in adaptive_rows
+        )
+        surface_summaries[surface] = {
+            "fixed_total_timing_ms": _timing_summary(
+                [row["timing_ms"]["total"] for row in fixed_rows]
+            ),
+            "adaptive_total_timing_ms": _timing_summary(
+                [row["timing_ms"]["total"] for row in adaptive_rows]
+            ),
+            "fixed_cycles": [row["compute"].get("cycles_used") for row in fixed_rows],
+            "adaptive_cycles": [
+                row["compute"].get("cycles_used") for row in adaptive_rows
+            ],
+            "fixed_exit_reasons": dict(sorted(fixed_exits.items())),
+            "adaptive_exit_reasons": dict(sorted(adaptive_exits.items())),
+        }
+
+    source_summary = surface_summaries["source"]
+    release_eligible = bool(
+        matrix_observation["release_eligible"]
+        and artifact_identity["passed"]
+        and model_identity["passed"]
+    )
 
     worktree_status = _git_text("status", "--porcelain", "--untracked-files=all")
     payload: Dict[str, Any] = {
@@ -981,13 +1702,23 @@ def run_gate(
                 if matrix_observation["release_eligible"]
                 else "diagnostic_prompt_matrix"
             ),
-            "statement": "Deterministic regression evidence for this exact hashed prompt matrix and checkpoint only.",
+            "artifact_kind": (
+                "canonical_default_v51_artifacts"
+                if artifact_identity["passed"]
+                else "diagnostic_custom_artifacts"
+            ),
+            "statement": (
+                "Deterministic regression evidence for the exact canonical v51 "
+                "prompt matrix, checkpoint, metadata, and runtime identity only."
+            ),
             "held_out_claim": False,
             "universal_chat_fidelity_claim": False,
-            "release_eligible": matrix_observation["release_eligible"],
+            "release_eligible": release_eligible,
         },
-        "checkpoint": {"path": str(weights), "sha256": _sha256_file(weights)},
-        "metadata": {"path": str(metadata), "sha256": _sha256_file(metadata)},
+        "checkpoint": artifact_identity["observed"]["weights"],
+        "metadata": artifact_identity["observed"]["metadata"],
+        "artifact_identity": artifact_identity,
+        "model_identity": model_identity,
         "prompt_matrix": {
             **source,
             "sha256": matrix_observation["observed"]["sha256"],
@@ -999,52 +1730,78 @@ def run_gate(
             "canonical_release_contract": matrix_observation["required"],
         },
         "source_package_parity": source_package_parity,
+        "surface_specific_runtime_hashes": surface_specific_runtime_hashes,
+        "surface_module_provenance": surface_module_provenance,
         "settings": {
-            "engine": "source.chat_web_app.Engine",
+            "engines": {
+                "source": "source.chat_web_app.Engine",
+                "packaged": "runtime_python.chat_web_app.Engine",
+            },
             "fixed_cycles": FIXED_CYCLES,
             "adaptive_max_cycles": ADAPTIVE_MAX_CYCLES,
             "response_temperature": 0.0,
             "auto_compute": False,
             "prediction_stability_margin": PREDICTION_STABILITY_MARGIN,
-            "adaptive_runtime_defaults": adaptive_runtime_defaults,
+            "adaptive_runtime_defaults": adaptive_runtime_defaults_by_surface[
+                "source"
+            ],
+            "adaptive_runtime_defaults_by_surface": (
+                adaptive_runtime_defaults_by_surface
+            ),
             "authoritative_adaptive_runtime_defaults": dict(
                 AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS
             ),
             "prediction_stability_rank_depth": {
                 "selection": "runtime_release_default",
                 "authoritative": AUTHORITATIVE_RELEASE_PREDICTION_STABILITY_RANK_DEPTH,
-                "resolved": engine_release_rank_depth,
+                "resolved": engine_release_rank_depth_by_surface["source"],
+                "resolved_by_surface": engine_release_rank_depth_by_surface,
                 "explicitly_overridden_by_gate": False,
             },
-            "available_label_scope": expected_labels,
+            "available_label_scope": expected_labels_by_surface["source"],
+            "available_label_scope_by_surface": expected_labels_by_surface,
             "show_top_responses": TOP_CANDIDATE_COUNT,
             "session_isolation": "unique_empty_session_per_prompt_and_mode",
             "measurement_order": "alternate_fixed_first_and_adaptive_first_by_prompt",
         },
         "load": {
-            "ok": True,
-            "load_ms": _optional_finite_float(load_status.get("load_ms"), label="load_ms"),
-            "model_size": str(load_status.get("model_size", "")),
-            "feature_mode": str(load_status.get("feature_mode", "")),
-            "available_labels": _optional_finite_float(load_status.get("available_labels"), label="available_labels"),
+            surface: {
+                "ok": True,
+                "load_ms": _optional_finite_float(
+                    status.get("load_ms"), label=f"{surface} load_ms"
+                ),
+                "model_size": str(status.get("model_size", "")),
+                "feature_mode": str(status.get("feature_mode", "")),
+                "available_labels": _optional_finite_float(
+                    status.get("available_labels"),
+                    label=f"{surface} available_labels",
+                ),
+            }
+            for surface, status in load_status_by_surface.items()
         },
         "summary": {
             "prompt_count": len(normalized_prompts),
             "response_text_mismatch_count": response_mismatches,
             "top_candidate_text_order_mismatch_count": candidate_mismatches,
             "any_fidelity_mismatch_count": any_mismatches,
-            "fixed_total_timing_ms": _timing_summary(fixed_total_timings),
-            "adaptive_total_timing_ms": _timing_summary(adaptive_total_timings),
+            "source_package_behavior_parity_violation_count": len(
+                behavior_parity_violations
+            ),
+            "fixed_total_timing_ms": source_summary["fixed_total_timing_ms"],
+            "adaptive_total_timing_ms": source_summary[
+                "adaptive_total_timing_ms"
+            ],
             "fixed_cycles": [
                 _optional_finite_float(value, label="fixed cycles summary")
-                for value in fixed_cycles_values
+                for value in source_summary["fixed_cycles"]
             ],
             "adaptive_cycles": [
                 _optional_finite_float(value, label="adaptive cycles summary")
-                for value in adaptive_cycles_values
+                for value in source_summary["adaptive_cycles"]
             ],
-            "fixed_exit_reasons": dict(sorted(fixed_exits.items())),
-            "adaptive_exit_reasons": dict(sorted(adaptive_exits.items())),
+            "fixed_exit_reasons": source_summary["fixed_exit_reasons"],
+            "adaptive_exit_reasons": source_summary["adaptive_exit_reasons"],
+            "by_surface": surface_summaries,
         },
         "gates": {"passed": all_checks_passed, "checks": checks},
         "provenance": dict(provenance) if provenance is not None else {

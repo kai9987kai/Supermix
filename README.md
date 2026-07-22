@@ -15,12 +15,15 @@ It is intentionally a mixed workspace, not a minimal source-only model repo.
 
 ## Current status
 
-As of July 18, 2026:
+As of July 22, 2026:
 
 - `source/` is the active Supermix Studio runtime and packaging tree
 - the curated desktop build selects `11` core model artifacts and leaves expansion to the model store
 - the route control plane includes durable lifecycle evidence, Policy Lab diagnostics,
   bounded-exposure rehearsal, and a fail-closed stateful experiment protocol preflight
+- v51 local inference supports progressive accepted-probe reuse plus a post-head,
+  allowed-label-scoped decision verifier that checks the ordered top-3 boundary before
+  an adaptive early exit
 - `runtime_python/` remains a legacy compatibility snapshot for the smaller chat runtime;
   it is not the source of truth for the multimodel Studio route control plane
 - the Windows installer contract version is `2026.07.18`
@@ -52,6 +55,8 @@ As of July 18, 2026:
 - native-image experimental checkpoints
 - training pipelines for frontier, omni, lite, and specialist model lines
 - benchmark sweeps across common text benchmarks
+- release-gated v51 adaptive compute with source/package parity and frozen-prompt
+  response-fidelity checks
 - export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
 
 ## Quick start

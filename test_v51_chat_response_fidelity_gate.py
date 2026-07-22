@@ -13,6 +13,7 @@ import run_v51_chat_response_fidelity_gate as gate
 
 
 class _StubEngine:
+    __v51_verified_surface__ = "source"
     instances = []
     mismatch_prompt = None
     nonfinite_timing = False
@@ -21,6 +22,10 @@ class _StubEngine:
     applied_value = True
     adaptive_compute_overrides = {}
     runtime_default_overrides = {}
+    load_status_overrides = {}
+    status_overrides = {}
+    available_label_count = 10
+    response_suffix = ""
 
     def __init__(self, device, device_info, defaults):
         self.device = device
@@ -36,18 +41,34 @@ class _StubEngine:
         }
         self.defaults.update(type(self).runtime_default_overrides)
         self.calls = []
-        self.available_labels = list(range(10))
+        self.available_labels = list(range(type(self).available_label_count))
         type(self).instances.append(self)
 
     def load(self, weights, metadata):
         self.loaded = (weights, metadata)
-        return {
+        status = {
             "ok": True,
             "load_ms": 2.5,
             "model_size": "cognitive_leap_ultra_expert",
             "feature_mode": "context_mix_v4",
-            "available_labels": 10,
+            "available_labels": len(self.available_labels),
         }
+        status.update(type(self).load_status_overrides)
+        return status
+
+    def status(self):
+        status = {
+            "loaded": True,
+            "weights": self.loaded[0],
+            "meta": self.loaded[1],
+            "runtime_compute_supported": True,
+            "sessions": 0,
+            "reasoning_cycles": 3,
+            "adaptive_compute": False,
+            "auto_compute": False,
+        }
+        status.update(type(self).status_overrides)
+        return status
 
     def chat(self, **kwargs):
         self.calls.append(kwargs)
@@ -90,14 +111,17 @@ class _StubEngine:
                     "prediction_rank_depth": 3,
                     "prediction_decision_margin": 0.1,
                     "prediction_margin": 0.2,
-                    "prediction_class_count": 10,
+                    "prediction_class_count": len(self.available_labels),
                     "prediction_class_selection_valid": True,
                 }
             )
             compute.update(type(self).adaptive_compute_overrides)
         return {
             "ok": True,
-            "response": "adaptive mismatch" if mismatch else f"answer:{prompt}",
+            "response": (
+                "adaptive mismatch" if mismatch else f"answer:{prompt}"
+            )
+            + type(self).response_suffix,
             "style_mode": "balanced",
             "timing_ms": {
                 "infer": math.nan if type(self).nonfinite_timing else 1.0,
@@ -114,6 +138,14 @@ class _StubEngine:
         }
 
 
+class _PackagedStubEngine(_StubEngine):
+    __v51_verified_surface__ = "packaged"
+
+
+class _PackagedBehaviorDriftEngine(_PackagedStubEngine):
+    response_suffix = " [packaged drift]"
+
+
 @pytest.fixture(autouse=True)
 def _reset_stub():
     _StubEngine.instances = []
@@ -124,6 +156,10 @@ def _reset_stub():
     _StubEngine.applied_value = True
     _StubEngine.adaptive_compute_overrides = {}
     _StubEngine.runtime_default_overrides = {}
+    _StubEngine.load_status_overrides = {}
+    _StubEngine.status_overrides = {}
+    _StubEngine.available_label_count = 10
+    _StubEngine.response_suffix = ""
 
 
 def _artifacts(tmp_path):
@@ -135,7 +171,7 @@ def _artifacts(tmp_path):
 
 
 def _clock():
-    ticks = iter(index / 1000 for index in range(100))
+    ticks = iter(index / 1000 for index in range(1000))
     return lambda: next(ticks)
 
 
@@ -147,13 +183,13 @@ def _custom_prompts():
 
 
 def _run(tmp_path, **overrides):
-    weights, metadata = _artifacts(tmp_path)
     kwargs = {
-        "weights": weights,
-        "metadata": metadata,
+        "weights": gate.DEFAULT_WEIGHTS,
+        "metadata": gate.DEFAULT_META,
         "device": "cpu-stub",
         "device_info": {"requested": "stub", "resolved": "cpu-stub"},
         "engine_factory": _StubEngine,
+        "packaged_engine_factory": _PackagedStubEngine,
         "clock": _clock(),
         "created_at": "2026-07-22T00:00:00+00:00",
         "provenance": {"test": True},
@@ -263,7 +299,11 @@ def test_gate_uses_isolated_sessions_release_defaults_and_exact_comparisons(tmp_
     assert payload["summary"]["top_candidate_text_order_mismatch_count"] == 0
     assert payload["claim_scope"] == {
         "matrix_kind": "frozen_release_prompt_matrix",
-        "statement": "Deterministic regression evidence for this exact hashed prompt matrix and checkpoint only.",
+        "artifact_kind": "canonical_default_v51_artifacts",
+        "statement": (
+            "Deterministic regression evidence for the exact canonical v51 "
+            "prompt matrix, checkpoint, metadata, and runtime identity only."
+        ),
         "held_out_claim": False,
         "universal_chat_fidelity_claim": False,
         "release_eligible": True,
@@ -275,6 +315,7 @@ def test_gate_uses_isolated_sessions_release_defaults_and_exact_comparisons(tmp_
         "selection": "runtime_release_default",
         "authoritative": 3,
         "resolved": 3,
+        "resolved_by_surface": {"source": 3.0, "packaged": 3.0},
         "explicitly_overridden_by_gate": False,
     }
     assert payload["settings"]["adaptive_runtime_defaults"] == {
@@ -303,10 +344,125 @@ def test_gate_uses_isolated_sessions_release_defaults_and_exact_comparisons(tmp_
         assert call["show_top_responses"] == 5
         assert "prediction_stability_rank_depth" not in call
     assert payload["source_package_parity"]["passed"] is True
+    assert payload["surface_specific_runtime_hashes"]["required_for_release"] is False
+    assert payload["gates"]["checks"][
+        "source_package_engine_exact_behavior_parity"
+    ]["passed"] is True
+    assert payload["gates"]["checks"][
+        "isolated_source_packaged_module_provenance"
+    ]["passed"] is True
+    assert payload["gates"]["checks"][
+        "canonical_default_checkpoint_and_metadata_identity"
+    ]["passed"] is True
+    assert payload["gates"]["checks"]["canonical_model_runtime_identity"][
+        "passed"
+    ] is True
     assert payload["gates"]["checks"]["canonical_builtin_release_prompt_matrix"]["passed"] is True
     assert payload["gates"]["checks"][
         "authoritative_chat_app_adaptive_runtime_defaults"
     ]["passed"] is True
+
+
+def test_release_adaptive_defaults_are_literal_and_immutable():
+    with pytest.raises(TypeError):
+        gate.AUTHORITATIVE_RELEASE_ADAPTIVE_DEFAULTS["adaptive_exit_tol"] = 999.0
+
+
+def test_coordinated_chat_app_default_drift_cannot_redefine_release(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(gate.chat_app, "DEFAULT_ADAPTIVE_EXIT_TOL", 999.0)
+
+    payload = _run(tmp_path)
+
+    check = payload["gates"]["checks"][
+        "canonical_chat_app_adaptive_defaults_unchanged"
+    ]
+    assert check["passed"] is False
+    assert check["mismatches"]["adaptive_exit_tol"] == {
+        "actual": 999.0,
+        "required": 0.001,
+    }
+    assert payload["gates"]["passed"] is False
+
+
+def test_custom_checkpoint_and_metadata_are_diagnostic_only(tmp_path):
+    weights, metadata = _artifacts(tmp_path)
+
+    payload = _run(tmp_path, weights=weights, metadata=metadata)
+
+    identity = payload["gates"]["checks"][
+        "canonical_default_checkpoint_and_metadata_identity"
+    ]
+    assert identity["passed"] is False
+    assert identity["diagnostic_only"] is True
+    assert payload["claim_scope"]["artifact_kind"] == "diagnostic_custom_artifacts"
+    assert payload["claim_scope"]["release_eligible"] is False
+    assert payload["gates"]["passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("load_overrides", "label_count"),
+    [
+        ({"model_size": "base"}, 10),
+        ({"feature_mode": "legacy"}, 10),
+        ({}, 9),
+    ],
+)
+def test_noncanonical_model_identity_blocks_release(
+    tmp_path, load_overrides, label_count
+):
+    _StubEngine.load_status_overrides = load_overrides
+    _StubEngine.available_label_count = label_count
+
+    payload = _run(tmp_path)
+
+    identity = payload["gates"]["checks"]["canonical_model_runtime_identity"]
+    assert identity["passed"] is False
+    assert payload["claim_scope"]["release_eligible"] is False
+    assert payload["gates"]["passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("status_key", "mutated_value"),
+    [
+        ("loaded", False),
+        ("runtime_compute_supported", False),
+        ("sessions", 1),
+        ("reasoning_cycles", 8),
+    ],
+)
+def test_noncanonical_loaded_runtime_status_blocks_release(
+    tmp_path, status_key, mutated_value
+):
+    _StubEngine.status_overrides = {status_key: mutated_value}
+
+    payload = _run(tmp_path)
+
+    identity = payload["gates"]["checks"]["canonical_model_runtime_identity"]
+    assert identity["passed"] is False
+    assert payload["gates"]["passed"] is False
+
+
+def test_packaged_behavior_drift_blocks_release_even_when_each_mode_is_stable(
+    tmp_path,
+):
+    payload = _run(
+        tmp_path,
+        packaged_engine_factory=_PackagedBehaviorDriftEngine,
+    )
+
+    assert payload["summary"]["any_fidelity_mismatch_count"] == 0
+    parity = payload["gates"]["checks"][
+        "source_package_engine_exact_behavior_parity"
+    ]
+    assert parity["passed"] is False
+    assert parity["violation_count"] == gate.CANONICAL_RELEASE_PROMPT_MATRIX_COUNT * 2
+    assert all(
+        row["mismatched_fields"] == ["response"]
+        for row in parity["violations"]
+    )
+    assert payload["gates"]["passed"] is False
 
 
 @pytest.mark.parametrize(
@@ -329,7 +485,12 @@ def test_noncanonical_engine_adaptive_defaults_block_release(
         "authoritative_chat_app_adaptive_runtime_defaults"
     ]
     assert check["passed"] is False
-    assert check["mismatches"][runtime_key]["actual"] == float(mutated_value)
+    assert check["mismatches_by_surface"]["source"][runtime_key][
+        "actual"
+    ] == float(mutated_value)
+    assert check["mismatches_by_surface"]["packaged"][runtime_key][
+        "actual"
+    ] == float(mutated_value)
     assert payload["gates"]["passed"] is False
 
 
@@ -371,7 +532,7 @@ def test_noncanonical_observed_adaptive_controls_block_release(
     adaptive_violations = [
         row for row in contract["violations"] if row["mode"] == "adaptive"
     ]
-    assert len(adaptive_violations) == gate.CANONICAL_RELEASE_PROMPT_MATRIX_COUNT
+    assert len(adaptive_violations) == gate.CANONICAL_RELEASE_PROMPT_MATRIX_COUNT * 2
     assert all(violation in row["violations"] for row in adaptive_violations)
     assert payload["gates"]["passed"] is False
 

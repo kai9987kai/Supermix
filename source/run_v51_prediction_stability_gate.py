@@ -264,6 +264,43 @@ def _validated_scalar_summary(
     return values
 
 
+def _validated_latency_summary(
+    summary: Mapping[str, Any],
+    *,
+    request_count: int,
+    label: str,
+) -> Dict[str, float]:
+    if not isinstance(summary, Mapping):
+        raise ValueError(f"{label} latency summary must be an object")
+    if "total_ms" not in summary:
+        raise ValueError(f"{label} latency summary is missing total_ms")
+    mean_ms = _finite_float(summary.get("mean_ms"), label=f"{label} mean latency")
+    total_ms = _finite_float(summary["total_ms"], label=f"{label} total latency")
+    if mean_ms <= 0.0 or total_ms <= 0.0:
+        raise ValueError(f"{label} latency must be positive")
+
+    # The benchmark serializes mean_ms to 3 decimals and total_ms to 6.
+    # Multiplying the rounded mean can therefore differ from the rounded total
+    # by at most 0.0005 ms per request, plus half a microsecond of total rounding.
+    absolute_tolerance_ms = 0.0005 * request_count + 0.000001
+    expected_total_ms = mean_ms * request_count
+    if not math.isclose(
+        total_ms,
+        expected_total_ms,
+        rel_tol=0.0,
+        abs_tol=absolute_tolerance_ms,
+    ):
+        raise ValueError(
+            f"{label} total latency is inconsistent with mean_ms * request_count"
+        )
+    return {
+        "mean_ms": mean_ms,
+        "total_ms": total_ms,
+        "expected_total_from_rounded_mean_ms": expected_total_ms,
+        "absolute_rounding_tolerance_ms": absolute_tolerance_ms,
+    }
+
+
 def aggregate_gate_results(
     seed_results: Sequence[Mapping[str, Any]],
     *,
@@ -810,26 +847,18 @@ def aggregate_gate_results(
             or adaptive_first != request_count - expected_fixed_first
         ):
             raise ValueError(f"Seed {seed} measurement order is not counterbalanced")
-        fixed_mean_latency = _finite_float(
-            fixed["latency"]["mean_ms"], label="fixed latency"
+        fixed_latency_evidence = _validated_latency_summary(
+            fixed["latency"],
+            request_count=request_count,
+            label=f"seed {seed} fixed",
         )
-        adaptive_mean_latency = _finite_float(
-            adaptive["latency"]["mean_ms"], label="adaptive latency"
+        adaptive_latency_evidence = _validated_latency_summary(
+            adaptive["latency"],
+            request_count=request_count,
+            label=f"seed {seed} adaptive",
         )
-        fixed_total_latency = _finite_float(
-            fixed["latency"].get("total_ms", fixed_mean_latency * request_count),
-            label="fixed total latency",
-        )
-        adaptive_total_latency = _finite_float(
-            adaptive["latency"].get(
-                "total_ms", adaptive_mean_latency * request_count
-            ),
-            label="adaptive total latency",
-        )
-        if fixed_mean_latency <= 0.0 or fixed_total_latency <= 0.0:
-            raise ValueError(f"Seed {seed} fixed latency must be positive")
-        if adaptive_mean_latency <= 0.0 or adaptive_total_latency <= 0.0:
-            raise ValueError(f"Seed {seed} adaptive latency must be positive")
+        fixed_total_latency = fixed_latency_evidence["total_ms"]
+        adaptive_total_latency = adaptive_latency_evidence["total_ms"]
         latency_reduction = (
             100.0
             * (fixed_total_latency - adaptive_total_latency)
@@ -898,6 +927,10 @@ def aggregate_gate_results(
                 "adaptive_mean_latency_ms": round(
                     adaptive_total_latency / request_count, 6
                 ),
+                "latency_consistency": {
+                    "fixed": fixed_latency_evidence,
+                    "adaptive": adaptive_latency_evidence,
+                },
                 "mean_latency_reduction_percent": round(latency_reduction, 6),
                 "measurement_order": comparison["measurement_order"],
             }
