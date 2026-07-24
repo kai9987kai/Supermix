@@ -15,12 +15,15 @@ It is intentionally a mixed workspace, not a minimal source-only model repo.
 
 ## Current status
 
-As of July 18, 2026:
+As of July 22, 2026:
 
 - `source/` is the active Supermix Studio runtime and packaging tree
 - the curated desktop build selects `11` core model artifacts and leaves expansion to the model store
 - the route control plane includes durable lifecycle evidence, Policy Lab diagnostics,
   bounded-exposure rehearsal, and a fail-closed stateful experiment protocol preflight
+- v51 local inference supports progressive accepted-probe reuse plus a post-head,
+  allowed-label-scoped decision verifier that checks the ordered top-3 boundary before
+  an adaptive early exit
 - `runtime_python/` remains a legacy compatibility snapshot for the smaller chat runtime;
   it is not the source of truth for the multimodel Studio route control plane
 - the Windows installer contract version is `2026.07.18`
@@ -52,6 +55,8 @@ As of July 18, 2026:
 - native-image experimental checkpoints
 - training pipelines for frontier, omni, lite, and specialist model lines
 - benchmark sweeps across common text benchmarks
+- release-gated v51 adaptive compute with source/package parity and frozen-prompt
+  response-fidelity checks
 - export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
 
 ## Quick start
@@ -333,18 +338,44 @@ executed envelope.
 
 ## Research and experiment notes
 
-The v51 stability benchmark supports a research-derived, shadow-only
-distribution-drift diagnostic:
+The accepted v51 decision-fidelity configuration is checkpoint- and
+workload-calibrated: ordered top-3 persistence, a `0.0005` minimum adjacent
+probability gap through the top-3/outside boundary, and exact fallback to the
+trained three-cycle reference output whenever an earlier decision is not
+certified. Legacy latent, entropy, and ACT signals cannot bypass this post-head
+verifier.
+
+The clean CPU release gate at commit `81c4dbe7` evaluated 4,096 held-out
+requests in each of two modes (isolated verifier and exact release-runtime
+defaults):
+
+- zero top-1, ordered top-3, top-3-set, or exact-output disagreements in both
+  modes, with zero per-seed accuracy deltas;
+- 3,941 certified cycle-2 exits and 155 exact cycle-3 reference fallbacks,
+  for 2.0378 mean cycles and a 32.07% cycle reduction from fixed cycle 3;
+- positive counterbalanced latency results in both modes: 4.76% weighted / 3.71%
+  median-per-seed reduction for release runtime and 7.23% / 5.57% for the
+  isolated verifier;
+- the frozen 16-prompt source/package response gate had zero response,
+  top-five-order, runtime-contract, or packaged-behavior mismatches; and
+- progressive accepted-probe auto compute matched the legacy controller exactly
+  on 256 requests while reducing forward evaluations by 31.25% and weighted
+  latency by 30.09%.
 
 ```powershell
-python source/benchmark_v51_prediction_stability.py --distribution_top_k 5
+python source/run_v51_prediction_stability_gate.py --device cpu --torch-num-threads 8 --torch-interop-threads 1 --strict-determinism --samples-per-seed 512 --enforce-gates
+python source/run_v51_chat_response_fidelity_gate.py --device cpu --torch-num-threads 8 --torch-interop-threads 1 --strict-determinism --enforce-gates
+python source/benchmark_progressive_auto_compute.py --device cpu --torch-num-threads 8 --torch-interop-threads 1 --strict-determinism --enforce-gates
 ```
 
-It reports consecutive-prefix top-k Jensen-Shannon divergence with a retained
-`other` mass bucket. The metric is telemetry only and does not authorize an
-early exit. A 480-request CPU pilot retained 96/96 agreement for the current
-patience-2/tolerance-0.005 setting with 28.8% fewer cycles; the release gate is a
-larger fresh-seed confirmation, not that pilot result.
+The stricter gate rejected the earlier `0.0001` candidate: release mode showed
+5 top-1, 18 ordered-top-3, and 10 top-3-set disagreements; isolated mode showed
+2, 6, and 4. That failure led to the common exit guard, ordered-rank state, the
+calibrated margin, bounded disagreement evidence, and reference-budget fallback.
+Top-k Jensen-Shannon divergence remains shadow telemetry only and cannot
+authorize an exit. These are deterministic results for this checkpoint,
+synthetic task, seeds, and frozen prompt matrix—not a universal reasoning or
+chat-quality guarantee.
 
 This repo is a living experiment workspace. It contains finished artifacts, release-ready packaging, and in-progress work at the same time.
 

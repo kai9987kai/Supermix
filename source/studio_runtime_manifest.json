@@ -2,6 +2,13 @@
   "active_runtime_tree": "source",
   "app_version": "2026.07.18",
   "contracts": {
+    "source/chat_app.py": {
+      "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
+      "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
+      "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
+      "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0005,
+      "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH": 3
+    },
     "source/route_policy_explorer.py": {
       "REHEARSAL_RECEIPT_SCHEMA_VERSION": "route-exploration-rehearsal-receipt-v1",
       "REHEARSAL_SUPPORT_PROPOSAL_SCHEMA_VERSION": "route-exploration-rehearsal-support-proposal-v1",
@@ -70,18 +77,18 @@
   "modules": [
     {
       "path": "source/chat_app.py",
-      "sha256": "c09e304356673cb49678ffbba4a53b00984659e911dcbfedef3c437aad07a3a7",
-      "size_bytes": 63948
+      "sha256": "210ab471cc97832d6e00c891ff2179941895986b40010cd06f983547c21ac2ea",
+      "size_bytes": 84166
     },
     {
       "path": "source/chat_web_app.py",
-      "sha256": "0750072c52b10616cbd5c7c20e0ed8e335f54804fd863a47fd5824431f2a76ca",
-      "size_bytes": 62635
+      "sha256": "d50b665b87a99ba6a48a1363a05a46bc6e60e34f8b3a007ec8153cf6968fb1a6",
+      "size_bytes": 70608
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "d64636c3853313b8870a00c7d24d28912fa412ac28d6124697cda63497f433d4",
-      "size_bytes": 366643
+      "sha256": "849cffd386ca41c081861632f9891516b40f29e53037e5467fd29015b0ddb6a3",
+      "size_bytes": 377061
     },
     {
       "path": "source/route_policy_ledger.py",
@@ -125,13 +132,13 @@
     },
     {
       "path": "source/multimodel_runtime.py",
-      "sha256": "0a7eb12fc60494f1b96b763cb98619d75d2b340d903c9abb861683cdd3046f7d",
-      "size_bytes": 263936
+      "sha256": "d5074b4ea1ea483db928f92006251d7cfcc22c62ef4f3a4ede88ee1b9891b832",
+      "size_bytes": 264169
     },
     {
       "path": "source/supermix_multimodel_web_app.py",
-      "sha256": "f73bd68afa75db328f688066471dd7b1c990047e32257c016cac31237e3ec0c3",
-      "size_bytes": 159501
+      "sha256": "caa016f43eb1c1d91b6d59140381a7b1127392c6afd607c0ac4109b986be9138",
+      "size_bytes": 164215
     },
     {
       "path": "source/supermix_multimodel_desktop_app.py",
@@ -140,13 +147,13 @@
     },
     {
       "path": "runtime_python/chat_app.py",
-      "sha256": "c09e304356673cb49678ffbba4a53b00984659e911dcbfedef3c437aad07a3a7",
-      "size_bytes": 63948
+      "sha256": "210ab471cc97832d6e00c891ff2179941895986b40010cd06f983547c21ac2ea",
+      "size_bytes": 84166
     },
     {
       "path": "runtime_python/chat_web_app.py",
-      "sha256": "6ee741f32ffed9e6818eebc33558f777b445415370fd783d1080404e24309122",
-      "size_bytes": 54592
+      "sha256": "4217b4027e95e0d75a3d57bc6556331eeca14531f81ad37569c9d36536f11eb7",
+      "size_bytes": 62611
     },
     {
       "path": "runtime_python/chat_pipeline.py",
@@ -170,8 +177,8 @@
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "d64636c3853313b8870a00c7d24d28912fa412ac28d6124697cda63497f433d4",
-      "size_bytes": 366643
+      "sha256": "849cffd386ca41c081861632f9891516b40f29e53037e5467fd29015b0ddb6a3",
+      "size_bytes": 377061
     },
     {
       "path": "runtime_python/run.py",
@@ -181,6 +188,17 @@
   ],
   "package_guards": {
     "automatic_policy_promotion_available": false,
+    "full_output_verifier_includes_post_head_calibration": true,
+    "mutual_stability_shadow_can_select_output": false,
+    "prediction_stability_decision_margin_telemetry": true,
+    "prediction_stability_margin_default_is_universal": false,
+    "prediction_stability_margin_guard_available": true,
+    "prediction_stability_rank_depth_default_is_universal": false,
+    "prediction_stability_rank_depth_guard_available": true,
+    "prediction_stability_rank_depth_zero_disables_verifier": true,
+    "prediction_stability_verifier_scoped_to_available_labels": true,
+    "prediction_verifier_telemetry_requires_active_verifier": true,
+    "progressive_auto_compute_accepted_probe_reuse": true,
     "route_ledger_requires_executed_assignment_namespace": true,
     "route_ledger_requires_issued_execution_assignment_record": true,
     "route_protocol_activation_available": false,

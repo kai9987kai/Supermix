@@ -858,6 +858,22 @@ HTML_TEMPLATE = r"""<!doctype html>
           </select>
         </div>
         <div class="cfg-row">
+          <label>Progressive auto</label>
+          <select class="cfg-input" id="progressiveAutoCompute" style="width:116px" title="Evaluate compute budgets progressively and reuse the accepted probe output">
+            <option value="model" selected>Model / Route</option>
+            <option value="on">Enabled</option>
+            <option value="off">Disabled</option>
+          </select>
+        </div>
+        <div class="cfg-row">
+          <label>Stability margin</label>
+          <input class="cfg-input" type="number" id="predictionStabilityMargin" value="" min="0" max="1" step="0.0001" style="width:116px" placeholder="Model / Route" title="Optional minimum top-two full-output probability margin for adaptive exit">
+        </div>
+        <div class="cfg-row">
+          <label>Decision rank depth</label>
+          <input class="cfg-input" type="number" id="predictionStabilityRankDepth" value="" min="0" max="10" step="1" style="width:116px" placeholder="Model / Route" title="Optional ordered top-rank verifier depth; 0 intentionally disables rank verification">
+        </div>
+        <div class="cfg-row">
           <label>Session budget</label>
           <input class="cfg-input" type="number" id="sessionBudget" value="0" min="0" max="100000" step="0.5" style="width:90px" title="0 disables session cost pacing">
         </div>
@@ -1396,6 +1412,11 @@ HTML_TEMPLATE = r"""<!doctype html>
   function computePills(compute) {
     if (!compute || !Object.keys(compute).length) return [];
     const bits = [];
+    if (compute.prediction_verifier_active === true) {
+      bits.push('<span class="trace-pill trace-ok">Verifier active</span>');
+    } else if (compute.adaptive_compute === true) {
+      bits.push('<span class="trace-pill">Verifier inactive</span>');
+    }
     const requested = compute.requested_reasoning_cycles ?? compute.selected_reasoning_cycles;
     const used = compute.cycles_used;
     if (requested !== undefined && requested !== null) {
@@ -1415,6 +1436,44 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
     if (compute.prediction_confidence_delta !== undefined && compute.prediction_confidence_delta !== null) {
       bits.push(`<span class="trace-pill">Prediction drift ${escHtml(compute.prediction_confidence_delta)}</span>`);
+    }
+    if (compute.prediction_margin !== undefined && compute.prediction_margin !== null) {
+      bits.push(`<span class="trace-pill trace-score">Top-1 margin ${escHtml(compute.prediction_margin)}</span>`);
+    }
+    if (compute.prediction_decision_margin !== undefined && compute.prediction_decision_margin !== null) {
+      bits.push(`<span class="trace-pill trace-score">Decision margin ${escHtml(compute.prediction_decision_margin)}</span>`);
+    }
+    if (compute.prediction_stability_margin !== undefined && compute.prediction_stability_margin !== null) {
+      bits.push(`<span class="trace-pill">Margin floor ${escHtml(compute.prediction_stability_margin)}</span>`);
+    }
+    if (compute.prediction_rank_depth !== undefined && compute.prediction_rank_depth !== null) {
+      bits.push(`<span class="trace-pill">Verified depth ${escHtml(compute.prediction_rank_depth)}</span>`);
+    }
+    if (compute.prediction_stability_rank_depth !== undefined && compute.prediction_stability_rank_depth !== null) {
+      bits.push(`<span class="trace-pill">Requested depth ${escHtml(compute.prediction_stability_rank_depth)}</span>`);
+    }
+    if (compute.prediction_class_count !== undefined && compute.prediction_class_count !== null) {
+      bits.push(`<span class="trace-pill">Verifier scope ${escHtml(compute.prediction_class_count)} classes</span>`);
+    }
+    if (compute.prediction_class_selection_valid === false) {
+      bits.push('<span class="trace-pill trace-warn">Verifier scope invalid</span>');
+    }
+    const plan = compute.auto_compute_plan;
+    if (plan && typeof plan === 'object') {
+      bits.push(`<span class="trace-pill trace-score">Progressive ${escHtml(plan.selected_reasoning_cycles)} cycles</span>`);
+      bits.push(`<span class="trace-pill">${escHtml(plan.forward_evaluations)}/${escHtml(plan.legacy_forward_evaluations)} forwards</span>`);
+      if (plan.reused_probe_output) {
+        bits.push('<span class="trace-pill">Accepted probe reused</span>');
+      }
+      const rows = Array.isArray(plan.rows) ? plan.rows : [];
+      const selectedIndex = Number(plan.selected_index);
+      const selectedRow = Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < rows.length
+        ? rows[selectedIndex]
+        : (rows.length ? rows[rows.length - 1] : null);
+      const shadow = selectedRow ? selectedRow.mutual_stability_shadow : null;
+      if (shadow && shadow.js_divergence !== undefined && shadow.js_divergence !== null) {
+        bits.push(`<span class="trace-pill">Shadow JSD ${escHtml(shadow.js_divergence)}</span>`);
+      }
     }
     if (compute.applied === false && compute.supported === false) {
       bits.push('<span class="trace-pill">Compute controls unsupported</span>');
@@ -2240,8 +2299,18 @@ HTML_TEMPLATE = r"""<!doctype html>
     };
     const requestedCycles = el('reasoningCycles').value;
     const requestedAdaptive = el('adaptiveCompute').value;
+    const requestedProgressive = el('progressiveAutoCompute').value;
+    const requestedStabilityMargin = parseFloat(el('predictionStabilityMargin').value);
+    const requestedStabilityRankDepth = Number(el('predictionStabilityRankDepth').value);
     if (requestedCycles !== 'model') settings.reasoning_cycles = requestedCycles;
     if (requestedAdaptive !== 'model') settings.adaptive_compute = requestedAdaptive === 'on';
+    if (requestedProgressive !== 'model') settings.auto_compute = requestedProgressive === 'on';
+    if (Number.isFinite(requestedStabilityMargin) && requestedStabilityMargin >= 0) {
+      settings.prediction_stability_margin = requestedStabilityMargin;
+    }
+    if (el('predictionStabilityRankDepth').value.trim() !== '' && Number.isInteger(requestedStabilityRankDepth) && requestedStabilityRankDepth >= 0) {
+      settings.prediction_stability_rank_depth = requestedStabilityRankDepth;
+    }
     return {
       session_id: sessionId,
       message: text,

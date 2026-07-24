@@ -659,6 +659,9 @@ def test_index_contains_discovery_ui():
         assert 'id="autoBudget"' in html
         assert 'id="reasoningCycles"' in html
         assert 'id="adaptiveCompute"' in html
+        assert 'id="progressiveAutoCompute"' in html
+        assert 'id="predictionStabilityMargin"' in html
+        assert 'id="predictionStabilityRankDepth"' in html
         assert 'id="sessionBudget"' in html
         assert 'id="sessionBudgetTargetRoutes"' in html
         assert 'data-mode="auto"' in html
@@ -777,6 +780,16 @@ def test_index_contains_discovery_ui():
         assert "function computePills" in html
         assert "requested_reasoning_cycles" in html
         assert "prediction_confidence_delta" in html
+        assert "auto_compute_plan" in html
+        assert "Accepted probe reused" in html
+        assert "prediction_stability_margin" in html
+        assert "Top-1 margin" in html
+        assert "Decision margin" in html
+        assert "prediction_stability_rank_depth" in html
+        assert "prediction_class_count" in html
+        assert "Verifier scope" in html
+        assert "rows[selectedIndex]" in html
+        assert "rows[rows.length - 1].mutual_stability_shadow" not in html
         assert "route_alternatives" in html
         assert "route_frontier" in html
         assert "recommended_agent_mode" in html

@@ -6029,6 +6029,24 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         self.register_buffer("last_gating_entropy", torch.tensor(0.0))
         self.register_buffer("last_prediction_streak", torch.tensor(0.0), persistent=False)
         self.register_buffer("last_prediction_confidence_delta", torch.tensor(0.0), persistent=False)
+        self.register_buffer("last_prediction_margin", torch.tensor(0.0), persistent=False)
+        self.register_buffer(
+            "last_prediction_decision_margin", torch.tensor(0.0), persistent=False
+        )
+        self.register_buffer(
+            "last_prediction_rank_depth", torch.tensor(1.0), persistent=False
+        )
+        self.register_buffer(
+            "last_prediction_class_count", torch.tensor(float(out_dim)), persistent=False
+        )
+        self.register_buffer(
+            "last_prediction_class_selection_valid", torch.tensor(True), persistent=False
+        )
+        self.register_buffer(
+            "last_decision_reference_cycles",
+            torch.tensor(float(n_cycles)),
+            persistent=False,
+        )
         self.register_buffer(
             "last_prediction_topk_js_divergence", torch.tensor(0.0), persistent=False
         )
@@ -6130,10 +6148,82 @@ class CognitiveLeapUltraExpertHead(nn.Module):
             )
             return terms.sum(dim=-1)
 
-        return 0.5 * (
-            _kl(previous_compact, compact_midpoint)
-            + _kl(current_compact, compact_midpoint)
-        )
+        # JSD is nonnegative by definition. Float32 cancellation can leave a
+        # few negative nanonats for nearly identical distributions, which must
+        # not turn shadow telemetry into an inference failure.
+        return (
+            0.5
+            * (
+                _kl(previous_compact, compact_midpoint)
+                + _kl(current_compact, compact_midpoint)
+            )
+        ).clamp_min(0.0)
+
+    @staticmethod
+    def _normalize_prediction_class_indices(
+        prediction_class_indices,
+        *,
+        out_dim: int,
+        device: torch.device,
+    ):
+        """Validate an index list or full-length bool mask without raising.
+
+        ``None`` and any complete permutation of all output classes use the
+        untouched all-class verifier path. Invalid scopes return no index
+        tensor and ``False`` so inference can continue while the
+        prediction-stability exit fails closed.
+        """
+
+        if prediction_class_indices is None:
+            return None, int(out_dim), int(out_dim) >= 2
+
+        try:
+            raw_selection = (
+                prediction_class_indices.detach()
+                if torch.is_tensor(prediction_class_indices)
+                else torch.as_tensor(prediction_class_indices)
+            )
+        except (TypeError, ValueError, RuntimeError):
+            return None, 0, False
+
+        if raw_selection.ndim != 1:
+            return None, 0, False
+
+        if raw_selection.dtype == torch.bool:
+            if int(raw_selection.numel()) != int(out_dim):
+                return None, 0, False
+            class_indices = raw_selection.nonzero(as_tuple=False).flatten()
+        elif raw_selection.dtype.is_floating_point or raw_selection.dtype.is_complex:
+            return None, 0, False
+        else:
+            class_indices = raw_selection
+
+        try:
+            class_indices = class_indices.to(device=device, dtype=torch.long)
+        except (TypeError, ValueError, RuntimeError):
+            return None, 0, False
+
+        class_count = int(class_indices.numel())
+        if class_count == 0:
+            return None, 0, False
+        try:
+            selection_is_invalid = (
+                int(class_indices.min().item()) < 0
+                or int(class_indices.max().item()) >= int(out_dim)
+                or int(torch.unique(class_indices).numel()) != class_count
+            )
+        except (TypeError, ValueError, RuntimeError):
+            return None, 0, False
+        if selection_is_invalid:
+            return None, 0, False
+
+        # A valid complete selection is equivalent to ``None``. Avoiding an
+        # index_select here preserves the historical all-class numerics bit for
+        # bit, including for a complete selection supplied in another order.
+        if class_count == int(out_dim):
+            return None, class_count, class_count >= 2
+
+        return class_indices, class_count, class_count >= 2
 
     def forward(
         self,
@@ -6145,6 +6235,10 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         prediction_stability_patience: int = 2,
         prediction_stability_tol: float = 5e-3,
         prediction_stability_top_k: int = 5,
+        prediction_stability_margin: float = 0.0,
+        prediction_output_transform: Optional[nn.Module] = None,
+        prediction_class_indices=None,
+        prediction_stability_rank_depth: int = 1,
     ):
         N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
         shape_prefix = x.shape[:-1]
@@ -6174,13 +6268,49 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         cycles_used = n_cycles
         stability_patience = max(0, int(prediction_stability_patience))
         stability_tol = max(0.0, float(prediction_stability_tol))
-        use_prediction_stability = adaptive_compute and not self.training and stability_patience > 0
+        try:
+            stability_margin = float(prediction_stability_margin)
+        except (TypeError, ValueError):
+            stability_margin = float("inf")
+        if not math.isfinite(stability_margin) or stability_margin < 0.0:
+            stability_margin = float("inf")
+        (
+            verifier_class_indices,
+            verifier_class_count,
+            verifier_class_selection_valid,
+        ) = self._normalize_prediction_class_indices(
+            prediction_class_indices,
+            out_dim=self.out_dim,
+            device=x_flat.device,
+        )
+        try:
+            requested_rank_depth = int(prediction_stability_rank_depth)
+        except (TypeError, ValueError, OverflowError, RuntimeError):
+            requested_rank_depth = 0
+        effective_rank_depth = min(
+            max(0, requested_rank_depth),
+            max(0, int(verifier_class_count) - 1),
+        )
+        verifier_decision_margin_valid = (
+            verifier_class_selection_valid and effective_rank_depth >= 1
+        )
+        use_prediction_stability = (
+            adaptive_compute
+            and not self.training
+            and stability_patience > 0
+            and verifier_decision_margin_valid
+        )
+        decision_reference_cycles = max(1, int(self.n_cycles))
         weighted_recursive = torch.zeros(N, self.out_dim, device=x_flat.device, dtype=x_flat.dtype)
-        previous_prediction = None
+        previous_prediction_rank_tuple = None
         prediction_streak = torch.zeros(N, device=x_flat.device, dtype=torch.long)
         stable_confidence_min = None
         stable_confidence_max = None
         prediction_confidence_delta = torch.zeros(N, device=x_flat.device, dtype=x_flat.dtype)
+        prediction_margin = torch.zeros(N, device=x_flat.device, dtype=x_flat.dtype)
+        prediction_decision_margin = torch.zeros(
+            N, device=x_flat.device, dtype=x_flat.dtype
+        )
         prediction_topk_js_divergence = torch.zeros(
             N, device=x_flat.device, dtype=x_flat.dtype
         )
@@ -6246,7 +6376,19 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                     + self.shared_scale * shared_out
                     + (self.alpha + 1e-4) * prefix_recursive
                 )
-                prefix_probs = F.softmax(prefix_output, dim=-1)
+                # Verify the exact distribution returned by the complete model,
+                # including its learned post-head calibration layer.
+                verifier_output = (
+                    prediction_output_transform(prefix_output)
+                    if prediction_output_transform is not None
+                    else prefix_output
+                )
+                scoped_verifier_output = (
+                    verifier_output.index_select(-1, verifier_class_indices)
+                    if verifier_class_indices is not None
+                    else verifier_output
+                )
+                prefix_probs = F.softmax(scoped_verifier_output, dim=-1)
                 if previous_prediction_distribution is not None:
                     prediction_topk_js_divergence = self._topk_js_divergence(
                         previous_prediction_distribution,
@@ -6258,13 +6400,45 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                         prediction_topk_js_divergence,
                     )
                 previous_prediction_distribution = prefix_probs
-                prediction_confidence, prediction = prefix_probs.max(dim=-1)
-                if previous_prediction is None:
+                prediction_confidence, _ = prefix_probs.max(dim=-1)
+                prediction_rank_tuple = prefix_probs.topk(
+                    k=effective_rank_depth,
+                    dim=-1,
+                ).indices
+                margin_verifiable = (
+                    verifier_class_selection_valid
+                    and int(prefix_probs.shape[-1]) >= 2
+                )
+                if margin_verifiable:
+                    top_two_probabilities = prefix_probs.topk(k=2, dim=-1).values
+                    prediction_margin = (
+                        top_two_probabilities[:, 0] - top_two_probabilities[:, 1]
+                    )
+                    decision_probabilities = prefix_probs.topk(
+                        k=effective_rank_depth + 1,
+                        dim=-1,
+                    ).values
+                    prediction_decision_margin = (
+                        decision_probabilities[:, :-1]
+                        - decision_probabilities[:, 1:]
+                    ).min(dim=-1).values
+                else:
+                    prediction_margin = torch.zeros_like(prediction_confidence)
+                    prediction_decision_margin = torch.zeros_like(
+                        prediction_confidence
+                    )
+                if previous_prediction_rank_tuple is None:
                     prediction_streak = torch.ones_like(prediction_streak)
                     stable_confidence_min = prediction_confidence
                     stable_confidence_max = prediction_confidence
                 else:
-                    same_prediction = prediction.eq(previous_prediction)
+                    # A certified decision preserves the complete ordered
+                    # candidate tuple, not just its top-1 member. Any swap or
+                    # replacement through the requested rank depth restarts
+                    # the persistence window.
+                    same_prediction = prediction_rank_tuple.eq(
+                        previous_prediction_rank_tuple
+                    ).all(dim=-1)
                     prediction_streak = torch.where(
                         same_prediction,
                         prediction_streak + 1,
@@ -6281,31 +6455,50 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                         prediction_confidence,
                     )
                 prediction_confidence_delta = stable_confidence_max - stable_confidence_min
-                previous_prediction = prediction
+                previous_prediction_rank_tuple = prediction_rank_tuple
                 stable_mask = (
                     prediction_streak >= stability_patience
                 ) & (
                     prediction_confidence_delta <= stability_tol
+                ) & (
+                    prediction_decision_margin >= stability_margin
+                ) & (
+                    margin_verifiable
                 )
-                prediction_stable = bool(stable_mask.all().item())
+                prediction_stable = (
+                    verifier_class_selection_valid
+                    and stable_mask.numel() > 0
+                    and bool(stable_mask.all().item())
+                )
 
             # Inference-only verifier and convergence exits. Prediction
-            # stability is checked first so diagnostics identify the new path
-            # when multiple exit criteria become true on the same cycle.
+            # stability exclusively controls early stopping while its exact
+            # post-head verifier is active. Legacy latent, entropy, and halt
+            # signals remain available only when that verifier is disabled or
+            # invalid, so they cannot bypass a failed decision certificate.
             converged = False
             if adaptive_compute and not self.training:
-                if prediction_stable:
-                    converged = True
-                    exit_reason = "prediction_stable"
-                elif delta is not None and delta.item() < exit_tol:
-                    converged = True
-                    exit_reason = "latent_converged"
-                elif entropy.mean().item() < exit_entropy_threshold:
-                    converged = True
-                    exit_reason = "low_entropy"
-                elif remaining.mean().item() < 0.05:
-                    converged = True
-                    exit_reason = "halt_mass"
+                if use_prediction_stability:
+                    if prediction_stable and (t + 1) < decision_reference_cycles:
+                        converged = True
+                        exit_reason = "prediction_stable"
+                    elif (t + 1) >= decision_reference_cycles:
+                        # The head was trained against ``self.n_cycles``. If
+                        # the verifier cannot certify a strictly earlier
+                        # answer, use that exact reference-budget mixture
+                        # instead of drifting into untrained extra cycles.
+                        converged = True
+                        exit_reason = "decision_reference_budget"
+                else:
+                    if delta is not None and delta.item() < exit_tol:
+                        converged = True
+                        exit_reason = "latent_converged"
+                    elif entropy.mean().item() < exit_entropy_threshold:
+                        converged = True
+                        exit_reason = "low_entropy"
+                    elif remaining.mean().item() < 0.05:
+                        converged = True
+                        exit_reason = "halt_mass"
 
             # Differentiable ACT halting
             h_t = torch.sigmoid(self.halt_head(z_h))  # (N, 1)
@@ -6325,18 +6518,54 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         self.last_cycles_used = torch.tensor(
             float(cycles_used), device=x_flat.device
         )
-        self.last_prediction_streak = prediction_streak.float().mean()
-        self.last_prediction_confidence_delta = prediction_confidence_delta.mean()
+        self.last_prediction_streak = (
+            prediction_streak.float().mean()
+            if prediction_streak.numel()
+            else prediction_margin.new_zeros(())
+        )
+        self.last_prediction_confidence_delta = (
+            prediction_confidence_delta.mean()
+            if prediction_confidence_delta.numel()
+            else prediction_margin.new_zeros(())
+        )
+        # Batch-level telemetry reports the least decisive member because the
+        # all-samples early-exit rule is only as safe as its smallest margin.
+        self.last_prediction_margin = (
+            prediction_margin.min().detach()
+            if prediction_margin.numel()
+            else prediction_margin.new_zeros(())
+        )
+        self.last_prediction_decision_margin = (
+            prediction_decision_margin.min().detach()
+            if prediction_decision_margin.numel()
+            else prediction_decision_margin.new_zeros(())
+        )
+        self.last_prediction_rank_depth = torch.tensor(
+            float(effective_rank_depth), device=x_flat.device
+        )
+        self.last_prediction_class_count = torch.tensor(
+            float(verifier_class_count), device=x_flat.device
+        )
+        self.last_prediction_class_selection_valid = torch.tensor(
+            bool(verifier_class_selection_valid), device=x_flat.device
+        )
+        self.last_decision_reference_cycles = torch.tensor(
+            float(decision_reference_cycles), device=x_flat.device
+        )
         self.last_prediction_topk_js_divergence = (
             prediction_topk_js_divergence.mean().detach()
+            if prediction_topk_js_divergence.numel()
+            else prediction_margin.new_zeros(())
         )
         self.last_prediction_topk_js_divergence_max = (
             prediction_topk_js_divergence_max.mean().detach()
+            if prediction_topk_js_divergence_max.numel()
+            else prediction_margin.new_zeros(())
         )
         self.last_exit_reason = exit_reason
 
         # Calculate gating entropy for MoE cores
-        if gate_probs_list:
+        if gate_probs_list and N > 0:
             all_gate_probs = torch.stack(gate_probs_list, dim=0)  # (Steps, N, n_cores)
             mean_gate_probs = all_gate_probs.mean(dim=(0, 1))  # (n_cores,)
             gating_entropy = -torch.sum(mean_gate_probs * torch.log(mean_gate_probs + 1e-9))
@@ -6363,7 +6592,7 @@ class CognitiveLeapUltraExpertHead(nn.Module):
             + (self.alpha + 1e-4) * recursive_out
         )
 
-        return output.view(*shape_prefix, -1)
+        return output.view(*shape_prefix, self.out_dim)
 
 
 class ChampionNetCognitiveLeapUltraExpert(nn.Module):
@@ -6406,6 +6635,9 @@ class ChampionNetCognitiveLeapUltraExpert(nn.Module):
         prediction_stability_patience: int = 2,
         prediction_stability_tol: float = 5e-3,
         prediction_stability_top_k: int = 5,
+        prediction_stability_margin: float = 0.0,
+        prediction_class_indices=None,
+        prediction_stability_rank_depth: int = 1,
     ):
         for layer in self.layers:
             if isinstance(layer, CognitiveLeapUltraExpertHead):
@@ -6418,6 +6650,10 @@ class ChampionNetCognitiveLeapUltraExpert(nn.Module):
                     prediction_stability_patience=prediction_stability_patience,
                     prediction_stability_tol=prediction_stability_tol,
                     prediction_stability_top_k=prediction_stability_top_k,
+                    prediction_stability_margin=prediction_stability_margin,
+                    prediction_output_transform=self.layers[11],
+                    prediction_class_indices=prediction_class_indices,
+                    prediction_stability_rank_depth=prediction_stability_rank_depth,
                 )
             else:
                 x = layer(x)

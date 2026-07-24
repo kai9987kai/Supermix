@@ -36,7 +36,10 @@ for _name in __all__:
 # Keep the root compatibility surface behaviorally identical for callers that
 # validate CLI default inheritance after another test imported this wrapper
 # first. The canonical helper remains private in the source implementation.
-for _name in ("_runtime_compute_cli_overrides",):
+for _name in (
+    "_normalize_runtime_compute_defaults",
+    "_runtime_compute_cli_overrides",
+):
     globals()[_name] = getattr(_IMPL, _name)
 
 

@@ -220,7 +220,7 @@ select, input {
         <div class='row'><label>Adaptive Compute</label><select id='adaptiveCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-        <div class='row'><label>Auto Compute Budget</label><select id='autoCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
+        <div class='row'><label>Progressive Auto Compute</label><select id='autoCompute'><option value='off'>off</option><option value='on'>on</option></select></div>
         <div class='row'><label>Exit Tolerance</label><input id='exitTol' type='number' min='0' step='0.0001' value='0.001'></div>
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
@@ -229,7 +229,9 @@ select, input {
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
         <div class='row'><label>Stability Patience</label><input id='stabilityPatience' type='number' min='0' max='64' step='1' value='2'></div>
+        <div class='row'><label>Stability Margin</label><input id='stabilityMargin' type='number' min='0' step='0.0001' value='0.0005' title='v51 checkpoint/workload-calibrated default; explicit overrides are supported'></div>
     </div>
+    <div class='row'><label>Decision Rank Depth</label><input id='stabilityRankDepth' type='number' min='0' max='10' step='1' value='3'><small style='color:var(--text-dim)'>Verify ordered top ranks; 0 intentionally disables rank verification.</small></div>
     
     <div class='btns'>
         <button id='loadBtn' class="btn-full">INITIALIZE ENGINE</button>
@@ -270,6 +272,7 @@ promptEl.addEventListener('input', () => {
 
 function fmtNum(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):null;}
 function reasoningCyclesValue(){const raw=el('reasoningCycles').value.trim();if(!raw)return null;const low=raw.toLowerCase();if(['auto','adaptive','smart'].includes(low))return 'auto';const n=Number(raw);return Number.isFinite(n)?n:raw;}
+function addOptionalFiniteNumber(payload,key,input){const raw=input.value.trim();if(raw==='')return;const value=Number(raw);if(Number.isFinite(value))payload[key]=value;}
 function add(kind,text,timing,top,compute){
     const d=document.createElement('div');
     d.className='msg '+kind;
@@ -290,18 +293,39 @@ function add(kind,text,timing,top,compute){
     }
     if(compute&&compute.applied){
         const parts=[];
+        if(compute.prediction_verifier_active===true) parts.push('verifier active');
+        else if(compute.adaptive_compute) parts.push('verifier inactive');
         if(compute.reasoning_budget_mode==='auto') parts.push('mode auto');
         if(compute.requested_reasoning_cycles!==undefined&&compute.requested_reasoning_cycles!==null) parts.push(`requested ${compute.requested_reasoning_cycles}`);
         if(compute.cycles_used!==undefined&&compute.cycles_used!==null) parts.push(`used ${compute.cycles_used}`);
+        if(compute.decision_reference_cycles!==undefined&&compute.decision_reference_cycles!==null) parts.push(`reference ${compute.decision_reference_cycles}`);
         if(compute.exit_reason) parts.push(`exit ${compute.exit_reason}`);
         const streak=fmtNum(compute.prediction_streak); if(streak) parts.push(`stable ${streak}`);
         const drift=fmtNum(compute.prediction_confidence_delta); if(drift) parts.push(`drift ${drift}`);
+        const observedMargin=fmtNum(compute.prediction_margin,6); if(observedMargin) parts.push(`top-1 margin ${observedMargin}`);
+        const decisionMargin=fmtNum(compute.prediction_decision_margin,6); if(decisionMargin) parts.push(`decision margin ${decisionMargin}`);
+        const marginFloor=fmtNum(compute.prediction_stability_margin,6); if(marginFloor) parts.push(`margin floor ${marginFloor}`);
+        if(compute.prediction_rank_depth!==undefined&&compute.prediction_rank_depth!==null) parts.push(`verified depth ${compute.prediction_rank_depth}`);
+        if(compute.prediction_stability_rank_depth!==undefined&&compute.prediction_stability_rank_depth!==null) parts.push(`requested depth ${compute.prediction_stability_rank_depth}`);
+        if(compute.prediction_class_count!==undefined&&compute.prediction_class_count!==null) parts.push(`verifier ${compute.prediction_class_count} classes`);
+        if(compute.prediction_class_selection_valid===false) parts.push('verifier scope invalid');
         const ponder=fmtNum(compute.ponder_cost); if(ponder) parts.push(`ponder ${ponder}`);
         const consistency=fmtNum(compute.consistency_loss); if(consistency) parts.push(`consistency ${consistency}`);
         const entropy=fmtNum(compute.gating_entropy); if(entropy) parts.push(`gate entropy ${entropy}`);
         const exitEntropy=fmtNum(compute.exit_entropy_threshold); if(exitEntropy) parts.push(`exit entropy ${exitEntropy}`);
         if(compute.auto_reasoning_policy&&Array.isArray(compute.auto_reasoning_policy.reasons)) parts.push(`policy ${compute.auto_reasoning_policy.reasons.slice(0,3).join(',')}`);
-        if(compute.auto_compute_plan) parts.push(`budget ${compute.auto_compute_plan.selected_reasoning_cycles} (${compute.auto_compute_plan.reason})`);
+        if(compute.auto_compute_plan){
+            const plan=compute.auto_compute_plan;
+            parts.push(`budget ${plan.selected_reasoning_cycles} (${plan.reason})`);
+            parts.push(`${plan.forward_evaluations}/${plan.legacy_forward_evaluations} forwards`);
+            if(plan.reused_probe_output) parts.push('probe reused');
+            const rows=Array.isArray(plan.rows)?plan.rows:[];
+            const selectedIndex=Number(plan.selected_index);
+            const selectedRow=Number.isInteger(selectedIndex)&&selectedIndex>=0&&selectedIndex<rows.length?rows[selectedIndex]:(rows.length?rows[rows.length-1]:null);
+            const shadow=selectedRow?selectedRow.mutual_stability_shadow:null;
+            const js=shadow?fmtNum(shadow.js_divergence,6):null;
+            if(js) parts.push(`shadow JSD ${js}`);
+        }
         if(parts.length){
             const c=document.createElement('div');
             c.className='tim';
@@ -357,6 +381,8 @@ async function refresh(){
         if(d.status.adaptive_exit_entropy !== undefined) el('exitEntropy').value = d.status.adaptive_exit_entropy;
         if(d.status.prediction_stability_patience !== undefined) el('stabilityPatience').value = d.status.prediction_stability_patience;
         if(d.status.prediction_stability_tol !== undefined) el('stabilityTol').value = d.status.prediction_stability_tol;
+        if(d.status.prediction_stability_margin !== undefined) el('stabilityMargin').value = d.status.prediction_stability_margin;
+        if(d.status.prediction_stability_rank_depth !== undefined) el('stabilityRankDepth').value = d.status.prediction_stability_rank_depth;
     }catch(e){ el('statusBox').textContent='TELEMETRY ERROR: '+e.message; }
 }
 function renderRouteShadowRegistry(snapshot){
@@ -397,14 +423,20 @@ async function send(){
     promptEl.style.height = 'auto';
     try{
         const cycles = reasoningCyclesValue();
-        const d=await jpost('/api/chat',{session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value),reasoning_cycles:cycles,adaptive_compute:el('adaptiveCompute').value==='on',auto_compute:el('autoCompute').value==='on',adaptive_exit_tol:Number(el('exitTol').value),adaptive_exit_entropy:Number(el('exitEntropy').value),prediction_stability_patience:Number(el('stabilityPatience').value),prediction_stability_tol:Number(el('stabilityTol').value)});
+        const payload={session_id:sid,message:text,style_mode:el('style').value,response_temperature:Number(el('rt').value),show_top_responses:Number(el('showTop').value),reasoning_cycles:cycles,adaptive_compute:el('adaptiveCompute').value==='on',auto_compute:el('autoCompute').value==='on',adaptive_exit_tol:Number(el('exitTol').value),adaptive_exit_entropy:Number(el('exitEntropy').value),prediction_stability_patience:Number(el('stabilityPatience').value),prediction_stability_tol:Number(el('stabilityTol').value)};
+        addOptionalFiniteNumber(payload,'prediction_stability_margin',el('stabilityMargin'));
+        addOptionalFiniteNumber(payload,'prediction_stability_rank_depth',el('stabilityRankDepth'));
+        const d=await jpost('/api/chat',payload);
         add('bot',d.response,d.timing_ms,d.top_candidates,d.compute);
     }catch(e){ add('bot','CORE ERROR: '+e.message); }
 }
 async function sweepCompute(){
     const text=promptEl.value.trim(); if(!text) return;
     try{
-        const d=await jpost('/api/compute_sweep',{session_id:sid,message:text,cycles:[1,3,8],adaptive_compute:el('adaptiveCompute').value==='on',adaptive_exit_tol:Number(el('exitTol').value),adaptive_exit_entropy:Number(el('exitEntropy').value),prediction_stability_patience:Number(el('stabilityPatience').value),prediction_stability_tol:Number(el('stabilityTol').value)});
+        const payload={session_id:sid,message:text,cycles:[1,3,8],adaptive_compute:el('adaptiveCompute').value==='on',adaptive_exit_tol:Number(el('exitTol').value),adaptive_exit_entropy:Number(el('exitEntropy').value),prediction_stability_patience:Number(el('stabilityPatience').value),prediction_stability_tol:Number(el('stabilityTol').value)};
+        addOptionalFiniteNumber(payload,'prediction_stability_margin',el('stabilityMargin'));
+        addOptionalFiniteNumber(payload,'prediction_stability_rank_depth',el('stabilityRankDepth'));
+        const d=await jpost('/api/compute_sweep',payload);
         const lines=['Compute sweep for draft prompt:'];
         d.rows.forEach((row)=>{
             const conf=fmtNum(row.confidence);
@@ -435,6 +467,8 @@ _RUNTIME_COMPUTE_DEFAULT_KEYS = (
     "adaptive_exit_entropy",
     "prediction_stability_patience",
     "prediction_stability_tol",
+    "prediction_stability_margin",
+    "prediction_stability_rank_depth",
     "auto_compute",
 )
 
@@ -447,6 +481,8 @@ def _library_runtime_compute_defaults() -> Dict[str, Any]:
         "adaptive_exit_entropy": chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY,
         "prediction_stability_patience": chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE,
         "prediction_stability_tol": chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
+        "prediction_stability_margin": chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN,
+        "prediction_stability_rank_depth": chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
         "auto_compute": False,
     }
 
@@ -481,6 +517,12 @@ def _normalize_runtime_compute_defaults(values: Dict[str, Any]) -> Dict[str, Any
             values.get("prediction_stability_tol"),
             chat_app.DEFAULT_PREDICTION_STABILITY_TOL,
         ),
+        "prediction_stability_margin": chat_app._coerce_prediction_stability_margin(
+            values.get("prediction_stability_margin"),
+        ),
+        "prediction_stability_rank_depth": chat_app._coerce_prediction_stability_rank_depth(
+            values.get("prediction_stability_rank_depth"),
+        ),
         "auto_compute": chat_app._coerce_bool(values.get("auto_compute")),
     }
 
@@ -494,6 +536,8 @@ def _runtime_compute_cli_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         "adaptive_exit_entropy": getattr(args, "adaptive_exit_entropy", None),
         "prediction_stability_patience": getattr(args, "prediction_stability_patience", None),
         "prediction_stability_tol": getattr(args, "prediction_stability_tol", None),
+        "prediction_stability_margin": getattr(args, "prediction_stability_margin", None),
+        "prediction_stability_rank_depth": getattr(args, "prediction_stability_rank_depth", None),
         "auto_compute": getattr(args, "auto_compute", None),
     }
     return {key: value for key, value in values.items() if value is not None}
@@ -560,6 +604,8 @@ class Engine:
                 "adaptive_exit_entropy": chat_app._coerce_nonnegative_float(self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY), chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
                 "prediction_stability_patience": chat_app._coerce_nonnegative_int(self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE), chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE, chat_app.MAX_RUNTIME_REASONING_CYCLES),
                 "prediction_stability_tol": chat_app._coerce_nonnegative_float(self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL), chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                "prediction_stability_margin": chat_app._coerce_prediction_stability_margin(self.defaults.get("prediction_stability_margin", chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN)),
+                "prediction_stability_rank_depth": chat_app._coerce_prediction_stability_rank_depth(self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)),
                 "auto_compute": chat_app._coerce_bool(self.defaults.get("auto_compute", False)),
             }
 
@@ -605,16 +651,7 @@ class Engine:
         }
 
     def _parse_buckets(self, meta: Dict[str, Any]) -> None:
-        buckets: Dict[int, List[Dict[str, Any]]] = {}
-        raw = meta.get("buckets", {})
-        if isinstance(raw, dict):
-            for k, v in raw.items():
-                try:
-                    label = int(k)
-                except Exception:
-                    continue
-                if isinstance(v, list) and v:
-                    buckets[label] = v
+        buckets = chat_app._parse_metadata_buckets(meta.get("buckets", {}))
         self.buckets = buckets
         self.available_labels = sorted(buckets.keys()) or list(range(chat_app.MODEL_CLASSES))
 
@@ -694,6 +731,11 @@ class Engine:
         cycles: Any,
         adaptive: bool,
         exit_tol: Optional[float],
+        exit_entropy_threshold: Any = None,
+        prediction_stability_patience: Any = None,
+        prediction_stability_tol: Any = None,
+        prediction_stability_margin: Any = None,
+        prediction_stability_rank_depth: Any = None,
     ) -> List[Dict[str, Any]]:
         return chat_app.evaluate_runtime_compute_budgets(
             model,
@@ -702,6 +744,11 @@ class Engine:
             cycles=cycles,
             adaptive_compute=adaptive,
             exit_tol=exit_tol,
+            exit_entropy_threshold=exit_entropy_threshold,
+            prediction_stability_patience=prediction_stability_patience,
+            prediction_stability_tol=prediction_stability_tol,
+            prediction_stability_margin=prediction_stability_margin,
+            prediction_stability_rank_depth=prediction_stability_rank_depth,
         )
 
     def _select_auto_compute_budget(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -717,6 +764,8 @@ class Engine:
         adaptive_exit_entropy: Any = None,
         prediction_stability_patience: Any = None,
         prediction_stability_tol: Any = None,
+        prediction_stability_margin: Any = None,
+        prediction_stability_rank_depth: Any = None,
     ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
@@ -741,6 +790,16 @@ class Engine:
         x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
         idx = torch.tensor(labels, dtype=torch.long, device=self.device)
         rows: List[Dict[str, Any]] = []
+        resolved_prediction_stability_margin = chat_app._coerce_prediction_stability_margin(
+            prediction_stability_margin
+            if prediction_stability_margin is not None
+            else self.defaults.get("prediction_stability_margin", chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN)
+        )
+        resolved_prediction_stability_rank_depth = chat_app._coerce_prediction_stability_rank_depth(
+            prediction_stability_rank_depth
+            if prediction_stability_rank_depth is not None
+            else self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)
+        )
 
         with torch.no_grad():
             for cycle_count in requested_cycles:
@@ -754,6 +813,9 @@ class Engine:
                     exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
                     prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
                     prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                    prediction_stability_margin=resolved_prediction_stability_margin,
+                    prediction_class_indices=labels,
+                    prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
                 )
                 latency_ms = round((time.perf_counter() - t0) * 1000, 1)
                 logits = model_out[0, 0]
@@ -792,6 +854,8 @@ class Engine:
         prediction_stability_patience: Any = None,
         prediction_stability_tol: Any = None,
         auto_compute: Optional[bool] = None,
+        prediction_stability_margin: Any = None,
+        prediction_stability_rank_depth: Any = None,
     ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
@@ -821,6 +885,16 @@ class Engine:
             if adaptive_exit_tol is None
             else adaptive_exit_tol
         )
+        resolved_prediction_stability_margin = chat_app._coerce_prediction_stability_margin(
+            prediction_stability_margin
+            if prediction_stability_margin is not None
+            else self.defaults.get("prediction_stability_margin", chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN)
+        )
+        resolved_prediction_stability_rank_depth = chat_app._coerce_prediction_stability_rank_depth(
+            prediction_stability_rank_depth
+            if prediction_stability_rank_depth is not None
+            else self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)
+        )
         effective_reasoning_cycles = (
             self.defaults.get("reasoning_cycles")
             if reasoning_cycles is None
@@ -833,34 +907,41 @@ class Engine:
             else chat_app._coerce_bool(auto_compute, default=False)
         )
         if auto_enabled and chat_app.model_supports_runtime_compute(model):
-            sweep_rows = self._run_compute_sweep_rows(
-                model=model,
-                x=x,
-                labels=labels,
+            model_out, compute_metrics, compute_plan = chat_app.progressive_auto_compute_forward(
+                model,
+                x,
+                labels,
                 cycles=self._auto_compute_cycles(effective_reasoning_cycles),
-                adaptive=chat_app._coerce_bool(resolved_adaptive_compute, default=False),
+                adaptive_compute=resolved_adaptive_compute,
                 exit_tol=chat_app._coerce_nonnegative_float(
                     resolved_exit_tol,
                     default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
                 ),
-            )
-            compute_plan = self._select_auto_compute_budget(sweep_rows)
-            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
-        with torch.no_grad():
-            model_out, compute_metrics = chat_app.forward_with_runtime_compute(
-                model,
-                x,
-                reasoning_cycles=effective_reasoning_cycles,
-                adaptive_compute=resolved_adaptive_compute,
-                exit_tol=resolved_exit_tol,
                 exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
                 prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
                 prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                prediction_stability_margin=resolved_prediction_stability_margin,
+                prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
                 auto_reasoning_context=context,
             )
-            logits = model_out[0, 0]
-        if compute_plan is not None:
-            compute_metrics["auto_compute_plan"] = compute_plan
+            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
+        else:
+            with torch.no_grad():
+                model_out, compute_metrics = chat_app.forward_with_runtime_compute(
+                    model,
+                    x,
+                    reasoning_cycles=effective_reasoning_cycles,
+                    adaptive_compute=resolved_adaptive_compute,
+                    exit_tol=resolved_exit_tol,
+                    exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                    prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
+                    prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                    prediction_stability_margin=resolved_prediction_stability_margin,
+                    auto_reasoning_context=context,
+                    prediction_class_indices=labels,
+                    prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
+                )
+        logits = model_out[0, 0]
         t_infer += time.perf_counter() - tt
 
         idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
@@ -1025,6 +1106,8 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 prediction_stability_patience=p.get('prediction_stability_patience'),
                 prediction_stability_tol=p.get('prediction_stability_tol'),
                 auto_compute=p.get('auto_compute'),
+                prediction_stability_margin=p.get('prediction_stability_margin'),
+                prediction_stability_rank_depth=p.get('prediction_stability_rank_depth'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -1044,6 +1127,8 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 adaptive_exit_entropy=p.get('adaptive_exit_entropy'),
                 prediction_stability_patience=p.get('prediction_stability_patience'),
                 prediction_stability_tol=p.get('prediction_stability_tol'),
+                prediction_stability_margin=p.get('prediction_stability_margin'),
+                prediction_stability_rank_depth=p.get('prediction_stability_rank_depth'),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -1100,6 +1185,8 @@ def main() -> None:
     ap.add_argument('--adaptive_exit_entropy', type=float, default=None)
     ap.add_argument('--prediction_stability_patience', type=int, default=None)
     ap.add_argument('--prediction_stability_tol', type=float, default=None)
+    ap.add_argument('--prediction_stability_margin', type=float, default=None)
+    ap.add_argument('--prediction_stability_rank_depth', type=int, default=None)
     auto_compute_group = ap.add_mutually_exclusive_group()
     auto_compute_group.add_argument(
         '--auto_compute',

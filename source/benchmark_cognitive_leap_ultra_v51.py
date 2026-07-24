@@ -33,6 +33,9 @@ from model_variants import ChampionNetCognitiveLeapUltraExpert
 N_CLASSES = 10
 N_OPS = 4
 IN_DIM = 128
+# Calibrated for this v51 checkpoint/workload, not a universal safety threshold.
+DEFAULT_PREDICTION_STABILITY_MARGIN = 5e-4
+DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = 3
 
 
 def make_chained_task(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -134,7 +137,7 @@ def evaluate(
     y_test: torch.Tensor,
     device: torch.device,
     **forward_kwargs: Any,
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     model.eval()
     x = x_test.to(device)
     y = y_test.to(device)
@@ -144,12 +147,34 @@ def evaluate(
     loss = F.cross_entropy(logits, y)
     acc = (logits.argmax(dim=-1) == y).float().mean()
     head = model.layers[10]
+    observed_rank_depth = int(head.last_prediction_rank_depth.item())
+    prediction_verifier_active = bool(forward_kwargs.get("adaptive_compute", False)) and (
+        int(forward_kwargs.get("prediction_stability_patience", 2)) > 0
+        and bool(head.last_prediction_class_selection_valid.item())
+        and observed_rank_depth > 0
+    )
     return {
         "loss": round(float(loss.item()), 4),
         "accuracy": round(float(acc.item()), 4),
         "latency_ms": round(latency_ms, 2),
         "cycles_used": round(float(head.last_cycles_used.item()), 2),
         "gating_entropy": round(float(head.last_gating_entropy.item()), 4),
+        "prediction_verifier_active": prediction_verifier_active,
+        "prediction_margin": (
+            round(float(head.last_prediction_margin.item()), 8)
+            if prediction_verifier_active
+            else None
+        ),
+        "prediction_decision_margin": (
+            round(float(head.last_prediction_decision_margin.item()), 8)
+            if prediction_verifier_active
+            else None
+        ),
+        "prediction_rank_depth": (
+            observed_rank_depth
+            if prediction_verifier_active
+            else None
+        ),
     }
 
 
@@ -208,6 +233,8 @@ def main() -> None:
         adaptive_compute=True,
         exit_tol=1e-4,
         exit_entropy_threshold=0.0,
+        prediction_stability_margin=DEFAULT_PREDICTION_STABILITY_MARGIN,
+        prediction_stability_rank_depth=DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     )
 
     out_dir = Path(args.output_dir)
@@ -233,6 +260,11 @@ def main() -> None:
         "eval_default": eval_default,
         "test_time_scaling": eval_cycles,
         "adaptive_compute": eval_adaptive,
+        "adaptive_compute_configuration": {
+            "prediction_stability_margin": DEFAULT_PREDICTION_STABILITY_MARGIN,
+            "prediction_stability_rank_depth": DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+            "margin_scope": "checkpoint_calibrated_not_universal",
+        },
     }
     metrics_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 

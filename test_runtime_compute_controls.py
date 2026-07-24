@@ -25,6 +25,12 @@ class _RuntimeComputeModel(torch.nn.Module):
         self.register_buffer("last_gating_entropy", torch.tensor(0.0))
         self.register_buffer("last_prediction_streak", torch.tensor(0.0))
         self.register_buffer("last_prediction_confidence_delta", torch.tensor(0.0))
+        self.register_buffer("last_prediction_margin", torch.tensor(0.0))
+        self.register_buffer("last_prediction_decision_margin", torch.tensor(0.0))
+        self.register_buffer("last_decision_reference_cycles", torch.tensor(3.0))
+        self.register_buffer("last_prediction_rank_depth", torch.tensor(1.0))
+        self.register_buffer("last_prediction_class_count", torch.tensor(10.0))
+        self.register_buffer("last_prediction_class_selection_valid", torch.tensor(1.0))
         self.last_exit_reason = "not_run"
 
     def forward(
@@ -36,6 +42,8 @@ class _RuntimeComputeModel(torch.nn.Module):
         exit_entropy_threshold=0.2,
         prediction_stability_patience=2,
         prediction_stability_tol=5e-3,
+        prediction_stability_margin=chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN,
+        prediction_stability_rank_depth=chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     ):
         self.calls.append(
             {
@@ -45,14 +53,19 @@ class _RuntimeComputeModel(torch.nn.Module):
                 "exit_entropy_threshold": exit_entropy_threshold,
                 "prediction_stability_patience": prediction_stability_patience,
                 "prediction_stability_tol": prediction_stability_tol,
+                "prediction_stability_margin": prediction_stability_margin,
             }
         )
+        self.last_rank_depth_arg = prediction_stability_rank_depth
         self.last_cycles_used = torch.tensor(float(reasoning_cycles or 3))
         self.last_ponder_cost = torch.tensor(float(reasoning_cycles or 3) - 0.25)
         self.last_consistency_loss = torch.tensor(0.125)
         self.last_gating_entropy = torch.tensor(0.75)
         self.last_prediction_streak = torch.tensor(float(prediction_stability_patience))
         self.last_prediction_confidence_delta = torch.tensor(float(prediction_stability_tol))
+        self.last_prediction_margin = torch.tensor(0.25)
+        self.last_prediction_decision_margin = torch.tensor(0.125)
+        self.last_prediction_rank_depth = torch.tensor(float(prediction_stability_rank_depth))
         self.last_exit_reason = "prediction_stable" if adaptive_compute and prediction_stability_patience else "max_cycles"
         logits = torch.zeros(x.shape[0], x.shape[1], 10, device=x.device)
         logits[..., 2] = 4.0
@@ -69,6 +82,13 @@ class _LegacyModel(torch.nn.Module):
         return torch.zeros(x.shape[0], x.shape[1], 10, device=x.device)
 
 
+class _ClassAwareRuntimeComputeModel(_RuntimeComputeModel):
+    def forward(self, x, prediction_class_indices=None, **kwargs):
+        output = super().forward(x, **kwargs)
+        self.calls[-1]["prediction_class_indices"] = prediction_class_indices
+        return output
+
+
 def _candidate(text: str):
     vec = chat_app.text_to_model_input(text, feature_mode="legacy")[0, 0].tolist()
     return {
@@ -78,6 +98,44 @@ def _candidate(text: str):
         "bucket_score": 1.0,
         "count": 1,
     }
+
+
+def test_metadata_bucket_labels_are_bounded_and_invalid_only_metadata_falls_back():
+    zero_rows = [_candidate("zero")]
+    last_rows = [_candidate("last")]
+    raw = {
+        "-1": [_candidate("negative")],
+        "0": zero_rows,
+        str(chat_app.MODEL_CLASSES - 1): last_rows,
+        str(chat_app.MODEL_CLASSES): [_candidate("upper-bound")],
+        "999": [_candidate("far-out-of-range")],
+        "not-a-label": [_candidate("malformed")],
+        "2.5": [_candidate("fractional")],
+        2.5: [_candidate("numeric-fractional")],
+        None: [_candidate("none")],
+    }
+
+    assert chat_app._parse_metadata_buckets(raw) == {
+        0: zero_rows,
+        chat_app.MODEL_CLASSES - 1: last_rows,
+    }
+
+    engine = Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "all"})
+    engine._parse_buckets({"buckets": raw})
+    assert engine.buckets == {0: zero_rows, chat_app.MODEL_CLASSES - 1: last_rows}
+    assert engine.available_labels == [0, chat_app.MODEL_CLASSES - 1]
+
+    engine._parse_buckets(
+        {
+            "buckets": {
+                "-1": [_candidate("negative")],
+                str(chat_app.MODEL_CLASSES): [_candidate("upper-bound")],
+                "bad": [_candidate("malformed")],
+            }
+        }
+    )
+    assert engine.buckets == {}
+    assert engine.available_labels == list(range(chat_app.MODEL_CLASSES))
 
 
 def _stub_engine_load(monkeypatch, metadata_by_name):
@@ -128,6 +186,7 @@ def smoke_test_runtime_compute_helper_applies_only_supported_kwargs():
         exit_entropy_threshold="0.75",
         prediction_stability_patience="4",
         prediction_stability_tol="0.02",
+        prediction_stability_margin="0.15",
     )
 
     assert recursive.calls[-1] == {
@@ -137,6 +196,7 @@ def smoke_test_runtime_compute_helper_applies_only_supported_kwargs():
         "exit_entropy_threshold": 0.75,
         "prediction_stability_patience": 4,
         "prediction_stability_tol": 0.02,
+        "prediction_stability_margin": 0.15,
     }
     assert diag["applied"] is True
     assert diag["requested_reasoning_cycles"] == chat_app.MAX_RUNTIME_REASONING_CYCLES
@@ -147,6 +207,14 @@ def smoke_test_runtime_compute_helper_applies_only_supported_kwargs():
     assert diag["exit_entropy_threshold"] == 0.75
     assert diag["prediction_streak"] == 4.0
     assert abs(diag["prediction_confidence_delta"] - 0.02) < 1e-6
+    assert diag["prediction_stability_margin"] == 0.15
+    assert diag["prediction_stability_rank_depth"] == 3
+    assert diag["prediction_verifier_active"] is True
+    assert diag["prediction_margin"] == 0.25
+    assert diag["prediction_decision_margin"] == 0.125
+    assert diag["decision_reference_cycles"] == 3.0
+    assert diag["prediction_rank_depth"] == 3.0
+    assert recursive.last_rank_depth_arg == 3
     assert diag["exit_reason"] == "prediction_stable"
 
     legacy = _LegacyModel()
@@ -161,6 +229,66 @@ def smoke_test_runtime_compute_helper_applies_only_supported_kwargs():
     assert legacy.calls == 1
     assert legacy_diag["applied"] is False
     assert legacy_diag["cycles_used"] is None
+    assert legacy_diag["prediction_verifier_active"] is False
+    assert legacy_diag["prediction_margin"] is None
+
+
+def test_prediction_rank_depth_coercion_and_inactive_telemetry_suppression():
+    assert chat_app._coerce_prediction_stability_rank_depth("5") == 5
+    assert chat_app._coerce_prediction_stability_rank_depth(0) == 0
+    for invalid in (-1, "bad", float("inf")):
+        assert chat_app._coerce_prediction_stability_rank_depth(invalid) == 3
+
+    x = torch.zeros(1, 1, 128)
+    for controls in (
+        {"adaptive_compute": False},
+        {"adaptive_compute": True, "prediction_stability_patience": 0},
+        {"adaptive_compute": True, "prediction_stability_rank_depth": 0},
+    ):
+        _, diag = chat_app.forward_with_runtime_compute(
+            _RuntimeComputeModel(), x, reasoning_cycles=3, **controls
+        )
+        assert diag["prediction_verifier_active"] is False
+        for key in (
+            "prediction_streak",
+            "prediction_confidence_delta",
+            "prediction_margin",
+            "prediction_decision_margin",
+            "decision_reference_cycles",
+            "prediction_rank_depth",
+            "prediction_class_count",
+            "prediction_class_selection_valid",
+        ):
+            assert diag[key] is None
+
+
+def test_budget_evaluator_forwards_complete_adaptive_verifier_controls():
+    model = _RuntimeComputeModel()
+    rows = chat_app.evaluate_runtime_compute_budgets(
+        model,
+        torch.zeros(1, 1, 128),
+        [2],
+        cycles=[2],
+        adaptive_compute=True,
+        exit_tol=0.04,
+        exit_entropy_threshold=0.6,
+        prediction_stability_patience=4,
+        prediction_stability_tol=0.03,
+        prediction_stability_margin=0.02,
+        prediction_stability_rank_depth=4,
+    )
+    assert model.calls[-1] == {
+        "reasoning_cycles": 2,
+        "adaptive_compute": True,
+        "exit_tol": 0.04,
+        "exit_entropy_threshold": 0.6,
+        "prediction_stability_patience": 4,
+        "prediction_stability_tol": 0.03,
+        "prediction_stability_margin": 0.02,
+    }
+    assert model.last_rank_depth_arg == 4
+    assert rows[0]["compute"]["prediction_stability_rank_depth"] == 4
+    assert rows[0]["compute"]["prediction_verifier_active"] is True
 
 
 def smoke_test_auto_reasoning_budget_selects_cycles_from_context():
@@ -203,6 +331,7 @@ def smoke_test_web_engine_forwards_runtime_compute_controls():
         adaptive_exit_entropy=0.5,
         prediction_stability_patience=3,
         prediction_stability_tol=0.01,
+        prediction_stability_margin=0.12,
     )
 
     assert result["ok"] is True
@@ -215,7 +344,32 @@ def smoke_test_web_engine_forwards_runtime_compute_controls():
         "exit_entropy_threshold": 0.5,
         "prediction_stability_patience": 3,
         "prediction_stability_tol": 0.01,
+        "prediction_stability_margin": 0.12,
     }
+
+
+def test_web_engine_scopes_prediction_verifier_to_available_labels():
+    engine = Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "all"})
+    model = _ClassAwareRuntimeComputeModel()
+    with engine.lock:
+        engine.model = model
+        engine.feature_mode = "legacy"
+        engine.model_size = "cognitive_leap_ultra_expert"
+        engine.buckets = {
+            2: [_candidate("Allowed two.")],
+            9: [_candidate("Allowed nine.")],
+        }
+        engine.available_labels = [2, 9]
+
+    result = engine.chat(
+        session_id="partial-label-verifier",
+        user_text="scope the verifier",
+        adaptive_compute=True,
+    )
+
+    assert result["ok"] is True
+    assert model.calls[-1]["prediction_class_indices"] == [2, 9]
+    assert result["compute"]["prediction_class_indices"] == [2, 9]
 
 
 def smoke_test_web_engine_auto_runtime_compute_controls():
@@ -263,6 +417,7 @@ def smoke_test_web_api_accepts_runtime_compute_payload():
             "adaptive_exit_entropy": 0.4,
             "prediction_stability_patience": 5,
             "prediction_stability_tol": 0.03,
+            "prediction_stability_margin": 0.11,
         },
     )
 
@@ -277,7 +432,25 @@ def smoke_test_web_api_accepts_runtime_compute_payload():
         "exit_entropy_threshold": 0.4,
         "prediction_stability_patience": 5,
         "prediction_stability_tol": 0.03,
+        "prediction_stability_margin": 0.11,
     }
+
+    for requested_margin, expected_margin in (
+        (-1.0, chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN),
+        (0.0, 0.0),
+    ):
+        response = client.post(
+            "/api/chat",
+            json={
+                "session_id": f"api-margin-{requested_margin}",
+                "message": "validate stability margin",
+                "adaptive_compute": True,
+                "prediction_stability_margin": requested_margin,
+            },
+        )
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()["compute"]["prediction_stability_margin"] == expected_margin
+        assert model.calls[-1]["prediction_stability_margin"] == expected_margin
 
 
 def smoke_test_web_api_accepts_auto_runtime_compute_payload():
@@ -329,6 +502,7 @@ def smoke_test_compute_sweep_reports_budget_rows_without_mutating_session():
         adaptive_exit_entropy=0.6,
         prediction_stability_patience=6,
         prediction_stability_tol=0.04,
+        prediction_stability_margin=0.09,
     )
 
     assert result["ok"] is True
@@ -351,6 +525,7 @@ def smoke_test_compute_sweep_reports_budget_rows_without_mutating_session():
         "exit_entropy_threshold": 0.6,
         "prediction_stability_patience": 6,
         "prediction_stability_tol": 0.04,
+        "prediction_stability_margin": 0.09,
     }
 
 
@@ -377,6 +552,7 @@ def smoke_test_web_api_accepts_compute_sweep_payload():
             "adaptive_exit_entropy": 0.55,
             "prediction_stability_patience": 4,
             "prediction_stability_tol": 0.025,
+            "prediction_stability_margin": 0.08,
         },
     )
 
@@ -388,6 +564,7 @@ def smoke_test_web_api_accepts_compute_sweep_payload():
     assert payload["rows"][1]["compute"]["exit_entropy_threshold"] == 0.55
     assert payload["rows"][1]["compute"]["prediction_stability_patience"] == 4
     assert abs(payload["rows"][1]["compute"]["prediction_stability_tol"] - 0.025) < 1e-6
+    assert payload["rows"][1]["compute"]["prediction_stability_margin"] == 0.08
     assert "api-sweep" not in engine.sessions
 
 
@@ -405,6 +582,7 @@ def test_engine_load_applies_whitelisted_metadata_compute_defaults_and_request_o
             "adaptive_exit_entropy": "0.75",
             "prediction_stability_patience": "4",
             "prediction_stability_tol": "0.02",
+            "prediction_stability_margin": "0.13",
             "pool_mode": "topk",
             "untrusted_extra": "ignored",
         },
@@ -426,6 +604,7 @@ def test_engine_load_applies_whitelisted_metadata_compute_defaults_and_request_o
     assert loaded["adaptive_exit_entropy"] == 0.75
     assert loaded["prediction_stability_patience"] == 4
     assert loaded["prediction_stability_tol"] == 0.02
+    assert loaded["prediction_stability_margin"] == 0.13
     assert engine.defaults["pool_mode"] == "all"
     assert "untrusted_extra" not in engine.defaults
 
@@ -437,6 +616,7 @@ def test_engine_load_applies_whitelisted_metadata_compute_defaults_and_request_o
         "exit_entropy_threshold": 0.75,
         "prediction_stability_patience": 4,
         "prediction_stability_tol": 0.02,
+        "prediction_stability_margin": 0.13,
     }
 
     engine.chat(
@@ -448,6 +628,7 @@ def test_engine_load_applies_whitelisted_metadata_compute_defaults_and_request_o
         adaptive_exit_entropy=0.5,
         prediction_stability_patience=3,
         prediction_stability_tol=0.01,
+        prediction_stability_margin=0.06,
     )
     assert engine.model.calls[-1] == {
         "reasoning_cycles": 5,
@@ -456,6 +637,7 @@ def test_engine_load_applies_whitelisted_metadata_compute_defaults_and_request_o
         "exit_entropy_threshold": 0.5,
         "prediction_stability_patience": 3,
         "prediction_stability_tol": 0.01,
+        "prediction_stability_margin": 0.06,
     }
 
     disabled = engine.chat(
@@ -481,6 +663,7 @@ def test_engine_load_rebuilds_defaults_and_constructor_values_win(
             "adaptive_exit_entropy": 0.8,
             "prediction_stability_patience": 6,
             "prediction_stability_tol": 0.04,
+            "prediction_stability_margin": 0.07,
         },
     }
     second_meta = {
@@ -500,6 +683,7 @@ def test_engine_load_rebuilds_defaults_and_constructor_values_win(
     engine.load(str(weights), str(first_path))
     assert engine.status()["reasoning_cycles"] == 8
     assert engine.status()["prediction_stability_patience"] == 6
+    assert engine.status()["prediction_stability_margin"] == 0.07
 
     reloaded = engine.load(str(weights), str(second_path))
     assert reloaded["reasoning_cycles"] == "default"
@@ -508,6 +692,7 @@ def test_engine_load_rebuilds_defaults_and_constructor_values_win(
     assert reloaded["adaptive_exit_entropy"] == chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY
     assert reloaded["prediction_stability_patience"] == chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE
     assert reloaded["prediction_stability_tol"] == chat_app.DEFAULT_PREDICTION_STABILITY_TOL
+    assert reloaded["prediction_stability_margin"] == chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
 
     explicit = {
         "pool_mode": "all",
@@ -517,6 +702,7 @@ def test_engine_load_rebuilds_defaults_and_constructor_values_win(
         "adaptive_exit_entropy": 0.3,
         "prediction_stability_patience": 2,
         "prediction_stability_tol": 0.005,
+        "prediction_stability_margin": 0.02,
     }
     explicit_engine = Engine(torch.device("cpu"), {"resolved": "cpu"}, explicit)
     explicit_status = explicit_engine.load(str(weights), str(first_path))
@@ -526,10 +712,18 @@ def test_engine_load_rebuilds_defaults_and_constructor_values_win(
     assert explicit_status["adaptive_exit_entropy"] == 0.3
     assert explicit_status["prediction_stability_patience"] == 2
     assert explicit_status["prediction_stability_tol"] == 0.005
+    assert explicit_status["prediction_stability_margin"] == 0.02
 
 
 def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
     import chat_web_app
+
+    assert chat_web_app._normalize_runtime_compute_defaults(
+        {"prediction_stability_margin": -1}
+    )["prediction_stability_margin"] == chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    assert chat_web_app._normalize_runtime_compute_defaults(
+        {"prediction_stability_margin": 0}
+    )["prediction_stability_margin"] == 0.0
 
     unspecified = Namespace(
         reasoning_cycles=None,
@@ -538,6 +732,7 @@ def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
         adaptive_exit_entropy=None,
         prediction_stability_patience=None,
         prediction_stability_tol=None,
+        prediction_stability_margin=None,
     )
     assert chat_web_app._runtime_compute_cli_overrides(unspecified) == {}
 
@@ -548,6 +743,7 @@ def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
         adaptive_exit_entropy=0.4,
         prediction_stability_patience=4,
         prediction_stability_tol=0.01,
+        prediction_stability_margin=0.03,
     )
     assert chat_web_app._runtime_compute_cli_overrides(explicit) == {
         "reasoning_cycles": "auto",
@@ -556,6 +752,7 @@ def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
         "adaptive_exit_entropy": 0.4,
         "prediction_stability_patience": 4,
         "prediction_stability_tol": 0.01,
+        "prediction_stability_margin": 0.03,
     }
 
     explicit_disabled = Namespace(adaptive_compute=False)
@@ -571,6 +768,26 @@ def test_cli_omits_unspecified_compute_defaults_so_metadata_can_win():
     explicit_auto_enabled = Namespace(auto_compute=True)
     assert chat_web_app._runtime_compute_cli_overrides(explicit_auto_enabled) == {
         "auto_compute": True,
+    }
+
+
+def test_root_chat_web_app_compatibility_forwards_compute_helpers():
+    root_entrypoint = Path(__file__).resolve().parent / "chat_web_app.py"
+    spec = importlib.util.spec_from_file_location(
+        "_root_chat_web_app_compatibility_test",
+        root_entrypoint,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._normalize_runtime_compute_defaults(
+        {"prediction_stability_margin": -1}
+    )["prediction_stability_margin"] == chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    assert module._runtime_compute_cli_overrides(Namespace(adaptive_compute=False)) == {
+        "adaptive_compute": False,
     }
 
 
@@ -605,6 +822,43 @@ def test_packaged_context_mix_v4_matches_source_runtime():
     assert torch.allclose(source_vector, runtime_vector)
 
 
+def test_packaged_runtime_rejects_out_of_range_metadata_bucket_labels():
+    runtime_dir = Path("runtime_python").resolve()
+    script = f"""
+import json
+import sys
+import torch
+sys.path.insert(0, {str(runtime_dir)!r})
+import chat_app
+import chat_web_app
+
+raw = {{
+    "-1": [{{"text": "negative"}}],
+    "0": [{{"text": "valid"}}],
+    str(chat_app.MODEL_CLASSES): [{{"text": "upper-bound"}}],
+    "not-a-label": [{{"text": "malformed"}}],
+}}
+parsed = chat_app._parse_metadata_buckets(raw)
+engine = chat_web_app.Engine(torch.device("cpu"), {{"resolved": "cpu"}}, {{"pool_mode": "all"}})
+engine._parse_buckets({{"buckets": raw}})
+valid = {{"parsed": sorted(parsed), "engine": sorted(engine.buckets), "labels": engine.available_labels}}
+engine._parse_buckets({{"buckets": {{"-1": [{{"text": "bad"}}], str(chat_app.MODEL_CLASSES): [{{"text": "bad"}}], "bad": [{{"text": "bad"}}]}}}})
+print(json.dumps({{"valid": valid, "fallback_buckets": engine.buckets, "fallback_labels": engine.available_labels}}, sort_keys=True))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert payload["valid"] == {"parsed": [0], "engine": [0], "labels": [0]}
+    assert payload["fallback_buckets"] == {}
+    assert payload["fallback_labels"] == list(range(chat_app.MODEL_CLASSES))
+
+
 def test_packaged_web_runtime_rebuilds_metadata_compute_defaults():
     runtime_dir = Path("runtime_python").resolve()
     script = f"""
@@ -620,6 +874,7 @@ metadata = {{
         "adaptive_compute": True,
         "adaptive_exit_tol": 0.4,
         "prediction_stability_patience": 6,
+        "prediction_stability_margin": 0.05,
     }}
 }}
 plain = chat_web_app.Engine(torch.device("cpu"), {{"resolved": "cpu"}}, {{"pool_mode": "all"}})
@@ -646,11 +901,118 @@ print(json.dumps({{"first": first, "clean": clean, "overridden": overridden}}, s
     assert payload["first"]["adaptive_compute"] is True
     assert payload["first"]["adaptive_exit_tol"] == 0.4
     assert payload["first"]["prediction_stability_patience"] == 6
+    assert payload["first"]["prediction_stability_margin"] == 0.05
     assert payload["clean"]["reasoning_cycles"] is None
     assert payload["clean"]["adaptive_compute"] is False
     assert payload["clean"]["adaptive_exit_tol"] == 1e-3
+    assert payload["clean"]["prediction_stability_margin"] == chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
     assert payload["overridden"]["reasoning_cycles"] == 3
     assert payload["overridden"]["adaptive_compute"] is False
+
+
+def test_source_and_packaged_web_uis_expose_prediction_stability_margin():
+    engine = Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "all"})
+    source_html = build_app(engine, "weights.pth", "meta.json").test_client().get("/").get_data(as_text=True)
+    packaged_source = Path("runtime_python/chat_web_app.py").read_text(encoding="utf-8")
+
+    for text in (source_html, packaged_source):
+        assert "stabilityMargin" in text
+        assert "stabilityRankDepth" in text
+        assert "prediction_stability_margin" in text
+        assert "prediction_stability_rank_depth" in text
+        assert "prediction_margin" in text
+        assert "prediction_decision_margin" in text
+        assert "decision_reference_cycles" in text
+        assert "prediction_verifier_active" in text
+        assert "prediction_class_count" in text
+        assert "fmtNum(compute.prediction_stability_margin,6)" in text
+        assert "margin floor" in text
+        assert "step='0.0001' value='0.0005'" in text
+        assert "checkpoint/workload-calibrated default" in text
+
+
+def test_source_and_packaged_web_uis_omit_blank_optional_verifier_inputs_but_preserve_zero():
+    engine = Engine(torch.device("cpu"), {"resolved": "cpu"}, {"pool_mode": "all"})
+    source_html = build_app(engine, "weights.pth", "meta.json").test_client().get("/").get_data(as_text=True)
+    packaged_source = Path("runtime_python/chat_web_app.py").read_text(encoding="utf-8")
+
+    for text in (source_html, packaged_source):
+        assert (
+            "function addOptionalFiniteNumber(payload,key,input)"
+            "{const raw=input.value.trim();if(raw==='')return;"
+            "const value=Number(raw);if(Number.isFinite(value))payload[key]=value;}"
+        ) in text
+        for key in (
+            "prediction_stability_margin",
+            "prediction_stability_rank_depth",
+        ):
+            assert text.count(f"addOptionalFiniteNumber(payload,'{key}'") == 2
+            assert f"{key}:Number(" not in text
+        assert "jpost('/api/chat',payload)" in text
+        assert "jpost('/api/compute_sweep',payload)" in text
+
+
+def test_packaged_web_api_forwards_prediction_stability_margin():
+    runtime_dir = Path("runtime_python").resolve()
+    script = f"""
+import json
+import sys
+import torch
+sys.path.insert(0, {str(runtime_dir)!r})
+import chat_web_app
+
+class Model(torch.nn.Module):
+    def forward(
+        self,
+        x,
+        reasoning_cycles=None,
+        adaptive_compute=False,
+        exit_tol=1e-3,
+        exit_entropy_threshold=0.2,
+        prediction_stability_patience=2,
+        prediction_stability_tol=5e-3,
+        prediction_stability_margin=5e-4,
+        prediction_stability_rank_depth=3,
+    ):
+        logits = torch.zeros(x.shape[0], x.shape[1], 10, device=x.device)
+        logits[..., 2] = 4.0
+        return logits
+
+engine = chat_web_app.Engine(torch.device("cpu"), {{"resolved": "cpu"}}, {{"pool_mode": "all"}})
+engine.model = Model().eval()
+engine.available_labels = [2]
+client = chat_web_app.build_app(engine, "weights.pth", "meta.json").test_client()
+results = {{}}
+for name, margin in (("positive", 0.17), ("negative", -1.0), ("zero", 0.0)):
+    response = client.post(
+        "/api/compute_sweep",
+        json={{
+            "session_id": "packaged-margin-" + name,
+            "message": "compare compute",
+            "cycles": [1],
+            "adaptive_compute": True,
+            "prediction_stability_margin": margin,
+            "prediction_stability_rank_depth": 4,
+        }},
+    )
+    results[name] = {{"status": response.status_code, "payload": response.get_json()}}
+print(json.dumps(results, sort_keys=True))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert result["positive"]["status"] == 200
+    assert result["positive"]["payload"]["rows"][0]["compute"]["prediction_stability_margin"] == 0.17
+    assert result["positive"]["payload"]["rows"][0]["compute"]["prediction_stability_rank_depth"] == 4
+    assert result["positive"]["payload"]["rows"][0]["compute"]["prediction_verifier_active"] is True
+    assert result["negative"]["payload"]["rows"][0]["compute"]["prediction_stability_margin"] == chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN
+    assert result["zero"]["payload"]["rows"][0]["compute"]["prediction_stability_margin"] == 0.0
 
 
 def test_packaged_web_runtime_escapes_default_paths():

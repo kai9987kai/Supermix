@@ -646,11 +646,14 @@ Additional primary sources reviewed:
 
 Repo changes:
 
-- Added an inference-only full-output verifier to the v51 recurrent head. At
-  each cycle it constructs the output that would be returned if reasoning
-  stopped at that point, then tracks the top prediction and confidence range.
-- Adaptive inference can now stop when the prediction remains unchanged for a
-  configurable patience window and confidence drift stays below a configurable
+- Added an inference-only post-head verifier to the v51 recurrent head. At each
+  cycle it constructs the exact output that would be returned if reasoning
+  stopped at that point, applies softmax only over the caller's verified
+  allowed-label scope, and tracks the ordered decision boundary through the
+  configured rank depth.
+- Adaptive inference can now stop when the ordered top-k decision remains
+  unchanged for a configurable patience window, its minimum adjacent margin
+  clears the calibrated floor, and confidence drift stays below a configurable
   tolerance. This criterion is separate from latent convergence, low entropy,
   and ACT remaining-mass exits.
 - Added `prediction_stability_patience` and `prediction_stability_tol` across
@@ -1297,40 +1300,75 @@ Research and deployment boundary:
   Those controls remain external prerequisites, not properties implied by a
   verified registry.
 
-## July 2026: v51 prediction-stability pilot and distribution-drift shadow metric
+## July 2026: v51 decision-fidelity release gate and reference fallback
 
 Recent primary sources reviewed:
 
-1. LESS Is More: Adaptive Early Exit for Diffusion Language Models
-   https://arxiv.org/abs/2606.16908
-2. Stop When Reasoning Converges: Adaptive Test-Time Scaling with PUMA
+1. Understanding and Mitigating Premature Confidence for Better LLM Reasoning
+   https://arxiv.org/abs/2605.24396
+2. MarginGate: Sparse Margin-Triggered Verification for Batch-Invariant LLM Inference
+   https://arxiv.org/abs/2605.30218
+3. Stop When Reasoning Converges: Semantic-Preserving Early Exit for Reasoning Models
    https://arxiv.org/abs/2605.17672
-3. LLMRouterBench: A Massive Benchmark and Unified Framework for LLM Routing
-   https://arxiv.org/abs/2601.07206
-4. TwinRouterBench: A Systematic Benchmark for Dynamic LLM Routing
-   https://arxiv.org/abs/2605.18859
+4. LESS Is More: Mutual-Stability Sampling for Diffusion Language Models
+   https://arxiv.org/abs/2606.16908
+5. UCCI: Calibrated Uncertainty for Cost-Optimal LLM Cascade Routing
+   https://arxiv.org/abs/2605.18796
+6. Conformal Thinking: Risk Control for Reasoning on a Compute Budget
+   https://arxiv.org/abs/2602.03814
+7. MARS: Margin-Adversarial Risk-controlled Stopping for Parallel LLM Test-time Scaling
+   https://arxiv.org/abs/2606.12935
 
-Implementation and pilot evidence:
+Implementation and release evidence:
 
 - `benchmark_v51_prediction_stability.py` now records top-k Jensen-Shannon
   divergence between consecutive full-prefix output distributions. The shared
   top-k support is chosen from the midpoint distribution and all remaining
   probability is retained in one `other` bucket. This is diagnostic telemetry
   only: it cannot trigger an exit or change a model answer.
-- A CPU pilot screened five stopping configurations over three unseen seeds and
-  32 examples per seed (480 requests total). Patience 2 / tolerance 0.005 kept
-  96/96 prediction agreement and zero observed accuracy delta while using 2.135
-  mean cycles, a 28.8% reduction from the three-cycle baseline. Patience 1
-  changed one prediction and is rejected. Stricter patience/tolerance settings
-  increased work without improving observed agreement.
-- Latency measurements were not counterbalanced, so they are screening evidence
-  rather than a release claim. The next gate is 512 held-out examples over eight
-  fresh seeds with zero disagreements, no negative per-seed accuracy delta, at
-  least 20% mean cycle reduction, and positive median latency reduction before
-  changing any runtime default.
-- The research transfer remains provisional. LESS studies diffusion language
-  models, PUMA combines semantic convergence with answer verification, and the
-  router benchmarks emphasize held-out dynamic evaluation plus strong simple
-  baselines. Supermix therefore exposes distribution drift as a shadow metric
-  beside its existing output-persistence verifier rather than treating a new
-  paper or a small pilot as activation evidence.
+- The first strict 4,096-request dual-mode gate rejected the `0.0001` margin:
+  release mode observed 5 top-1, 18 ordered-top-3, and 10 top-3-set
+  disagreements; isolated mode observed 2, 6, and 4. Exact replay attributed
+  13 release top-3 failures to legacy `latent_converged` bypasses and five to
+  cycle-2 verifier exits. The largest failing certified decision margin was
+  `0.000412636`, so `0.0005` is the smallest round candidate screened here.
+- The accepted implementation persists the complete ordered rank tuple, makes
+  the post-head verifier the sole authority for early exit, and falls back to
+  the exact trained three-cycle ACT mixture with
+  `decision_reference_budget` when no strictly earlier decision is certified.
+  Bounded disagreement records retain sample index, target, decisions, exit
+  reason, cycles, margins, and verifier telemetry without retaining raw inputs.
+- The clean v5 CPU gate at commit `81c4dbe7` used eight seeds and 512 requests
+  per seed in both isolated-verifier and exact release-runtime modes. Both had
+  zero top-1, ordered-top-3, top-3-set, and exact-output disagreements, and all
+  per-seed accuracy deltas were zero. Of 4,096 requests, 3,941 exited at cycle 2
+  and 155 used the exact cycle-3 reference fallback: mean cycles were 2.0378 and
+  cycle reduction was 32.0719%. Release-runtime weighted/median-per-seed latency
+  reductions were 4.7567%/3.7062%; isolated reductions were
+  7.2346%/5.5732%.
+- The frozen 16-prompt response-fidelity gate ran source and a `python -I`
+  isolated packaged engine with verified module provenance. It observed zero
+  response, ordered-top-five, compute-contract, or packaged-behavior mismatches;
+  15 prompts certified at cycle 2 and one used the exact reference fallback.
+  The progressive accepted-probe controller separately matched the legacy
+  controller exactly on 256 requests while reducing forward evaluations by
+  31.25% and weighted latency by 30.095%.
+
+Research and statistical boundary:
+
+- Premature Confidence motivates distrust of early commitment, but its tested
+  remedy is training-time confidence shaping. PUMA studies semantic convergence
+  in generated reasoning, LESS studies diffusion-language-model token
+  commitment, MarginGate studies margin-aware numerical routing, UCCI studies
+  calibrated cascades, and MARS analyzes a different switching process. Their
+  results motivate this design; none directly proves the Supermix stopping rule.
+- `0.0005` is a checkpoint/workload operating point, not a universal margin.
+  The zero-error observation over 4,096 requests still has a one-sided 95%
+  binomial upper bound of roughly 0.073%. Conformal Thinking is the rationale
+  for reporting finite-sample risk rather than turning a held-out zero into a
+  universal guarantee.
+- JSD and total variation remain shadow diagnostics. In the rejected replay
+  they did not uniquely identify every decision-boundary failure, so they are
+  not substitutes for ordered decisions, protected adjacent gaps, or exact
+  fallback. The release evidence is scoped to this checkpoint, synthetic task,
+  seed matrix, CPU configuration, and frozen prompt matrix.
