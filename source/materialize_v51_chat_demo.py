@@ -116,9 +116,12 @@ def build_demo_metadata(weights: Path, metrics_path: Path) -> Dict[str, Any]:
         "training_task": "synthetic chained modular arithmetic benchmark",
         "fine_tuned_weights": str(weights.name),
         "checkpoint_path": _portable_project_path(weights),
-        "benchmark_metrics": _portable_project_path(metrics_path) if metrics else None,
-        "prediction_stability_metrics": (
-            _portable_project_path(stability_metrics_path) if stability_metrics else None
+        # These fields describe the portable artifact contract, not whether the
+        # files happened to be present while metadata was materialized.  Keep
+        # availability reflected in the nullable summary values below.
+        "benchmark_metrics": _portable_project_path(metrics_path),
+        "prediction_stability_metrics": _portable_project_path(
+            stability_metrics_path
         ),
         "benchmark_summary": {
             "train_seconds": metrics.get("train_seconds"),
