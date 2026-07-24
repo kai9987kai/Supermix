@@ -114,8 +114,12 @@ jobs:
           if ($seal.execution_enabled -ne $false) { throw 'Frozen shadow seal unexpectedly enables execution' }
           $campaignId = $seal.public_package.campaign_seal.seal.campaign_id
           $clusterPath = Join-Path $PWD 'build\ci_route_shadow\cluster.json'
-          @{ cluster_identifier = 'ci-shadow-cluster-1' } | ConvertTo-Json -Compress | Set-Content -LiteralPath $clusterPath -Encoding utf8
-          $commit = (& .\dist\ci_route_shadow\SupermixRouteShadow.exe commit --registry $registryPath --campaign $campaignId --seed-input $seedPath --cluster-input $clusterPath --compact) | ConvertFrom-Json
+          $clusterIdentifier = python -c "from source.route_policy_ledger import hash_session_identity; print(hash_session_identity('ci-shadow-cluster-1'))"
+          if ($LASTEXITCODE -ne 0) { throw 'CI shadow cluster hash generation failed' }
+          @{ cluster_identifier = $clusterIdentifier } | ConvertTo-Json -Compress | Set-Content -LiteralPath $clusterPath -Encoding utf8
+          $commitRaw = & .\dist\ci_route_shadow\SupermixRouteShadow.exe commit --registry $registryPath --campaign $campaignId --seed-input $seedPath --cluster-input $clusterPath --compact
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen shadow commitment failed' }
+          $commit = $commitRaw | ConvertFrom-Json
           if ($commit.chosen_arm_revealed -ne $false) { throw 'Frozen shadow commitment revealed an arm early' }
           $closure = (& .\dist\ci_route_shadow\SupermixRouteShadow.exe close --registry $registryPath --campaign $campaignId --compact) | ConvertFrom-Json
           if ($closure.closure.frozen_commitment_count -ne 1) { throw 'Frozen shadow closure count mismatch' }
