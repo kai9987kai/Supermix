@@ -1,5 +1,4 @@
 ﻿import argparse
-import json
 import threading
 import time
 import uuid
@@ -11,7 +10,28 @@ from flask import Flask, jsonify, request
 import torch
 
 import chat_app
+from chat_memory import ChatMemoryDB, render_memory_block
+from conversation_state import (
+    build_conversation_state,
+    conversation_state_diagnostics,
+)
 from device_utils import configure_torch_runtime, resolve_device
+from grounding_runtime import (
+    build_evidence_bundle,
+    finalize_grounded_response,
+    plan_grounding,
+)
+from interaction_planner import (
+    finalize_response_for_interaction,
+    interaction_plan_diagnostics,
+    plan_interaction,
+)
+from llm_database import LLMDatabase
+from prompt_understanding import (
+    analyze_prompt,
+    evaluate_response_constraints,
+    prompt_understanding_diagnostics,
+)
 
 try:
     from route_policy_shadow_registry import RouteShadowAssignmentRegistry
@@ -273,7 +293,10 @@ promptEl.addEventListener('input', () => {
 function fmtNum(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):null;}
 function reasoningCyclesValue(){const raw=el('reasoningCycles').value.trim();if(!raw)return null;const low=raw.toLowerCase();if(['auto','adaptive','smart'].includes(low))return 'auto';const n=Number(raw);return Number.isFinite(n)?n:raw;}
 function addOptionalFiniteNumber(payload,key,input){const raw=input.value.trim();if(raw==='')return;const value=Number(raw);if(Number.isFinite(value))payload[key]=value;}
-function add(kind,text,timing,top,compute){
+function interactionText(interaction){if(!interaction)return'';const guard=interaction.response_guard||{};return `Interaction: intent ${interaction.intent||'conversation'} | strategy ${interaction.strategy||'direct_then_offer_depth'} | risk ${interaction.risk_tier||'low'} | guard ${guard.reason||'candidate_aligned'}`;}
+function understandingText(understanding){if(!understanding)return'';const acts=Array.isArray(understanding.objective_acts)?understanding.objective_acts:(Array.isArray(understanding.acts)?understanding.acts:[]);const ambiguity=understanding.ambiguity||{};const context=understanding.context||{};const normalization=understanding.normalization||{};const safety=understanding.safety||{};const audit=understanding.response_constraint_audit||{};const parts=[`acts ${acts.slice(0,3).join('+')||understanding.primary_act||'direct'}`,`constraints ${understanding.constraint_count??0}`,`ambiguity ${ambiguity.status||understanding.ambiguity_status||understanding.decision||'clear'}`,`turn ${context.turn_relation||understanding.turn_relation||'standalone'}`];if(audit.accepted===true)parts.push('contract pass');else if(audit.accepted===false)parts.push(`contract ${Array.isArray(audit.violations)?audit.violations.length:1} issue(s)`);if(Number(normalization.correction_count||0)>0||safety.typo_recovery_applied||understanding.typo_recovery_applied||understanding.cue_typos_recovered)parts.push('cue typo recovered');return `Understanding: ${parts.join(' | ')}`;}
+function groundingText(grounding){if(!grounding)return'';const diagnostics=grounding.diagnostics||{};const guard=grounding.response_guard||{};return `Grounding: evidence ${diagnostics.evidence_count??0} | ${diagnostics.sufficiency||'no_evidence'} | guard ${guard.reason||'audit_only'}`;}
+function add(kind,text,timing,top,compute,interaction,promptUnderstanding,grounding){
     const d=document.createElement('div');
     d.className='msg '+kind;
     const who=document.createElement('div');
@@ -332,6 +355,27 @@ function add(kind,text,timing,top,compute){
             c.textContent='Compute: '+parts.join(' | ');
             d.appendChild(c);
         }
+    }
+    const understandingSummary=understandingText(promptUnderstanding);
+    if(understandingSummary){
+        const node=document.createElement('div');
+        node.className='tim';
+        node.textContent=understandingSummary;
+        d.appendChild(node);
+    }
+    const interactionSummary=interactionText(interaction);
+    if(interactionSummary){
+        const node=document.createElement('div');
+        node.className='tim';
+        node.textContent=interactionSummary;
+        d.appendChild(node);
+    }
+    const groundingSummary=groundingText(grounding);
+    if(groundingSummary){
+        const node=document.createElement('div');
+        node.className='tim';
+        node.textContent=groundingSummary;
+        d.appendChild(node);
     }
     if(top&&top.length){
         const x=document.createElement('div');
@@ -427,7 +471,7 @@ async function send(){
         addOptionalFiniteNumber(payload,'prediction_stability_margin',el('stabilityMargin'));
         addOptionalFiniteNumber(payload,'prediction_stability_rank_depth',el('stabilityRankDepth'));
         const d=await jpost('/api/chat',payload);
-        add('bot',d.response,d.timing_ms,d.top_candidates,d.compute);
+        add('bot',d.response,d.timing_ms,d.top_candidates,d.compute,d.interaction,d.prompt_understanding,d.grounding);
     }catch(e){ add('bot','CORE ERROR: '+e.message); }
 }
 async function sweepCompute(){
@@ -460,6 +504,10 @@ refresh(); refreshRouteShadowRegistry();
 </script></body></html>"""
 
 
+# Bounded so a long-lived server cannot accumulate one lock per session id.
+MAX_SESSION_TURN_LOCKS = 512
+
+
 _RUNTIME_COMPUTE_DEFAULT_KEYS = (
     "reasoning_cycles",
     "adaptive_compute",
@@ -470,6 +518,10 @@ _RUNTIME_COMPUTE_DEFAULT_KEYS = (
     "prediction_stability_margin",
     "prediction_stability_rank_depth",
     "auto_compute",
+    "core_top_k",
+    "verifier_adaptive_compute",
+    "verifier_continue_threshold",
+    "max_verifier_cycles",
 )
 
 
@@ -484,6 +536,12 @@ def _library_runtime_compute_defaults() -> Dict[str, Any]:
         "prediction_stability_margin": chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN,
         "prediction_stability_rank_depth": chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
         "auto_compute": False,
+        # v52 controls default to off: sparse dispatch is not always faster on
+        # small CPU batches, and the verifier head is untrained on v50 imports.
+        "core_top_k": None,
+        "verifier_adaptive_compute": False,
+        "verifier_continue_threshold": chat_app.DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+        "max_verifier_cycles": chat_app.DEFAULT_MAX_VERIFIER_CYCLES,
     }
 
 
@@ -524,6 +582,22 @@ def _normalize_runtime_compute_defaults(values: Dict[str, Any]) -> Dict[str, Any
             values.get("prediction_stability_rank_depth"),
         ),
         "auto_compute": chat_app._coerce_bool(values.get("auto_compute")),
+        "core_top_k": chat_app._coerce_optional_positive_int(
+            values.get("core_top_k"),
+            chat_app.MAX_RUNTIME_CORE_TOP_K,
+        ),
+        "verifier_adaptive_compute": chat_app._coerce_bool(
+            values.get("verifier_adaptive_compute")
+        ),
+        "verifier_continue_threshold": chat_app._coerce_unit_interval(
+            values.get("verifier_continue_threshold"),
+            chat_app.DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+        ),
+        "max_verifier_cycles": chat_app._coerce_nonnegative_int(
+            values.get("max_verifier_cycles"),
+            chat_app.DEFAULT_MAX_VERIFIER_CYCLES,
+            chat_app.MAX_RUNTIME_REASONING_CYCLES,
+        ),
     }
 
 
@@ -539,6 +613,10 @@ def _runtime_compute_cli_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         "prediction_stability_margin": getattr(args, "prediction_stability_margin", None),
         "prediction_stability_rank_depth": getattr(args, "prediction_stability_rank_depth", None),
         "auto_compute": getattr(args, "auto_compute", None),
+        "core_top_k": getattr(args, "core_top_k", None),
+        "verifier_adaptive_compute": getattr(args, "verifier_adaptive_compute", None),
+        "verifier_continue_threshold": getattr(args, "verifier_continue_threshold", None),
+        "max_verifier_cycles": getattr(args, "max_verifier_cycles", None),
     }
     return {key: value for key, value in values.items() if value is not None}
 
@@ -550,6 +628,11 @@ class Engine:
         self._constructor_defaults = dict(defaults or {})
         self.defaults = self._build_effective_defaults({})
         self.lock = threading.RLock()
+        # Serializes model inference. The heads store their telemetry on
+        # themselves (`last_*`), so concurrent forwards would report each
+        # other's metrics.
+        self.inference_lock = threading.Lock()
+        self.session_turn_locks: Dict[str, threading.Lock] = {}
         self.model = None
         self.weights_path: Optional[str] = None
         self.meta_path: Optional[str] = None
@@ -559,6 +642,23 @@ class Engine:
         self.available_labels: List[int] = list(range(chat_app.MODEL_CLASSES))
         self.sessions: Dict[str, List[Tuple[str, str]]] = {}
         self.recent: Dict[str, List[str]] = {}
+        llm_db_path = str(self._constructor_defaults.get("llm_db") or "").strip()
+        self.llm_db_path = str(Path(llm_db_path).expanduser().resolve()) if llm_db_path else ""
+        self.llm_db: Optional[LLMDatabase] = (
+            LLMDatabase(self.llm_db_path)
+            if self.llm_db_path and Path(self.llm_db_path).is_file()
+            else None
+        )
+        memory_db_path = str(self._constructor_defaults.get("memory_db") or "").strip()
+        self.memory_db_path = (
+            str(Path(memory_db_path).expanduser().resolve()) if memory_db_path else ""
+        )
+        self.memory_db: Optional[ChatMemoryDB] = (
+            ChatMemoryDB(self.memory_db_path)
+            if self.memory_db_path
+            and not bool(self._constructor_defaults.get("disable_memory", False))
+            else None
+        )
         registry_path = self._constructor_defaults.get("route_shadow_registry_path")
         self.route_shadow_registry_path = Path(
             registry_path or Path("tmp") / "memory" / "route-policy-shadow-registry.sqlite3"
@@ -586,6 +686,26 @@ class Engine:
         effective.update(_normalize_runtime_compute_defaults(runtime_defaults))
         return effective
 
+    def _session_turn_lock(self, session_id: str) -> "threading.Lock":
+        """One turn at a time per session.
+
+        `chat` snapshots the session history, runs inference outside the engine
+        lock, then appends the finished turn. Two concurrent requests for the
+        same session would both snapshot the same history and the earlier turn
+        would be lost, which also corrupts the derived conversation state.
+        """
+
+        with self.lock:
+            lock = self.session_turn_locks.get(session_id)
+            if lock is None:
+                lock = threading.Lock()
+                self.session_turn_locks[session_id] = lock
+                if len(self.session_turn_locks) > MAX_SESSION_TURN_LOCKS:
+                    for stale in list(self.session_turn_locks)[:-MAX_SESSION_TURN_LOCKS]:
+                        if not self.session_turn_locks[stale].locked():
+                            del self.session_turn_locks[stale]
+        return lock
+
     def status(self) -> Dict[str, Any]:
         with self.lock:
             return {
@@ -607,6 +727,12 @@ class Engine:
                 "prediction_stability_margin": chat_app._coerce_prediction_stability_margin(self.defaults.get("prediction_stability_margin", chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN)),
                 "prediction_stability_rank_depth": chat_app._coerce_prediction_stability_rank_depth(self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)),
                 "auto_compute": chat_app._coerce_bool(self.defaults.get("auto_compute", False)),
+                "knowledge": {
+                    "llm_db_available": self.llm_db is not None,
+                    "persistent_memory_available": self.memory_db is not None,
+                    "llm_db_file": Path(self.llm_db_path).name if self.llm_db_path else None,
+                    "memory_db_file": Path(self.memory_db_path).name if self.memory_db_path else None,
+                },
             }
 
     def route_shadow_registry_snapshot(self) -> Dict[str, Any]:
@@ -801,7 +927,7 @@ class Engine:
             else self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)
         )
 
-        with torch.no_grad():
+        with self.inference_lock, torch.no_grad():
             for cycle_count in requested_cycles:
                 t0 = time.perf_counter()
                 model_out, compute_diag = chat_app.forward_with_runtime_compute(
@@ -816,6 +942,14 @@ class Engine:
                     prediction_stability_margin=resolved_prediction_stability_margin,
                     prediction_class_indices=labels,
                     prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
+                    core_top_k=self.defaults.get("core_top_k"),
+                    verifier_adaptive_compute=self.defaults.get("verifier_adaptive_compute", False),
+                    verifier_continue_threshold=self.defaults.get(
+                        "verifier_continue_threshold", chat_app.DEFAULT_VERIFIER_CONTINUE_THRESHOLD
+                    ),
+                    max_verifier_cycles=self.defaults.get(
+                        "max_verifier_cycles", chat_app.DEFAULT_MAX_VERIFIER_CYCLES
+                    ),
                 )
                 latency_ms = round((time.perf_counter() - t0) * 1000, 1)
                 logits = model_out[0, 0]
@@ -856,197 +990,434 @@ class Engine:
         auto_compute: Optional[bool] = None,
         prediction_stability_margin: Any = None,
         prediction_stability_rank_depth: Any = None,
+        interaction_enabled: bool = True,
+        interaction_plan: Optional[Dict[str, Any]] = None,
+        interaction_user_text: Optional[str] = None,
+        prompt_profile: Optional[Dict[str, Any]] = None,
+        grounding_enabled: bool = True,
+        grounding_plan: Optional[Dict[str, Any]] = None,
+        conversation_enabled: bool = True,
     ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
-        with self.lock:
-            if self.model is None:
-                raise RuntimeError("No model loaded")
-            model = self.model
-            feature_mode = self.feature_mode
-            buckets = self.buckets
-            labels = list(self.available_labels)
-            history = list(self.sessions.get(session_id, []))
-            recent_msgs = list(self.recent.get(session_id, []))
-        t0 = time.perf_counter()
-        t_infer = 0.0
-        t_rank = 0.0
-
-        context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
-        tt = time.perf_counter()
-        x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
-        resolved_adaptive_compute = (
-            self.defaults.get("adaptive_compute", False)
-            if adaptive_compute is None
-            else adaptive_compute
-        )
-        resolved_exit_tol = (
-            self.defaults.get("adaptive_exit_tol")
-            if adaptive_exit_tol is None
-            else adaptive_exit_tol
-        )
-        resolved_prediction_stability_margin = chat_app._coerce_prediction_stability_margin(
-            prediction_stability_margin
-            if prediction_stability_margin is not None
-            else self.defaults.get("prediction_stability_margin", chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN)
-        )
-        resolved_prediction_stability_rank_depth = chat_app._coerce_prediction_stability_rank_depth(
-            prediction_stability_rank_depth
-            if prediction_stability_rank_depth is not None
-            else self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)
-        )
-        effective_reasoning_cycles = (
-            self.defaults.get("reasoning_cycles")
-            if reasoning_cycles is None
-            else reasoning_cycles
-        )
-        compute_plan: Optional[Dict[str, Any]] = None
-        auto_enabled = (
-            chat_app._coerce_bool(self.defaults.get("auto_compute", False), default=False)
-            if auto_compute is None
-            else chat_app._coerce_bool(auto_compute, default=False)
-        )
-        if auto_enabled and chat_app.model_supports_runtime_compute(model):
-            model_out, compute_metrics, compute_plan = chat_app.progressive_auto_compute_forward(
-                model,
-                x,
-                labels,
-                cycles=self._auto_compute_cycles(effective_reasoning_cycles),
-                adaptive_compute=resolved_adaptive_compute,
-                exit_tol=chat_app._coerce_nonnegative_float(
-                    resolved_exit_tol,
-                    default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
-                ),
-                exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
-                prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
-                prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
-                prediction_stability_margin=resolved_prediction_stability_margin,
-                prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
-                auto_reasoning_context=context,
-            )
-            effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
-        else:
-            with torch.no_grad():
-                model_out, compute_metrics = chat_app.forward_with_runtime_compute(
-                    model,
-                    x,
-                    reasoning_cycles=effective_reasoning_cycles,
-                    adaptive_compute=resolved_adaptive_compute,
-                    exit_tol=resolved_exit_tol,
-                    exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
-                    prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
-                    prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
-                    prediction_stability_margin=resolved_prediction_stability_margin,
-                    auto_reasoning_context=context,
-                    prediction_class_indices=labels,
-                    prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
+        with self._session_turn_lock(session_id):
+            with self.lock:
+                if self.model is None:
+                    raise RuntimeError("No model loaded")
+                model = self.model
+                feature_mode = self.feature_mode
+                buckets = self.buckets
+                labels = list(self.available_labels)
+                history = list(self.sessions.get(session_id, []))
+                recent_msgs = list(self.recent.get(session_id, []))
+            t0 = time.perf_counter()
+            t_infer = 0.0
+            t_rank = 0.0
+            t_retrieval = 0.0
+            interaction_request_text = str(interaction_user_text or user_text)
+            recent_turns = [
+                {
+                    "id": f"turn-{index + 1}",
+                    "user": str(prior_user or ""),
+                    "assistant": str(prior_assistant or ""),
+                }
+                for index, (prior_user, prior_assistant) in enumerate(history[-4:])
+            ]
+            recent_user_messages = [
+                str(prior_user or "")
+                for prior_user, _ in history[-4:]
+                if str(prior_user or "").strip()
+            ]
+            recent_assistant_messages = [
+                str(message or "")
+                for message in recent_msgs[-4:]
+                if str(message or "").strip()
+            ]
+            if prompt_profile is None:
+                prompt_profile = analyze_prompt(
+                    interaction_request_text,
+                    recent_turns=recent_turns,
+                    recent_user_messages=recent_user_messages,
+                    recent_assistant_messages=recent_assistant_messages,
                 )
-        logits = model_out[0, 0]
-        t_infer += time.perf_counter() - tt
+            else:
+                prompt_profile = dict(prompt_profile)
+            if not interaction_enabled:
+                interaction_plan = None
+            elif interaction_plan is None:
+                interaction_plan = plan_interaction(
+                    interaction_request_text,
+                    recent_assistant_messages=recent_assistant_messages,
+                    context={
+                        "recent_user_messages": recent_user_messages,
+                        "recent_turns": recent_turns,
+                    },
+                    prompt_profile=prompt_profile,
+                )
+            if not grounding_enabled:
+                grounding_plan = None
+            elif grounding_plan is None:
+                grounding_plan = plan_grounding(
+                    interaction_request_text,
+                    interaction_plan=interaction_plan,
+                    prompt_profile=prompt_profile,
+                )
+            # Accumulated over the whole session rather than the bounded window the
+            # planner sees. A controlled evaluation can switch it off entirely.
+            conversation_state = (
+                build_conversation_state(history, current_user_text=interaction_request_text)
+                if conversation_enabled
+                else None
+            )
 
-        idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
-        avail_logits = logits.index_select(0, idx)
-        probs = torch.softmax(avail_logits, dim=0)
-        pool_mode = str(self.defaults.get("pool_mode", "all"))
-        if pool_mode == "all":
-            top_pos = list(range(len(labels)))
-        else:
-            k = max(1, min(int(self.defaults.get("top_labels", 3)), len(labels)))
-            top_pos = torch.topk(avail_logits, k=k).indices.tolist()
+            retrieval_started = time.perf_counter()
+            memory_rows: List[Dict[str, Any]] = []
+            if self.memory_db is not None:
+                memory_rows = self.memory_db.query(
+                    interaction_request_text,
+                    top_k=max(1, int(self.defaults.get("memory_top_k", 4))),
+                    pool_size=max(1, int(self.defaults.get("memory_pool_size", 400))),
+                    recency_half_life_hours=max(
+                        1.0,
+                        float(self.defaults.get("memory_recency_half_life_hours", 168.0)),
+                    ),
+                )
+            db_candidates: List[Dict[str, Any]] = []
+            if self.llm_db is not None:
+                db_query = chat_app._build_db_query(
+                    user=interaction_request_text,
+                    history=history,
+                    memory_rows=memory_rows,
+                    max_turns=max(0, int(self.defaults.get("db_query_context_turns", 2))),
+                    prompt_profile=prompt_profile,
+                    recent_turns=recent_turns,
+                )
+                db_candidates = self.llm_db.query(
+                    db_query or interaction_request_text,
+                    top_k=max(1, int(self.defaults.get("db_top_k", 120))),
+                    exact_user_text=interaction_request_text,
+                )
+            exact_db_candidates = [
+                row for row in db_candidates if bool(row.get("exact_user_match", False))
+            ]
+            grounded_db_candidates = exact_db_candidates or db_candidates
+            evidence_rows = [
+                {
+                    "title": str(row.get("source_title") or ""),
+                    "text": str(row.get("text") or ""),
+                    "source": str(row.get("source_uri") or "local_llm_db"),
+                    "source_type": str(row.get("source_type") or "local_dataset"),
+                    "score": float(row.get("bucket_score") or 0.0),
+                }
+                for row in grounded_db_candidates
+                if str(row.get("text") or "").strip()
+            ]
+            evidence_bundle = (
+                build_evidence_bundle(
+                    interaction_request_text,
+                    evidence_rows,
+                    interaction_plan=interaction_plan,
+                    max_items=int((grounding_plan or {}).get("max_evidence_items") or 6),
+                    grounding_plan=grounding_plan,
+                    prompt_profile=prompt_profile,
+                )
+                if grounding_enabled
+                else None
+            )
+            t_retrieval += time.perf_counter() - retrieval_started
 
-        pooled: List[Dict[str, Any]] = []
-        for pos in top_pos:
-            label = labels[int(pos)]
-            bucket_score = float(probs[int(pos)].item())
-            for row in buckets.get(label, []):
-                m = dict(row)
-                m["bucket_score"] = bucket_score
-                m["_source"] = "model"
-                pooled.append(m)
-        if (not pooled) and buckets:
-            label = chat_app.choose_bucket_from_logits(logits, labels, temperature=float(self.defaults.get("temperature", 0.0)))
-            pooled = list(buckets.get(label, []))
-
-        dedup: Dict[str, Dict[str, Any]] = {}
-        for row in pooled:
-            text = str(row.get("text", "")).strip()
-            if not text:
-                continue
-            prev = dedup.get(text)
-            if prev is None:
-                d = dict(row)
-                d["_sources_set"] = {row.get("_source", "unknown")}
-                dedup[text] = d
-                continue
-            src = row.get("_source", "unknown")
-            base = max(float(prev.get("bucket_score", 0.0)), float(row.get("bucket_score", 0.0)))
-            if src not in prev["_sources_set"]:
-                base *= 1.10
-                prev["_sources_set"].add(src)
-            prev["bucket_score"] = base
-            prev["count"] = int(prev.get("count", 1)) + int(row.get("count", 1))
-        for k in list(dedup):
-            dedup[k].pop("_sources_set", None)
-            dedup[k].pop("_source", None)
-        pooled = list(dedup.values())
-
-        resolved_style = chat_app.infer_style_mode(user_text, requested_mode=style_mode or str(self.defaults.get("style_mode", "auto")))
-        top_candidates: List[Dict[str, Any]] = []
-        show_n = max(0, int(show_top_responses))
-        if show_n > 0 and pooled:
+            context = chat_app.build_context(history, user_text=user_text, max_turns=int(self.defaults.get("max_turns", 2)))
+            if memory_rows:
+                memory_block = render_memory_block(memory_rows)
+                if memory_block:
+                    context = memory_block + "\n" + context
             tt = time.perf_counter()
-            ranked, scores = chat_app.rank_response_candidates(pooled, query_text=user_text, recent_assistant_messages=recent_msgs, style_mode=resolved_style)
-            t_rank += time.perf_counter() - tt
-            shown = 0
-            for ridx in ranked:
-                txt = str(pooled[ridx].get("text", "")).strip()
-                if not txt:
+            x = chat_app.text_to_model_input(context, feature_mode=feature_mode).to(self.device)
+            resolved_adaptive_compute = (
+                self.defaults.get("adaptive_compute", False)
+                if adaptive_compute is None
+                else adaptive_compute
+            )
+            resolved_exit_tol = (
+                self.defaults.get("adaptive_exit_tol")
+                if adaptive_exit_tol is None
+                else adaptive_exit_tol
+            )
+            resolved_prediction_stability_margin = chat_app._coerce_prediction_stability_margin(
+                prediction_stability_margin
+                if prediction_stability_margin is not None
+                else self.defaults.get("prediction_stability_margin", chat_app.DEFAULT_PREDICTION_STABILITY_MARGIN)
+            )
+            resolved_prediction_stability_rank_depth = chat_app._coerce_prediction_stability_rank_depth(
+                prediction_stability_rank_depth
+                if prediction_stability_rank_depth is not None
+                else self.defaults.get("prediction_stability_rank_depth", chat_app.DEFAULT_PREDICTION_STABILITY_RANK_DEPTH)
+            )
+            effective_reasoning_cycles = (
+                self.defaults.get("reasoning_cycles")
+                if reasoning_cycles is None
+                else reasoning_cycles
+            )
+            compute_plan: Optional[Dict[str, Any]] = None
+            auto_enabled = (
+                chat_app._coerce_bool(self.defaults.get("auto_compute", False), default=False)
+                if auto_compute is None
+                else chat_app._coerce_bool(auto_compute, default=False)
+            )
+            if auto_enabled and chat_app.model_supports_runtime_compute(model):
+                with self.inference_lock:
+                    model_out, compute_metrics, compute_plan = chat_app.progressive_auto_compute_forward(
+                        model,
+                        x,
+                        labels,
+                        cycles=self._auto_compute_cycles(effective_reasoning_cycles),
+                        adaptive_compute=resolved_adaptive_compute,
+                        exit_tol=chat_app._coerce_nonnegative_float(
+                            resolved_exit_tol,
+                            default=chat_app.DEFAULT_ADAPTIVE_EXIT_TOL,
+                        ),
+                        exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                        prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
+                        prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                        prediction_stability_margin=resolved_prediction_stability_margin,
+                        prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
+                        auto_reasoning_context=context,
+                    )
+                effective_reasoning_cycles = compute_plan.get("selected_reasoning_cycles")
+            else:
+                with self.inference_lock, torch.no_grad():
+                    model_out, compute_metrics = chat_app.forward_with_runtime_compute(
+                        model,
+                        x,
+                        reasoning_cycles=effective_reasoning_cycles,
+                        adaptive_compute=resolved_adaptive_compute,
+                        exit_tol=resolved_exit_tol,
+                        exit_entropy_threshold=adaptive_exit_entropy if adaptive_exit_entropy is not None else self.defaults.get("adaptive_exit_entropy", chat_app.DEFAULT_ADAPTIVE_EXIT_ENTROPY),
+                        prediction_stability_patience=prediction_stability_patience if prediction_stability_patience is not None else self.defaults.get("prediction_stability_patience", chat_app.DEFAULT_PREDICTION_STABILITY_PATIENCE),
+                        prediction_stability_tol=prediction_stability_tol if prediction_stability_tol is not None else self.defaults.get("prediction_stability_tol", chat_app.DEFAULT_PREDICTION_STABILITY_TOL),
+                        prediction_stability_margin=resolved_prediction_stability_margin,
+                        auto_reasoning_context=context,
+                        prediction_class_indices=labels,
+                        prediction_stability_rank_depth=resolved_prediction_stability_rank_depth,
+                        core_top_k=self.defaults.get("core_top_k"),
+                        verifier_adaptive_compute=self.defaults.get("verifier_adaptive_compute", False),
+                        verifier_continue_threshold=self.defaults.get(
+                            "verifier_continue_threshold", chat_app.DEFAULT_VERIFIER_CONTINUE_THRESHOLD
+                        ),
+                        max_verifier_cycles=self.defaults.get(
+                            "max_verifier_cycles", chat_app.DEFAULT_MAX_VERIFIER_CYCLES
+                        ),
+                    )
+            logits = model_out[0, 0]
+            t_infer += time.perf_counter() - tt
+
+            idx = torch.tensor(labels, dtype=torch.long, device=logits.device)
+            avail_logits = logits.index_select(0, idx)
+            probs = torch.softmax(avail_logits, dim=0)
+            pool_mode = str(self.defaults.get("pool_mode", "all"))
+            if pool_mode == "all":
+                top_pos = list(range(len(labels)))
+            else:
+                k = max(1, min(int(self.defaults.get("top_labels", 3)), len(labels)))
+                top_pos = torch.topk(avail_logits, k=k).indices.tolist()
+
+            pooled: List[Dict[str, Any]] = []
+            if not exact_db_candidates:
+                for pos in top_pos:
+                    label = labels[int(pos)]
+                    bucket_score = float(probs[int(pos)].item())
+                    for row in buckets.get(label, []):
+                        m = dict(row)
+                        m["bucket_score"] = bucket_score
+                        m["_source"] = "model"
+                        pooled.append(m)
+            for row in grounded_db_candidates:
+                merged = dict(row)
+                merged["bucket_score"] = float(merged.get("bucket_score", 0.0)) * float(
+                    self.defaults.get("db_score_scale", 1.0)
+                )
+                merged["_source"] = "llm_db"
+                pooled.append(merged)
+            for row in ([] if exact_db_candidates else memory_rows):
+                text = str(row.get("assistant_text", "")).strip()
+                vec = row.get("assistant_vec")
+                ctx_vec = row.get("user_vec")
+                if not text or not isinstance(vec, list) or not isinstance(ctx_vec, list):
                     continue
-                top_candidates.append({"score": float(scores[ridx].item()), "text": txt})
-                shown += 1
-                if shown >= show_n:
-                    break
+                pooled.append(
+                    {
+                        "text": text,
+                        "count": 1,
+                        "vec": vec,
+                        "ctx_vec": ctx_vec,
+                        "bucket_score": float(
+                            max(0.0, float(row.get("score", 0.0)))
+                            * float(self.defaults.get("memory_score_scale", 0.45))
+                        ),
+                        "_source": "memory",
+                    }
+                )
+            if (not pooled) and buckets:
+                label = chat_app.choose_bucket_from_logits(logits, labels, temperature=float(self.defaults.get("temperature", 0.0)))
+                pooled = list(buckets.get(label, []))
 
-        tt = time.perf_counter()
-        resp = chat_app.pick_response(
-            pooled,
-            query_text=user_text,
-            recent_assistant_messages=recent_msgs,
-            response_temperature=float(self.defaults.get("response_temperature", 0.08) if response_temperature is None else response_temperature),
-            style_mode=resolved_style,
-            creativity=max(0.0, min(1.0, float(self.defaults.get("creativity", 0.2)))),
-        )
-        t_rank += time.perf_counter() - tt
-        resp = chat_app.cleanup_response_text(resp) or "I do not have a trained response for that yet."
+            dedup: Dict[str, Dict[str, Any]] = {}
+            for row in pooled:
+                text = str(row.get("text", "")).strip()
+                if not text:
+                    continue
+                prev = dedup.get(text)
+                if prev is None:
+                    d = dict(row)
+                    d["_sources_set"] = {row.get("_source", "unknown")}
+                    dedup[text] = d
+                    continue
+                src = row.get("_source", "unknown")
+                base = max(float(prev.get("bucket_score", 0.0)), float(row.get("bucket_score", 0.0)))
+                if src not in prev["_sources_set"]:
+                    base *= 1.10
+                    prev["_sources_set"].add(src)
+                prev["bucket_score"] = base
+                prev["count"] = int(prev.get("count", 1)) + int(row.get("count", 1))
+            for k in list(dedup):
+                dedup[k].pop("_sources_set", None)
+                dedup[k].pop("_source", None)
+            pooled = list(dedup.values())
 
-        with self.lock:
-            hist = self.sessions.setdefault(session_id, [])
-            hist.append((user_text, resp))
-            if len(hist) > 40:
-                del hist[:-40]
-            recent = self.recent.setdefault(session_id, [])
-            recent.append(resp)
-            if len(recent) > 24:
-                del recent[:-24]
+            resolved_style = chat_app.infer_style_mode(
+                user_text,
+                requested_mode=style_mode or str(self.defaults.get("style_mode", "auto")),
+                conversation_state=conversation_state,
+            )
+            top_candidates: List[Dict[str, Any]] = []
+            show_n = max(0, int(show_top_responses))
+            if show_n > 0 and pooled:
+                tt = time.perf_counter()
+                ranked, scores = chat_app.rank_response_candidates(
+                    pooled,
+                    query_text=user_text,
+                    recent_assistant_messages=recent_msgs,
+                    style_mode=resolved_style,
+                    interaction_plan=interaction_plan,
+                    conversation_state=conversation_state,
+                )
+                t_rank += time.perf_counter() - tt
+                shown = 0
+                for ridx in ranked:
+                    txt = str(pooled[ridx].get("text", "")).strip()
+                    if not txt:
+                        continue
+                    top_candidates.append({"score": float(scores[ridx].item()), "text": txt})
+                    shown += 1
+                    if shown >= show_n:
+                        break
 
-        timing_ms = {
-            "infer": round(t_infer * 1000, 1),
-            "rank_pick": round(t_rank * 1000, 1),
-            "total": round((time.perf_counter() - t0) * 1000, 1),
-        }
-        if "cycles_used" in compute_metrics:
-            timing_ms["cycles_used"] = compute_metrics["cycles_used"]
+            tt = time.perf_counter()
+            resp = chat_app.pick_response(
+                pooled,
+                query_text=user_text,
+                recent_assistant_messages=recent_msgs,
+                response_temperature=float(self.defaults.get("response_temperature", 0.08) if response_temperature is None else response_temperature),
+                style_mode=resolved_style,
+                creativity=max(0.0, min(1.0, float(self.defaults.get("creativity", 0.2)))),
+                interaction_plan=interaction_plan,
+                conversation_state=conversation_state,
+            )
+            t_rank += time.perf_counter() - tt
+            resp = chat_app.cleanup_response_text(resp) or "I do not have a trained response for that yet."
+            grounding_diag: Optional[Dict[str, Any]] = None
+            if grounding_plan is not None:
+                grounding_guard = finalize_grounded_response(
+                    resp,
+                    interaction_request_text,
+                    grounding_plan=grounding_plan,
+                    evidence_bundle=evidence_bundle,
+                    prompt_profile=prompt_profile,
+                )
+                resp = str(grounding_guard["text"])
+                grounding_diag = {
+                    "schema_version": str((evidence_bundle or {}).get("schema_version") or ""),
+                    "plan": grounding_plan,
+                    "source_ids": [
+                        str(row.get("id") or "")
+                        for row in (evidence_bundle or {}).get("evidence", [])
+                    ],
+                    "diagnostics": dict(grounding_guard.get("grounding") or {}),
+                    "response_guard": {
+                        "changed": bool(grounding_guard.get("changed", False)),
+                        "reason": str(grounding_guard.get("reason") or "audit_only"),
+                    },
+                    "authority": dict(grounding_guard.get("authority") or {}),
+                }
+            interaction_diag: Optional[Dict[str, Any]] = None
+            if interaction_plan is not None:
+                response_guard = finalize_response_for_interaction(
+                    resp,
+                    interaction_request_text,
+                    interaction_plan,
+                    relevance_context=history[-1][0] if history else "",
+                )
+                resp = str(response_guard["text"])
+                interaction_diag = interaction_plan_diagnostics(interaction_plan)
+                interaction_diag["response_guard"] = {
+                    "changed": bool(response_guard.get("changed", False)),
+                    "reason": str(response_guard.get("reason", "candidate_aligned")),
+                    "audit": dict(response_guard.get("audit", {})),
+                }
+            understanding_diag = prompt_understanding_diagnostics(prompt_profile)
+            understanding_diag["response_constraint_audit"] = (
+                evaluate_response_constraints(
+                    resp,
+                    interaction_request_text,
+                    prompt_profile,
+                )
+            )
 
-        return {
-            "ok": True,
-            "session_id": session_id,
-            "response": resp,
-            "style_mode": resolved_style,
-            "timing_ms": timing_ms,
-            "compute": compute_metrics,
-            "auto_compute_plan": compute_plan,
-            "top_candidates": top_candidates,
-        }
+            with self.lock:
+                hist = self.sessions.setdefault(session_id, [])
+                hist.append((user_text, resp))
+                if len(hist) > 40:
+                    del hist[:-40]
+                recent = self.recent.setdefault(session_id, [])
+                recent.append(resp)
+                if len(recent) > 24:
+                    del recent[:-24]
+            if self.memory_db is not None:
+                self.memory_db.add_turn(interaction_request_text, resp)
+
+            timing_ms = {
+                "retrieval": round(t_retrieval * 1000, 1),
+                "infer": round(t_infer * 1000, 1),
+                "rank_pick": round(t_rank * 1000, 1),
+                "total": round((time.perf_counter() - t0) * 1000, 1),
+            }
+            if "cycles_used" in compute_metrics:
+                timing_ms["cycles_used"] = compute_metrics["cycles_used"]
+
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "response": resp,
+                "style_mode": resolved_style,
+                "timing_ms": timing_ms,
+                "compute": compute_metrics,
+                "auto_compute_plan": compute_plan,
+                "prompt_understanding": understanding_diag,
+                "interaction": interaction_diag,
+                "conversation": (
+                    conversation_state_diagnostics(conversation_state)
+                    if conversation_state is not None
+                    else None
+                ),
+                "grounding": grounding_diag,
+                "knowledge": {
+                    "llm_db_enabled": self.llm_db is not None,
+                    "memory_enabled": self.memory_db is not None,
+                    "llm_db_hits": len(db_candidates),
+                    "memory_hits": len(memory_rows),
+                },
+                "top_candidates": top_candidates,
+            }
 
 
 def build_app(engine: Engine, default_weights: str, default_meta: str):
@@ -1108,6 +1479,7 @@ def build_app(engine: Engine, default_weights: str, default_meta: str):
                 auto_compute=p.get('auto_compute'),
                 prediction_stability_margin=p.get('prediction_stability_margin'),
                 prediction_stability_rank_depth=p.get('prediction_stability_rank_depth'),
+                grounding_enabled=bool(p.get('grounding_enabled', True)),
             ))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 400
@@ -1166,6 +1538,16 @@ def main() -> None:
     ap.add_argument('--temperature', type=float, default=0.0)
     ap.add_argument('--style_mode', choices=['auto','balanced','creative','concise','analyst'], default='auto')
     ap.add_argument('--creativity', type=float, default=0.2)
+    ap.add_argument('--llm_db', default='llm_chat.db', help='Optional local retrieval database.')
+    ap.add_argument('--db_top_k', type=int, default=120)
+    ap.add_argument('--db_query_context_turns', type=int, default=2)
+    ap.add_argument('--db_score_scale', type=float, default=1.0)
+    ap.add_argument('--memory_db', default='chat_memory.db', help='Persistent local chat memory.')
+    ap.add_argument('--memory_top_k', type=int, default=4)
+    ap.add_argument('--memory_pool_size', type=int, default=400)
+    ap.add_argument('--memory_recency_half_life_hours', type=float, default=168.0)
+    ap.add_argument('--memory_score_scale', type=float, default=0.45)
+    ap.add_argument('--disable_memory', action='store_true')
     ap.add_argument('--reasoning_cycles', type=str, default=None)
     adaptive_compute_group = ap.add_mutually_exclusive_group()
     adaptive_compute_group.add_argument(
@@ -1187,6 +1569,20 @@ def main() -> None:
     ap.add_argument('--prediction_stability_tol', type=float, default=None)
     ap.add_argument('--prediction_stability_margin', type=float, default=None)
     ap.add_argument('--prediction_stability_rank_depth', type=int, default=None)
+    ap.add_argument(
+        '--core_top_k',
+        type=int,
+        default=None,
+        help='v52 only: execute just the top-k routed recurrent cores (off by default).',
+    )
+    ap.add_argument(
+        '--verifier_adaptive_compute',
+        action='store_true',
+        default=None,
+        help='v52 only: let the quality head request extra recursive cycles.',
+    )
+    ap.add_argument('--verifier_continue_threshold', type=float, default=None)
+    ap.add_argument('--max_verifier_cycles', type=int, default=None)
     auto_compute_group = ap.add_mutually_exclusive_group()
     auto_compute_group.add_argument(
         '--auto_compute',
@@ -1219,6 +1615,16 @@ def main() -> None:
         'temperature': float(args.temperature),
         'style_mode': str(args.style_mode),
         'creativity': float(args.creativity),
+        'llm_db': str(args.llm_db),
+        'db_top_k': int(args.db_top_k),
+        'db_query_context_turns': int(args.db_query_context_turns),
+        'db_score_scale': float(args.db_score_scale),
+        'memory_db': str(args.memory_db),
+        'memory_top_k': int(args.memory_top_k),
+        'memory_pool_size': int(args.memory_pool_size),
+        'memory_recency_half_life_hours': float(args.memory_recency_half_life_hours),
+        'memory_score_scale': float(args.memory_score_scale),
+        'disable_memory': bool(args.disable_memory),
     }
     engine_defaults.update(_runtime_compute_cli_overrides(args))
     engine = Engine(device, device_info, engine_defaults)

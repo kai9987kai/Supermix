@@ -134,6 +134,7 @@ def main() -> int:
             "cmd_open_enabled": bool(args.cmd_open_enabled or manifest.get("distillation", {}).get("allow_cmd_open", True)),
             "memory_enabled": False,
             "uploaded_image_path": image_path or "",
+            "interaction_intelligence": False,
         }
         payload = manager.handle_prompt(
             session_id="v40_benchmax_distill",

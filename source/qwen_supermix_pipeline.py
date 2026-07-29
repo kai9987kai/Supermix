@@ -125,6 +125,10 @@ def _normalize_chat_pair_metadata(raw_metadata: Optional[Dict[str, object]]) -> 
                 out[key] = value
         elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
             out[key] = raw_value
+        elif key == "verifier_spec" and isinstance(raw_value, dict):
+            verifier_spec = _normalize_chat_pair_metadata(raw_value)
+            if verifier_spec:
+                out[key] = verifier_spec
     return out
 
 
@@ -871,8 +875,217 @@ def _normalize_rule_reward(value: Optional[float]) -> float:
     return float(max(-1.0, min(1.0, parsed)))
 
 
+_VERIFIER_SCHEMA = "supermix-verifier-v1"
+
+
+def _chat_pair_verifier_payload(metadata: object) -> Optional[Dict[str, object]]:
+    if not isinstance(metadata, dict):
+        return None
+    normalized = _normalize_chat_pair_metadata(metadata)
+    nested = normalized.get("verifier_spec")
+    nested_spec = dict(nested) if isinstance(nested, dict) else {}
+    schema = _coerce_text(normalized.get("verifier_schema") or nested_spec.get("verifier_schema")).lower()
+    has_nested_spec = bool(
+        nested_spec
+        and _coerce_text(nested_spec.get("verifier_type"))
+        and nested_spec.get("expected_answer") is not None
+    )
+    if schema != _VERIFIER_SCHEMA and not has_nested_spec:
+        return None
+
+    payload = dict(normalized)
+    for key, value in nested_spec.items():
+        payload.setdefault(key, value)
+    payload["verifier_schema"] = _VERIFIER_SCHEMA
+    return payload
+
+
+def _verifier_result_dict(result: object) -> Dict[str, object]:
+    if isinstance(result, dict):
+        return dict(result)
+    for converter_name in ("to_dict", "to_payload"):
+        converter = getattr(result, converter_name, None)
+        if not callable(converter):
+            continue
+        try:
+            converted = converter()
+        except Exception:
+            converted = None
+        if isinstance(converted, dict):
+            return dict(converted)
+    out: Dict[str, object] = {}
+    for key in (
+        "correct",
+        "passed",
+        "valid_spec",
+        "score",
+        "reward",
+        "reason",
+        "family",
+        "problem_family",
+        "verifier_type",
+    ):
+        if hasattr(result, key):
+            out[key] = getattr(result, key)
+    get_value = getattr(result, "get", None)
+    if callable(get_value):
+        for key in (
+            "correct",
+            "passed",
+            "valid_spec",
+            "score",
+            "reward",
+            "reason",
+            "family",
+            "problem_family",
+            "verifier_type",
+        ):
+            if key in out:
+                continue
+            try:
+                value = get_value(key)
+            except Exception:
+                continue
+            if value is not None:
+                out[key] = value
+    return out
+
+
+def _coerce_verifier_correct(value: object) -> Optional[bool]:
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return bool(float(value) > 0.0)
+    text = _coerce_text(value).lower()
+    if text in {"true", "yes", "correct", "pass", "passed", "1"}:
+        return True
+    if text in {"false", "no", "incorrect", "fail", "failed", "0"}:
+        return False
+    return None
+
+
+def _load_verify_candidate():
+    try:
+        from verifiable_reasoning import verify_candidate
+
+        return verify_candidate
+    except (ImportError, ModuleNotFoundError):
+        try:
+            from source.verifiable_reasoning import verify_candidate
+
+            return verify_candidate
+        except (ImportError, ModuleNotFoundError):
+            return None
+
+
+def _verify_chat_candidate(
+    prompt: str,
+    response: str,
+    metadata: object,
+) -> Optional[Dict[str, object]]:
+    payload = _chat_pair_verifier_payload(metadata)
+    if payload is None:
+        return None
+
+    family = (
+        _coerce_text(payload.get("problem_family"))
+        or _coerce_text(payload.get("verifier_type"))
+        or "unknown"
+    )
+    verify_candidate = _load_verify_candidate()
+    if verify_candidate is None:
+        return {
+            "tagged": True,
+            "available": False,
+            "correct": False,
+            "score": 0.0,
+            "reason": "verifier_unavailable",
+            "family": family,
+        }
+    try:
+        raw_result = verify_candidate(str(prompt), str(response), payload)
+    except Exception as exc:
+        return {
+            "tagged": True,
+            "available": False,
+            "correct": False,
+            "score": 0.0,
+            "reason": f"verifier_error:{type(exc).__name__}",
+            "family": family,
+        }
+
+    result = _verifier_result_dict(raw_result)
+    valid_spec = _coerce_verifier_correct(result.get("valid_spec", True))
+    if valid_spec is not True:
+        return {
+            "tagged": True,
+            "available": False,
+            "correct": False,
+            "score": 0.0,
+            "reason": _coerce_text(result.get("reason")) or "invalid_verifier_spec",
+            "family": family,
+        }
+    correct = _coerce_verifier_correct(result.get("correct", result.get("passed")))
+    if correct is None:
+        return {
+            "tagged": True,
+            "available": False,
+            "correct": False,
+            "score": 0.0,
+            "reason": "invalid_verifier_result",
+            "family": family,
+        }
+    try:
+        score = float(result.get("score", 1.0 if correct else 0.0))
+    except (TypeError, ValueError):
+        score = 1.0 if correct else 0.0
+    if not math.isfinite(score):
+        score = 1.0 if correct else 0.0
+    return {
+        "tagged": True,
+        "available": True,
+        "correct": bool(correct),
+        "score": float(max(0.0, min(1.0, score))),
+        "reason": _coerce_text(result.get("reason")) or ("correct" if correct else "incorrect"),
+        "family": (
+            _coerce_text(result.get("problem_family"))
+            or _coerce_text(result.get("family"))
+            or family
+        ),
+    }
+
+
 def _chat_pair_verifier_metrics(pair: ChatPair) -> Dict[str, float]:
     metadata = pair.metadata if isinstance(pair.metadata, dict) else {}
+    verification = _verify_chat_candidate(pair.user, pair.assistant, metadata)
+    if verification is not None:
+        verification_available = bool(verification.get("available", False))
+        verified_correct = bool(verification.get("correct", False)) and verification_available
+        verifier_score = (
+            _normalize_metric_0_1(float(verification.get("score", 0.0)))
+            if verified_correct
+            else 0.0
+        )
+        difficulty = _normalize_metric_0_1(
+            _metadata_number(metadata, "test_difficulty", "verifier_difficulty", "difficulty", "problem_difficulty")
+        )
+        rule_reward = 1.0 if verified_correct else -1.0
+        verifier_bonus = (
+            0.16 * verifier_score
+            + 0.08 * max(0.0, rule_reward)
+            + 0.08 * verifier_score * difficulty
+            - 0.12 * max(0.0, -rule_reward)
+        )
+        return {
+            "verifier_score": float(verifier_score),
+            "rule_reward": float(rule_reward),
+            "verifier_difficulty": float(difficulty),
+            "verifier_bonus": float(max(-0.12, min(0.34, verifier_bonus))),
+            "verifier_tagged": 1.0,
+            "verification_available": 1.0 if verification_available else 0.0,
+            "verified_correct": 1.0 if verified_correct else 0.0,
+        }
+
     tests_passed = _metadata_number(metadata, "tests_passed", "passed_tests")
     tests_total = _metadata_number(metadata, "tests_total", "total_tests")
     pass_rate: Optional[float] = None
@@ -1439,7 +1652,9 @@ def _distillation_candidate_rank(
     gain_bias: float,
     compactness_bias: float,
     source: str = "dataset",
+    metadata: Optional[Dict[str, object]] = None,
 ) -> Tuple[float, float, float, Dict[str, float]]:
+    verification = _verify_chat_candidate(user_text, candidate_text, metadata)
     quality_score, alignment = _paired_response_score(user_text, candidate_text)
     knowledge_density = _pair_knowledge_density_score(
         user_text=user_text,
@@ -1474,13 +1689,31 @@ def _distillation_candidate_rank(
         + 0.12 * float(density_gain)
         + alignment_bonus
     )
-    return float(rank), float(quality_score), float(knowledge_density), {
+    verification_metrics: Dict[str, float] = {}
+    if verification is not None:
+        verification_available = bool(verification.get("available", False))
+        verified_correct = bool(verification.get("correct", False)) and verification_available
+        verification_score = float(verification.get("score", 0.0) or 0.0)
+        verification_metrics = {
+            "verifier_tagged": 1.0,
+            "verification_available": 1.0 if verification_available else 0.0,
+            "verified_correct": 1.0 if verified_correct else 0.0,
+            "verified_score": float(max(0.0, min(1.0, verification_score))),
+        }
+        if verified_correct:
+            rank += 1.0 + 0.25 * float(max(0.0, min(1.0, verification_score)))
+        else:
+            rank = -1e6
+
+    metrics = {
         "quality_gain": float(quality_gain),
         "density_gain": float(density_gain),
         "compactness": float(compactness),
         "utility_scale": float(utility_scale),
         "alignment_bonus": float(alignment_bonus),
     }
+    metrics.update(verification_metrics)
+    return float(rank), float(quality_score), float(knowledge_density), metrics
 
 
 def _should_log_progress_heartbeat(
@@ -1571,6 +1804,7 @@ def apply_supermix_distillation(
             gain_bias=float(gain_bias),
             compactness_bias=float(compactness_bias),
             source=str(pair.source or "dataset"),
+            metadata=pair.metadata,
         )
         required_score = max(float(min_quality_score), base_score + max(0.0, float(min_quality_gain)))
         best_response = ""
@@ -1593,7 +1827,13 @@ def apply_supermix_distillation(
                 gain_bias=float(gain_bias),
                 compactness_bias=float(compactness_bias),
                 source=str(pair.source or "dataset"),
+                metadata=pair.metadata,
             )
+            if (
+                teacher_metrics.get("verifier_tagged", 0.0) > 0.0
+                and teacher_metrics.get("verified_correct", 0.0) <= 0.0
+            ):
+                continue
             if teacher_score < required_score:
                 continue
             if teacher_rank < (base_rank + max(0.0, float(rank_margin))):
@@ -1614,7 +1854,14 @@ def apply_supermix_distillation(
                 best_response = teacher_resp
         if best_response:
             seen_keys.add((pair.user, best_response))
-            mixed.append(ChatPair(user=pair.user, assistant=best_response, source="supermix_teacher"))
+            mixed.append(
+                ChatPair(
+                    user=pair.user,
+                    assistant=best_response,
+                    source="supermix_teacher",
+                    metadata=dict(pair.metadata),
+                )
+            )
             generated += 1
 
         now = time.time()
@@ -2990,6 +3237,19 @@ def _sft_pair_selection_score(
     verifier_difficulty = float(verifier_metrics.get("verifier_difficulty", 0.0))
     verifier_bonus = float(verifier_metrics.get("verifier_bonus", 0.0))
     word_count = max(1, _word_token_count(assistant))
+    if (
+        verifier_metrics.get("verifier_tagged", 0.0) > 0.0
+        and verifier_metrics.get("verified_correct", 0.0) <= 0.0
+    ):
+        return -1e9, {
+            "verifier_score": float(verifier_score),
+            "rule_reward": float(rule_reward),
+            "verifier_difficulty": float(verifier_difficulty),
+            "verifier_bonus": float(verifier_bonus),
+            "verifier_tagged": 1.0,
+            "verified_correct": 0.0,
+            "score": -1e9,
+        }
 
     if word_count <= 18:
         compactness = 0.55
@@ -4269,14 +4529,23 @@ def _pick_rejected_candidate(
     similarity_threshold: float,
     similarity_min: float = 0.0,
     stop_signal_strength: float = 0.0,
+    metadata: Optional[Dict[str, object]] = None,
 ) -> Tuple[str, float, float]:
-    candidates: List[Tuple[str, float, float]] = []
+    candidates: List[Tuple[str, float, float, bool]] = []
     for cand in generated:
         c = _fast_cleanup_response_text(str(cand or "")).strip()
         if not c or c == chosen_text:
             continue
         if _looks_like_placeholder_assistant(c):
             continue
+        verification = _verify_chat_candidate(user_text, c, metadata)
+        verified_wrong = False
+        if verification is not None:
+            if not bool(verification.get("available", False)):
+                continue
+            if bool(verification.get("correct", False)):
+                continue
+            verified_wrong = True
         sim = float(SequenceMatcher(None, chosen_text, c).ratio())
         if sim < float(similarity_min):
             continue
@@ -4288,20 +4557,25 @@ def _pick_rejected_candidate(
             assistant_text=c,
             strength=float(stop_signal_strength),
         )
-        candidates.append((c, sim, score))
+        candidates.append((c, sim, score, verified_wrong))
 
     if not candidates:
         return "", 0.0, -1e9
+
+    verified_wrong = [x for x in candidates if x[3]]
+    if verified_wrong:
+        verified_wrong.sort(key=lambda x: (-x[1], x[2]))
+        return verified_wrong[0][:3]
 
     hard = [x for x in candidates if x[1] >= 0.25]
     if hard:
         # Prefer semantically-close but still inferior responses as harder negatives.
         hard.sort(key=lambda x: (-x[1], x[2]))
-        return hard[0]
+        return hard[0][:3]
 
     # Fall back to the lowest-quality generated answer.
     candidates.sort(key=lambda x: x[2])
-    return candidates[0]
+    return candidates[0][:3]
 
 
 def _stop_overlong_reject_variants(
@@ -4557,6 +4831,12 @@ def build_preference_pairs_with_generation(
             continue
         if bool(skip_template_prompts) and _is_synthetic_template_prompt(pair.user):
             continue
+        verifier_metrics = _chat_pair_verifier_metrics(pair)
+        if (
+            verifier_metrics.get("verifier_tagged", 0.0) > 0.0
+            and verifier_metrics.get("verified_correct", 0.0) <= 0.0
+        ):
+            continue
         short_prompt = _is_short_answer_prompt(pair.user)
         chosen_score, chosen_alignment = _paired_response_score(pair.user, chosen_text)
         chosen_density = _pair_knowledge_density_score(pair.user, chosen_text, source=str(pair.source or ""))
@@ -4803,6 +5083,7 @@ def build_preference_pairs_with_generation(
                 similarity_threshold=float(similarity_threshold),
                 similarity_min=float(reject_similarity_min),
                 stop_signal_strength=float(stop_signal_strength),
+                metadata=pair.metadata,
             )
 
             if not rejected:
@@ -4825,6 +5106,12 @@ def build_preference_pairs_with_generation(
                             continue
                         if _looks_like_placeholder_assistant(candidate):
                             continue
+                        verification = _verify_chat_candidate(pair.user, candidate, pair.metadata)
+                        if verification is not None:
+                            if not bool(verification.get("available", False)):
+                                continue
+                            if bool(verification.get("correct", False)):
+                                continue
                         sim = float(SequenceMatcher(None, chosen_text, candidate).ratio())
                         if sim < float(reject_similarity_min):
                             continue
@@ -6347,6 +6634,10 @@ def _evaluate_model_internal(
         latencies = []
         prompt_token_count = 0.0
         generated_token_count = 0.0
+        verified_count = 0
+        verified_correct_count = 0
+        verified_family_counts: Dict[str, int] = {}
+        verified_family_correct: Dict[str, int] = {}
         eval_start = time.time()
         with torch.inference_mode():
             for sample_index, pair in enumerate(eval_pairs):
@@ -6382,25 +6673,46 @@ def _evaluate_model_internal(
                 char_similarity_value = float(SequenceMatcher(None, pair.assistant, pred).ratio())
                 f1s.append(token_f1_value)
                 sims.append(char_similarity_value)
-                sample_rows.append(
-                    {
-                        "sample_index": int(sample_index),
-                        "source": str(pair.source),
-                        "prompt_signature": _prompt_signature(pair.user),
-                        "prompt_complexity": float(_prompt_complexity_score(pair.user)),
-                        "prompt_words": int(len(pair.user.split())),
-                        "reference_words": int(len(pair.assistant.split())),
-                        "prompt_tokens": int(prompt_tokens),
-                        "generated_tokens": int(generated_tokens),
-                        "gen_seconds": float(latency_value),
-                        "loss": float(loss_value),
-                        "token_f1": float(token_f1_value),
-                        "char_similarity": float(char_similarity_value),
-                        "user": pair.user,
-                        "reference": pair.assistant,
-                        "prediction": pred,
-                    }
-                )
+                sample_row: Dict[str, object] = {
+                    "sample_index": int(sample_index),
+                    "source": str(pair.source),
+                    "prompt_signature": _prompt_signature(pair.user),
+                    "prompt_complexity": float(_prompt_complexity_score(pair.user)),
+                    "prompt_words": int(len(pair.user.split())),
+                    "reference_words": int(len(pair.assistant.split())),
+                    "prompt_tokens": int(prompt_tokens),
+                    "generated_tokens": int(generated_tokens),
+                    "gen_seconds": float(latency_value),
+                    "loss": float(loss_value),
+                    "token_f1": float(token_f1_value),
+                    "char_similarity": float(char_similarity_value),
+                    "user": pair.user,
+                    "reference": pair.assistant,
+                    "prediction": pred,
+                }
+                verification = _verify_chat_candidate(pair.user, pred, pair.metadata)
+                if verification is not None:
+                    verification_available = bool(verification.get("available", False))
+                    verified_correct = bool(verification.get("correct", False)) and verification_available
+                    family = _coerce_text(verification.get("family")) or "unknown"
+                    sample_row.update(
+                        {
+                            "verifier_tagged": True,
+                            "verification_available": bool(verification_available),
+                            "verified_correct": bool(verified_correct),
+                            "verified_score": float(verification.get("score", 0.0) or 0.0),
+                            "verifier_family": family,
+                            "verifier_reason": _coerce_text(verification.get("reason")),
+                        }
+                    )
+                    if verification_available:
+                        verified_count += 1
+                        verified_correct_count += 1 if verified_correct else 0
+                        verified_family_counts[family] = verified_family_counts.get(family, 0) + 1
+                        verified_family_correct[family] = (
+                            verified_family_correct.get(family, 0) + (1 if verified_correct else 0)
+                        )
+                sample_rows.append(sample_row)
 
         mean_loss = float(sum(losses) / max(1, len(losses)))
         eval_seconds = float(max(1e-6, time.time() - eval_start))
@@ -6418,6 +6730,16 @@ def _evaluate_model_internal(
             "eval_seconds": eval_seconds,
             "generated_tokens_per_sec": float(generated_token_count / eval_seconds),
         }
+        if verified_count > 0:
+            metrics["verified_samples"] = float(verified_count)
+            metrics["verified_accuracy"] = float(verified_correct_count / max(1, verified_count))
+            for family in sorted(verified_family_counts):
+                metric_family = re.sub(r"[^a-z0-9]+", "_", family.lower()).strip("_") or "unknown"
+                family_count = int(verified_family_counts[family])
+                metrics[f"verified_samples_family_{metric_family}"] = float(family_count)
+                metrics[f"verified_accuracy_family_{metric_family}"] = float(
+                    verified_family_correct.get(family, 0) / max(1, family_count)
+                )
     finally:
         try:
             del model
@@ -6727,14 +7049,40 @@ def _merge_distillation_pairs(
     seen = {(pair.user, pair.assistant) for pair in train_pairs}
     mixed = list(train_pairs)
     added = 0
+    verifier_tagged = 0
+    verifier_accepted = 0
+    verifier_rejected = 0
+    verifier_unavailable = 0
+    verifier_duplicates = 0
     for pair in distilled_pairs:
+        verification = _verify_chat_candidate(pair.user, pair.assistant, pair.metadata)
+        if verification is not None:
+            verifier_tagged += 1
+            if not bool(verification.get("available", False)):
+                verifier_unavailable += 1
+                verifier_rejected += 1
+                continue
+            if not bool(verification.get("correct", False)):
+                verifier_rejected += 1
+                continue
         key = (pair.user, pair.assistant)
         if key in seen:
+            if verification is not None:
+                verifier_duplicates += 1
             continue
         seen.add(key)
         mixed.append(pair)
         added += 1
+        if verification is not None:
+            verifier_accepted += 1
     random.Random(seed).shuffle(mixed)
+    if verifier_tagged > 0:
+        print(
+            "[distill] cached verifier revalidation: "
+            f"tagged={verifier_tagged} accepted={verifier_accepted} "
+            f"rejected={verifier_rejected} unavailable={verifier_unavailable} "
+            f"duplicates={verifier_duplicates}"
+        )
     return mixed, added
 
 

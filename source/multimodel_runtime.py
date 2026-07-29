@@ -30,6 +30,23 @@ from chat_image_variant_app import (
     ImageVariantEngine,
 )
 from device_utils import configure_torch_runtime, resolve_device
+from grounding_runtime import (
+    build_evidence_bundle,
+    finalize_grounded_response,
+    plan_grounding,
+    redact_external_query,
+)
+from reasoning_engine import reasoning_diagnostics
+from interaction_planner import (
+    finalize_response_for_interaction,
+    interaction_plan_diagnostics,
+    plan_interaction,
+)
+from prompt_understanding import (
+    analyze_prompt,
+    evaluate_response_constraints,
+    prompt_understanding_diagnostics,
+)
 from multimodel_catalog import (
     DEFAULT_COMMON_SUMMARY,
     DEFAULT_MODELS_DIR,
@@ -141,6 +158,52 @@ class ChatResult:
             "refined_prompt": self.refined_prompt,
             "agent_trace": self.agent_trace or {},
         }
+
+
+def finalize_chat_result_for_interaction(
+    result: ChatResult,
+    *,
+    user_text: str,
+    interaction_plan: Mapping[str, Any],
+    relevance_context: str = "",
+) -> ChatResult:
+    """Finalize one routed result without changing routing or compute decisions."""
+
+    interaction = interaction_plan_diagnostics(interaction_plan)
+    if result.kind == "text" and str(result.response or "").strip():
+        guard = finalize_response_for_interaction(
+            result.response,
+            user_text,
+            interaction_plan,
+            relevance_context=relevance_context,
+        )
+        result.response = str(guard.get("text") or "")
+        audit = dict(guard.get("audit") or {})
+        response_guard: Dict[str, Any] = {
+            "changed": bool(guard.get("changed", False)),
+            "reason": str(guard.get("reason") or "candidate_aligned"),
+            "audit": {
+                "accepted": bool(audit.get("accepted", False)),
+                "coverage": float(audit.get("coverage") or 0.0),
+                "missing": list(audit.get("missing") or []),
+                "violations": list(audit.get("violations") or []),
+                "lexical_relevance": float(audit.get("lexical_relevance") or 0.0),
+            },
+        }
+    else:
+        response_guard = {
+            "changed": False,
+            "reason": (
+                "non_text_result"
+                if result.kind != "text"
+                else "empty_text_result"
+            ),
+        }
+    interaction["response_guard"] = response_guard
+    trace = dict(result.agent_trace or {})
+    trace["interaction"] = interaction
+    result.agent_trace = trace
+    return result
 
 
 def _safe_slug(text: str) -> str:
@@ -746,6 +809,23 @@ class ChampionChatBackend(BaseBackend):
             prediction_stability_margin=settings.get("prediction_stability_margin"),
             prediction_stability_rank_depth=settings.get("prediction_stability_rank_depth"),
             auto_compute=settings.get("auto_compute"),
+            interaction_enabled=bool(
+                settings.get("interaction_intelligence", True)
+            ),
+            interaction_plan=(
+                settings.get("_interaction_plan")
+                if isinstance(settings.get("_interaction_plan"), Mapping)
+                else None
+            ),
+            interaction_user_text=str(
+                settings.get("_interaction_user_text") or prompt
+            ),
+            prompt_profile=(
+                settings.get("_prompt_profile")
+                if isinstance(settings.get("_prompt_profile"), Mapping)
+                else None
+            ),
+            grounding_enabled=False,
         )
         return ChatResult(
             kind="text",
@@ -864,6 +944,23 @@ class QwenBackend(BaseBackend):
             top_p=float(settings.get("top_p") or 0.92),
             preset=preset,
             system_hint=str(settings.get("system_hint") or ""),
+            interaction_enabled=bool(
+                settings.get("interaction_intelligence", True)
+            ),
+            interaction_plan=(
+                settings.get("_interaction_plan")
+                if isinstance(settings.get("_interaction_plan"), Mapping)
+                else None
+            ),
+            interaction_user_text=str(
+                settings.get("_interaction_user_text") or prompt
+            ),
+            prompt_profile=(
+                settings.get("_prompt_profile")
+                if isinstance(settings.get("_prompt_profile"), Mapping)
+                else None
+            ),
+            grounding_enabled=False,
         )
         return ChatResult(
             kind="text",
@@ -2213,11 +2310,32 @@ class UnifiedModelManager:
 
     def _seed_auto_tool_events(self, prompt: str, settings: Dict[str, Any]) -> List[ToolEvent]:
         events: List[ToolEvent] = []
-        if bool(settings.get("web_search_enabled", False)) and should_offer_web_search(prompt):
+        profile = (
+            settings.get("_prompt_profile")
+            if isinstance(settings.get("_prompt_profile"), Mapping)
+            else {}
+        )
+        knowledge = (
+            profile.get("knowledge")
+            if isinstance(profile.get("knowledge"), Mapping)
+            else {}
+        )
+        search_recommended = bool(
+            should_offer_web_search(prompt)
+            or knowledge.get("freshness_required", False)
+        )
+        redaction = redact_external_query(prompt)
+        safe_query = str(redaction.get("query") or "").strip()
+        if (
+            bool(settings.get("web_search_enabled", False))
+            and search_recommended
+            and bool(redaction.get("safe_to_send", False))
+            and safe_query
+        ):
             try:
                 events.append(
                     self.web_search.search(
-                        prompt,
+                        safe_query,
                         max_results=_coerce_int_setting(settings.get("web_search_results"), 5, minimum=1, maximum=20),
                     )
                 )
@@ -2236,7 +2354,11 @@ class UnifiedModelManager:
         tool_cache: Dict[str, ToolEvent],
         settings: Dict[str, Any],
     ) -> Optional[ToolEvent]:
-        key = _trim_text(query, limit=220).lower()
+        redaction = redact_external_query(query)
+        if not bool(redaction.get("safe_to_send", False)):
+            return None
+        safe_query = str(redaction.get("query") or "").strip()
+        key = _trim_text(safe_query, limit=220).lower()
         if not key:
             return None
         if key in tool_cache:
@@ -2245,7 +2367,7 @@ class UnifiedModelManager:
             return None
         try:
             event = self.web_search.search(
-                query,
+                safe_query,
                 max_results=_coerce_int_setting(settings.get("web_search_results"), 5, minimum=1, maximum=20),
             )
         except Exception:
@@ -4909,13 +5031,59 @@ class UnifiedModelManager:
     ) -> Dict[str, Any]:
         with self._lock:
             route_started = time.perf_counter()
+            settings = dict(settings or {})
+            route_model_call_counter = {"count": 0}
+            settings["_route_model_call_counter"] = route_model_call_counter
+            settings.setdefault("memory_enabled", True)
+            settings.setdefault("agent_mode", "off")
+            settings.setdefault("grounding_intelligence", True)
+            settings.setdefault("web_search_enabled", False)
+            settings.setdefault("cmd_open_enabled", True)
+            settings.setdefault("web_search_budget", 3)
+            settings.setdefault("web_search_results", 5)
+            settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
+            memory_bundle = self._prepare_memory_bundle(session_id, prompt, settings)
+            memory_raw = memory_bundle.get("raw")
+            raw_turns = (
+                memory_raw.get("turns")
+                if isinstance(memory_raw, Mapping)
+                else ()
+            )
+            recent_turns = [
+                turn
+                for turn in (
+                    raw_turns[-4:]
+                    if isinstance(raw_turns, (list, tuple))
+                    else ()
+                )
+                if isinstance(turn, Mapping)
+            ]
+            recent_user_messages = [
+                str(turn.get("user") or "")
+                for turn in recent_turns
+                if str(turn.get("user") or "").strip()
+            ]
+            recent_assistant_messages = [
+                str(turn.get("assistant") or "")
+                for turn in recent_turns
+                if str(turn.get("assistant") or "").strip()
+            ]
+            prompt_profile = analyze_prompt(
+                prompt,
+                recent_turns=recent_turns,
+                recent_user_messages=recent_user_messages,
+                recent_assistant_messages=recent_assistant_messages,
+            )
+            settings["_prompt_profile"] = prompt_profile
+
             requested_key = model_key or self.selected_model_key or "auto"
             if requested_key == "auto":
                 chosen_record, route_reason = choose_auto_model(
                     self.records,
                     prompt,
                     action_mode=action_mode,
-                    uploaded_image_path=str((settings or {}).get("uploaded_image_path") or ""),
+                    uploaded_image_path=str(settings.get("uploaded_image_path") or ""),
+                    prompt_profile=prompt_profile,
                 )
                 if chosen_record is None:
                     raise RuntimeError("No local models were discovered.")
@@ -4932,17 +5100,31 @@ class UnifiedModelManager:
                 else:
                     resolved_action = "text"
 
-            settings = dict(settings or {})
-            route_model_call_counter = {"count": 0}
-            settings["_route_model_call_counter"] = route_model_call_counter
-            settings.setdefault("memory_enabled", True)
-            settings.setdefault("agent_mode", "off")
-            settings.setdefault("web_search_enabled", False)
-            settings.setdefault("cmd_open_enabled", True)
-            settings.setdefault("web_search_budget", 3)
-            settings.setdefault("web_search_results", 5)
-            settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
-            memory_bundle = self._prepare_memory_bundle(session_id, prompt, settings)
+            interaction_enabled = bool(
+                settings.get("interaction_intelligence", True)
+            )
+            interaction_plan: Optional[Dict[str, Any]] = None
+            if interaction_enabled:
+                interaction_plan = plan_interaction(
+                    prompt,
+                    recent_assistant_messages=recent_assistant_messages,
+                    context={
+                        "recent_user_messages": recent_user_messages,
+                        "recent_turns": recent_turns,
+                    },
+                    prompt_profile=prompt_profile,
+                )
+                settings["_interaction_plan"] = interaction_plan
+                settings["_interaction_user_text"] = prompt
+            grounding_plan = (
+                plan_grounding(
+                    prompt,
+                    interaction_plan=interaction_plan,
+                    prompt_profile=prompt_profile,
+                )
+                if bool(settings.get("grounding_intelligence", True))
+                else None
+            )
             agent_mode = self._normalized_agent_mode(settings.get("agent_mode"))
             requested_agent_mode = agent_mode
             auto_agent_policy: Optional[Dict[str, Any]] = None
@@ -5195,8 +5377,106 @@ class UnifiedModelManager:
                             "tool_events": [event.to_dict() for event in list(tool_cache.values())],
                         }
 
+            grounding_guard: Optional[Dict[str, Any]] = None
+            if grounding_plan is not None:
+                trace_before_grounding = dict(result.agent_trace or {})
+                evidence_rows: List[Dict[str, Any]] = []
+                for event in trace_before_grounding.get("tool_events") or []:
+                    if not isinstance(event, Mapping):
+                        continue
+                    event_source = str(event.get("source") or event.get("name") or "web_search")
+                    for row in event.get("results") or []:
+                        if not isinstance(row, Mapping):
+                            continue
+                        evidence_rows.append(
+                            {
+                                "title": str(row.get("title") or ""),
+                                "text": str(row.get("snippet") or row.get("text") or ""),
+                                "url": str(row.get("url") or row.get("href") or ""),
+                                "source": event_source,
+                                "source_type": "web_snippet",
+                                "domain": str(row.get("domain") or ""),
+                                "trust_tier": "web_snippet",
+                            }
+                        )
+                grounding_bundle = build_evidence_bundle(
+                    prompt,
+                    evidence_rows,
+                    interaction_plan=interaction_plan,
+                    max_items=int(grounding_plan.get("max_evidence_items") or 6),
+                    grounding_plan=grounding_plan,
+                    prompt_profile=prompt_profile,
+                )
+                if result.kind == "text":
+                    grounding_guard = finalize_grounded_response(
+                        result.response,
+                        prompt,
+                        grounding_plan=grounding_plan,
+                        evidence_bundle=grounding_bundle,
+                        prompt_profile=prompt_profile,
+                    )
+                    result.response = str(grounding_guard["text"])
+                trace_before_grounding["grounding"] = {
+                    "schema_version": str(grounding_bundle.get("schema_version") or ""),
+                    "plan": grounding_plan,
+                    "source_ids": [
+                        str(item.get("id") or "")
+                        for item in grounding_bundle.get("evidence") or []
+                    ],
+                    "sources": [
+                        {
+                            "id": str(item.get("id") or ""),
+                            "title": str(item.get("title") or ""),
+                            "url": str(item.get("url") or ""),
+                            "domain": str(item.get("domain") or ""),
+                            "source_type": str(item.get("source_type") or ""),
+                        }
+                        for item in grounding_bundle.get("evidence") or []
+                    ],
+                    "diagnostics": dict(
+                        (grounding_guard or {}).get("grounding")
+                        or grounding_bundle.get("diagnostics")
+                        or {}
+                    ),
+                    "response_guard": {
+                        "changed": bool((grounding_guard or {}).get("changed", False)),
+                        "reason": str(
+                            (grounding_guard or {}).get("reason")
+                            or ("non_text_result" if result.kind != "text" else "audit_only")
+                        ),
+                    },
+                    # Prompt-free reasoning metadata: class, verification, and
+                    # budget only. It carries no routing or compute authority.
+                    "reasoning": reasoning_diagnostics(
+                        (grounding_guard or {}).get("reasoning")
+                    ),
+                    "authority": dict(
+                        (grounding_guard or {}).get("authority")
+                        or grounding_plan.get("authority")
+                        or {}
+                    ),
+                }
+                result.agent_trace = trace_before_grounding
+
+            if interaction_plan is not None:
+                result = finalize_chat_result_for_interaction(
+                    result,
+                    user_text=prompt,
+                    interaction_plan=interaction_plan,
+                    relevance_context=str(memory_bundle.get("context_block") or ""),
+                )
             elapsed_ms = (time.perf_counter() - route_started) * 1000.0
             trace = dict(result.agent_trace or {})
+            understanding_diag = prompt_understanding_diagnostics(prompt_profile)
+            if result.kind == "text":
+                understanding_diag["response_constraint_audit"] = (
+                    evaluate_response_constraints(
+                        result.response,
+                        prompt,
+                        prompt_profile,
+                    )
+                )
+            trace["prompt_understanding"] = understanding_diag
             trace["route_id"] = route_id
             if result.compute:
                 trace["compute"] = dict(result.compute)
@@ -5289,13 +5569,54 @@ class UnifiedModelManager:
         settings: Dict[str, Any],
     ) -> Dict[str, Any]:
         with self._lock:
+            settings = dict(settings or {})
+            settings.setdefault("memory_enabled", True)
+            settings.setdefault("agent_mode", "off")
+            settings.setdefault("web_search_enabled", False)
+            settings.setdefault("cmd_open_enabled", True)
+            settings.setdefault("web_search_budget", 3)
+            settings.setdefault("web_search_results", 5)
+            settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
+            memory_bundle = self._prepare_memory_bundle(session_id, prompt, settings)
+            memory_raw = memory_bundle.get("raw")
+            raw_turns = (
+                memory_raw.get("turns")
+                if isinstance(memory_raw, Mapping)
+                else ()
+            )
+            recent_turns = [
+                turn
+                for turn in (
+                    raw_turns[-4:]
+                    if isinstance(raw_turns, (list, tuple))
+                    else ()
+                )
+                if isinstance(turn, Mapping)
+            ]
+            prompt_profile = analyze_prompt(
+                prompt,
+                recent_turns=recent_turns,
+                recent_user_messages=[
+                    str(turn.get("user") or "")
+                    for turn in recent_turns
+                    if str(turn.get("user") or "").strip()
+                ],
+                recent_assistant_messages=[
+                    str(turn.get("assistant") or "")
+                    for turn in recent_turns
+                    if str(turn.get("assistant") or "").strip()
+                ],
+            )
+            settings["_prompt_profile"] = prompt_profile
+
             requested_key = model_key or self.selected_model_key or "auto"
             if requested_key == "auto":
                 chosen_record, route_reason = choose_auto_model(
                     self.records,
                     prompt,
                     action_mode=action_mode,
-                    uploaded_image_path=str((settings or {}).get("uploaded_image_path") or ""),
+                    uploaded_image_path=str(settings.get("uploaded_image_path") or ""),
+                    prompt_profile=prompt_profile,
                 )
                 if chosen_record is None:
                     raise RuntimeError("No local models were discovered.")
@@ -5308,14 +5629,6 @@ class UnifiedModelManager:
             resolved_action = action_mode
             if resolved_action == "auto":
                 resolved_action = "image" if chosen_record.supports_image and not chosen_record.supports_chat else "text"
-
-            settings = dict(settings or {})
-            settings.setdefault("agent_mode", "off")
-            settings.setdefault("web_search_enabled", False)
-            settings.setdefault("cmd_open_enabled", True)
-            settings.setdefault("web_search_budget", 3)
-            settings.setdefault("web_search_results", 5)
-            settings.setdefault("loop_max_steps", LOOP_AGENT_DEFAULT_MAX_STEPS)
 
             requested_agent_mode = self._normalized_agent_mode(settings.get("agent_mode"))
             agent_mode = requested_agent_mode
@@ -5452,6 +5765,9 @@ class UnifiedModelManager:
                 "requested_agent_mode": requested_agent_mode,
                 "selected_agent_mode": agent_mode,
                 "route_reason": route_reason,
+                "prompt_understanding": prompt_understanding_diagnostics(
+                    prompt_profile
+                ),
                 "route_economics_estimate": route_economics_estimate,
                 "route_alternatives": route_alternatives,
                 "route_frontier": route_frontier,

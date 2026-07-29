@@ -889,6 +889,13 @@ HTML_TEMPLATE = r"""<!doctype html>
           </select>
         </div>
         <div class="cfg-row">
+          <label>Grounding</label>
+          <select class="cfg-input" id="groundingToggle" style="width:90px" title="Audit evidence and solve explicit arithmetic without changing model routing or compute exits">
+            <option value="on">Enabled</option>
+            <option value="off">Disabled</option>
+          </select>
+        </div>
+        <div class="cfg-row">
           <label>Web Access</label>
           <select class="cfg-input" id="webToggle" style="width:90px">
             <option value="off">Local Only</option>
@@ -1586,6 +1593,94 @@ HTML_TEMPLATE = r"""<!doctype html>
       const body = document.createElement('div');
       body.className = 'trace-body trace-summary';
       body.innerHTML = computePills(trace.compute).join('');
+      wrapper.appendChild(body);
+    }
+
+    const understanding = trace.prompt_understanding;
+    if (understanding && typeof understanding === 'object') {
+      const acts = Array.isArray(understanding.objective_acts)
+        ? understanding.objective_acts
+        : (Array.isArray(understanding.acts) ? understanding.acts : []);
+      const audit = understanding.response_constraint_audit &&
+        typeof understanding.response_constraint_audit === 'object'
+        ? understanding.response_constraint_audit
+        : {};
+      const ambiguityProfile = understanding.ambiguity || {};
+      const context = understanding.context || {};
+      const normalization = understanding.normalization || {};
+      const safety = understanding.safety || {};
+      const ambiguity = ambiguityProfile.status || understanding.ambiguity_status || understanding.decision || 'clear';
+      const bits = [
+        `<span class="trace-pill trace-score">Understanding ${escHtml(acts.slice(0,3).join(' + ') || understanding.primary_act || 'direct')}</span>`,
+        `<span class="trace-pill">Constraints ${escHtml(understanding.constraint_count ?? 0)}</span>`,
+        `<span class="trace-pill${ambiguity === 'clarification_required' || ambiguity === 'clarify' ? ' trace-warn' : ''}">Ambiguity ${escHtml(ambiguity)}</span>`,
+        `<span class="trace-pill">Turn ${escHtml(context.turn_relation || understanding.turn_relation || 'standalone')}</span>`,
+      ];
+      if (
+        Number(normalization.correction_count || 0) > 0 ||
+        safety.typo_recovery_applied ||
+        understanding.typo_recovery_applied ||
+        understanding.cue_typos_recovered
+      ) {
+        bits.push('<span class="trace-pill trace-score">Cue typo recovered</span>');
+      }
+      if (Object.keys(audit).length) {
+        bits.push(
+          `<span class="trace-pill${audit.accepted ? ' trace-score' : ' trace-warn'}">Constraint audit ${audit.accepted ? 'pass' : 'review'}</span>`
+        );
+      }
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = bits.join('');
+      wrapper.appendChild(body);
+    }
+
+    const interaction = trace.interaction;
+    if (interaction && typeof interaction === 'object') {
+      const guard = interaction.response_guard && typeof interaction.response_guard === 'object'
+        ? interaction.response_guard
+        : {};
+      const bits = [
+        `<span class="trace-pill">Intent ${escHtml(interaction.intent || 'conversation')}</span>`,
+        `<span class="trace-pill">Strategy ${escHtml(interaction.strategy || 'direct_then_offer_depth')}</span>`,
+        `<span class="trace-pill${interaction.risk_tier === 'critical' || interaction.risk_tier === 'high' ? ' trace-warn' : ''}">Risk ${escHtml(interaction.risk_tier || 'low')}</span>`,
+        `<span class="trace-pill${guard.changed ? ' trace-score' : ''}">Guard ${escHtml(guard.reason || 'candidate_aligned')}</span>`,
+      ];
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = bits.join('');
+      wrapper.appendChild(body);
+    }
+
+    const grounding = trace.grounding;
+    if (grounding && typeof grounding === 'object') {
+      const diagnostics = grounding.diagnostics && typeof grounding.diagnostics === 'object'
+        ? grounding.diagnostics
+        : {};
+      const guard = grounding.response_guard && typeof grounding.response_guard === 'object'
+        ? grounding.response_guard
+        : {};
+      const bits = [
+        `<span class="trace-pill">Evidence ${escHtml(diagnostics.evidence_count ?? 0)}</span>`,
+        `<span class="trace-pill${diagnostics.sufficiency === 'sufficient' ? ' trace-score' : ''}">Grounding ${escHtml(diagnostics.sufficiency || 'no_evidence')}</span>`,
+        `<span class="trace-pill${Number(diagnostics.conflict_count || 0) > 0 ? ' trace-warn' : ''}">Conflicts ${escHtml(diagnostics.conflict_count ?? 0)}</span>`,
+        `<span class="trace-pill${guard.changed ? ' trace-score' : ''}">Guard ${escHtml(guard.reason || 'audit_only')}</span>`,
+      ];
+      const sources = Array.isArray(grounding.sources) ? grounding.sources : [];
+      const sourceLinks = sources.map(source => {
+        const label = `[${escHtml(source.id || 'S?')}] ${escHtml(source.title || source.domain || 'source')}`;
+        const url = String(source.url || '');
+        return url.startsWith('http://') || url.startsWith('https://')
+          ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+          : `<span>${label}</span>`;
+      });
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = bits.join('') + (
+        sourceLinks.length
+          ? `<div style="margin-top:8px;color:var(--muted);font-size:11px">${sourceLinks.join(' · ')}</div>`
+          : ''
+      );
       wrapper.appendChild(body);
     }
 
@@ -2294,6 +2389,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       auto_session_budget_target_routes: parseInt(el('sessionBudgetTargetRoutes').value) || 0,
       loop_max_steps: parseInt(el('loopBudget').value),
       memory_enabled: el('memToggle').value === 'on',
+      grounding_intelligence: el('groundingToggle').value === 'on',
       web_search_enabled: el('webToggle').value === 'on',
       uploaded_image_path: currentUpload
     };

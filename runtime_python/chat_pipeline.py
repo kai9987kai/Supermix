@@ -6,9 +6,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 import torch
+
+from conversation_state import score_candidates_for_conversation
+from score_fusion import calibrate_signal, consensus_multiplier, resolve_fusion_mode
+from interaction_planner import score_candidate_for_interaction
 
 
 FEAT_DIM = 128
@@ -2026,7 +2030,21 @@ def choose_bucket_from_logits(
     return int(idx[choice].item())
 
 
-def infer_style_mode(query_text: str, requested_mode: str = "auto") -> str:
+# A fresh request for depth on the current turn. Used to stop a standing
+# "be brief" from silently overriding an explicit "explain that in detail".
+DETAIL_REQUEST_RE = re.compile(
+    r"\b(?:in (?:more )?detail|detailed|thorough(?:ly)?|in[- ]depth|elaborate|"
+    r"expand|comprehensive|walk me through|walkthrough|explain (?:it |this |that )?fully|"
+    r"tell me more|say more|more detail|at length|step by step)\b",
+    re.IGNORECASE,
+)
+
+
+def infer_style_mode(
+    query_text: str,
+    requested_mode: str = "auto",
+    conversation_state: Optional[Dict[str, Any]] = None,
+) -> str:
     mode = str(requested_mode or "auto").strip().lower()
     if mode in {"balanced", "creative", "concise", "analyst"}:
         return mode
@@ -2036,6 +2054,21 @@ def infer_style_mode(query_text: str, requested_mode: str = "auto") -> str:
         return "balanced"
     if CONCISE_HINT_RE.search(query):
         return "concise"
+
+    # A style the user asked for on an earlier turn still applies. Without this
+    # the request is detected, stored, and then never reaches the ranker: the
+    # mode is re-inferred from the current turn alone, which for "how do I list
+    # files in python" is `analyst`, and the already-weighted concise signal
+    # never activates.
+    if isinstance(conversation_state, Mapping) and not DETAIL_REQUEST_RE.search(query):
+        # The guard matters: without it a standing "be brief" would override
+        # "explain that in detail" on the very next turn, which is worse than
+        # having no memory at all.
+        standing = str(conversation_state.get("style_request") or "")
+        if standing == "concise":
+            return "concise"
+        if standing == "detailed":
+            return "analyst"
     if CREATIVE_HINT_RE.search(query):
         return "creative"
     if LITERARY_HINT_RE.search(query):
@@ -2238,11 +2271,22 @@ def _domain_flags(text: str) -> Dict[str, bool]:
     }
 
 
+# Bounds the caller-supplied candidate score. At weight 0.18 this caps its
+# contribution near the ~0.26 spread a real 60-candidate pool shows, so a
+# confident classifier stays influential without overwhelming the text
+# evidence. Default configurations produce values <= 1.0 and never reach it.
+MAX_BUCKET_BONUS = 2.0
+
+
 def rank_response_candidates(
     candidates: Sequence[Dict[str, Any]],
     query_text: str,
     recent_assistant_messages: Sequence[str],
     style_mode: str = "balanced",
+    interaction_plan: Optional[Dict[str, Any]] = None,
+    conversation_state: Optional[Dict[str, Any]] = None,
+    fusion_mode: Any = None,
+    allow_experimental_fusion: bool = False,
 ) -> Tuple[List[int], torch.Tensor]:
     if not candidates:
         return [], torch.zeros(0, dtype=torch.float32)
@@ -2292,6 +2336,7 @@ def rank_response_candidates(
     reference_style_vals: List[float] = []
     reasoning_depth_vals: List[float] = []
     empathy_vals: List[float] = []
+    interaction_vals: List[float] = []
     word_count_vals: List[float] = []
     q_domains = _domain_flags(query_text)
     for row in candidates:
@@ -2398,6 +2443,11 @@ def rank_response_candidates(
         reference_style_vals.append(reference_style)
         reasoning_depth_vals.append(reasoning_depth)
         empathy_vals.append(empathy_score)
+        interaction_vals.append(
+            float(score_candidate_for_interaction(text, interaction_plan)["total"])
+            if interaction_plan is not None
+            else 0.0
+        )
         word_count_vals.append(float(max(1, len(text.split()))))
 
     lex_sim = torch.tensor(overlap_vals, dtype=torch.float32)
@@ -2416,10 +2466,29 @@ def rank_response_candidates(
     reference_style_signal = torch.tensor(reference_style_vals, dtype=torch.float32)
     reasoning_depth_signal = _normalize_01(torch.tensor(reasoning_depth_vals, dtype=torch.float32))
     empathy_signal = _normalize_01(torch.tensor(empathy_vals, dtype=torch.float32))
+    interaction_signal = torch.tensor(interaction_vals, dtype=torch.float32)
     word_count_signal = torch.tensor(word_count_vals, dtype=torch.float32)
 
     freq_penalty = torch.tensor([math.log1p(float(row.get("count", 1))) for row in candidates], dtype=torch.float32)
-    bucket_bonus = torch.tensor([float(row.get("bucket_score", 0.0)) for row in candidates], dtype=torch.float32)
+    # `bucket_score` carries probability semantics (a softmax probability, scaled
+    # by --db_score_scale / --memory_score_scale), but nothing bounded it. A
+    # single caller-supplied value of 50 measured a jump from rank 16 to rank 1
+    # and a score of +9.35 against a pool maximum of +0.51 - the classifier's
+    # confidence silently overriding every text signal. Clamping to the total
+    # weight the text evidence itself can contribute keeps this influential
+    # without letting it override. Default configurations produce values <= 1.0
+    # and are unaffected.
+    # nan_to_num before clamp: clamp propagates NaN, and a NaN score sorts to
+    # the front, so a malformed row would win the ranking outright.
+    bucket_bonus = torch.nan_to_num(
+        torch.tensor(
+            [float(row.get("bucket_score", 0.0)) for row in candidates],
+            dtype=torch.float32,
+        ),
+        nan=0.0,
+        posinf=MAX_BUCKET_BONUS,
+        neginf=-MAX_BUCKET_BONUS,
+    ).clamp(min=-MAX_BUCKET_BONUS, max=MAX_BUCKET_BONUS)
     domain_alignment = torch.zeros(len(candidates), dtype=torch.float32)
     if q_domains["code"]:
         domain_alignment += 0.24 * code_signal
@@ -2473,6 +2542,72 @@ def rank_response_candidates(
     followup_bonus = (
         0.10 * anchor_signal + 0.14 * edit_match_signal + 0.08 * view_consistency_signal
     ) if followup_profile["followup"] else 0.0
+
+    # Calibrated fusion. The weighted sums below were tuned against signals on
+    # incommensurable scales: `sim_ctx` is a raw dot product spanning ~0.38,
+    # `lex_sim` a Jaccard ratio spanning ~0.09, and every `_normalize_01` signal
+    # spans exactly 1.0 by construction. Measured on a 16-candidate pool,
+    # `lex_sim` at weight 0.10 moved the ranking less than `freq_penalty` at
+    # weight 0.03. Mapping each signal onto its own percentile rank makes a
+    # weight of 0.60 genuinely six times a weight of 0.10.
+    #
+    # The dispersion gate is not optional: percentile ranking is scale-free, so
+    # without it a signal carrying only numerical noise would be stretched to the
+    # same full spread as the signal that decides the answer.
+    #
+    # `legacy` is the default and is bit-exact with the behaviour that shipped.
+    fusion = resolve_fusion_mode(fusion_mode, allow_experimental=allow_experimental_fusion)
+    fusion_report: Optional[Dict[str, Any]] = None
+    if fusion != "legacy":
+        _calibrated: Dict[str, torch.Tensor] = {}
+        _gates: Dict[str, float] = {}
+        for _name, _signal in (
+            ("sim_ctx", sim_ctx),
+            ("sim_resp", sim_resp),
+            ("lex_sim", lex_sim),
+            ("bucket_bonus", bucket_bonus),
+            ("freq_penalty", freq_penalty),
+            ("domain_alignment", domain_alignment),
+            ("view_consistency", view_consistency_signal),
+            ("exact_lookup", exact_lookup_signal),
+            ("reference_style", reference_style_signal),
+            ("reasoning_depth", reasoning_depth_signal),
+            ("empathy", empathy_signal),
+            ("creative", creative_signal),
+            ("analytic", analytic_signal),
+            ("concise", concise_signal),
+            ("diversity", diversity_signal),
+            ("interaction", interaction_signal),
+        ):
+            # `gated` keeps the tuned scales and only removes noise signals;
+            # `calibrated`/`consensus` also rank-transform.
+            _values, _gate = calibrate_signal(
+                _signal, rank_transform=fusion != "gated"
+            )
+            _calibrated[_name] = _values
+            _gates[_name] = _gate
+
+        sim_ctx = _calibrated["sim_ctx"]
+        sim_resp = _calibrated["sim_resp"]
+        lex_sim = _calibrated["lex_sim"]
+        bucket_bonus = _calibrated["bucket_bonus"]
+        freq_penalty = _calibrated["freq_penalty"]
+        domain_alignment = _calibrated["domain_alignment"]
+        view_consistency_signal = _calibrated["view_consistency"]
+        exact_lookup_signal = _calibrated["exact_lookup"]
+        reference_style_signal = _calibrated["reference_style"]
+        reasoning_depth_signal = _calibrated["reasoning_depth"]
+        empathy_signal = _calibrated["empathy"]
+        creative_signal = _calibrated["creative"]
+        analytic_signal = _calibrated["analytic"]
+        concise_signal = _calibrated["concise"]
+        diversity_signal = _calibrated["diversity"]
+        interaction_signal = _calibrated["interaction"]
+        fusion_report = {
+            "mode": fusion,
+            "gated_out": sorted(name for name, gate in _gates.items() if gate <= 0.0),
+            "gates": {name: round(gate, 6) for name, gate in sorted(_gates.items())},
+        }
 
     mode = infer_style_mode(query_text, requested_mode=style_mode)
     if mode == "creative":
@@ -2545,6 +2680,57 @@ def rank_response_candidates(
             - (0.04 * creative_signal if q_needs_exact_lookup else 0.0)
             - 0.28 * sim_recent
             - 0.02 * freq_penalty
+        )
+
+    if interaction_plan is not None:
+        semantic_gate = torch.clamp(
+            0.5 + 0.25 * (sim_ctx + sim_resp),
+            min=0.0,
+            max=1.0,
+        )
+        positive_alignment = (
+            0.10
+            * torch.clamp(interaction_signal, min=0.0, max=1.0)
+            * semantic_gate
+        )
+        risk_penalty = 0.20 * torch.clamp(
+            interaction_signal,
+            min=-1.0,
+            max=0.0,
+        )
+        scores = scores + positive_alignment + risk_penalty
+
+    # Conversation continuity. Deliberately the last term and deliberately
+    # skipped entirely when no state is supplied, so the single-turn ranking
+    # path stays bit-exact with the pre-conversation-state behaviour.
+    if conversation_state is not None:
+        conversation_signal = torch.tensor(
+            score_candidates_for_conversation(
+                [str(row.get("text", "")) for row in candidates],
+                conversation_state,
+            ),
+            dtype=torch.float32,
+        )
+        scores = scores + conversation_signal
+
+    # CombMNZ consensus. A candidate backed by many independent signals is a
+    # safer commitment than one a single loud signal likes, which is the failure
+    # mode that matters most when the system must pick exactly one stored
+    # response. Applied only in `consensus` mode, and only to calibrated signals
+    # where "backed by" is comparable across signals.
+    if fusion == "consensus" and fusion_report is not None:
+        scores = scores * consensus_multiplier(
+            [
+                sim_ctx,
+                sim_resp,
+                lex_sim,
+                bucket_bonus,
+                domain_alignment,
+                view_consistency_signal,
+                exact_lookup_signal,
+                reasoning_depth_signal,
+                empathy_signal,
+            ]
         )
 
     ranked = torch.argsort(scores, descending=True).tolist()
@@ -2763,6 +2949,8 @@ def pick_response(
     response_temperature: float = 0.0,
     style_mode: str = "balanced",
     creativity: float = 0.0,
+    interaction_plan: Optional[Dict[str, Any]] = None,
+    conversation_state: Optional[Dict[str, Any]] = None,
 ) -> str:
     if not candidates:
         return "I do not have a good response for that yet."
@@ -2773,14 +2961,33 @@ def pick_response(
         query_text=query_text,
         recent_assistant_messages=recent_assistant_messages,
         style_mode=style_mode,
+        interaction_plan=interaction_plan,
+        conversation_state=conversation_state,
     )
     ranked, scores = _consensus_mmr_rerank(candidates, list(ranked), scores)
     if ambiguity["needs_clarification"] and (ambiguity["conflict"] or not ambiguity["has_anchor"]):
         top_score = float(scores[ranked[0]].item()) if ranked else -1e9
-        if top_score < 0.55 or not ambiguity["has_anchor"]:
-            return _clarification_question_for_query(query_text, recent_assistant_messages)
+        # Asking the same clarifying question a third time is worse than
+        # answering imperfectly, so a detected clarification loop suppresses it.
+        conversation_flags = (
+            conversation_state.get("flags")
+            if isinstance(conversation_state, dict) and isinstance(conversation_state.get("flags"), dict)
+            else {}
+        )
+        if not conversation_flags.get("clarification_loop"):
+            if top_score < 0.55 or not ambiguity["has_anchor"]:
+                return _clarification_question_for_query(query_text, recent_assistant_messages)
     blocked = set(msg.strip() for msg in recent_assistant_messages[-2:] if msg.strip())
-    filtered = [i for i in ranked if str(candidates[i].get("text", "")).strip() not in blocked]
+
+    def _is_blocked_repeat(index: int) -> bool:
+        text = str(candidates[index].get("text", "")).strip()
+        return bool(
+            text
+            and text in blocked
+            and candidates[index].get("exact_user_match") is not True
+        )
+
+    filtered = [i for i in ranked if not _is_blocked_repeat(i)]
     if not filtered:
         filtered = ranked
     if not filtered:
@@ -2804,7 +3011,7 @@ def pick_response(
 
     for i in ranked:
         text = str(candidates[i].get("text", "")).strip()
-        if text and text not in blocked:
+        if text and not _is_blocked_repeat(i):
             return _maybe_refine_selected_response(
                 text,
                 query_text=query_text,

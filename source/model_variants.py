@@ -54,6 +54,7 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "cognitive_expert",
     "cognitive_leap_expert",
     "cognitive_leap_ultra_expert",
+    "cognitive_leap_v52_expert",
     "transcendent_expert",
     "omniversal_expert",
     "fractal_expert",
@@ -6027,6 +6028,13 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         self.register_buffer("last_consistency_loss", torch.tensor(0.0))
         self.register_buffer("last_cycles_used", torch.tensor(0.0))
         self.register_buffer("last_gating_entropy", torch.tensor(0.0))
+        # v52 router telemetry. Non-persistent so existing v51 checkpoints load
+        # unchanged.
+        self.register_buffer("last_router_load_balance", torch.tensor(0.0), persistent=False)
+        self.register_buffer("last_router_z_loss", torch.tensor(0.0), persistent=False)
+        self.register_buffer(
+            "last_active_cores", torch.tensor(float(n_cores)), persistent=False
+        )
         self.register_buffer("last_prediction_streak", torch.tensor(0.0), persistent=False)
         self.register_buffer("last_prediction_confidence_delta", torch.tensor(0.0), persistent=False)
         self.register_buffer("last_prediction_margin", torch.tensor(0.0), persistent=False)
@@ -6057,6 +6065,9 @@ class CognitiveLeapUltraExpertHead(nn.Module):
 
         # Per-cycle decode cache for deep improvement supervision
         self._cycle_logits = []
+        # Router auxiliary loss, defined before any forward so a caller that
+        # reads it early gets zero rather than an AttributeError.
+        self._aux_loss = torch.zeros(())
 
         self.reset_parameters()
 
@@ -6104,6 +6115,35 @@ class CognitiveLeapUltraExpertHead(nn.Module):
 
     def _sphere_norm(self, z):
         return F.normalize(z, p=2, dim=-1) * self.latent_gain
+
+    def _route_core_updates(self, core_in, gate_probs, core_top_k: Optional[int] = None):
+        """Mix recurrent cores, optionally evaluating only the selected experts.
+
+        The dense v51 path remains the default. A bounded top-k value enables the
+        v52 sparse-compute path without changing existing checkpoints, since the
+        cores and router are the same parameters either way.
+        """
+
+        if core_top_k is None or int(core_top_k) >= self.n_cores:
+            core_outs = torch.stack([core(core_in) for core in self.cores], dim=1)
+            return (core_outs * gate_probs.unsqueeze(-1)).sum(dim=1), float(self.n_cores)
+
+        top_k = max(1, min(int(core_top_k), self.n_cores))
+        selected_probs, selected_indices = torch.topk(gate_probs, k=top_k, dim=-1)
+        selected_probs = selected_probs / selected_probs.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        update = torch.zeros(
+            core_in.shape[0], self.latent_dim, device=core_in.device, dtype=core_in.dtype
+        )
+        for core_idx, core in enumerate(self.cores):
+            selected_mask = selected_indices.eq(core_idx)
+            row_mask = selected_mask.any(dim=-1)
+            if not bool(row_mask.any().item()):
+                continue
+            row_weights = (
+                selected_probs * selected_mask.to(selected_probs.dtype)
+            ).sum(dim=-1)[row_mask]
+            update[row_mask] = update[row_mask] + core(core_in[row_mask]) * row_weights.unsqueeze(-1)
+        return update, float(top_k)
 
     def deep_supervision_loss(self, targets):
         if not self._cycle_logits:
@@ -6239,6 +6279,7 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         prediction_output_transform: Optional[nn.Module] = None,
         prediction_class_indices=None,
         prediction_stability_rank_depth: int = 1,
+        core_top_k: Optional[int] = None,
     ):
         N = x.shape[0] * x.shape[1] if x.dim() == 3 else x.shape[0]
         shape_prefix = x.shape[:-1]
@@ -6261,6 +6302,8 @@ class CognitiveLeapUltraExpertHead(nn.Module):
         cycle_logits = []
         halt_probs = []
         gate_probs_list = []
+        gate_logits_list = []
+        active_core_counts = []
         remaining = torch.ones(N, 1, device=x_flat.device, dtype=x_flat.dtype)
         ponder = torch.zeros(N, 1, device=x_flat.device, dtype=x_flat.dtype)
         consistency = torch.zeros((), device=x_flat.device, dtype=x_flat.dtype)
@@ -6331,10 +6374,17 @@ class CognitiveLeapUltraExpertHead(nn.Module):
                 gate_logits = self.core_router(core_in)
                 gate_probs = F.softmax(gate_logits, dim=-1)
                 gate_probs_list.append(gate_probs)
+                # Raw logits are only needed for the training-time router
+                # z-loss. Collecting them during inference would stack and
+                # reduce a tensor nothing reads.
+                if self.training:
+                    gate_logits_list.append(gate_logits)
 
-                # Route to recurrent cores
-                core_outs = torch.stack([core(core_in) for core in self.cores], dim=1)  # (N, n_cores, latent_dim)
-                core_update = (core_outs * gate_probs.unsqueeze(-1)).sum(dim=1)  # (N, latent_dim)
+                # Route to recurrent cores. Dense by default; top-k when asked.
+                core_update, active_cores = self._route_core_updates(
+                    core_in, gate_probs, core_top_k=core_top_k
+                )
+                active_core_counts.append(active_cores)
 
                 z_l_cond = self._sphere_norm(z_l_cond + core_update)
             z_l = z_l_cond
@@ -6569,16 +6619,41 @@ class CognitiveLeapUltraExpertHead(nn.Module):
             all_gate_probs = torch.stack(gate_probs_list, dim=0)  # (Steps, N, n_cores)
             mean_gate_probs = all_gate_probs.mean(dim=(0, 1))  # (n_cores,)
             gating_entropy = -torch.sum(mean_gate_probs * torch.log(mean_gate_probs + 1e-9))
+            # v52 router regularizers. Load balance keeps the cores in use and
+            # reuses the mean already computed for the entropy, so it is free.
+            # The z-loss, which keeps router logits from drifting large, is a
+            # training objective and is computed only when it will be used.
+            router_load_balance = self.n_cores * torch.sum(mean_gate_probs.pow(2))
+            if gate_logits_list:
+                all_gate_logits = torch.stack(gate_logits_list, dim=0)
+                router_z_loss = torch.logsumexp(all_gate_logits, dim=-1).pow(2).mean()
+            else:
+                router_z_loss = torch.zeros((), device=x_flat.device, dtype=x_flat.dtype)
         else:
             gating_entropy = torch.tensor(0.0, device=x_flat.device)
+            router_load_balance = torch.tensor(1.0, device=x_flat.device)
+            router_z_loss = torch.tensor(0.0, device=x_flat.device)
+
+        self.last_active_cores = torch.tensor(
+            float(sum(active_core_counts) / max(1, len(active_core_counts)))
+            if active_core_counts
+            else float(self.n_cores),
+            device=x_flat.device,
+        )
 
         if self.training:
             self.last_ponder_cost = ponder.mean()
             self.last_consistency_loss = consistency / max(1, cycles_used - 1)
             self.last_gating_entropy = gating_entropy
+            self.last_router_load_balance = router_load_balance
+            self.last_router_z_loss = router_z_loss
+            self._aux_loss = router_load_balance + 0.01 * router_z_loss
             self._cycle_logits = cycle_logits
         else:
             self.last_gating_entropy = gating_entropy
+            self.last_router_load_balance = router_load_balance
+            self.last_router_z_loss = router_z_loss
+            self._aux_loss = torch.zeros((), device=x_flat.device, dtype=x_flat.dtype)
             self._cycle_logits = []
 
         # Halting-weighted mixture of per-cycle decodes
@@ -6661,6 +6736,377 @@ class ChampionNetCognitiveLeapUltraExpert(nn.Module):
 
     def deep_supervision_loss(self, targets):
         return self.layers[10].deep_supervision_loss(targets)
+
+
+class CognitiveLeapV52ExpertHead(CognitiveLeapUltraExpertHead):
+    """Generation v52: verified recursive cognition with bounded affective appraisal.
+
+    The v51 recurrent latent reasoner remains the backbone, including its
+    prediction-stability early exit, which this head forwards rather than
+    bypasses. V52 adds three deliberately small, trainable paths:
+
+    * affect / intent / support-strategy appraisal heads;
+    * a problem-plan residual kept separate from the affective channel;
+    * a calibrated quality/continue verifier that can opt into a larger cycle
+      budget at inference.
+
+    The named appraisal outputs require explicit auxiliary supervision before
+    they should be interpreted semantically. Fresh and v51-upgraded models start
+    with near-zero residual scales so legacy behaviour is preserved.
+    """
+
+    EMOTION_LABELS = (
+        "joy", "sadness", "fear", "anger", "surprise", "disgust",
+        "trust", "mixed",
+    )
+    INTENT_LABELS = (
+        "information", "action", "clarification", "validation",
+        "reassurance", "safety_support",
+    )
+    STRATEGY_LABELS = (
+        "acknowledge", "reflect", "clarify", "inform", "suggest",
+        "reassure", "escalate",
+    )
+
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        latent_dim: int = 128,
+        core_dim: int = 256,
+        n_cycles: int = 3,
+        inner_steps: int = 2,
+        max_cycles: int = 16,
+        dropout: float = 0.1,
+        n_cores: int = 4,
+        router_top_k: int = 2,
+    ):
+        super().__init__(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            latent_dim=latent_dim,
+            core_dim=core_dim,
+            n_cycles=n_cycles,
+            inner_steps=inner_steps,
+            max_cycles=max_cycles,
+            dropout=dropout,
+            n_cores=n_cores,
+        )
+        self.router_top_k = max(1, min(int(router_top_k), n_cores))
+        # A legacy checkpoint can initialize v52 without random new branches
+        # changing its predictions before fine-tuning.
+        with torch.no_grad():
+            self.shared_scale.zero_()
+
+        self.affect_encoder = nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, latent_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.problem_encoder = nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, latent_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.emotion_head = nn.Linear(latent_dim, len(self.EMOTION_LABELS))
+        self.intent_head = nn.Linear(latent_dim, len(self.INTENT_LABELS))
+        self.strategy_head = nn.Linear(
+            2 * latent_dim, len(self.STRATEGY_LABELS)
+        )
+        self.affect_to_logits = nn.Linear(latent_dim, out_dim, bias=False)
+        self.plan_to_logits = nn.Sequential(
+            nn.Linear(2 * latent_dim, core_dim),
+            nn.GELU(),
+            nn.Linear(core_dim, out_dim, bias=False),
+        )
+        self.appraisal_gate = nn.Linear(2 * latent_dim, 2)
+        self.appraisal_scale = nn.Parameter(torch.tensor(0.0))
+
+        verifier_in_dim = 2 * latent_dim + out_dim + 3
+        self.quality_encoder = nn.Sequential(
+            nn.Linear(verifier_in_dim, latent_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.quality_head = nn.Linear(latent_dim, 2)
+        self.verification_correction = nn.Linear(latent_dim, out_dim, bias=False)
+        self.verification_scale = nn.Parameter(torch.tensor(0.0))
+        self.log_temperature = nn.Parameter(torch.tensor(0.0))
+
+        self.register_buffer("last_quality_score", torch.tensor(0.5), persistent=False)
+        self.register_buffer("last_continue_probability", torch.tensor(0.5), persistent=False)
+        self.register_buffer("last_calibrated_entropy", torch.tensor(0.0), persistent=False)
+        self.register_buffer(
+            "last_emotion_probs", torch.zeros(len(self.EMOTION_LABELS)), persistent=False
+        )
+        self.register_buffer(
+            "last_intent_probs", torch.zeros(len(self.INTENT_LABELS)), persistent=False
+        )
+        self.register_buffer(
+            "last_strategy_probs", torch.zeros(len(self.STRATEGY_LABELS)), persistent=False
+        )
+        self.last_verifier_selection = "not_run"
+        self._quality_logits = None
+        self._emotion_logits = None
+        self._intent_logits = None
+        self._strategy_logits = None
+        self._pre_verification_logits = None
+
+        nn.init.normal_(self.affect_to_logits.weight, std=0.01)
+        nn.init.normal_(self.plan_to_logits[-1].weight, std=0.01)
+        nn.init.zeros_(self.appraisal_gate.bias)
+        nn.init.zeros_(self.quality_head.weight)
+        nn.init.zeros_(self.quality_head.bias)
+        nn.init.normal_(self.verification_correction.weight, std=0.01)
+
+    def _structured_pass(self, x_flat, recursive_output):
+        affect = self.affect_encoder(x_flat)
+        problem = self.problem_encoder(x_flat)
+        joint = torch.cat([affect, problem], dim=-1)
+
+        emotion_logits = self.emotion_head(affect)
+        intent_logits = self.intent_head(affect)
+        strategy_logits = self.strategy_head(joint)
+        gates = torch.sigmoid(self.appraisal_gate(joint))
+        structured_residual = (
+            gates[:, :1] * self.affect_to_logits(affect)
+            + gates[:, 1:] * self.plan_to_logits(joint)
+        )
+        pre_verification = recursive_output + (
+            self.appraisal_scale + (1e-4 if self.training else 0.0)
+        ) * structured_residual
+
+        temperature = torch.exp(self.log_temperature.clamp(min=-2.3, max=2.3))
+        calibrated = pre_verification / temperature
+        probs = F.softmax(calibrated, dim=-1)
+        confidence, _ = probs.max(dim=-1, keepdim=True)
+        if self.out_dim > 1:
+            top_two = torch.topk(probs, k=2, dim=-1).values
+            margin = top_two[:, :1] - top_two[:, 1:2]
+        else:
+            margin = confidence
+        entropy = -torch.sum(probs * torch.log(probs.clamp_min(1e-9)), dim=-1, keepdim=True)
+
+        verifier_input = torch.cat(
+            [affect, problem, calibrated, confidence, entropy, margin], dim=-1
+        )
+        quality_state = self.quality_encoder(verifier_input)
+        quality_logits = self.quality_head(quality_state)
+        continue_prob = torch.sigmoid(quality_logits[:, 1:2])
+        final_output = calibrated + (
+            (self.verification_scale + (1e-4 if self.training else 0.0))
+            * continue_prob
+            * self.verification_correction(quality_state)
+        )
+        return final_output, {
+            "emotion_logits": emotion_logits,
+            "intent_logits": intent_logits,
+            "strategy_logits": strategy_logits,
+            "quality_logits": quality_logits,
+            "pre_verification_logits": pre_verification,
+            "entropy": entropy,
+        }
+
+    def _publish_structured_diagnostics(self, cache, selection: str):
+        quality_probs = torch.sigmoid(cache["quality_logits"])
+        self.last_quality_score = quality_probs[:, 0].mean().detach()
+        self.last_continue_probability = quality_probs[:, 1].mean().detach()
+        self.last_calibrated_entropy = cache["entropy"].mean().detach()
+        self.last_emotion_probs = torch.sigmoid(cache["emotion_logits"]).mean(dim=0).detach()
+        self.last_intent_probs = F.softmax(cache["intent_logits"], dim=-1).mean(dim=0).detach()
+        self.last_strategy_probs = F.softmax(cache["strategy_logits"], dim=-1).mean(dim=0).detach()
+        self.last_verifier_selection = selection
+        if self.training:
+            self._quality_logits = cache["quality_logits"]
+            self._emotion_logits = cache["emotion_logits"]
+            self._intent_logits = cache["intent_logits"]
+            self._strategy_logits = cache["strategy_logits"]
+            self._pre_verification_logits = cache["pre_verification_logits"]
+        else:
+            self._quality_logits = None
+            self._emotion_logits = None
+            self._intent_logits = None
+            self._strategy_logits = None
+            self._pre_verification_logits = None
+
+    def forward(
+        self,
+        x,
+        reasoning_cycles: Optional[int] = None,
+        adaptive_compute: bool = False,
+        exit_tol: float = 1e-3,
+        exit_entropy_threshold: float = 0.2,
+        prediction_stability_patience: int = 2,
+        prediction_stability_tol: float = 5e-3,
+        prediction_stability_top_k: int = 5,
+        prediction_stability_margin: float = 0.0,
+        prediction_output_transform: Optional[nn.Module] = None,
+        prediction_class_indices=None,
+        prediction_stability_rank_depth: int = 1,
+        core_top_k: Optional[int] = None,
+        verifier_adaptive_compute: bool = False,
+        verifier_continue_threshold: float = 0.6,
+        max_verifier_cycles: Optional[int] = None,
+    ):
+        selected_top_k = self.router_top_k if core_top_k is None else core_top_k
+        # The v51 prediction-stability controls are forwarded, not dropped, so a
+        # v52 model keeps the checkpoint-bound verifier exit it inherits.
+        stability_kwargs = dict(
+            exit_tol=exit_tol,
+            exit_entropy_threshold=exit_entropy_threshold,
+            prediction_stability_patience=prediction_stability_patience,
+            prediction_stability_tol=prediction_stability_tol,
+            prediction_stability_top_k=prediction_stability_top_k,
+            prediction_stability_margin=prediction_stability_margin,
+            prediction_output_transform=prediction_output_transform,
+            prediction_class_indices=prediction_class_indices,
+            prediction_stability_rank_depth=prediction_stability_rank_depth,
+            core_top_k=selected_top_k,
+        )
+        recursive = super().forward(
+            x,
+            reasoning_cycles=reasoning_cycles,
+            adaptive_compute=adaptive_compute,
+            **stability_kwargs,
+        )
+        shape_prefix = recursive.shape[:-1]
+        x_flat = x.reshape(-1, self.in_dim)
+        initial_output, initial_cache = self._structured_pass(
+            x_flat, recursive.reshape(-1, self.out_dim)
+        )
+        selected_output = initial_output
+        selected_cache = initial_cache
+        selection = "initial"
+        initial_cycles_used = float(self.last_cycles_used.detach().cpu().item())
+
+        requested_budget = int(reasoning_cycles) if reasoning_cycles is not None else self.n_cycles
+        verifier_cap = self.max_cycles if max_verifier_cycles is None else int(max_verifier_cycles)
+        verifier_cap = max(1, min(verifier_cap, self.max_cycles))
+        should_escalate = (
+            bool(verifier_adaptive_compute)
+            and not self.training
+            and requested_budget < verifier_cap
+            and float(torch.sigmoid(initial_cache["quality_logits"][:, 1]).mean().item())
+            >= max(0.0, min(1.0, float(verifier_continue_threshold)))
+        )
+        if should_escalate:
+            escalated_budget = min(verifier_cap, max(requested_budget + 1, requested_budget * 2))
+            escalated_recursive = super().forward(
+                x,
+                reasoning_cycles=escalated_budget,
+                adaptive_compute=False,
+                **stability_kwargs,
+            )
+            escalated_output, escalated_cache = self._structured_pass(
+                x_flat, escalated_recursive.reshape(-1, self.out_dim)
+            )
+            initial_quality = torch.sigmoid(initial_cache["quality_logits"][:, :1])
+            escalated_quality = torch.sigmoid(escalated_cache["quality_logits"][:, :1])
+            choose_escalated = escalated_quality >= initial_quality
+            selected_output = torch.where(choose_escalated, escalated_output, initial_output)
+            # Diagnostics describe the path selected for the majority of rows.
+            if float(choose_escalated.float().mean().item()) >= 0.5:
+                selected_cache = escalated_cache
+                selection = "escalated"
+            self.last_cycles_used = torch.tensor(
+                initial_cycles_used + float(escalated_budget), device=x_flat.device
+            )
+            self.last_exit_reason = "verifier_escalated"
+
+        self._publish_structured_diagnostics(selected_cache, selection=selection)
+        return selected_output.view(*shape_prefix, self.out_dim)
+
+    def verifier_loss(self, targets):
+        if self._quality_logits is None or self._pre_verification_logits is None:
+            raise RuntimeError("verifier_loss requires a training-mode forward pass first")
+        targets_flat = targets.reshape(-1)
+        correctness = self._pre_verification_logits.detach().argmax(dim=-1).eq(targets_flat).float()
+        quality_loss = F.binary_cross_entropy_with_logits(
+            self._quality_logits[:, 0], correctness
+        )
+        continue_loss = F.binary_cross_entropy_with_logits(
+            self._quality_logits[:, 1], 1.0 - correctness
+        )
+        return quality_loss + continue_loss
+
+    def structured_auxiliary_loss(
+        self,
+        targets,
+        emotion_targets=None,
+        intent_targets=None,
+        strategy_targets=None,
+    ):
+        loss = self.verifier_loss(targets)
+        if emotion_targets is not None:
+            emotion_targets = emotion_targets.to(
+                device=self._emotion_logits.device, dtype=self._emotion_logits.dtype
+            )
+            loss = loss + F.binary_cross_entropy_with_logits(
+                self._emotion_logits, emotion_targets
+            )
+        if intent_targets is not None:
+            loss = loss + F.cross_entropy(
+                self._intent_logits, intent_targets.reshape(-1).long()
+            )
+        if strategy_targets is not None:
+            loss = loss + F.cross_entropy(
+                self._strategy_logits, strategy_targets.reshape(-1).long()
+            )
+        return loss
+
+
+class ChampionNetCognitiveLeapV52Expert(nn.Module):
+    """Backbone-compatible v52 verified cognitive-affective reasoner."""
+
+    def __init__(
+        self,
+        latent_dim: int = 128,
+        core_dim: int = 256,
+        n_cycles: int = 3,
+        inner_steps: int = 2,
+        max_cycles: int = 16,
+        dropout: float = 0.1,
+        n_cores: int = 4,
+        router_top_k: int = 2,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(
+            CognitiveLeapV52ExpertHead(
+                256,
+                10,
+                latent_dim=latent_dim,
+                core_dim=core_dim,
+                n_cycles=n_cycles,
+                inner_steps=inner_steps,
+                max_cycles=max_cycles,
+                dropout=dropout,
+                n_cores=n_cores,
+                router_top_k=router_top_k,
+            )
+        )
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x, **kwargs):
+        for layer in self.layers:
+            if isinstance(layer, CognitiveLeapV52ExpertHead):
+                x = layer(x, **kwargs)
+            else:
+                x = layer(x)
+        return x
+
+    def deep_supervision_loss(self, targets):
+        return self.layers[10].deep_supervision_loss(targets)
+
+    def verifier_loss(self, targets):
+        return self.layers[10].verifier_loss(targets)
+
+    def structured_auxiliary_loss(self, targets, **kwargs):
+        return self.layers[10].structured_auxiliary_loss(targets, **kwargs)
 
 
 class ChampionNetHierarchicalExpert(nn.Module):
@@ -7150,6 +7596,8 @@ def build_model(
         return ChampionNetCognitiveLeapExpert(dropout=dropout)
     if model_size == "cognitive_leap_ultra_expert":
         return ChampionNetCognitiveLeapUltraExpert(dropout=dropout)
+    if model_size == "cognitive_leap_v52_expert":
+        return ChampionNetCognitiveLeapV52Expert(dropout=dropout)
     if model_size == "transcendent_expert":
         return ChampionNetTranscendentExpert(dropout=dropout)
     if model_size == "omniversal_expert":
@@ -7998,6 +8446,36 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
+    if model_size == "cognitive_leap_v52_expert":
+        head_pref = "layers.10."
+        allowed_missing = {
+            key
+            for key in model.state_dict().keys()
+            if key.startswith(head_pref) and key not in {f"{head_pref}weight", f"{head_pref}bias"}
+        }
+
+        ckpt_size = detect_model_size_from_state_dict(state_dict)
+        # A v51 ultra checkpoint upgrades in place: its shared recurrent tensors
+        # load and only the new v52 branches stay at their near-zero init.
+        if ckpt_size not in {"cognitive_leap_ultra_expert", "cognitive_leap_v52_expert"}:
+            filtered_sd = {
+                key: value
+                for key, value in state_dict.items()
+                if not (
+                    key.startswith(head_pref)
+                    and key not in {f"{head_pref}weight", f"{head_pref}bias"}
+                )
+            }
+            incompatible = model.load_state_dict(filtered_sd, strict=False)
+        else:
+            incompatible = model.load_state_dict(state_dict, strict=False)
+
+        missing_filtered = [
+            key for key in incompatible.missing_keys if key and key not in allowed_missing
+        ]
+        unexpected_filtered = [key for key in incompatible.unexpected_keys if key]
+        return missing_filtered, unexpected_filtered
+
 
     if model_size == "neurogenesis_expert":
         head_pref = "layers.10."
@@ -8655,6 +9133,13 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "omniscient_expert"
     if "layers.10.hypernet.0.weight" in state_dict and "layers.10.memory_matrix" in state_dict:
         return "cognitive_expert"
+    if (
+        "layers.10.affect_encoder.1.weight" in state_dict
+        and "layers.10.quality_head.weight" in state_dict
+    ):
+        # Probed before the ultra check: a v52 checkpoint also carries the
+        # core_router and cross_attn tensors it inherits from v51.
+        return "cognitive_leap_v52_expert"
     if "layers.10.core_router.weight" in state_dict and "layers.10.cross_attn.qkv.weight" in state_dict:
         return "cognitive_leap_ultra_expert"
     if "layers.10.recur_core.0.weight" in state_dict and "layers.10.halt_head.weight" in state_dict:

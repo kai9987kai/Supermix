@@ -166,7 +166,7 @@ def make_splash() -> Image.Image:
         draw.text((156, y), line, font=body_font, fill=(214, 226, 245))
         y += 54
 
-    footer = "Supermix_27"
+    footer = "Supermix"
     footer_w = draw.textbbox((0, 0), footer, font=label_font)[2]
     draw.text((width - 120 - footer_w, height - 120), footer, font=label_font, fill=(132, 157, 194))
     return image

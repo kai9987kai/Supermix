@@ -1,0 +1,13 @@
+{
+  "created_by": "materialize_v52_from_v50.py",
+  "source_checkpoint": "artifacts\\v52_initialization\\champion_model_chat_v50_cognitive_leap.pth",
+  "source_model_size": "cognitive_leap_expert",
+  "model_size": "cognitive_leap_v52_expert",
+  "seed": 52,
+  "output_checkpoint": "artifacts\\v52_initialization\\champion_model_chat_v52_initialized.pth",
+  "size_bytes": 9737831,
+  "sha256": "1AB25AA9772F90896A9A6C28EB346135B9B9A8D48FA9D84936C4D802D742C192",
+  "state_sha256": "D9FEA1FAFBF61D967370BB9D4F09BFDF19F93C04FB14C9EAE4E223994692044A",
+  "trained_v52": false,
+  "purpose": "deterministic initialization for v52 fine-tuning and runtime integration"
+}

@@ -1372,3 +1372,1097 @@ Research and statistical boundary:
   not substitutes for ordered decisions, protected adjacent gaps, or exact
   fallback. The release evidence is scoped to this checkpoint, synthetic task,
   seed matrix, CPU configuration, and frozen prompt matrix.
+
+## July 2026: Plan-Evaluate interaction intelligence v1
+
+Recent primary sources reviewed:
+
+1. Think$^{2}$: Grounded Metacognitive Reasoning in Large Language Models
+   https://arxiv.org/abs/2602.18806
+2. Ask don't tell: Reducing sycophancy in large language models
+   https://arxiv.org/abs/2602.23971
+3. What If We Allocate Test-Time Compute Adaptively?
+   https://arxiv.org/abs/2602.01070
+4. Uncertainty-Aware Budget Allocation for Adaptive Test-Time Reasoning
+   https://arxiv.org/abs/2605.26849
+5. ThinkBooster: A Unified Framework for Seamless Test-Time Scaling of LLM
+   Reasoning
+   https://arxiv.org/abs/2606.06915
+6. Scaling with Confidence: Calibrating Confidence of LLMs for Adaptive Test
+   Time Scaling
+   https://arxiv.org/abs/2607.01612
+
+Implementation contract:
+
+- `interaction_planner.py` constructs one deterministic
+  `supermix-interaction-plan-v1` object from the raw user turn and bounded
+  recent-turn context. Studio creates it once and propagates it separately from
+  routing, memory, tool, and backend prompt scaffolding. The plan records
+  cautious intent scores, appraisal and affect continuity cues, ambiguity,
+  epistemic risk, a response strategy, and a response contract made of
+  observable capabilities. These labels are routing aids, not a claim to infer
+  a user's hidden mental state.
+- Candidate scoring adds a bounded plan-alignment signal for empathy,
+  actionability, reasoning, calibration, clarification, comparison, requested
+  steps, independent assessment, and safety support. Positive alignment is
+  gated by the existing semantic scores, while explicit unearned agreement,
+  overclaiming, and dismissive phrasing contribute bounded penalties. Passing
+  no interaction plan preserves the legacy candidate-score path.
+- The response contract is evaluated after selection. Automatic changes are
+  intentionally restricted to high-precision cases: immediate crisis
+  escalation, immediate urgent-medical escalation, explicit sycophantic
+  agreement, and explicit dismissive language. Crisis text that already
+  contains escalation guidance can receive a short acknowledgement; non-text
+  Studio results are diagnosed but are never rewritten.
+- Lower-precision findings remain audit and ranking signals only. In
+  particular, missing empathy, missing contract capabilities, unsupported
+  certainty, topical continuity, and lexical relevance do not authorize a
+  rewrite. Quoted, historical, educational, prevention-policy, process-control,
+  and general medical-information contexts are negative controls for the
+  immediate-safety heuristics.
+- Compact diagnostics expose the plan version, intent, strategy, reasoning
+  mode, risk tier, cautious affect cue, uncertainty, factuality and sycophancy
+  risk, deliberation summary, response contract, and final guard audit. The
+  diagnostics do not include the raw prompt. Studio attaches them to the
+  transient agent trace; they do not become route-quality evidence or durable
+  route-policy-ledger support.
+- The canonical source planner is mirrored in `runtime_python`. Terminal and
+  web Champion paths pass the same plan through ranking and finalization; the
+  Studio manager creates it once and uses a common post-route finalizer across
+  direct, collective, loop, specialist, Champion, and Qwen text routes. The
+  standalone Qwen engine and all three static-browser copies implement a
+  mirrored Plan-Evaluate boundary and golden negative-control contract, with
+  browser diagnostics shown alongside each response.
+- Interaction intelligence is enabled by default for normal chat. Controlled
+  raw-response evaluation can opt out explicitly with
+  `settings.interaction_intelligence=false` in a Studio request, or
+  `interaction_enabled=False` in direct Champion or Qwen engine calls. The
+  opt-out constructs no plan, applies no interaction reranking or final guard,
+  and emits no interaction trace; it exists for fidelity measurement rather
+  than as a user-facing safety override.
+- `compute_advice.role` is fixed to `shadow_advisory_only`,
+  `activation_available` is false, and the suggested reasoning floor is
+  bounded. The advice cannot alter a runtime compute request or authorize an
+  adaptive exit. The existing checkpoint-bound prediction verifier remains
+  the sole decision-exit authority.
+
+Research and evaluation boundary:
+
+- Think$^{2}$ motivates making planning and evaluation explicit, but Supermix
+  v1 is a deterministic cue-and-contract layer rather than that paper's
+  prompting architecture or learned metacognitive controller. It does not
+  demonstrate self-awareness, semantic understanding, or successful
+  self-correction.
+- Ask don't tell shows that user framing can affect sycophancy and that
+  question-form reframing can reduce it in the studied models. Supermix neither
+  reproduces that experiment nor rewrites the user's input; it uses a bounded
+  agreement-risk signal to prefer independent assessment and blocks only
+  explicit unearned agreement after selection.
+- Adaptive allocation, uncertainty-aware budgeting, ThinkBooster, and
+  confidence-calibrated scaling motivate keeping difficulty, epistemic risk,
+  value-of-compute, and confidence visible. Their methods use different models,
+  scorers, sampling procedures, training objectives, and benchmarks. They do
+  not validate Supermix's lexical heuristics, suggested reasoning floor, or
+  response-contract scores, so all compute advice remains non-authoritative.
+- The planner is not a truth verifier, medical diagnostic system, crisis
+  classifier, calibrated uncertainty estimator, or learned reward model.
+  High-precision guards reduce a narrow set of obvious failures but do not
+  establish general safety. The negative-control and parity tests validate
+  deterministic implementation behavior, not real-world sensitivity,
+  specificity, fairness, clinical validity, or improved end-to-end answer
+  quality.
+
+## July 2026: Grounded problem solving and verifier-grounded training v1
+
+Recent primary sources reviewed:
+
+1. Uncertainty-Aware Budget Allocation for Adaptive Test-Time Reasoning
+   https://arxiv.org/abs/2605.26849
+2. ThinkBooster: A Unified Framework for Seamless Test-Time Scaling of LLM
+   Reasoning
+   https://arxiv.org/abs/2606.06915
+3. Search-R1: Training LLMs to Reason and Leverage Search Engines with
+   Reinforcement Learning
+   https://arxiv.org/abs/2503.09516
+4. Sufficient Context: A New Lens on Retrieval Augmented Generation Systems
+   https://arxiv.org/abs/2411.06037
+5. S2R: Teaching LLMs to Self-verify and Self-correct via Reinforcement
+   Learning
+   https://arxiv.org/abs/2502.12853
+6. TinyV: Reducing False Negatives in Verification
+   https://arxiv.org/abs/2505.14625
+7. s1: Simple Test-Time Scaling
+   https://arxiv.org/abs/2501.19393
+8. Correct Answers from Sound Reasoning: Verifiable Process Supervision
+   https://arxiv.org/abs/2605.12519
+
+Runtime contract:
+
+- `grounding_runtime.py` is a deterministic, JSON-safe
+  `supermix-grounding-v1` layer mirrored exactly in `runtime_python`. It plans
+  whether evidence is useful, redacts likely secrets and private paths before
+  an external query, ranks bounded evidence with stable `S1` identifiers,
+  measures lexical coverage and conflicts, and rejects fabricated citations.
+  Its authority block explicitly prevents it from controlling model routes,
+  reasoning budgets, adaptive exits, or interaction strategy.
+- The response finalizer is deliberately narrow. It changes output only when a
+  bounded AST/Fraction arithmetic evaluator safely solves an explicitly
+  requested calculation, or when the user explicitly requires an answer based
+  only on supplied evidence and that evidence is absent, insufficient, or
+  conflicting. Every other grounding finding is audit-only.
+- Champion Web now uses the same optional `llm_chat.db` retrieval and
+  `chat_memory.db` continuity paths as Champion Terminal. Local database rows
+  carry privacy-safe dataset provenance and content hashes; existing databases
+  are migrated in place. Source and packaged terminal/database modules remain
+  exact mirrors, while the source and packaged web `Engine` knowledge methods
+  are AST-parity tested.
+- Standalone Qwen receives normalized evidence in a separate system message
+  labelled as untrusted reference data. Only supplied `[S#]` identifiers are
+  valid. Studio constructs one grounding plan from the raw prompt, reuses web
+  tool results as an evidence bundle, audits the final answer before the
+  existing interaction finalizer, and renders evidence status and safe source
+  links. The offline static browser has a no-eval BigInt rational arithmetic
+  mirror and remains byte-identical across its three copies.
+
+Training and evaluation contract:
+
+- `verifiable_reasoning.py` defines `supermix-verifier-v1` with fail-closed,
+  non-executable checks for integer, decimal, fraction, normalized exact and
+  alias answers, multiple choice, and JSON-field equality. Candidate text is
+  never passed to `eval`, a shell, submitted code, the filesystem, or a
+  network.
+- `build_verifiable_reasoning_curriculum.py` creates deterministic,
+  independently seeded train/evaluation JSONL for multi-step arithmetic,
+  ratios and probability, sequences, constraint tables, and
+  evidence-in-prompt QA. Train and evaluation template identifiers are
+  disjoint, every assistant answer is self-verified before inclusion, and the
+  manifest records family counts and content hashes.
+- The Qwen pipeline now recomputes verifier results instead of trusting cached
+  scalar rewards. Verifiably wrong tagged teacher examples are rejected before
+  lexical ranking, verified-correct alternatives cannot become preference
+  negatives, wrong near-misses are preferred as useful negatives, cached
+  tagged distillation rows are revalidated, and evaluation reports overall and
+  per-family verified accuracy. Untagged legacy data preserves its previous
+  behavior.
+
+Research and evaluation boundary:
+
+- These papers motivate evidence sufficiency, search-aware training, bounded
+  test-time scaling, process supervision, and secondary verification. None
+  validates this Supermix checkpoint, its lexical evidence coverage, or the
+  generated curriculum. The runtime improvement is directly testable; model
+  quality can be claimed only after a separate adapter is trained and passes a
+  fixed held-out exact-answer/common-benchmark comparison.
+- The checked v51 arithmetic classifier is not an open-ended language model,
+  and prediction-stability gates measure decision fidelity rather than general
+  intelligence. This upgrade therefore avoids using more cycles as a proxy for
+  being more knowledgeable.
+- A CPU smoke run validates data and training plumbing only. It is not evidence
+  that weights improved. Current or changing facts should remain on an
+  explicitly enabled retrieval path rather than being memorized from a dated
+  synthetic file.
+
+## July 2026: Prompt Understanding v1
+
+Recent primary sources reviewed:
+
+1. ClarifyMT-Bench (multi-turn clarification evaluation)
+   https://arxiv.org/abs/2512.21120
+2. MulTypo (multi-task typo robustness)
+   https://arxiv.org/abs/2510.09536
+3. ComplexBench (complex instruction following)
+   https://arxiv.org/abs/2407.03978
+4. Multi-IF (multi-turn instruction following)
+   https://arxiv.org/abs/2410.15553
+5. StructFlowBench (dialogue-flow understanding)
+   https://arxiv.org/abs/2502.14494
+6. RECAP (context-aware intent rewriting)
+   https://arxiv.org/abs/2509.04472
+7. Structured Uncertainty Guided Clarification (SAGE)
+   https://arxiv.org/abs/2511.08798
+
+Implementation contract:
+
+- `prompt_understanding.py` defines the deterministic,
+  `supermix-prompt-understanding-v1` profile and is mirrored in the packaged
+  `runtime_python` tree. One profile is intended to be computed from the raw
+  user turn plus bounded recent turns and reused by interaction planning,
+  contextual retrieval, grounding, and response-constraint auditing.
+- Parsing is conservative and data-aware. Unicode and whitespace are
+  normalized for analysis, while quoted text, fenced and inline code, URLs,
+  and paths are masked before instruction matching. Typo recovery uses bounded
+  edit distance only for a fixed cue vocabulary. It never rewrites the raw
+  prompt or treats arbitrary corrected content as an instruction.
+- The profile records multiple requested acts, clause polarity, required and
+  forbidden capabilities, quantitative and structural output constraints,
+  hard conflicts, softer tensions, turn relations, unresolved references,
+  knowledge/freshness/evidence cues, and typo-robust immediate personal-safety
+  cues. Prompt-embedded claims about authority or permissions remain
+  non-controlling metadata.
+- Conflict handling is explicit: mutually impossible hard constraints and
+  unresolved required references support one targeted clarification rather
+  than a premature answer. Compatible constraints remain a deterministic
+  checklist for response auditing. The auditor reports violations but is not a
+  truth judge and does not substitute canned factual answers.
+- Contextual retrieval can combine the current request with a small number of
+  resolved recent turns. It keeps the current turn primary, excludes assistant
+  instructions from authority, and remains subject to the existing privacy
+  redaction and tool-permission gates.
+- Diagnostics are compact and privacy-safe: they include schema/version,
+  intent and constraint categories, ambiguity/conflict counts, turn relation,
+  and risk/evidence flags, but omit raw or corrected prompt text, quoted
+  literals, URLs, and paths. The profile cannot select a model, increase
+  compute, enable a tool, widen permissions, or bypass safety controls on its
+  own; consumers remain responsible for their existing eligibility and
+  permission checks.
+- A deterministic curriculum builder covers disjoint train/evaluation
+  templates for realistic typo noise, polarity and composed constraints,
+  conflict ask-versus-act decisions, multi-turn reference and intent drift,
+  and instruction/data separation. Targets are generated from template
+  parameters and verifier-checked rather than accepted from the parser's own
+  labels.
+
+Research and evaluation boundary:
+
+- ClarifyMT-Bench and Structured Uncertainty Guided Clarification motivate
+  separating ambiguity detection from the decision to ask. They do not
+  establish that Supermix's deterministic ambiguity scores are calibrated or
+  that every clarification decision is optimal.
+- MulTypo motivates realistic insertion, deletion, replacement, and
+  transposition tests. Supermix deliberately limits recovery to cue words, so
+  this is a robustness guard rather than a general spelling corrector.
+- ComplexBench and Multi-IF motivate explicit composed-constraint and
+  multi-turn checks. StructFlowBench motivates representing dialogue-flow
+  relations, while RECAP motivates context-aware retrieval queries. Their
+  results use different models, prompts, datasets, and metrics and therefore do
+  not validate this implementation.
+- The new parser, runtime integrations, deterministic tests, and curriculum
+  make the pipeline more capable and testable. Existing Supermix and Qwen model
+  weights were not retrained as part of this upgrade. No improvement in trained
+  model intelligence, knowledge, benchmark accuracy, or general prompt
+  understanding should be claimed until a separate training run and fixed
+  held-out evaluation demonstrate it.
+
+---
+
+## July 2026: Deliberate Reasoning v1
+
+Applied in `source/reasoning_engine.py`, mirrored byte-for-byte in
+`runtime_python/reasoning_engine.py`, and consumed by `grounding_runtime.py`.
+
+### Motivation
+
+Before this upgrade the only computation Supermix could actually perform at
+inference time was an explicit arithmetic expression such as
+`Calculate (7 * 9) + 5.`. Anything stated in words — a percentage, a unit
+conversion, a rate, an equation — fell through to retrieval-and-rerank, which
+selects a plausible-sounding stored response rather than a correct one. That is
+the single largest problem-solving gap in the runtime, and it is fixable
+deterministically without retraining a checkpoint.
+
+### Papers and ideas used
+
+1. Self-Consistency decoding (Wang et al., 2023):
+   https://arxiv.org/abs/2203.11171
+2. Program-Aided Language Models (Gao et al., 2023):
+   https://arxiv.org/abs/2211.10435
+3. Verify step by step / process supervision (Lightman et al., 2023):
+   https://arxiv.org/abs/2305.20050
+4. Self-Refine and self-verification limits (Madaan et al., 2023):
+   https://arxiv.org/abs/2303.17651
+5. Large Language Models Cannot Self-Correct Reasoning Yet (Huang et al., 2024):
+   https://arxiv.org/abs/2310.01798
+6. Adaptive computation and early exit for inference budgets
+   (Schuster et al., CALM, 2022): https://arxiv.org/abs/2207.07061
+7. Xiaomi MiMo's published direction on hybrid attention, sparse routing, and
+   agentic post-training, which motivates the fast/deep budget split rather
+   than any specific numeric claim: https://github.com/XiaomiMiMo
+
+### What was implemented
+
+1. Exact rational solving. Every solver computes with `fractions.Fraction`, so
+   `10% of 0.1` returns exactly `1/100` and never `0.010000000000000002`. There
+   is no `eval`, no network access, and no mutable state.
+
+2. Fifteen solver families with explicit checks: percent of / part-of-whole /
+   reverse percent, percent change, ordered percent chains (discount then tax),
+   unit conversion across length, mass, volume, time, data, area, speed, and
+   temperature, linear equations, speed-distance-time, combined work rates,
+   proportions, arithmetic/geometric/quadratic/additive sequences, statistics,
+   gcd/lcm/primality/factorization, combinations/permutations/factorials, date
+   differences and offsets, simple and compound interest, and sum-and-difference
+   word problems.
+
+3. Verification is a precondition for authority, not a report. Each solver
+   publishes how its answer was checked and whether that check is independent
+   of the path that produced it. Linear equations are re-evaluated by a second
+   substitution evaluator that accumulates a numeric total instead of collecting
+   symbolic coefficients, so an error in the collector cannot validate itself.
+   Unit conversions are checked by exact round trip *and* by a magnitude
+   direction test, because a round trip alone cancels an inverted factor.
+   Sequence rules must hold for every supplied term, not just the last pair.
+
+4. Cross-solver agreement. In `deep` tier every applicable solver runs and any
+   disagreement between solvers of equal verification status marks the attempt
+   `conflicting`, which withdraws override authority.
+
+5. Adaptive, bounded compute. A deterministic complexity score over quantity
+   count, clause count, unit mentions, and length selects `fast` (stop at the
+   first self-verified path) or `deep` (explore all paths, require agreement).
+   Solver invocations, literal digit length, sequence and list lengths,
+   factorial and combination sizes, date deltas, and result bit width are all
+   capped; the adversarial suite holds worst case under 250 ms.
+
+6. One conservative override point. `finalize_grounded_response` replaces a
+   retrieved response only when `override_allowed` is true, which requires a
+   solved problem, a passing verification, and no conflict. Explicit arithmetic
+   keeps its existing dedicated path and takes precedence, and the
+   strict-evidence override still outranks both. When the request asks for
+   working, the rendered answer includes the recorded steps.
+
+### Research and evaluation boundary
+
+- Self-Consistency motivates sampling several paths and preferring agreement.
+  Supermix does not sample a model; it runs disjoint deterministic solvers, so
+  agreement here is weaker evidence than a large sampled majority and is used
+  only to *withdraw* authority on disagreement, never to manufacture confidence.
+- PAL motivates computing rather than narrating an answer. Supermix executes no
+  generated code; it dispatches to fixed, bounded solvers.
+- Huang et al. is the reason self-verification never grants authority on its
+  own. Every check is either an inverse operation, a second independent
+  implementation, or a constraint recheck. The one solver whose replay is not
+  independent, `percent_chain`, declares `verification.independent: false`.
+- CALM motivates budget-aware early exit. The tier here selects how many
+  *solvers* run. It is metadata with respect to the model: this layer cannot
+  change the reasoning budget, alter routing, or affect the checkpoint-bound
+  prediction verifier, and `authority` states this on every result.
+- Diagnostics carry class, method, verification, consensus, and budget only —
+  never the prompt, the extracted numbers, or the answer.
+- This upgrade improves runtime logic, integration, and tests. No model weights
+  were retrained. It is not evidence of a smarter trained checkpoint and no
+  benchmark improvement should be claimed from it without a separate held-out
+  evaluation.
+
+---
+
+## July 2026: Conversation State v1 and the v52 unified merge
+
+### Conversation State v1
+
+`conversation_state.py` adds the first layer in this repo that accumulates
+across a session. `analyze_prompt` and `plan_interaction` are both per-turn and
+both see a bounded four-turn window, so a constraint the user stated earlier is
+simply gone by the time it matters, and an unanswered clarifying question can be
+asked again on the next turn.
+
+The layer derives, deterministically and from the turn list each time rather
+than by mutating hidden state:
+
+- durable user commitments (identity, tooling, preference, constraint), with a
+  later statement about the same subject superseding an earlier one;
+- questions the assistant asked, and whether a later user turn answered them,
+  including a clarification-loop flag when the same question recurs;
+- topic threads and topic shift;
+- what the assistant has already delivered, for repetition detection across the
+  whole conversation rather than the last two messages;
+- user requests the next assistant turn did not engage with;
+- contradictions, when a superseding statement flips polarity.
+
+Design boundaries, following the same contract as the interaction, prompt, and
+grounding layers:
+
+- Pure and deterministic. The same conversation always produces the same state,
+  so any turn sequence is replayable in a test.
+- Bounded everywhere: 40 turns, 24 commitments, 8 questions, 6 threads, 24
+  delivered signatures, 400 characters per stored span.
+- The ranking contribution is clamped to ±0.12, and the parameter defaults to
+  `None` with the whole block skipped in that case, so the single-turn ranking
+  path remains bit-exact.
+- Exactly one behavioural override: a detected clarification loop suppresses a
+  third repetition of the same clarifying question. Everything else — repeated
+  answers, ignored style requests, unaddressed requests — is audit-only.
+- No authority over compute, routing, permissions, tools, or the safety path.
+- Diagnostics carry counts, closed-vocabulary category labels, and flags. They
+  never carry turn text; `test_conversation_state.py` asserts this directly.
+
+The extraction is deliberately shallow, deterministic pattern matching. It
+recognizes stated commitments, not inferred ones, and it will miss commitments
+phrased in ways the patterns do not cover. It is a bounded observable-cue layer
+in the same spirit as the existing planner, not a learned dialogue-state tracker,
+and its recall should not be described as if it were one.
+
+### v52 unified merge
+
+The `cognitive_leap_v52_expert` variant was merged forward from a tree that
+predates the v51 prediction-stability work. Its research framing — a separately
+trained error-locating verifier rather than model self-correction, difficulty-
+proportional test-time compute, sparse conditional execution, and appraisal
+heads kept separate from the problem-plan channel — is recorded in
+[`docs/V52_UNIFIED_ARCHITECTURE.md`](../docs/V52_UNIFIED_ARCHITECTURE.md), and
+the merge decisions in [`docs/V52_MERGE_LOG.md`](../docs/V52_MERGE_LOG.md).
+
+Two boundaries carry over unchanged from that document and are worth restating:
+
+- The named emotion, intent, and strategy outputs are **not** semantic merely
+  because the heads exist. They require labelled auxiliary supervision and a
+  held-out evaluation before any output is interpreted as an appraisal.
+- Sparse top-k core execution is a compute *option*, not a measured speedup.
+  Sparse Python dispatch can cost more than it saves for small CPU batches, so
+  wall-clock must be benchmarked per deployment. It is off by default: the dense
+  path runs unless `core_top_k` is set, and `core_top_k=n_cores` is verified to
+  be bit-identical to the dense path.
+
+Fresh and v51-upgraded v52 models start with near-zero residual scales on the
+appraisal and verification branches, so an upgraded checkpoint reproduces its
+prior behaviour until it is fine-tuned. As with every other upgrade in this
+file: no weights were retrained here, so none of this is evidence of a smarter
+trained checkpoint.
+
+---
+
+## July 2026: v52 runtime control surface and measured cost
+
+The v52 merge landed the model before the controls that reach it. This entry
+records closing that gap, and the measurements taken to check the merge did not
+make anything slower or different than it was.
+
+### What was missing
+
+`launch_v52_unified_chat.ps1` passed `--core_top_k 2` to `source/chat_web_app.py`,
+whose parser did not define the flag, so the launcher aborted with argparse exit
+code 2. More broadly, every v52 capability was unreachable: the sparse router and
+the quality/continue verifier were merged model code with no CLI flag, no web
+setting, and no telemetry path, and `collect_runtime_compute_metrics` dropped the
+seven attributes the merged head emits.
+
+### What was added
+
+- `--core_top_k`, `--verifier_adaptive_compute`, `--verifier_continue_threshold`,
+  and `--max_verifier_cycles` in `chat_app.py` and `chat_web_app.py`, threaded
+  through `forward_with_runtime_compute`, the compute sweep, and progressive auto
+  compute.
+- The same four keys in the web app's runtime-compute settings registry, so they
+  round-trip through defaults, CLI overrides, and normalisation with the existing
+  clamping conventions.
+- Seven v52 telemetry fields in `collect_runtime_compute_metrics`:
+  `router_load_balance`, `router_z_loss`, `active_cores`, `quality_score`,
+  `continue_probability`, `verifier_selection`, `calibrated_entropy`. They stay
+  `None` on every pre-v52 variant, which never sets the source attributes.
+- `core_routing_mode` in the compute diagnostics, reporting `sparse` only when
+  the model actually accepted `core_top_k`, so a control the head ignores is
+  never reported as applied.
+- `test_v52_runtime_controls.py`, which parses the launcher for the flags it
+  passes and asserts the target app's `--help` accepts every one of them. This is
+  the contract the shipped defect crossed.
+
+Every control is guarded by `_model_forward_accepts_kwarg`, so pre-v52
+checkpoints ignore them entirely.
+
+### Measured cost
+
+Measured on CPU, single thread, median of 12–15 runs. These are this machine's
+numbers, not a general claim.
+
+| Path | Before | After | Note |
+|---|---|---|---|
+| v51 ultra head, dense forward | 26.914 ms | 26.293 ms | bit-identical output |
+| Ranking, 60 candidates, no conversation state | 21.146 ms | unchanged | legacy path bit-exact |
+| Ranking, 60 candidates, conversation state on | — | +7.6% | was +18.9% before batching |
+| v52 forward vs v51 ultra | 32.108 ms | 41.802 ms | +176,668 params, opt-in variant only |
+| v52 sparse `core_top_k=2` vs its own dense path | — | 1.63x slower | small CPU batches |
+
+Three findings worth keeping:
+
+1. **Sparse routing is slower here, not faster.** Per-core masking costs more
+   than the cores it skips at this batch size. This confirms the donor
+   document's own warning and is why the dense path remains the default.
+2. **The v51 path was briefly 10% slower after the merge.** The router z-loss
+   stacked and reduced raw gate logits on every forward, including inference,
+   where nothing reads it. It is now computed only under `self.training`,
+   matching how `last_ponder_cost` and `last_consistency_loss` were already
+   handled. Load balance stays available in both modes because it reuses the
+   mean already computed for the gating entropy.
+3. **Conversation-state ranking was 18.9% overhead** because per-candidate
+   scoring re-derived the delivered shingle sets, question terms, and thread
+   terms for all 60 candidates. `score_candidates_for_conversation` now prepares
+   that view once per turn; the batch and single-candidate paths are asserted
+   equal.
+
+### Installer upgrade rule
+
+`docs/V52_UNIFIED_ARCHITECTURE.md` states that installer upgrades delete the
+prior bundled-model directory so a model removed from a manifest cannot survive
+an upgrade. That guarantee was documented but not implemented. The
+`[InstallDelete]` rule for `{app}\_internal\bundled_models` is now in
+`installer/SupermixStudioDesktop.iss`, matching the PyInstaller `--add-data`
+target the build script uses, and the installer contract version moved to
+`2026.07.27`.
+
+As with every other entry in this file: no weights were retrained, so none of
+this is evidence of a smarter trained checkpoint.
+
+---
+
+## July 2026: Calibrated score fusion, and a negative result
+
+A survey of 2024-2026 retrieval, calibration, and selective-prediction work
+produced 24 candidate techniques. This entry records what was built, and — more
+usefully — what was measured and rejected.
+
+### The defect, which is real
+
+`rank_response_candidates` fuses about twenty signals with hand-tuned weights.
+Roughly half pass through `_normalize_01` (per-batch min-max) and half arrive
+raw. Expressing each signal's influence as |weight| x realised spread on a
+16-candidate pool:
+
+| Signal | Nominal weight | Actual influence |
+|---|---|---|
+| `sim_ctx` (raw dot product) | 0.60 | 46.9% |
+| `sim_resp` (raw dot product) | 0.25 | 19.5% |
+| `bucket_bonus` (raw model score) | 0.18 | 12.8% |
+| a `_normalize_01` signal | 0.06 | 12.2% |
+| `freq_penalty` (raw `log1p`) | 0.03 | 6.7% |
+| `lex_sim` (raw Jaccard) | 0.10 | 1.8% |
+
+`lex_sim` carries three times the nominal weight of `freq_penalty` and a third of
+its influence, and a min-max signal at weight 0.06 outweighs it twice over. A
+signal's influence is set by its normalisation choice, not its weight. Whatever
+the weights were tuned to express, this is not it.
+
+This is motivated by Bruch, Gai and Ingber, "An Analysis of Fusion Functions for
+Hybrid Retrieval" (ACM TOIS 2023, arXiv:2210.11934), which argues score
+calibration is the first-order step before fusion, and finds min-max
+specifically weak because it preserves the underlying distribution's skew.
+
+### What was built
+
+`score_fusion.py` (mirrored to `runtime_python/`), providing four modes:
+
+- `legacy` — the shipped behaviour, **bit-exact**, and the default;
+- `gated` — suppress signals whose spread is indistinguishable from noise,
+  leaving surviving signals on their original scale;
+- `calibrated` — additionally map each signal onto its own percentile rank;
+- `consensus` — additionally apply a bounded CombMNZ multiplier rewarding
+  candidates that many signals independently support.
+
+One design point is worth stating plainly: **percentile ranking alone is
+unsafe.** It is scale-free, so it stretches a signal carrying nothing but
+numerical noise onto the same full [0, 1] spread as the signal that decides the
+answer. Rank calibration is therefore always paired with a dispersion gate that
+zeroes such a signal *before* the transform can amplify it.
+
+### First measurement (synthetic probes, since superseded)
+
+`source/benchmark_ranking_quality.py` scores 31 labelled probes over a 30-item
+corpus, reporting top-1, top-3, and MRR with **paired bootstrap confidence
+intervals**:
+
+| Mode | top-1 | MRR | Paired delta vs legacy (95% CI) |
+|---|---|---|---|
+| `legacy` | 61.3% | 0.743 | — |
+| `gated` | 61.3% | 0.743 | MRR +0.0000 [+0.0000, +0.0000] |
+| `calibrated` | 54.8% | 0.690 | MRR -0.0524 [-0.1421, +0.0325] |
+| `consensus` | 54.8% | 0.702 | MRR -0.0405 [-0.1308, +0.0445] |
+
+**No mode differs from legacy beyond sampling noise.** Every interval straddles
+zero. Three conclusions, none of them flattering to the original hypothesis:
+
+1. **Rank calibration measured slightly worse, not better.** The premise is
+   correct — the weights genuinely do not mean what they say — but the corollary
+   is fatal to a drop-in fix: the weights were hand-tuned *against* the
+   miscalibrated scales and therefore already compensate for them. Recalibrating
+   the signals without re-tuning the weights discards that compensation.
+   Calibrated fusion is only a win alongside a weight re-tune, which needs
+   labelled data this repository does not have.
+2. **`gated` is bit-identical to `legacy` on every probe.** The dispersion gate
+   never fires, because no signal in this fixture is noise-only. It is a safety
+   net against a degenerate pool, not an improvement.
+3. **Vector-PRF was prototyped and rejected.** A Rocchio query-expansion sweep
+   (Li et al., TOIS, arXiv:2108.11044) over alpha in [0.5, 0.9] and k in {2,3,5}
+   produced a best case of +0.0150 MRR at alpha=0.7, k=3 — but -0.0241 at
+   alpha=0.8, k=3. Selecting the winning cell from 23 probes is fitting the
+   evaluation, not the problem. It was not merged.
+
+### What is actually delivered
+
+The honest deliverable here is the **measurement**, not the ranking change.
+Before this, every weight in `rank_response_candidates` was a judgement call that
+nothing measured, and there was no way to tell whether any change to it helped.
+The bootstrap intervals are the load-bearing part: the probe set is small enough
+that a single query moves top-1 by more than three percentage points, which is
+easy to misread as a result.
+
+`legacy` remains the default and is bit-exact however the mode is spelled,
+including for unknown values. The other modes exist so that a future weight
+re-tune can be evaluated rather than asserted.
+
+The probe set is a hand-written regression fixture, not a validation corpus. A
+win on it is evidence that a change did something, not evidence that the system
+is smarter. As with every other entry in this file: no weights were retrained,
+so none of this is evidence of a smarter trained checkpoint.
+
+### Second measurement, on the real corpus: conclusive rejection
+
+The synthetic result above was inconclusive because the fixture was too weak.
+`llm_chat.db` already held the labels: 120,000 rows pairing a `user_text` with
+the `response_text` stored for it, of which 57,934 have a `user_text` occurring
+exactly once and are therefore unambiguous (query, gold) pairs.
+
+`source/build_ranking_eval_set.py` extracts a reproducible fixture from them.
+Two decisions made it useful:
+
+- **Hard negatives.** With randomly drawn distractors the reranker scores 100%
+  top-1, because an unrelated response is trivially dissimilar; that measures
+  nothing. Drawing distractors from the query's nearest neighbours in context
+  space drops legacy to 87.0%, leaving real headroom.
+- **Production vector semantics.** A first version featurized the response text
+  for both `vec` and `ctx_vec` and reported legacy at 1.0% top-1. That was a bug
+  in the harness, not a finding: production scores a candidate's stored
+  *context* vector against the live query, and `sim_ctx` is the dominant signal.
+  The fixture now carries the query each response was stored under.
+
+On 200 probes with 39 hard negatives each:
+
+| Mode | top-1 | MRR | Paired delta vs legacy (95% CI) |
+|---|---|---|---|
+| `legacy` | 87.0% | 0.916 | — |
+| `gated` | 87.0% | 0.916 | +0.0000 [+0.0000, +0.0000] |
+| `calibrated` | 36.0% | 0.546 | **-0.5100 [-0.5800, -0.4400]** |
+| `consensus` | 28.5% | 0.474 | **-0.5850 [-0.6600, -0.5100]** |
+
+Rank calibration costs **51 percentage points of top-1 accuracy**, far outside
+sampling noise.
+
+### Why, and why no weight re-tune can rescue it
+
+The earlier entry speculated that calibration might win alongside a weight
+re-tune. That is now refuted, and the reason is more interesting than the
+result.
+
+Percentile ranking is scale-free, which is exactly the property that makes it
+destroy this task. When the gold response sits at a context similarity of 0.95
+and the distractors sit near 0.1, the *margin* is the information that
+identifies the answer. The transform replaces it with uniform rank steps: the
+gold becomes 1.00 and the runner-up 0.97, regardless of whether the true gap was
+enormous or negligible.
+
+No choice of weights recovers that, because the discarded quantity is no longer
+present in any signal. This is an information-destruction problem, not a tuning
+problem.
+
+The hand-tuned weights are therefore not naive. They exploit raw magnitudes that
+carry real signal, and the weight/influence mismatch documented above is the
+price of that — a genuine, measured trade rather than an oversight.
+
+Bruch, Gai and Ingber's calibration argument still holds in its own setting:
+fusing heterogeneous rankers over results of *comparable* quality. It does not
+transfer to a retrieval task where one candidate dominates by a wide margin.
+
+### What changed as a result
+
+`calibrated` and `consensus` are no longer reachable from the runtime path.
+`resolve_fusion_mode` accepts only `RUNTIME_FUSION_MODES` unless a caller passes
+`allow_experimental=True`, which only the benchmark does. An unknown mode, a
+config typo, or a stale setting degrades to `legacy` rather than to a mode that
+halves retrieval quality. They remain in the tree as the evidence trail for why
+rank calibration was rejected.
+
+`legacy` remains the default and is bit-exact. `gated` stays selectable and is
+bit-identical to `legacy` on every probe measured; it is a safety net for a
+degenerate pool, not an improvement.
+
+The lasting deliverable is the pair of tools: a corpus-derived, hard-negative
+evaluation set and a benchmark that reports paired bootstrap intervals. Before
+them, every weight in `rank_response_candidates` was a judgement call that
+nothing measured, and a plausible, well-cited improvement could be adopted
+without anyone noticing it cost half the retrieval accuracy.
+
+---
+
+## July 2026: Measuring the reranker, and three rejected changes
+
+`rank_response_candidates` fuses about twenty signals with hand-tuned weights.
+Every one of those weights was a judgement call that nothing measured. This entry
+records building the measurement, and the three changes it rejected.
+
+### The evaluation
+
+`llm_chat.db` already held the labels: 120,000 rows pairing a query with the
+response stored for it, of which 57,934 have a query appearing exactly once and
+so carry an unambiguous gold. `source/build_ranking_eval_set.py` turns those into
+a fixture, and two decisions determine whether the result means anything.
+
+**Hard negatives are mandatory.** With randomly drawn distractors the reranker
+scores 100% top-1, because an unrelated response is trivially dissimilar. That
+number cannot move, so it measures nothing. Drawing distractors from the query's
+nearest neighbours drops it to 75.8% and leaves headroom a change can move.
+
+**The fixture must mirror production's vector semantics.** Production's dominant
+signal is `sim_ctx`, the live query against the *context a candidate was stored
+under*. A first version featurized response text for both vectors and measured
+legacy at 1.0% top-1 instead of 87.0%. The fixture now carries each candidate's
+source query. `test_ranking_eval_harness.py` pins this, because the failure mode
+is silent: the benchmark still runs and still prints confident numbers.
+
+**Scoring must credit equivalent answers.** The corpus stores the same answer
+many ways: "Okay. Hello. Tell me what you need." beside "Hello. Tell me what you
+need. Let me know if you want a deeper walkthrough." Only one is labelled. On a
+300-probe dev split, 88 queries missed top-1 and **51 of them (58%) retrieved a
+near-duplicate of the gold**. Strict scoring reported 70.7% where
+equivalence-aware scoring reports 87.7%. Chasing that 17-point gap would optimise
+a labelling artefact and reward reshuffling equivalent responses.
+
+### Rejected: rank calibration of the fusion signals
+
+Percentile-rank normalisation before fusion, motivated by rank-fusion results in
+retrieval. Measured on 200 corpus probes with hard negatives:
+
+| mode | top-1 | paired difference vs legacy |
+|---|---|---|
+| legacy | 93.0% | — |
+| calibrated | 69.5% | **-23.5 points** [-29.5, -17.0] |
+| consensus | 66.5% | **-26.5 points** [-33.5, -19.5] |
+
+Under strict scoring the gap is wider still, -51 and -58 points.
+
+The mechanism is now clear and worth recording: **rank transforms destroy
+margin**. When the gold sits at similarity 0.95 and the distractors at 0.1,
+percentile ranking flattens that decisive gap into uniform steps. The hand-tuned
+weights are not naive about scale; they exploit magnitudes that carry real
+signal. No weight re-tune can recover this, because the information is discarded
+before the weights apply.
+
+`calibrated` and `consensus` remain in the tree as the evidence trail but are no
+longer runtime-selectable. `resolve_fusion_mode` accepts them only under
+`allow_experimental=True`, which the benchmark passes and no runtime path does.
+A stale config or a typo degrades to `legacy`, never to a mode that would halve
+retrieval quality.
+
+### Rejected: length normalisation
+
+Among all top-1 failures the winning candidate was longer than the gold 78% of
+the time, which looked like an obvious length bias. It was not.
+
+The featurizer L2-normalises (`_featurize_text_impl`), so cosine similarity
+carries no length advantage, and lexical overlap is Jaccard, which *penalises*
+length through the union term. Restricting the measurement to the 34 genuine
+failures, the winner was longer in 22 of them: 65% +/- 17pp, **not
+distinguishable from chance**. The 78% was produced almost entirely by the
+near-duplicate artefact, where the winner is the gold plus boilerplate and is
+longer by construction (87% there).
+
+No change was made. The hypothesis was an artefact of measuring on the wrong
+subset.
+
+### Rejected: a content-focus query view
+
+Genuine failures skew towards queries padded with conversational filler ("can you
+how to speed up python loop thanks? when you can?"), where generic and greeting
+responses beat specific ones. `_query_view_texts` already builds multiple query
+views, but every one of them *appends* to the full query; none strips the filler.
+Adding a parameter-free view of the query's salient terms, tried at three
+positions in the view list:
+
+| split | baseline top-1 | with content view |
+|---|---|---|
+| dev (300) | 88.7% | 86.3%, difference [-0.050, +0.000] |
+| held-out test (300) | 87.0% | 87.0%, difference [-0.027, +0.027] |
+
+It did not help on dev and did nothing on test. Not shipped.
+
+### What this leaves
+
+Three interventions measured, three rejected, no ranking change shipped. The
+result worth keeping is that the hand-tuned reranker is hard to beat with generic
+interventions, and that there is now a harness able to say so with a confidence
+interval instead of an opinion.
+
+The remaining headroom is real but small: roughly 11% of queries retrieve a
+genuinely wrong answer, concentrated in filler-padded compound requests. Closing
+it likely needs the classifier's `bucket_score`, which this fixture deliberately
+holds constant, or labelled preference data — not another reweighting.
+
+As with every other entry in this file: no weights were retrained, so none of
+this is evidence of a smarter trained checkpoint.
+
+---
+
+## July 2026: Closing the bucket_score gap, and two more rejected changes
+
+The previous entry ended by saying the remaining headroom "likely needs the
+classifier's `bucket_score`, which this fixture deliberately holds constant."
+That was the right thing to chase, and chasing it produced two results: one
+correction to the harness, and one more rejected change.
+
+### The harness was measuring the reranker without its prior
+
+`rank_response_candidates` weights `bucket_score` at 0.14-0.18 as `bucket_bonus`.
+Pinning it to a constant makes that term identical across candidates, so it drops
+out of the ranking entirely. The fixture was measuring the reranker with one of
+its inputs disabled.
+
+Production does not supply a constant. `llm_database.fetch_candidates` hands every
+DB candidate
+
+    bucket_score = sigmoid(0.72*sim_ctx + 0.28*sim_resp + 0.04*log1p(count)
+                           - 0.03*bm25_penalty + exact_bonus)
+
+The benchmark now replicates that first stage. `bm25_penalty` and `exact_bonus`
+are omitted — the fixture has no FTS ranks, and a hard-negative set contains no
+exact user-text matches — so this is an approximation of the first stage, not a
+reproduction of it. `--constant-bucket-score` restores the old behaviour.
+
+**The correction changed nothing: 93.0% top-1 either way, MRR 0.961 to 0.962.**
+The reason is worth recording. That first-stage score is built from the same two
+cosine similarities the reranker already weights, so it is very nearly a monotone
+function of signals already present. It is redundant, not informative. The
+harness is now production-faithful on this path, and the faithfulness turned out
+not to matter.
+
+### The classifier prior is genuinely informative
+
+Unlike the first-stage score, the trained classifier carries independent
+information. Measured against the v50 checkpoint over its 10 k-means buckets:
+
+| | in-sample (meta exemplars) | out-of-sample (held-out corpus rows) |
+|---|---|---|
+| bucket top-1 | 78.5% | **80.7%** |
+| bucket top-3 | 99.5% | 98.5% |
+| chance | 10.0% | 10.0% |
+| confidence separation (correct - wrong) | +0.332 | +0.145 |
+
+Out-of-sample labels are nearest-centroid assignments over centroids recovered
+from the bucket exemplars — the same rule k-means used, but a proxy for the true
+training labels, so treat the absolute number as approximate. The conclusion is
+robust regardless: the classifier is far better than chance and its confidence
+separates hits from misses.
+
+### Rejected: using the classifier prior for DB candidates
+
+Given a prior that informative, the obvious move is to give DB candidates the
+classifier's bucket probability instead of the redundant first-stage score.
+Measured with a selection/held-out split:
+
+| prior | dev top-1 | difference vs production |
+|---|---|---|
+| first-stage (production) | 89.3% | — |
+| classifier probability | 84.0% | **-5.3 points** [-8.3, -2.7] |
+| 50/50 blend | 87.3% | **-2.0 points** [-4.0, -0.3] |
+
+The blend was best on dev and was then neutral on the held-out split
+(87.0% vs 87.0%, difference [-0.017, +0.017]). Nothing was shipped.
+
+The mechanism is the useful part. A 10-way cluster probability assigns **one
+score to every candidate in a bucket**. In a hard-negative pool the candidates
+are near neighbours by construction, so they cluster together: median 4 distinct
+buckets across a 40-candidate pool, and a median 64% of distractors sitting in
+the gold's own bucket. The prior therefore hands most of the pool an identical
+value, discriminating nothing, while displacing a first-stage score that is at
+least fine-grained per candidate.
+
+This is a limit of the cluster hypothesis rather than of this classifier. A
+cluster prior is useful for deciding **which buckets to pool candidates from**,
+which is exactly what production already uses it for on the model-bucket path.
+It cannot rerank *within* a pool drawn from one cluster.
+
+### Running tally
+
+Five interventions measured, five rejected: rank calibration, length
+normalisation, a content-focus query view, the classifier prior as a replacement,
+and as a blend. No ranking change has survived measurement.
+
+The reranker's hand-tuned weights are more robust than they look, and the harness
+is now faithful enough to say so on the DB path. The genuinely unmeasured
+remainder is the model-bucket candidate path, where the classifier selects which
+buckets to pool from before any reranking happens; this fixture contains only
+DB-style candidates and cannot see that decision.
+
+As with every other entry in this file: no weights were retrained, so none of
+this is evidence of a smarter trained checkpoint.
+
+---
+
+## July 2026: A literature scan, and a hubness hypothesis that did not survive
+
+A search of recent retrieval work returned 13 techniques with citations. Four of
+them were variations on one hypothesis, and that hypothesis was testable before
+any of them was implemented.
+
+### The hypothesis
+
+**Hubness** (Radovanovic, Nanopoulos & Ivanovic, *Hubs in Space*, JMLR 11, 2010;
+Feldbauer & Flexer, *KAIS* 2019). In high-dimensional spaces, points near the
+data centroid acquire disproportionate k-occurrence: they appear in the k
+nearest neighbours of many unrelated queries. The published diagnostic is the
+skewness of the k-occurrence distribution, with S_k >= 1.4 flagged as
+problematic.
+
+This is exactly the predicted signature of the residual failure mode here.
+A greeting or generic response sits near the centroid of conversational n-gram
+space, and a filler-padded query is dragged toward that same centroid, so the
+generic response wins. Four of the scanned techniques are corrections for it:
+QB-Norm / Dynamic Inverted Softmax (CVPR 2022), Dual Bank Sinkhorn Normalisation
+(arXiv:2508.02538), All-but-the-Top (ICLR 2018), and the MMI anti-prior
+(Li et al., NAACL 2016).
+
+Usefully, the scan itself proposed the diagnostic *before* the fixes, and flagged
+the right caveat: global hubness need not imply hubness inside the small
+candidate set the ranker actually sees.
+
+### The corpus is severely hub-dominated
+
+| | k-occurrence skewness S_10 | max O_10 | mean O_10 |
+|---|---|---|---|
+| 8,000-row corpus sample | **14.199** | 1,989 | 10.0 |
+| the fixture's 4,634-response candidate set | **13.219** | 5,686 | 43.2 |
+
+Both are an order of magnitude past the 1.4 threshold. One response is a top-10
+neighbour for 1,989 of 8,000 queries. The phenomenon is unambiguously present.
+
+### It does not explain the failures
+
+Measured over every genuine failure in the fixture, with the full response set
+covered so the test has power (n = 14, all with hubness data):
+
+- winning distractor's hubness percentile: **median 0**
+- gold's hubness percentile: median 0
+- winners above the 90th hubness percentile: **0 of 14**
+- winner more hub-like than the gold it displaced: **2 of 14**
+
+The hypothesis predicts winners should be *more* hub-like than the golds they
+beat. They are significantly *less*. The failures happen among low-hubness
+responses at the bottom of the k-occurrence distribution, and no hub is anywhere
+near them.
+
+All four hubness corrections are therefore rejected without implementing any of
+them. QB-Norm and DBSN would have been the most tempting, since both apply an
+additive per-candidate offset in log space and so avoid the margin destruction
+that killed rank calibration — they were the right *shape* of intervention for
+this system. They are simply aimed at a problem this evaluation does not have.
+
+### What this does not establish
+
+The hard negatives are drawn by nearest-neighbour search, which plausibly
+suppresses hubs in the pool by construction: a tight near-duplicate cluster has
+little k-occurrence spread. So this rules hubness out **for the failures this
+fixture can see**, not for production, where the first stage pulls from the whole
+120k corpus and a global hub with O_10 = 1,989 can reach the candidate set by a
+route the fixture never exercises. Testing that needs a fixture built from
+first-stage retrieval over the full corpus rather than from sampled negatives.
+That is a real gap, and this entry does not close it.
+
+### Running tally
+
+Nine interventions considered, nine rejected. Five were measured end to end
+(rank calibration, length normalisation, a content-focus query view, the
+classifier prior as replacement and as blend) and four were ruled out by a
+diagnostic that cost one offline pass instead of four implementations.
+
+The diagnostic-before-fix pattern has now paid for itself twice: once when the
+apparent 78% length bias turned out to be a near-duplicate artefact, and again
+here. Both times the intervention would have been built against a cause that was
+not there.
+
+As with every other entry in this file: no weights were retrained, so none of
+this is evidence of a smarter trained checkpoint.
+
+---
+
+## July 2026: Conversation quality, measured — and the first change that survived
+
+Every measurement in this file so far has been single-turn retrieval. The
+conversation layer in `conversation_state.py` was built, wired into ranking, and
+never checked. This entry checks it, and the check found the layer inert.
+
+### The harness
+
+`source/benchmark_conversation_quality.py`. It cannot be built from the corpus:
+every `context_text` in `llm_chat.db` carries exactly one turn marker, so no
+real multi-turn material exists. The 19 cases are therefore **constructed**, and
+that is a genuine limit — they are biased towards failures the author could
+imagine, and a pass rate here is a contract check, not an estimate of behaviour
+in use.
+
+What makes it useful anyway is that trap kinds are *separable*. Each case pairs
+a good continuation against one trap that is wrong for a purely conversational
+reason, so a change can be shown to fix one behaviour without disturbing another,
+which single-turn top-1 cannot express.
+
+### Three of four behaviours were already handled
+
+| trap kind | without state | with state (before the fix) |
+|---|---|---|
+| repetition | 4/4 | 4/4 |
+| re-asked question | 4/4 | 4/4 |
+| topic drift | 4/4 | 4/4 |
+| **stated style preference** | **1/4** | **1/4** |
+
+Repetition, re-asking, and drift are already covered by the existing
+`-0.27 * sim_recent` penalty. The conversation layer added nothing to any of
+them, and nothing to the one behaviour that was failing: overall 81.2% with the
+layer on and 81.2% with it off.
+
+### The layer was solving the right problem in the wrong place
+
+`conversation_state` detected `style_request = "concise"` correctly. It then
+applied it as a bounded score nudge worth at most `0.3 * 0.12 = 0.036`, far too
+small to reorder anything against a verbose candidate winning on other signals.
+
+Meanwhile the ranker already had a fully weighted `concise` style mode. The mode
+just never arrived: `infer_style_mode` reads the *current turn only*, so for
+"how do I list files in python" it returned `analyst`, and the concise signal
+never activated. A preference stated two turns earlier was detected, stored, and
+then discarded at the moment it mattered.
+
+The fix routes the standing preference into the mode that already exists instead
+of adding weight to the score. It introduces no tuned constant — the concise
+mode's weights were already there and independently set.
+
+Two supporting gaps were closed with it:
+
+- **Bare imperatives were never recorded.** "be brief" matches none of the cue
+  patterns: no "I prefer", no "always", no negation. A `_STYLE_DIRECTIVE_RE`
+  now records them, so the most natural phrasing of the preference works.
+- **A standing preference must yield to a fresh request.** Without a guard, "be
+  brief" on turn one would override "explain that in detail" on turn two, which
+  is worse than having no memory at all. `DETAIL_REQUEST_RE` on the current turn
+  suppresses the standing preference. Three cases now pin this.
+
+### Result
+
+| | without state | with state |
+|---|---|---|
+| stated style preference | 1/4 | **4/4** |
+| standing yields to fresh request | 3/3 | 3/3 |
+| overall (19 cases) | 84.2% | **100%** |
+
+Single-turn retrieval is unchanged at 93.0% top-1: it passes no conversation
+state, so the new branch never executes, and `infer_style_mode` is verified
+identical with and without an explicit `None`.
+
+**This is the first change in this file to survive measurement.** Nine previous
+interventions were rejected. The difference is instructive: the nine were all
+attempts to reweight a fusion that was already well tuned, while this one
+connected a signal that was being computed and then thrown away. Detection
+without routing is not a feature.
+
+### A defect worth recording
+
+`DETAIL_REQUEST_RE` shipped, briefly, with a literal `0x08` byte where each word
+boundary belonged, because an escaping layer collapsed `\b` into a backspace
+character. It compiled cleanly, imported cleanly, and silently matched nothing —
+the guard was inert and the standing preference kept overriding fresh requests.
+It surfaced only because the behaviour was measured rather than assumed.
+`test_conversation_style_memory.py` now asserts the pattern contains no control
+characters.
+
+### Scope not covered
+
+`conversation_state` is wired into `chat_app.py` and `chat_web_app.py` but **not**
+into `multimodel_runtime.py` (the Studio desktop app) or `qwen_chat_web_app.py`.
+Those two surfaces get no conversational memory at all. That gap is now measured
+rather than assumed, and closing it is the obvious next step.
+
+As with every other entry in this file: no weights were retrained, so none of
+this is evidence of a smarter trained checkpoint.

@@ -38,3 +38,47 @@ The model uses a **token-free, hash-based featurizer** (`chat_pipeline.py`):
 ## 4) Usage
 - **Primary Runtime**: `runtime_python/chat_web_app.py`
 - **Inference Requirements**: CPU-compatible (CUDA/NPU preference supported), ~15MB weights + ~9MB metadata.
+
+## 5) Variants this runtime can build
+
+The card above describes the shipped v27 champion checkpoint. The bundled
+`model_variants.py` snapshot is generated from `source/model_variants.py` and can
+build every variant that tree defines, including the current cognitive-leap line:
+
+| Variant | Head | Adds |
+|---|---|---|
+| `cognitive_leap_expert` | `CognitiveLeapExpertHead` | Weight-tied latent refinement, cross-latent attention, ACT halting, deep supervision |
+| `cognitive_leap_ultra_expert` | `CognitiveLeapUltraExpertHead` | Adaptive early exit gated by a checkpoint-bound prediction-stability verifier |
+| `cognitive_leap_v52_expert` | `CognitiveLeapV52ExpertHead` | Quality/continue verifier head, sparse top-k core routing, emotion/intent/strategy appraisal, calibrated entropy |
+
+The snapshot is standalone: it imports nothing from `source/`, so a shipped
+`runtime_python/` directory builds these variants on its own. Parity with the
+source tree is enforced by `source/sync_runtime_model_variants.py` and asserted
+in `test_runtime_model_variants_standalone.py`.
+
+### v52 status and limits
+
+`CognitiveLeapV52ExpertHead` subclasses the v51 ultra head. A v51 checkpoint
+loads into it unchanged and its dense forward is bit-identical, so upgrading the
+variant name alone changes nothing about the output.
+
+Two limits matter for anyone reading v52 output:
+
+- **The appraisal and verifier heads are untrained.** On a fresh model or a v50/
+  v51 upgrade they start at near-zero residual scale and are randomly
+  initialised. Named emotion, intent, and strategy outputs are not semantic
+  merely because the heads exist; they need labelled auxiliary supervision and a
+  held-out evaluation first.
+- **Sparse core routing is an option, not a speedup.** On small CPU batches the
+  per-core masking measured slower than the dense path. Benchmark wall-clock per
+  deployment. Both `--core_top_k` and `--verifier_adaptive_compute` are off by
+  default.
+
+### Runtime compute controls
+
+`chat_app.py` and `chat_web_app.py` accept `--reasoning_cycles`,
+`--adaptive_compute`, the `--prediction_stability_*` verifier settings, and the
+v52 `--core_top_k`, `--verifier_adaptive_compute`,
+`--verifier_continue_threshold`, and `--max_verifier_cycles`. Controls a
+checkpoint's forward does not accept are ignored rather than applied, and the
+compute diagnostics report `core_routing_mode` as `dense` in that case.

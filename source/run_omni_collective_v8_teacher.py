@@ -93,6 +93,7 @@ def main() -> None:
                         "temperature": 0.0,
                         "max_new_tokens": 160,
                         "top_p": 0.92,
+                        "interaction_intelligence": False,
                     },
                 )
                 candidate = str(result.response or "").strip()

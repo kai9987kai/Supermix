@@ -125,6 +125,11 @@ DEFAULT_SOURCE_PACKAGE_PARITY_PAIRS = (
         PROJECT_ROOT / "runtime_python" / "chat_app.py",
     ),
     (
+        "interaction_planner",
+        SOURCE_DIR / "interaction_planner.py",
+        PROJECT_ROOT / "runtime_python" / "interaction_planner.py",
+    ),
+    (
         "model_variants",
         SOURCE_DIR / "model_variants.py",
         PROJECT_ROOT / "runtime_python" / "model_variants.py",
@@ -734,6 +739,7 @@ def _record_engine_surface(
         "show_top_responses": TOP_CANDIDATE_COUNT,
         "auto_compute": False,
         "prediction_stability_margin": PREDICTION_STABILITY_MARGIN,
+        "grounding_enabled": False,
     }
     engine = engine_factory(device, dict(device_info), dict(constructor_defaults))
     load_status = engine.load(str(weights), str(metadata))
@@ -877,6 +883,7 @@ import chat_app
 import chat_pipeline
 import chat_web_app
 import device_utils
+import interaction_planner
 import model_variants
 
 modules = {
@@ -884,6 +891,7 @@ modules = {
     "chat_pipeline": chat_pipeline,
     "chat_web_app": chat_web_app,
     "device_utils": device_utils,
+    "interaction_planner": interaction_planner,
     "model_variants": model_variants,
 }
 module_paths = {}
@@ -1227,6 +1235,7 @@ def _source_hashes() -> Dict[str, str]:
         SOURCE_DIR / "chat_web_app.py",
         SOURCE_DIR / "chat_app.py",
         SOURCE_DIR / "chat_pipeline.py",
+        SOURCE_DIR / "interaction_planner.py",
         SOURCE_DIR / "model_variants.py",
     )
     return {
@@ -1370,6 +1379,7 @@ def run_gate(
             "chat_pipeline",
             "chat_web_app",
             "device_utils",
+            "interaction_planner",
             "model_variants",
         }
         surface_module_provenance_passed = bool(
@@ -1433,6 +1443,7 @@ def run_gate(
         "show_top_responses": TOP_CANDIDATE_COUNT,
         "auto_compute": False,
         "prediction_stability_margin": PREDICTION_STABILITY_MARGIN,
+        "grounding_enabled": False,
     }
     prompt_results: List[Dict[str, Any]] = []
     response_mismatches = 0

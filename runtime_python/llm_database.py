@@ -1,11 +1,12 @@
 import argparse
+import hashlib
 import json
 import math
 import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -17,6 +18,10 @@ def _extract_user_from_context(context: str) -> str:
         if line.strip().lower().startswith("user:"):
             return line.split(":", 1)[1].strip()
     return context.strip()
+
+
+def _normalize_exact_text(text: Optional[str]) -> str:
+    return " ".join(str(text or "").split()).casefold()
 
 
 def _to_json_vec(vec: torch.Tensor) -> str:
@@ -65,10 +70,25 @@ def create_schema(conn: sqlite3.Connection) -> None:
             response_text TEXT NOT NULL,
             count INTEGER NOT NULL DEFAULT 1,
             ctx_vec TEXT NOT NULL,
-            resp_vec TEXT NOT NULL
+            resp_vec TEXT NOT NULL,
+            source_uri TEXT NOT NULL DEFAULT '',
+            source_title TEXT NOT NULL DEFAULT '',
+            source_type TEXT NOT NULL DEFAULT 'local_dataset',
+            content_hash TEXT NOT NULL DEFAULT ''
         );
         """
     )
+    existing_columns = {
+        str(row[1]) for row in cur.execute("PRAGMA table_info(llm_entries);").fetchall()
+    }
+    for column_name, declaration in (
+        ("source_uri", "TEXT NOT NULL DEFAULT ''"),
+        ("source_title", "TEXT NOT NULL DEFAULT ''"),
+        ("source_type", "TEXT NOT NULL DEFAULT 'local_dataset'"),
+        ("content_hash", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column_name not in existing_columns:
+            cur.execute(f"ALTER TABLE llm_entries ADD COLUMN {column_name} {declaration};")
     cur.execute(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS llm_entries_fts
@@ -135,7 +155,10 @@ def build_llm_database(
         create_schema(conn)
 
     cur = conn.cursor()
-    insert_rows: List[Tuple[str, str, str, int, str, str]] = []
+    dataset_name = Path(data_path).name
+    dataset_title = Path(data_path).stem.replace("_", " ").strip() or dataset_name
+    source_uri = f"dataset:{dataset_name}"
+    insert_rows: List[Tuple[str, str, str, int, str, str, str, str, str, str]] = []
     for row in items:
         cnt = max(1, int(row["count"]))
         ctx_vec = row["ctx_sum"] / cnt
@@ -148,13 +171,22 @@ def build_llm_database(
                 cnt,
                 _to_json_vec(ctx_vec),
                 _to_json_vec(resp_vec),
+                source_uri,
+                dataset_title,
+                "local_dataset",
+                hashlib.sha256(
+                    (str(row["context"]) + "\n" + str(row["response"])).encode("utf-8")
+                ).hexdigest(),
             )
         )
 
     cur.executemany(
         """
-        INSERT INTO llm_entries (user_text, context_text, response_text, count, ctx_vec, resp_vec)
-        VALUES (?, ?, ?, ?, ?, ?);
+        INSERT INTO llm_entries (
+            user_text, context_text, response_text, count, ctx_vec, resp_vec,
+            source_uri, source_title, source_type, content_hash
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         insert_rows,
     )
@@ -174,11 +206,17 @@ def build_llm_database(
 
 @dataclass
 class LLMDBRow:
+    user_text: str
+    context_text: str
     response_text: str
     count: int
     ctx_vec: torch.Tensor
     resp_vec: torch.Tensor
     bm25_rank: float
+    source_uri: str = ""
+    source_title: str = ""
+    source_type: str = "local_dataset"
+    content_hash: str = ""
 
 
 class LLMDatabase:
@@ -186,6 +224,7 @@ class LLMDatabase:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        create_schema(self.conn)
 
     def close(self) -> None:
         self.conn.close()
@@ -197,7 +236,10 @@ class LLMDatabase:
         if match:
             cur.execute(
                 """
-                SELECT e.response_text, e.count, e.ctx_vec, e.resp_vec, bm25(llm_entries_fts) AS b
+                SELECT e.user_text, e.context_text, e.response_text,
+                       e.count, e.ctx_vec, e.resp_vec,
+                       e.source_uri, e.source_title, e.source_type, e.content_hash,
+                       bm25(llm_entries_fts) AS b
                 FROM llm_entries_fts
                 JOIN llm_entries e ON e.id = llm_entries_fts.rowid
                 WHERE llm_entries_fts MATCH ?
@@ -211,7 +253,8 @@ class LLMDatabase:
         if not rows:
             cur.execute(
                 """
-                SELECT response_text, count, ctx_vec, resp_vec, 0.0 AS b
+                SELECT user_text, context_text, response_text, count, ctx_vec, resp_vec,
+                       source_uri, source_title, source_type, content_hash, 0.0 AS b
                 FROM llm_entries
                 ORDER BY count DESC
                 LIMIT ?;
@@ -224,20 +267,40 @@ class LLMDatabase:
         for r in rows:
             out.append(
                 LLMDBRow(
+                    user_text=str(r["user_text"]),
+                    context_text=str(r["context_text"]),
                     response_text=str(r["response_text"]),
                     count=int(r["count"]),
                     ctx_vec=_from_json_vec(str(r["ctx_vec"])),
                     resp_vec=_from_json_vec(str(r["resp_vec"])),
                     bm25_rank=float(r["b"]),
+                    source_uri=str(r["source_uri"] or ""),
+                    source_title=str(r["source_title"] or ""),
+                    source_type=str(r["source_type"] or "local_dataset"),
+                    content_hash=str(r["content_hash"] or ""),
                 )
             )
         return out
 
-    def query(self, query_text: str, top_k: int = 80, pool_size: int = 300) -> List[Dict[str, object]]:
+    def query(
+        self,
+        query_text: str,
+        top_k: int = 80,
+        pool_size: int = 300,
+        *,
+        exact_user_text: Optional[str] = None,
+    ) -> List[Dict[str, object]]:
         rows = self._fetch_rows(query_text=query_text, pool_size=pool_size)
         if not rows:
             return []
 
+        exact_target = _normalize_exact_text(
+            query_text if exact_user_text is None else exact_user_text
+        )
+        exact_matches = [
+            bool(exact_target and _normalize_exact_text(row.user_text) == exact_target)
+            for row in rows
+        ]
         q = featurize_text(query_text)
         ctx = torch.stack([row.ctx_vec for row in rows], dim=0)
         resp = torch.stack([row.resp_vec for row in rows], dim=0)
@@ -249,7 +312,17 @@ class LLMDatabase:
         if bm25_penalty.numel() > 0 and float(torch.max(bm25_penalty)) > 0:
             bm25_penalty = bm25_penalty / (float(torch.max(bm25_penalty)) + 1e-6)
 
-        scores = 0.72 * sim_ctx + 0.28 * sim_resp + 0.04 * count_bonus - 0.03 * bm25_penalty
+        exact_bonus = torch.tensor(
+            [2.0 if is_exact else 0.0 for is_exact in exact_matches],
+            dtype=torch.float32,
+        )
+        scores = (
+            0.72 * sim_ctx
+            + 0.28 * sim_resp
+            + 0.04 * count_bonus
+            - 0.03 * bm25_penalty
+            + exact_bonus
+        )
         keep = min(max(1, top_k), len(rows))
         top_idx = torch.topk(scores, k=keep).indices.tolist()
 
@@ -263,6 +336,11 @@ class LLMDatabase:
                     "vec": row.resp_vec.tolist(),
                     "ctx_vec": row.ctx_vec.tolist(),
                     "bucket_score": float(torch.sigmoid(scores[i]).item()),
+                    "source_uri": row.source_uri,
+                    "source_title": row.source_title,
+                    "source_type": row.source_type,
+                    "content_hash": row.content_hash,
+                    "exact_user_match": bool(exact_matches[i]),
                 }
             )
         return out

@@ -66,6 +66,7 @@ def benchmark_auto_collective_loop(
         "memory_enabled": False,
         "web_search_enabled": False,
         "cmd_open_enabled": False,
+        "interaction_intelligence": False,
     }
     if consultant_keys:
         settings["collective_consultant_keys"] = list(consultant_keys)

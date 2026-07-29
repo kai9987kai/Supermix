@@ -5,7 +5,7 @@ import math
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 import torch
@@ -42,6 +42,21 @@ from model_variants import (
     THIRD_EXPANSION_DIM_MODEL_SIZES,
 )
 from chat_memory import ChatMemoryDB, render_memory_block
+from conversation_state import (
+    build_conversation_state,
+    conversation_state_diagnostics,
+)
+from grounding_runtime import (
+    build_evidence_bundle,
+    finalize_grounded_response,
+    plan_grounding,
+)
+from interaction_planner import (
+    finalize_response_for_interaction,
+    interaction_plan_diagnostics,
+    plan_interaction,
+)
+from prompt_understanding import analyze_prompt, build_contextual_query
 from run import safe_load_state_dict
 
 
@@ -103,6 +118,12 @@ DEFAULT_AUTO_COMPUTE_ENTROPY = 1.85
 AUTO_COMPUTE_PLAN_SCHEMA_VERSION = "runtime-auto-compute-plan-v2"
 AUTO_COMPUTE_STRATEGY = "progressive_accepted_probe"
 DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K = 5
+# v52 sparse core routing and verifier-driven compute escalation. Both default
+# to off: sparse dispatch is not always faster on small CPU batches, and the
+# verifier head is untrained on imported v50 weights.
+MAX_RUNTIME_CORE_TOP_K = 16
+DEFAULT_VERIFIER_CONTINUE_THRESHOLD = 0.6
+DEFAULT_MAX_VERIFIER_CYCLES = 2
 
 
 def resolve_runtime_compute_cycles(cycles, default: Optional[List[int]] = None, limit: int = 8) -> List[int]:
@@ -160,6 +181,10 @@ def evaluate_runtime_compute_budgets(
     prediction_stability_tol: Any = None,
     prediction_stability_margin: Any = None,
     prediction_stability_rank_depth: Any = None,
+    core_top_k: Any = None,
+    verifier_adaptive_compute: Any = False,
+    verifier_continue_threshold: Any = DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+    max_verifier_cycles: Any = DEFAULT_MAX_VERIFIER_CYCLES,
 ) -> List[Dict[str, object]]:
     labels = list(available_labels) or list(range(MODEL_CLASSES))
     idx_device = x.device if isinstance(x, torch.Tensor) else None
@@ -185,6 +210,10 @@ def evaluate_runtime_compute_budgets(
                 return_diagnostics=True,
                 prediction_class_indices=labels,
                 prediction_stability_rank_depth=prediction_stability_rank_depth,
+                core_top_k=core_top_k,
+                verifier_adaptive_compute=verifier_adaptive_compute,
+                verifier_continue_threshold=verifier_continue_threshold,
+                max_verifier_cycles=max_verifier_cycles,
             )
             logits = logits_tensor[0, 0]
             avail_logits = logits.index_select(0, idx.to(logits.device))
@@ -253,7 +282,6 @@ def select_auto_runtime_compute_budget(
     }
 
 
-_FOLLOWUP_QUERY_RE = re.compile(r"\b(it|that|this|they|them|same|previous|above|more|continue|deeper|expand)\b", re.I)
 VALID_RUNTIME_MODEL_SIZES = SUPPORTED_MODEL_SIZES
 MAX_RUNTIME_REASONING_CYCLES = 64
 DEFAULT_ADAPTIVE_EXIT_ENTROPY = 0.2
@@ -265,49 +293,77 @@ DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = 3
 AUTO_REASONING_CYCLE_BUCKETS = (1, 3, 8, 16)
 
 
-def _build_db_query(user: str, history: List[Tuple[str, str]], memory_rows: List[Dict], max_turns: int = 2) -> str:
+def _build_db_query(
+    user: str,
+    history: List[Tuple[str, str]],
+    memory_rows: List[Dict],
+    max_turns: int = 2,
+    prompt_profile: Optional[Mapping[str, Any]] = None,
+    recent_turns: Optional[Sequence[Any]] = None,
+) -> str:
     """
-    Conversation-aware retrieval query (lightweight QRHEAD-style expansion).
-    Uses the raw user query when standalone, and appends recent context for follow-ups.
+    Build a profile-guided query without widening self-contained prompts.
+
+    ``history`` and ``memory_rows`` remain accepted for older callers. New
+    callers can pass the already-computed prompt profile and recent turns so
+    retrieval shares the planner's follow-up decision.
     """
     user_text = (user or "").strip()
     if not user_text:
         return ""
 
-    use_context = bool(_FOLLOWUP_QUERY_RE.search(user_text)) or len(user_text.split()) <= 4
-    if not use_context and history:
-        # If the user explicitly asks about a prior topic, keep some context anyway.
-        use_context = user_text.endswith("?") and any(k in user_text.lower() for k in ("also", "again", "same", "earlier"))
-    if not use_context:
-        return user_text
+    turn_limit = max(0, int(max_turns))
+    bounded_history = history[-turn_limit:] if turn_limit else []
+    if recent_turns is None:
+        contextual_turns: List[Any] = [
+            {
+                "user": str(prior_user or ""),
+                "assistant": str(prior_assistant or ""),
+            }
+            for prior_user, prior_assistant in bounded_history
+        ]
+        if not contextual_turns:
+            contextual_turns = [
+                {
+                    "user": str(row.get("user_text") or ""),
+                    "assistant": str(row.get("assistant_text") or ""),
+                }
+                for row in memory_rows[:turn_limit]
+                if isinstance(row, Mapping)
+            ]
+    else:
+        contextual_turns = list(recent_turns)
 
-    parts = [user_text]
-    for hu, ha in history[-max(0, int(max_turns)):]:
-        if hu:
-            parts.append(hu)
-        if ha:
-            parts.append(ha[:220])
-    for row in memory_rows[:2]:
-        u = str(row.get("user_text", "")).strip()
-        a = str(row.get("assistant_text", "")).strip()
-        if u:
-            parts.append(u)
-        if a:
-            parts.append(a[:160])
-            
-    # Deduplicate exact segments while preserving order.
-    dedup: List[str] = []
-    seen = set()
-    for p in parts:
-        s = " ".join(p.split())
-        if not s:
-            continue
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        dedup.append(s)
-    return " | ".join(dedup[:6])
+    profile = (
+        dict(prompt_profile)
+        if isinstance(prompt_profile, Mapping)
+        else analyze_prompt(
+            user_text,
+            recent_turns=contextual_turns,
+            recent_user_messages=[
+                str(prior_user or "")
+                for prior_user, _ in bounded_history
+            ],
+            recent_assistant_messages=[
+                str(prior_assistant or "")
+                for _, prior_assistant in bounded_history
+            ],
+        )
+    )
+    contextual_query = build_contextual_query(
+        user_text,
+        profile,
+        recent_turns=contextual_turns,
+        max_turns=turn_limit,
+    )
+    if isinstance(contextual_query, Mapping):
+        contextual_query = (
+            contextual_query.get("query")
+            or contextual_query.get("contextual_query")
+            or contextual_query.get("text")
+            or ""
+        )
+    return " ".join(str(contextual_query or user_text).split())
 
 
 def _resolve_expansion_dim(arg_val: Optional[int], meta: Dict, meta_key: str, default_val: int, 
@@ -475,6 +531,16 @@ def _coerce_nonnegative_int(value: Any, default: int, max_value: Optional[int] =
     return parsed
 
 
+def _coerce_unit_interval(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError, RuntimeError):
+        return float(default)
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return float(default)
+    return min(1.0, max(0.0, parsed))
+
+
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if value is None:
         return bool(default)
@@ -545,6 +611,15 @@ def collect_runtime_compute_metrics(
         "prediction_class_count": None,
         "prediction_class_selection_valid": None,
         "exit_reason": None,
+        # v52 router and verifier telemetry. These stay None on every pre-v52
+        # variant, which never sets the corresponding attributes.
+        "router_load_balance": None,
+        "router_z_loss": None,
+        "active_cores": None,
+        "quality_score": None,
+        "continue_probability": None,
+        "verifier_selection": None,
+        "calibrated_entropy": None,
     }
     attr_map = {
         "last_cycles_used": "cycles_used",
@@ -559,6 +634,13 @@ def collect_runtime_compute_metrics(
         "last_prediction_rank_depth": "prediction_rank_depth",
         "last_prediction_class_count": "prediction_class_count",
         "last_prediction_class_selection_valid": "prediction_class_selection_valid",
+        "last_router_load_balance": "router_load_balance",
+        "last_router_z_loss": "router_z_loss",
+        "last_active_cores": "active_cores",
+        "last_quality_score": "quality_score",
+        "last_continue_probability": "continue_probability",
+        "last_verifier_selection": "verifier_selection",
+        "last_calibrated_entropy": "calibrated_entropy",
     }
     modules = list(model.modules()) if hasattr(model, "modules") else [model]
     for module in modules:
@@ -606,6 +688,10 @@ def forward_with_runtime_compute(
     prediction_stability_margin: Any = DEFAULT_PREDICTION_STABILITY_MARGIN,
     prediction_class_indices: Any = None,
     prediction_stability_rank_depth: Any = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+    core_top_k: Any = None,
+    verifier_adaptive_compute: Any = False,
+    verifier_continue_threshold: Any = DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+    max_verifier_cycles: Any = DEFAULT_MAX_VERIFIER_CYCLES,
 ):
     """Forward a model while applying optional v50 runtime-compute controls.
 
@@ -644,7 +730,31 @@ def forward_with_runtime_compute(
         prediction_stability_rank_depth,
         DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
     )
+    selected_core_top_k = _coerce_optional_positive_int(core_top_k, MAX_RUNTIME_CORE_TOP_K)
+    verifier_adaptive = _coerce_bool(verifier_adaptive_compute)
+    verifier_threshold = _coerce_unit_interval(
+        verifier_continue_threshold,
+        DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+    )
+    verifier_cycles = _coerce_nonnegative_int(
+        max_verifier_cycles,
+        DEFAULT_MAX_VERIFIER_CYCLES,
+        MAX_RUNTIME_REASONING_CYCLES,
+    )
     kwargs: Dict[str, Any] = {}
+
+    # v52 sparse core routing. Only the v52 head accepts this, so older
+    # checkpoints keep their dense path untouched.
+    if selected_core_top_k is not None and _model_forward_accepts_kwarg(model, "core_top_k"):
+        kwargs["core_top_k"] = selected_core_top_k
+
+    # v52 verifier-driven compute escalation.
+    if verifier_adaptive and _model_forward_accepts_kwarg(model, "verifier_adaptive_compute"):
+        kwargs["verifier_adaptive_compute"] = True
+        if _model_forward_accepts_kwarg(model, "verifier_continue_threshold"):
+            kwargs["verifier_continue_threshold"] = verifier_threshold
+        if _model_forward_accepts_kwarg(model, "max_verifier_cycles"):
+            kwargs["max_verifier_cycles"] = verifier_cycles
 
     if cycles is not None and _model_forward_accepts_kwarg(model, "reasoning_cycles"):
         kwargs["reasoning_cycles"] = cycles
@@ -714,6 +824,15 @@ def forward_with_runtime_compute(
         "prediction_stability_margin": stability_margin,
         "prediction_stability_rank_depth": stability_rank_depth,
         "prediction_verifier_active": prediction_verifier_active,
+        "core_top_k": kwargs.get("core_top_k"),
+        "core_routing_mode": "sparse" if "core_top_k" in kwargs else "dense",
+        "verifier_adaptive_compute": "verifier_adaptive_compute" in kwargs,
+        "verifier_continue_threshold": (
+            verifier_threshold if "verifier_continue_threshold" in kwargs else None
+        ),
+        "max_verifier_cycles": (
+            verifier_cycles if "max_verifier_cycles" in kwargs else None
+        ),
         "prediction_class_indices": (
             kwargs.get("prediction_class_indices")
             if "prediction_class_indices" in kwargs
@@ -786,6 +905,10 @@ def progressive_auto_compute_forward(
     distribution_top_k: int = DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K,
     prediction_stability_margin: Any = DEFAULT_PREDICTION_STABILITY_MARGIN,
     prediction_stability_rank_depth: Any = DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
+    core_top_k: Any = None,
+    verifier_adaptive_compute: Any = False,
+    verifier_continue_threshold: Any = DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+    max_verifier_cycles: Any = DEFAULT_MAX_VERIFIER_CYCLES,
 ) -> Tuple[torch.Tensor, Dict[str, Any], Dict[str, Any]]:
     """Evaluate auto-compute budgets progressively and reuse the accepted probe.
 
@@ -838,6 +961,10 @@ def progressive_auto_compute_forward(
                 prediction_stability_margin=prediction_stability_margin,
                 prediction_class_indices=labels,
                 prediction_stability_rank_depth=prediction_stability_rank_depth,
+                core_top_k=core_top_k,
+                verifier_adaptive_compute=verifier_adaptive_compute,
+                verifier_continue_threshold=verifier_continue_threshold,
+                max_verifier_cycles=max_verifier_cycles,
             )
             logits = model_out[0, 0]
             available_logits = logits.index_select(0, idx.to(logits.device))
@@ -1104,6 +1231,35 @@ def main():
         default=DEFAULT_PREDICTION_STABILITY_RANK_DEPTH,
         help="Ordered prediction ranks required to remain stable (0 disables the rank verifier).",
     )
+    ap.add_argument(
+        "--core_top_k",
+        type=int,
+        default=None,
+        help=(
+            "v52 only: execute just the top-k routed recurrent cores. Off by default; "
+            "sparse dispatch is not always faster than the dense path on small CPU batches."
+        ),
+    )
+    ap.add_argument(
+        "--verifier_adaptive_compute",
+        action="store_true",
+        help=(
+            "v52 only: let the quality head request extra recursive cycles and pick "
+            "between the initial and escalated proposals."
+        ),
+    )
+    ap.add_argument(
+        "--verifier_continue_threshold",
+        type=float,
+        default=DEFAULT_VERIFIER_CONTINUE_THRESHOLD,
+        help="v52 only: p(continue) above which the verifier escalates compute.",
+    )
+    ap.add_argument(
+        "--max_verifier_cycles",
+        type=int,
+        default=DEFAULT_MAX_VERIFIER_CYCLES,
+        help="v52 only: cap on extra verifier-driven recursive cycles.",
+    )
     ap.add_argument("--device", default="auto")
     ap.add_argument(
         "--device_preference",
@@ -1209,6 +1365,11 @@ def main():
         help="Scale factor for memory-derived candidate confidence.",
     )
     ap.add_argument("--disable_memory", action="store_true", help="Disable persistent memory retrieval and writes.")
+    ap.add_argument(
+        "--disable_grounding",
+        action="store_true",
+        help="Disable evidence auditing and deterministic exact-arithmetic answers.",
+    )
     args = ap.parse_args()
 
     configure_torch_runtime(
@@ -1650,6 +1811,48 @@ def main():
             t_db_wait = 0.0
             t_infer = 0.0
             t_rank = 0.0
+            prompt_recent_turns = [
+                {
+                    "user": str(prior_user or ""),
+                    "assistant": str(prior_assistant or ""),
+                }
+                for prior_user, prior_assistant in history[-4:]
+            ]
+            prompt_profile = analyze_prompt(
+                user,
+                recent_turns=prompt_recent_turns,
+                recent_user_messages=[
+                    prior_user for prior_user, _ in history[-4:]
+                ],
+                recent_assistant_messages=recent_assistant_messages[-4:],
+            )
+            interaction_plan = plan_interaction(
+                user,
+                recent_assistant_messages=recent_assistant_messages,
+                context={
+                    "recent_user_messages": [
+                        prior_user for prior_user, _ in history[-4:]
+                    ],
+                    "recent_turns": prompt_recent_turns,
+                },
+                prompt_profile=prompt_profile,
+            )
+            # Unlike the planner and the prompt profile, which see a bounded
+            # four-turn window, this accumulates over the whole session so
+            # earlier commitments and unanswered questions still count.
+            conversation_state = build_conversation_state(
+                history,
+                current_user_text=user,
+            )
+            grounding_plan = (
+                None
+                if args.disable_grounding
+                else plan_grounding(
+                    user,
+                    interaction_plan=interaction_plan,
+                    prompt_profile=prompt_profile,
+                )
+            )
 
             # 1. Evaluate memory queries synchronously (needed for model context & LLM DB query)
             memory_rows: List[Dict] = []
@@ -1671,8 +1874,15 @@ def main():
                     history=history,
                     memory_rows=memory_rows,
                     max_turns=max(0, int(args.db_query_context_turns)),
+                    prompt_profile=prompt_profile,
+                    recent_turns=prompt_recent_turns,
                 )
-                future_llm_db = executor.submit(llm_db.query, db_query or user, top_k=max(1, args.db_top_k))
+                future_llm_db = executor.submit(
+                    llm_db.query,
+                    db_query or user,
+                    top_k=max(1, args.db_top_k),
+                    exact_user_text=user,
+                )
 
             # 3. Proceed with model context building & inference while thread waits on DB IO
             _t = time.perf_counter()
@@ -1701,6 +1911,10 @@ def main():
                     auto_reasoning_context=context,
                     prediction_stability_margin=args.prediction_stability_margin,
                     prediction_stability_rank_depth=args.prediction_stability_rank_depth,
+                    core_top_k=args.core_top_k,
+                    verifier_adaptive_compute=args.verifier_adaptive_compute,
+                    verifier_continue_threshold=args.verifier_continue_threshold,
+                    max_verifier_cycles=args.max_verifier_cycles,
                 )
                 effective_reasoning_cycles = auto_compute_plan.get("selected_reasoning_cycles")
             else:
@@ -1718,6 +1932,10 @@ def main():
                         prediction_stability_margin=args.prediction_stability_margin,
                         prediction_class_indices=available_labels,
                         prediction_stability_rank_depth=args.prediction_stability_rank_depth,
+                        core_top_k=args.core_top_k,
+                        verifier_adaptive_compute=args.verifier_adaptive_compute,
+                        verifier_continue_threshold=args.verifier_continue_threshold,
+                        max_verifier_cycles=args.max_verifier_cycles,
                     )
             logits = model_out[0, 0]  # (10,)
             t_infer += max(0.0, time.perf_counter() - _t)
@@ -1743,6 +1961,7 @@ def main():
                     pooled_candidates.append(merged)
 
             # 4. Await LLM DB fetch result and ingest
+            db_candidates: List[Dict] = []
             if future_llm_db is not None:
                 _t = time.perf_counter()
                 db_candidates = future_llm_db.result()
@@ -1771,6 +1990,29 @@ def main():
                             "_source": "memory"
                         }
                     )
+
+            evidence_bundle = (
+                build_evidence_bundle(
+                    user,
+                    [
+                        {
+                            "title": str(row.get("source_title") or ""),
+                            "text": str(row.get("text") or ""),
+                            "source": str(row.get("source_uri") or "local_llm_db"),
+                            "source_type": str(row.get("source_type") or "local_dataset"),
+                            "score": float(row.get("bucket_score") or 0.0),
+                        }
+                        for row in db_candidates
+                        if str(row.get("text") or "").strip()
+                    ],
+                    interaction_plan=interaction_plan,
+                    max_items=int((grounding_plan or {}).get("max_evidence_items") or 6),
+                    prompt_profile=prompt_profile,
+                    grounding_plan=grounding_plan,
+                )
+                if grounding_plan is not None
+                else None
+            )
 
             # Deduplicate responses and Ensemble Boost Cross-Validated candidates
             dedup: Dict[str, Dict] = {}
@@ -1807,7 +2049,11 @@ def main():
                 label = choose_bucket_from_logits(logits, available_labels, temperature=args.temperature)
                 pooled_candidates = list(buckets.get(label, []))
 
-            resolved_style = infer_style_mode(user, requested_mode=args.style_mode)
+            resolved_style = infer_style_mode(
+                user,
+                requested_mode=args.style_mode,
+                conversation_state=conversation_state,
+            )
 
             if args.show_top_responses > 0 and pooled_candidates:
                 _t = time.perf_counter()
@@ -1816,6 +2062,7 @@ def main():
                     query_text=user,
                     recent_assistant_messages=recent_assistant_messages,
                     style_mode=resolved_style,
+                    interaction_plan=interaction_plan,
                 )
                 t_rank += max(0.0, time.perf_counter() - _t)
                 n_show = max(1, min(int(args.show_top_responses), len(ranked)))
@@ -1839,11 +2086,33 @@ def main():
                 response_temperature=args.response_temperature,
                 style_mode=resolved_style,
                 creativity=max(0.0, min(1.0, float(args.creativity))),
+                interaction_plan=interaction_plan,
+                conversation_state=conversation_state,
             )
             t_rank += max(0.0, time.perf_counter() - _t)
             response = cleanup_response_text(response)
             if not response:
                 response = "I do not have a trained response for that yet."
+            grounding_guard = None
+            if grounding_plan is not None:
+                grounding_guard = finalize_grounded_response(
+                    response,
+                    user,
+                    grounding_plan=grounding_plan,
+                    evidence_bundle=evidence_bundle,
+                    prompt_profile=prompt_profile,
+                    interaction_plan=interaction_plan,
+                )
+                response = str(grounding_guard["text"])
+            response_guard = finalize_response_for_interaction(
+                response,
+                user,
+                interaction_plan,
+                relevance_context=history[-1][0] if history else "",
+            )
+            response = str(response_guard["text"])
+            interaction_diag = interaction_plan_diagnostics(interaction_plan)
+            conversation_diag = conversation_state_diagnostics(conversation_state)
 
             print(f"{TerminalColors.BOT}Bot: {TerminalColors.RESET}{response}")
             history.append((user, response))
@@ -1884,6 +2153,31 @@ def main():
                         f"ponder={last_compute_metrics.get('ponder_cost')} "
                         f"gate_entropy={last_compute_metrics.get('gating_entropy')} "
                         f"exit={last_compute_metrics.get('exit_reason')}{plan_suffix}"
+                    )
+                print(
+                    f"{TerminalColors.SYSTEM}Interaction:{TerminalColors.RESET} "
+                    f"intent={interaction_diag.get('intent')} "
+                    f"strategy={interaction_diag.get('strategy')} "
+                    f"risk={interaction_diag.get('risk_tier')} "
+                    f"sycophancy={interaction_diag.get('sycophancy_risk')} "
+                    f"guard={response_guard.get('reason')}"
+                )
+                conversation_flags = dict(conversation_diag.get("flags") or {})
+                print(
+                    f"{TerminalColors.SYSTEM}Conversation:{TerminalColors.RESET} "
+                    f"turns={conversation_diag.get('turn_count', 0)} "
+                    f"commitments={conversation_diag.get('active_commitment_count', 0)} "
+                    f"open_questions={conversation_diag.get('open_question_count', 0)} "
+                    f"threads={conversation_diag.get('thread_count', 0)} "
+                    f"flags={','.join(sorted(name for name, on in conversation_flags.items() if on)) or 'none'}"
+                )
+                if grounding_guard is not None:
+                    grounding_metrics = dict(grounding_guard.get("grounding") or {})
+                    print(
+                        f"{TerminalColors.SYSTEM}Grounding:{TerminalColors.RESET} "
+                        f"guard={grounding_guard.get('reason', 'audit_only')} "
+                        f"evidence={grounding_metrics.get('evidence_count', 0)} "
+                        f"sufficiency={grounding_metrics.get('sufficiency', 'no_evidence')}"
                     )
                 
     finally:

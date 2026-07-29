@@ -45,3 +45,10 @@ training_monitor_snapshot_*.csv
 install_log_*.txt
 .codex_publish_nonlfs_files.txt
 Researching Current Model Architecture.txt
+
+# Runtime chat session state (contains conversation turns)
+chat_memory.db
+chat_memory.db-shm
+chat_memory.db-wal
+*.db-shm
+*.db-wal

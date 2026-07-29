@@ -308,6 +308,440 @@
       /\[reflective-set\d+\]/i,
       /decision policy framing/i
     ];
+    const INTERACTION_PLANNER_VERSION = 'supermix-static-plan-evaluate-v1';
+    const CRISIS_QUERY_RE = /\b(suicid(?:e|al)|self[- ]?harm|kill(?:ing)? myself(?!\s+(?:laughing|with laughter))|end my life(?![\s-]+insurance)|hurt(?:ing)? myself|might act on it|can(?:not|'t) stay safe)\b/i;
+    const URGENT_HEALTH_QUERY_RE = /\b(chest pain|shortness of breath|difficulty breathing|can(?:not|'t) breathe|signs? of (?:a )?stroke|severe bleeding|unconscious|overdos(?:e|ed|ing)|anaphylaxis)\b/i;
+    const CRISIS_METHOD_QUERY_RE = /\b(how (?:do|can|should) i|what are (?:the )?.{0,32}\b(?:ways|methods)|best way)\b.{0,80}\b(kill(?:ing)? myself(?!\s+(?:laughing|with laughter))|end my life(?![\s-]+insurance)|hurt(?:ing)? myself|suicid(?:e|al))\b/i;
+    const CURRENT_CRISIS_DISCLOSURE_RE = /\b(i (?:want|plan|intend|might) to (?:kill myself|end my life|hurt myself)|i(?:'m| am) suicidal|i can(?:not|'t) stay safe)\b/i;
+    const CONTRASTED_CRISIS_DISCLOSURE_RE = /\b(but|however|although|actually)\b.{0,100}\b(i (?:want|plan|intend|might) to (?:kill myself|end my life|hurt myself)|i(?:'m| am) suicidal|i can(?:not|'t) stay safe)\b/i;
+    const SAFETY_CONTEXT_RE = /\b(prevention|policy|research|article|historical|fictional|example|quoted|quotation|discussion|statistics)\b/i;
+    const REPORTED_SAFETY_CONTEXT_RE = /\b(historical|fictional|hypothetical|example|quoted|quotation|character|phrase|term|wording|sentence|poem|story|screenplay|novel|scene|plot|classroom|for (?:a |the )?class|curriculum|lesson plan|suicide squad)\b/i;
+    const NON_IMMEDIATE_SAFETY_TOPIC_RE = /\b(suicide (?:rates?|statistics|trends?|data|demographics?|epidemiology)|life[- ]insurance|public health|population study)\b/i;
+    const LAUGHTER_IDIOM_RE = /\bkilling myself (?:laughing|with laughter)\b/i;
+    const GENERAL_SAFETY_QUESTION_RE = /\b(what (?:is|are|causes)|how (?:does|do))\b/i;
+    const IMMEDIATE_PERSONAL_RE = /\b(i (?:feel|might|want|plan|have|took|overdosed)|i(?:'m| am) (?:about to|thinking|planning|having|experiencing|suicidal|unsafe|not safe)|i(?:'ve| have) (?:taken|overdosed)|my (?:friend|partner|child|parent|dad|mom|brother|sister) (?:is|has|might|took|overdosed)|someone (?:is|has|took|overdosed)|right now|currently|can(?:not|'t) stay safe)\b/i;
+    const IMMEDIATE_OVERRIDE_RE = /\b(right now|currently|at this moment|this is about me|actually me|in immediate danger)\b/i;
+    const AGREEMENT_REQUEST_RE = /\b(tell me (?:i(?:'m| am)|we(?:'re| are)) right|agree with me|validate my claim|back me up|say yes|do not disagree|don't disagree|am i right)\b/i;
+    const UNEARNED_AGREEMENT_RE = /\b(you(?:'re| are) absolutely right|exactly right|i completely agree|definitely,? you|yes,? obviously|without a doubt you)\b/i;
+    const DISMISSIVE_RESPONSE_RE = /\b(just get over it|calm down|no big deal|you(?:'re| are) overreacting|stop worrying)\b/i;
+    const EMPATHY_RESPONSE_RE = /\b(i hear you|i(?:'m| am) (?:really )?sorry|that sounds|it makes sense (?:that|to)|understandably|you(?:'re| are) not alone|thank you for (?:sharing|telling me))\b/i;
+    const ACTION_RESPONSE_RE = /\b(next step|start by|you can|try this|first|then|option|recommend|check|test|measure|compare)\b/i;
+    const REASONING_RESPONSE_RE = /\b(because|therefore|however|trade-?off|hypothesis|evidence|verify|root cause|assumption)\b/i;
+    const CALIBRATION_RESPONSE_RE = /\b(i(?:'m| am) not certain|uncertain|may|might|likely|appears|based on|confidence|estimate|could be wrong|i do not know|i don't know|insufficient information)\b/i;
+    const VERIFICATION_RESPONSE_RE = /\b(verify|check (?:the|a) source|citation|evidence|confirm|cross-check|test)\b/i;
+    const CRISIS_RESPONSE_RE = /\b((?:call|contact)\s+(?:local\s+)?emergency services|go to (?:the )?(?:nearest )?emergency department|(?:call|contact)\s+(?:a\s+)?crisis (?:line|service)|(?:call|contact) emergency)\b/i;
+    const URGENT_HEALTH_RESPONSE_RE = /\b((?:call|contact)\s+(?:local\s+)?emergency services|go to (?:the )?(?:nearest )?emergency department|seek immediate (?:emergency|medical) care|seek urgent medical (?:care|assessment)|(?:call|contact) emergency)\b/i;
+    const NEGATED_ESCALATION_ACTION_RE = /\b((?:(?:do not|don't|never|should(?: probably)? not|shouldn't|would not|wouldn't|need not|needn't)(?:\s+ever)?\s+(?:call|contact|seek|go to|visit))|(?:(?:do not|don't)\s+need to\s+(?:call|contact|seek|go to|visit))|(?:(?:avoid|skip)\s+(?:calling|contacting|seeking|going to|visiting))|(?:no need to\s+(?:call|contact|seek|go to|visit)))\b.{0,50}\b(emergency|crisis|urgent medical)\b|\b(?:avoid|skip)\s+(?:the\s+)?(emergency services?|emergency department|crisis (?:line|service)|urgent medical (?:care|assessment))\b|\b(emergency services?|emergency department|crisis (?:line|service)|urgent medical (?:care|assessment))\b.{0,45}\b((?:isn't|aren't|wasn't|weren't)\s+(?:needed|necessary|recommended)|(?:is|are|would be|seems?)?\s*(?:not (?:needed|necessary|recommended)|unnecessary|optional|overkill|can wait))\b|\b(no need|not necessary|unnecessary)\b.{0,45}\b(emergency services?|emergency department|crisis (?:line|service)|urgent medical (?:care|assessment))\b/i;
+    const NEGATED_ESCALATION_REASON_RE = /\b(?:there is|there's)\s+no\s+(?:need|reason)\s+to\s+(?:call|contact|seek|go to|visit)\b.{0,50}\b(?:emergency|crisis|urgent medical)\b|\b(?:rather than|instead of)\s+(?:call|contact|seek|go to|visit)\b.{0,50}\b(?:emergency|crisis|urgent medical)\b|\b(?:it is|it's|that is|that's)\s+not\s+(?:necessary|needed|recommended)\s+to\s+(?:call|contact|seek|go to|visit)\b.{0,50}\b(?:emergency|crisis|urgent medical)\b|\b(?:i|you|we|they)\s+(?:do not|don't)\s+have\s+to\s+(?:call|contact|seek|go to|visit)\b.{0,50}\b(?:emergency|crisis|urgent medical)\b/i;
+    const UNSAFE_DEFERRAL_RE = /\b(wait until|wait for)\b.{0,40}\b(tomorrow|later|morning|appointment)\b|\b(wait and see|sleep it off|see (?:if|whether) .{0,24}(?:passes|improves))\b/i;
+    const ANTI_DEFERRAL_RE = /\b(do not|don't|never|should not|shouldn't)\b.{0,24}\b(wait|delay|sleep it off)\b/i;
+    const DISMISSIVE_EDUCATIONAL_RE = /\b(?:telling|saying)\s+(?:someone|a person|people)\b.{0,48}\b(?:calm down|just get over it|no big deal|stop worrying)\b|\b(?:do not|don't|never|avoid)\s+(?:tell|say)\b.{0,48}\b(?:calm down|just get over it|no big deal|stop worrying)\b/i;
+    const OVERCLAIM_RESPONSE_RE = /\b(always|never|guaranteed|definitely|obviously|certainly|everyone knows|undeniably|100 percent|100%)\b/i;
+    const SAFETY_CAUTION_RE = /\b(never mix|do not mix|don't mix|seek immediate|call emergency|contact emergency|follow the safety|follow the manufacturer)\b/i;
+
+    function clamp(value, min = 0, max = 1) {
+      return Math.max(min, Math.min(max, Number(value) || 0));
+    }
+
+    function withoutQuotedSpans(text) {
+      return String(text || '').replace(/"[^"\n]{0,500}"|'[^'\n]{0,500}'|\u201c[^\u201d\n]{0,500}\u201d|\u2018[^\u2019\n]{0,500}\u2019/g, ' ');
+    }
+
+    function safetySignal(text, pattern, kind) {
+      const raw = String(text || '');
+      if (!pattern.test(raw)) return false;
+      const outsideQuotes = withoutQuotedSpans(raw);
+      const contextual = SAFETY_CONTEXT_RE.test(raw);
+      const reported = REPORTED_SAFETY_CONTEXT_RE.test(raw);
+      const nonImmediateTopic = NON_IMMEDIATE_SAFETY_TOPIC_RE.test(raw);
+      const quotedOnly = !pattern.test(outsideQuotes);
+      const generalQuestion = GENERAL_SAFETY_QUESTION_RE.test(raw);
+      const immediate = IMMEDIATE_PERSONAL_RE.test(outsideQuotes);
+      const explicitOverride = IMMEDIATE_OVERRIDE_RE.test(outsideQuotes);
+      const methodSeeking = kind === 'crisis' && CRISIS_METHOD_QUERY_RE.test(outsideQuotes);
+      const disclosureIndex = kind === 'crisis' ? outsideQuotes.search(CURRENT_CRISIS_DISCLOSURE_RE) : -1;
+      const contextIndex = outsideQuotes.search(SAFETY_CONTEXT_RE);
+      const disclosureBeforeContext = disclosureIndex >= 0 && contextIndex >= 0 && disclosureIndex < contextIndex;
+      const contrastedDisclosure = kind === 'crisis' && CONTRASTED_CRISIS_DISCLOSURE_RE.test(outsideQuotes);
+      const personalDisclosure = kind === 'crisis' ? disclosureIndex >= 0 : immediate;
+      if (kind === 'crisis' && LAUGHTER_IDIOM_RE.test(outsideQuotes) && !explicitOverride && !personalDisclosure) return false;
+      if (quotedOnly && !explicitOverride) return false;
+      if (reported && !(explicitOverride || disclosureBeforeContext || contrastedDisclosure)) return false;
+      if (nonImmediateTopic && !(explicitOverride || personalDisclosure)) return false;
+      if (contextual && !(explicitOverride || disclosureBeforeContext || contrastedDisclosure || disclosureIndex >= 0)) return false;
+      if (generalQuestion && !(immediate || methodSeeking)) return false;
+      return true;
+    }
+
+    const STATIC_PROMPT_SCHEMA_VERSION = 'supermix-prompt-understanding-v1';
+    const STATIC_CUE_TYPOS = Object.freeze({
+      plase: 'please',
+      plesae: 'please',
+      compair: 'compare',
+      comparre: 'compare',
+      recomend: 'recommend',
+      reccomend: 'recommend',
+      optons: 'options',
+      udnerstand: 'understand',
+      udnerstadn: 'understand',
+      udnerstanding: 'understanding',
+      sumarize: 'summarize',
+      summrize: 'summarize',
+      explian: 'explain',
+      rewite: 'rewrite',
+      formt: 'format',
+      sentnces: 'sentences',
+      bulltes: 'bullets',
+      wnat: 'want',
+      kil: 'kill',
+      myslef: 'myself',
+      rite: 'right'
+    });
+
+    function normalizeStaticCueTypos(text) {
+      return String(text || '').replace(/\b[A-Za-z][A-Za-z'-]{1,24}\b/g, token => {
+        const replacement = STATIC_CUE_TYPOS[token.toLowerCase()];
+        if (!replacement) return token;
+        return token[0] === token[0].toUpperCase()
+          ? replacement[0].toUpperCase() + replacement.slice(1)
+          : replacement;
+      });
+    }
+
+    function maskStaticInstructionData(text) {
+      return String(text || '')
+        .replace(/```[\s\S]{0,5000}?```/g, ' ')
+        .replace(/`[^`\n]{0,500}`/g, ' ')
+        .replace(/"[^"\n]{0,1000}"|'[^'\n]{0,1000}'|\u201c[^\u201d\n]{0,1000}\u201d|\u2018[^\u2019\n]{0,1000}\u2019/g, ' ')
+        .replace(/\bhttps?:\/\/[^\s<>"']+/gi, ' ')
+        .replace(/\b[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/g, ' ')
+        .replace(/(?:^|\s)\/(?:[^/\s]+\/)+[^/\s]*/g, ' ');
+    }
+
+    function positiveStaticInstructionView(text) {
+      return String(text || '')
+        .replace(
+          /\b(?:do\s+not|don't|never|avoid|exclude|without)\s+(?:give|include|use|provide|show|write|compare|recommend|explain|cite|list|add|return|format)(?:\s+me)?\b[^.;,\n]*/gi,
+          ' '
+        )
+        .replace(/\bno\s+(?:steps?|citations?|headings?|tables?|bullets?|comparison|recommendation)\b/gi, ' ');
+    }
+
+    function extractStaticPromptConstraints(instructionText) {
+      const text = String(instructionText || '');
+      const constraints = [];
+      const countValue = token => {
+        const words = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10 };
+        const lowered = String(token || '').toLowerCase();
+        return Object.prototype.hasOwnProperty.call(words, lowered) ? words[lowered] : Number(lowered);
+      };
+      const add = (kind, polarity, value = null) => {
+        const key = `${kind}:${polarity}:${value === null ? '' : value}`;
+        if (!constraints.some(item => item.key === key)) constraints.push({ key, kind, polarity, value });
+      };
+      const numericPatterns = [
+        ['bullets', /\bexactly\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:short\s+)?bullets?\b/gi],
+        ['sentences', /\bexactly\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b/gi],
+        ['words', /\b(?:exactly|in)\s+(\d{1,5}|one|two|three|four|five|six|seven|eight|nine|ten)\s+words?\b/gi],
+        ['headings', /\bexactly\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\s+headings?\b/gi]
+      ];
+      numericPatterns.forEach(([kind, pattern]) => {
+        for (const match of text.matchAll(pattern)) add(kind, 'required', countValue(match[1]));
+      });
+      const capabilities = [
+        ['steps', /\b(?:steps?|step-by-step|step by step)\b/i],
+        ['citations', /\b(?:citations?|sources?)\b/i],
+        ['comparison', /\b(?:compare|comparison|pros and cons|trade-?offs?)\b/i],
+        ['recommendation', /\b(?:recommend|recommendation|choose|pick the best)\b/i],
+        ['json', /\bjson\b/i],
+        ['table', /\btable\b/i],
+        ['headings', /\bheadings?\b/i],
+        ['bullets', /\bbullets?\b/i]
+      ];
+      capabilities.forEach(([kind, cue]) => {
+        const forbidden = new RegExp(
+          String.raw`\b(?:do\s+not|don't|never|avoid|exclude|without|no)\b[^.;,\n]{0,32}${cue.source}`,
+          'i'
+        ).test(text);
+        const required = cue.test(positiveStaticInstructionView(text));
+        if (forbidden) add(kind, 'forbidden');
+        if (required) add(kind, 'required');
+      });
+      if (/\b(?:just|only)\s+(?:the\s+)?answer\b|\banswer\s+only\b/i.test(text)) {
+        add('answer_only', 'required');
+      }
+      return constraints.map(({ key, ...item }) => item);
+    }
+
+    function staticPromptActs(positiveText) {
+      const text = String(positiveText || '');
+      const acts = [];
+      const add = value => { if (!acts.includes(value)) acts.push(value); };
+      if (/\b(?:solve|fix|debug|diagnose|implement|build|optimi[sz]e|calculate)\b/i.test(text)) add('problem_solving');
+      if (/\b(?:compare|choose|decide|recommend|best choice|pros and cons|trade-?off)\b/i.test(text)) add('decision_support');
+      if (/\b(?:explain|why|how does|teach|understand|what is|what are)\b/i.test(text)) add('explanation');
+      if (/\b(?:rewrite|rephrase|edit|polish|proofread)\b/i.test(text)) add('editing');
+      if (/\b(?:summari[sz]e|condense)\b/i.test(text)) add('summarization');
+      if (/\b(?:source|citation|current|latest|definition|how many|price)\b/i.test(text)) add('factual_lookup');
+      if (/\b(?:write|generate|draft|create)\b/i.test(text)) add('generation');
+      return acts;
+    }
+
+    function analyzeStaticPrompt(query, recentHistory = []) {
+      const raw = String(query || '').trim();
+      const cueNormalized = normalizeStaticCueTypos(raw);
+      const instructionText = maskStaticInstructionData(cueNormalized);
+      const positiveText = positiveStaticInstructionView(instructionText);
+      const constraints = extractStaticPromptConstraints(instructionText);
+      const hardConflicts = [];
+      ['bullets', 'sentences', 'words', 'headings'].forEach(kind => {
+        const values = [...new Set(
+          constraints
+            .filter(item => item.kind === kind && item.polarity === 'required' && Number.isFinite(item.value))
+            .map(item => item.value)
+        )];
+        if (values.length > 1) hardConflicts.push(`conflicting_${kind}_counts`);
+      });
+      [...new Set(constraints.map(item => item.kind))].forEach(kind => {
+        const polarities = new Set(constraints.filter(item => item.kind === kind).map(item => item.polarity));
+        if (polarities.has('required') && polarities.has('forbidden')) {
+          hardConflicts.push(`required_and_forbidden_${kind}`);
+        }
+      });
+      const acts = staticPromptActs(positiveText);
+      const recent = Array.isArray(recentHistory) ? recentHistory : [];
+      const referenceCue = /^(?:please\s+)?(?:do\s+(?:that|it)|make\s+it|same\s+again|continue\s+that|shorten\s+it|expand\s+it|rewrite\s+it|that|it)\b/i.test(positiveText.trim());
+      const unresolvedReference = referenceCue && recent.length === 0;
+      const decision = hardConflicts.length || unresolvedReference ? 'clarify' : 'act';
+      let clarification = '';
+      if (hardConflicts.length) {
+        const kind = hardConflicts[0].replace(/^conflicting_/, '').replace(/^required_and_forbidden_/, '').replace(/_counts$/, '');
+        clarification = `I found conflicting ${kind} instructions. Which one should I follow?`;
+      } else if (unresolvedReference) {
+        clarification = 'What should I apply that instruction to? Please name or paste the target.';
+      }
+      return {
+        schemaVersion: STATIC_PROMPT_SCHEMA_VERSION,
+        decision,
+        acts,
+        constraints,
+        hardConflicts,
+        turnRelation: referenceCue ? (unresolvedReference ? 'unresolved_reference' : 'follow_up') : 'new_request',
+        clarification,
+        normalization: {
+          cueTyposRecovered: cueNormalized !== raw,
+          instructionDataMasked: instructionText !== cueNormalized
+        }
+      };
+    }
+
+    function staticPromptDiagnostics(profile) {
+      const safe = profile || {};
+      return {
+        schemaVersion: safe.schemaVersion || STATIC_PROMPT_SCHEMA_VERSION,
+        decision: safe.decision || 'act',
+        acts: Array.isArray(safe.acts) ? safe.acts.slice(0, 6) : [],
+        constraintKinds: Array.isArray(safe.constraints)
+          ? [...new Set(safe.constraints.map(item => item.kind))].slice(0, 10)
+          : [],
+        conflictCount: Array.isArray(safe.hardConflicts) ? safe.hardConflicts.length : 0,
+        turnRelation: safe.turnRelation || 'new_request',
+        cueTyposRecovered: Boolean(safe.normalization && safe.normalization.cueTyposRecovered)
+      };
+    }
+
+    function planInteraction(query) {
+      const text = String(query || '').trim();
+      const promptUnderstanding = analyzeStaticPrompt(text, state.history);
+      const safetyText = normalizeStaticCueTypos(text);
+      const crisisSignal = safetySignal(text, CRISIS_QUERY_RE, 'crisis') ||
+        safetySignal(safetyText, CRISIS_QUERY_RE, 'crisis');
+      const urgentHealthSignal = safetySignal(text, URGENT_HEALTH_QUERY_RE, 'urgent_medical') ||
+        safetySignal(safetyText, URGENT_HEALTH_QUERY_RE, 'urgent_medical');
+      const agreementRequest = AGREEMENT_REQUEST_RE.test(text);
+      const distress = clamp(
+        (/\b(sad|anxious|scared|afraid|upset|lonely|hurt|grief|overwhelmed|hopeless|desperate)\b/i.test(text) ? 0.58 : 0) +
+        (/\b(panic|terrified|right now|urgent)\b|!{2,}/i.test(text) ? 0.22 : 0)
+      );
+      const factuality = clamp(
+        (/\b(exact|fact|source|citation|evidence|statistics?|date|current|latest|definition|price|law|medical|diagnosis|symptom|dose|medication|legal|financial|tax)\b/i.test(text) ? 0.58 : 0) +
+        (/\b(today|now|recent|newest)\b/i.test(text) ? 0.24 : 0)
+      );
+      let intent = promptUnderstanding.acts[0] || 'conversation';
+      if (intent === 'conversation' && distress >= 0.3) intent = 'emotional_support';
+
+      const required = [];
+      if (distress >= 0.3) required.push('emotional_acknowledgement');
+      if (crisisSignal) required.push('crisis_escalation');
+      if (urgentHealthSignal) required.push('urgent_medical_escalation');
+      if (intent === 'problem_solving') required.push('actionable_solution', 'reasoning');
+      if (factuality >= 0.34 && !crisisSignal && !urgentHealthSignal) required.push('evidence_or_calibration');
+      if (agreementRequest) required.push('independent_assessment');
+
+      let strategy = 'direct_then_offer_depth';
+      if (crisisSignal) strategy = 'crisis_support_then_immediate_help';
+      else if (urgentHealthSignal) strategy = 'urgent_health_escalation';
+      else if (intent === 'problem_solving') strategy = 'solve_then_verify';
+      else if (intent === 'decision_support') strategy = 'compare_then_recommend';
+      else if (intent === 'emotional_support') strategy = 'acknowledge_then_support';
+      else if (factuality >= 0.34) strategy = 'answer_with_evidence_and_uncertainty';
+
+      return {
+        schemaVersion: 'supermix-static-interaction-plan-v1',
+        version: INTERACTION_PLANNER_VERSION,
+        intent,
+        strategy,
+        riskTier: crisisSignal || urgentHealthSignal ? 'critical' : factuality >= 0.58 ? 'high' : distress >= 0.3 ? 'medium' : 'low',
+        appraisal: { distress: Number(distress.toFixed(3)) },
+        guards: {
+          crisisSignal,
+          urgentHealthSignal,
+          avoidUnearnedAgreement: agreementRequest,
+          calibratedUncertainty: factuality >= 0.34
+        },
+        responseContract: { required: [...new Set(required)] },
+        promptUnderstanding,
+        rankingWeights: {
+          empathy: Number((0.08 + 0.24 * distress).toFixed(3)),
+          actionability: ['problem_solving', 'decision_support', 'emotional_support'].includes(intent) ? 0.26 : 0.08,
+          reasoning: ['problem_solving', 'decision_support', 'explanation'].includes(intent) ? 0.30 : 0.10,
+          calibration: Number((0.06 + 0.22 * factuality).toFixed(3))
+        }
+      };
+    }
+
+    function responseSignals(text) {
+      const value = String(text || '');
+      const visible = withoutQuotedSpans(value);
+      const unsafeDeferral = UNSAFE_DEFERRAL_RE.test(value) && !ANTI_DEFERRAL_RE.test(value);
+      const negatedEscalation = NEGATED_ESCALATION_ACTION_RE.test(value) || NEGATED_ESCALATION_REASON_RE.test(value) || unsafeDeferral;
+      const negatedAgreement = /\b(?:do not|don't|never|avoid)\s+(?:say|tell|agree)\b/i.test(visible);
+      return {
+        empathy: EMPATHY_RESPONSE_RE.test(value) ? 1 : 0,
+        actionability: ACTION_RESPONSE_RE.test(value) ? 1 : 0,
+        reasoning: REASONING_RESPONSE_RE.test(value) ? 1 : 0,
+        calibration: CALIBRATION_RESPONSE_RE.test(value) ? 1 : 0,
+        verification: VERIFICATION_RESPONSE_RE.test(value) ? 1 : 0,
+        crisisSupport: CRISIS_RESPONSE_RE.test(value) && !negatedEscalation ? 1 : 0,
+        urgentMedicalSupport: URGENT_HEALTH_RESPONSE_RE.test(value) && !negatedEscalation ? 1 : 0,
+        unsafeDeferral: negatedEscalation ? 1 : 0,
+        unearnedAgreement: UNEARNED_AGREEMENT_RE.test(visible) && !negatedAgreement ? 1 : 0,
+        dismissive: DISMISSIVE_RESPONSE_RE.test(visible) && !DISMISSIVE_EDUCATIONAL_RE.test(value) ? 1 : 0,
+        overclaim: OVERCLAIM_RESPONSE_RE.test(value) ? 1 : 0
+      };
+    }
+
+    function scoreCandidateForInteraction(candidateText, plan) {
+      if (!plan) return { total: 0, signals: responseSignals(candidateText) };
+      const signals = responseSignals(candidateText);
+      const weights = plan.rankingWeights;
+      let total = weights.empathy * signals.empathy +
+        weights.actionability * signals.actionability +
+        weights.reasoning * signals.reasoning +
+        weights.calibration * signals.calibration;
+      if (plan.guards.calibratedUncertainty) total += 0.10 * signals.verification;
+      if (plan.guards.avoidUnearnedAgreement) total -= 0.65 * signals.unearnedAgreement;
+      if (plan.guards.calibratedUncertainty && !SAFETY_CAUTION_RE.test(candidateText)) total -= 0.14 * signals.overclaim;
+      total -= 0.80 * signals.dismissive;
+      if (plan.guards.crisisSignal) total += signals.crisisSupport ? 0.55 : -0.30;
+      if (plan.guards.urgentHealthSignal) total += signals.urgentMedicalSupport ? 0.55 : -0.30;
+      return { total: Number(clamp(total, -1, 1).toFixed(6)), signals };
+    }
+
+    function evaluateResponseContract(responseText, query, plan) {
+      const signals = responseSignals(responseText);
+      const required = plan.responseContract.required;
+      const satisfies = {
+        emotional_acknowledgement: signals.empathy > 0,
+        actionable_solution: signals.actionability > 0,
+        reasoning: signals.reasoning > 0,
+        evidence_or_calibration: signals.verification > 0 || signals.calibration > 0,
+        independent_assessment: signals.verification > 0 || signals.calibration > 0,
+        crisis_escalation: signals.crisisSupport > 0,
+        urgent_medical_escalation: signals.urgentMedicalSupport > 0
+      };
+      const missing = required.filter(capability => !satisfies[capability]);
+      const violations = [];
+      if (plan.guards.avoidUnearnedAgreement && signals.unearnedAgreement) violations.push('unearned_agreement');
+      if (plan.guards.calibratedUncertainty && signals.overclaim && !SAFETY_CAUTION_RE.test(responseText)) violations.push('unsupported_certainty');
+      if (signals.dismissive) violations.push('dismissive_language');
+      const qSet = tokenSet(query);
+      const lexicalRelevance = qSet.size ? overlapRatio(qSet, tokenSet(responseText)) : 0;
+      return {
+        accepted: missing.length === 0 && violations.length === 0,
+        coverage: required.length ? Number(((required.length - missing.length) / required.length).toFixed(3)) : 1,
+        missing,
+        violations,
+        lexicalRelevance: Number(lexicalRelevance.toFixed(3))
+      };
+    }
+
+    function finalizeResponseForInteraction(responseText, query, plan) {
+      const raw = String(responseText || '').trim();
+      const signals = responseSignals(raw);
+      const result = (text, changed, reason) => ({
+        text,
+        changed,
+        reason,
+        audit: evaluateResponseContract(text, query, plan)
+      });
+      if (plan.guards.crisisSignal) {
+        if (signals.crisisSupport) {
+          if (!signals.empathy) return result(`I'm really sorry you're facing this. ${raw}`, true, 'crisis_guidance_preserved_with_acknowledgement');
+          return result(raw, false, 'crisis_guidance_preserved');
+        }
+        return result(
+          "I'm really sorry you're facing this, and your immediate safety matters. If you might act now or are in immediate danger, contact local emergency services now or go to the nearest emergency department. If you can, contact a crisis service and a trusted person who can stay with you, and move away from anything you could use to hurt yourself. Are you in immediate danger right now?",
+          true,
+          'crisis_safety_escalation'
+        );
+      }
+      if (plan.guards.urgentHealthSignal) {
+        if (signals.urgentMedicalSupport) return result(raw, false, 'urgent_medical_guidance_preserved');
+        return result(
+          'These symptoms can require urgent medical assessment. Contact local emergency services now or seek immediate emergency care, especially if the symptoms are severe, new, or worsening.',
+          true,
+          'urgent_medical_safety_escalation'
+        );
+      }
+      if (plan.guards.avoidUnearnedAgreement && signals.unearnedAgreement) {
+        return result(
+          'I can help assess that, but I should not confirm it without checking the evidence. Share the exact claim or source, and I will separate what is supported from what remains uncertain.',
+          true,
+          'unearned_agreement_blocked'
+        );
+      }
+      if (signals.dismissive) {
+        return result(
+          "That sounds difficult, and I don't want to dismiss what you're dealing with. We can slow it down and identify one manageable next step together.",
+          true,
+          'dismissive_language_blocked'
+        );
+      }
+      const audit = evaluateResponseContract(raw, query, plan);
+      return { text: raw, changed: false, reason: audit.accepted ? 'candidate_aligned' : 'candidate_partially_aligned', audit };
+    }
+
+    function interactionDiagnostics(plan, guarded) {
+      const safety = plan.guards.crisisSignal ? 'crisis' : plan.guards.urgentHealthSignal ? 'urgent_medical' : 'none';
+      return {
+        version: plan.version,
+        intent: plan.intent,
+        strategy: plan.strategy,
+        risk: plan.riskTier,
+        safety,
+        sycophancyGuard: plan.guards.avoidUnearnedAgreement,
+        required: plan.responseContract.required,
+        promptUnderstanding: staticPromptDiagnostics(plan.promptUnderstanding),
+        response: {
+          changed: guarded.changed,
+          reason: guarded.reason,
+          accepted: guarded.audit.accepted,
+          missing: guarded.audit.missing,
+          violations: guarded.audit.violations
+        }
+      };
+    }
 
     function setStatus(text, kind = 'warn') {
       els.status.textContent = text;
@@ -513,7 +947,7 @@
         .replace(/\"/g, '&quot;');
     }
 
-    function rankCandidates(query) {
+    function rankCandidates(query, interactionPlan = null) {
       const q = String(query || '').trim();
       const qTokens = tokenSet(q);
       const qBigrams = bigrams(q);
@@ -571,7 +1005,12 @@
 
         score -= repeatPenalty + templatePenalty + weirdPenalty;
 
-        scored.push({ ...c, score });
+        const interactionScore = scoreCandidateForInteraction(text, interactionPlan).total;
+        const semanticGate = clamp(0.5 + 0.25 * (ctxOverlap + qOverlap));
+        score += 0.10 * Math.max(0, interactionScore) * semanticGate;
+        score += 0.20 * Math.min(0, interactionScore);
+
+        scored.push({ ...c, score, interactionScore });
       }
 
       scored.sort((a, b) => b.score - a.score);
@@ -647,33 +1086,233 @@
       }
     }
 
+    function staticGcd(a, b) {
+      a = a < 0n ? -a : a;
+      b = b < 0n ? -b : b;
+      while (b) [a, b] = [b, a % b];
+      return a || 1n;
+    }
+
+    function staticRational(n, d = 1n) {
+      if (d === 0n) throw new Error('division_by_zero');
+      if (d < 0n) { n = -n; d = -d; }
+      const g = staticGcd(n, d);
+      n /= g; d /= g;
+      if (n.toString(2).replace('-', '').length > 512 || d.toString(2).length > 512) {
+        throw new Error('result_too_large');
+      }
+      return { n, d };
+    }
+
+    function staticDecimalRational(token) {
+      const parts = token.split('.');
+      const whole = parts[0] || '0';
+      const fraction = parts[1] || '';
+      const denominator = 10n ** BigInt(fraction.length);
+      return staticRational(BigInt(whole + fraction), denominator);
+    }
+
+    function staticRationalDisplay(value) {
+      if (value.d === 1n) return value.n.toString();
+      let rest = value.d;
+      let twos = 0;
+      let fives = 0;
+      while (rest % 2n === 0n) { rest /= 2n; twos += 1; }
+      while (rest % 5n === 0n) { rest /= 5n; fives += 1; }
+      if (rest !== 1n) return `${value.n}/${value.d}`;
+      const places = Math.max(twos, fives);
+      const scaled = value.n
+        * (2n ** BigInt(places - twos))
+        * (5n ** BigInt(places - fives));
+      const negative = scaled < 0n;
+      let digits = (negative ? -scaled : scaled).toString().padStart(places + 1, '0');
+      if (places) {
+        digits = `${digits.slice(0, -places)}.${digits.slice(-places)}`
+          .replace(/0+$/, '')
+          .replace(/\.$/, '');
+      }
+      return `${negative ? '-' : ''}${digits}`;
+    }
+
+    function solveStaticExactArithmetic(query) {
+      const raw = String(query || '').trim();
+      const match = raw.match(/^(?:what\s+is|calculate|compute|solve)\s+(.+?)\s*[?!.]?\s*$/i);
+      if (!match) return { attempted: false, solved: false, reason: 'not_explicit_arithmetic' };
+      const expression = match[1]
+        .replace(/\u00d7/g, '*')
+        .replace(/\u00f7/g, '/')
+        .replace(/\u2212/g, '-')
+        .trim();
+      if (!expression || expression.length > 160 || !/^[\d\s()+\-*/.^]+$/.test(expression)) {
+        return { attempted: true, solved: false, reason: 'unsupported_expression' };
+      }
+      const compact = expression.replace(/\s+/g, '');
+      const tokens = compact.match(/\d+(?:\.\d*)?|\.\d+|[()+\-*/^]/g) || [];
+      if (!tokens.length || tokens.join('') !== compact || !/[+\-*/^]/.test(compact)) {
+        return { attempted: true, solved: false, reason: 'invalid_syntax' };
+      }
+      let index = 0;
+      let operations = 0;
+      const add = (a, b) => staticRational(a.n * b.d + b.n * a.d, a.d * b.d);
+      const subtract = (a, b) => staticRational(a.n * b.d - b.n * a.d, a.d * b.d);
+      const multiply = (a, b) => staticRational(a.n * b.n, a.d * b.d);
+      const divide = (a, b) => staticRational(a.n * b.d, a.d * b.n);
+      const countOperation = () => {
+        operations += 1;
+        if (operations > 32) throw new Error('too_many_operations');
+      };
+      let parseExpression;
+      let parseTerm;
+      let parsePower;
+      let parseUnary;
+      let parsePrimary;
+      parseExpression = () => {
+        let value = parseTerm();
+        while (tokens[index] === '+' || tokens[index] === '-') {
+          const op = tokens[index++];
+          countOperation();
+          const right = parseTerm();
+          value = op === '+' ? add(value, right) : subtract(value, right);
+        }
+        return value;
+      };
+      parseTerm = () => {
+        let value = parsePower();
+        while (tokens[index] === '*' || tokens[index] === '/') {
+          const op = tokens[index++];
+          countOperation();
+          const right = parsePower();
+          value = op === '*' ? multiply(value, right) : divide(value, right);
+        }
+        return value;
+      };
+      parsePower = () => {
+        let value = parseUnary();
+        if (tokens[index] === '^') {
+          index += 1;
+          countOperation();
+          const exponentValue = parsePower();
+          if (exponentValue.d !== 1n || exponentValue.n < -16n || exponentValue.n > 16n) {
+            throw new Error('unsupported_exponent');
+          }
+          const exponent = exponentValue.n;
+          if (exponent < 0n) {
+            if (value.n === 0n) throw new Error('division_by_zero');
+            value = staticRational(value.d ** (-exponent), value.n ** (-exponent));
+          } else {
+            value = staticRational(value.n ** exponent, value.d ** exponent);
+          }
+        }
+        return value;
+      };
+      parseUnary = () => {
+        if (tokens[index] === '+' || tokens[index] === '-') {
+          const op = tokens[index++];
+          countOperation();
+          const value = parseUnary();
+          return op === '-' ? staticRational(-value.n, value.d) : value;
+        }
+        return parsePrimary();
+      };
+      parsePrimary = () => {
+        const token = tokens[index++];
+        if (token === '(') {
+          const value = parseExpression();
+          if (tokens[index++] !== ')') throw new Error('unclosed_parenthesis');
+          return value;
+        }
+        if (!token || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)) {
+          throw new Error('expected_number');
+        }
+        return staticDecimalRational(token);
+      };
+      try {
+        const value = parseExpression();
+        if (index !== tokens.length) throw new Error('trailing_tokens');
+        return {
+          attempted: true,
+          solved: true,
+          reason: 'solved_exactly',
+          expression,
+          display: staticRationalDisplay(value),
+          exact: value.d === 1n ? value.n.toString() : `${value.n}/${value.d}`,
+          operations,
+        };
+      } catch (error) {
+        return {
+          attempted: true,
+          solved: false,
+          reason: String(error && error.message ? error.message : 'arithmetic_error'),
+        };
+      }
+    }
+
     async function onSend() {
       const user = els.userInput.value.trim();
       if (!user) return;
       addMessage('user', user);
       els.userInput.value = '';
 
+      const t0 = performance.now();
+      const interactionPlan = planInteraction(user);
+      if (
+        interactionPlan.promptUnderstanding &&
+        interactionPlan.promptUnderstanding.decision === 'clarify'
+      ) {
+        const bot = interactionPlan.promptUnderstanding.clarification ||
+          'I need one detail before I can answer accurately. What should I use?';
+        const guarded = finalizeResponseForInteraction(bot, user, interactionPlan);
+        addMessage('bot', guarded.text);
+        addMessage('sys', `Timing: ${(performance.now() - t0).toFixed(1)} ms · Understanding: ${JSON.stringify(staticPromptDiagnostics(interactionPlan.promptUnderstanding))}`);
+        state.history.push({ user, bot: guarded.text });
+        state.recentAssistant.push(guarded.text);
+        if (state.history.length > 20) state.history = state.history.slice(-20);
+        if (state.recentAssistant.length > 8) state.recentAssistant = state.recentAssistant.slice(-8);
+        return;
+      }
+      const arithmetic = solveStaticExactArithmetic(user);
+      if (arithmetic.solved) {
+        const grounded = {
+          text: `The exact result is ${arithmetic.display}.`,
+          changed: true,
+          reason: 'explicit_arithmetic_exact',
+        };
+        const guarded = finalizeResponseForInteraction(grounded.text, user, interactionPlan);
+        const bot = guarded.text;
+        addMessage('bot', bot);
+        addMessage('sys', `Timing: ${(performance.now() - t0).toFixed(1)} ms \u00b7 Grounding: ${grounded.reason} \u00b7 Interaction: ${JSON.stringify(interactionDiagnostics(interactionPlan, guarded))}`);
+        state.history.push({ user, bot });
+        state.recentAssistant.push(bot);
+        if (state.history.length > 20) state.history = state.history.slice(-20);
+        if (state.recentAssistant.length > 8) state.recentAssistant = state.recentAssistant.slice(-8);
+        return;
+      }
       if (!state.candidates.length) {
-        const msg = 'Load a metadata JSON first.';
-        addMessage('bot', msg);
+        const guarded = finalizeResponseForInteraction('Load a metadata JSON first.', user, interactionPlan);
+        const bot = guarded.text;
+        addMessage('bot', bot);
+        addMessage('sys', `Timing: ${(performance.now() - t0).toFixed(1)} ms · Interaction: ${JSON.stringify(interactionDiagnostics(interactionPlan, guarded))}`);
+        state.history.push({ user, bot });
+        state.recentAssistant.push(bot);
         return;
       }
 
-      const t0 = performance.now();
       const smallTalk = detectSmallTalk(user);
       let bot;
       let ranked = [];
       if (smallTalk) {
         bot = smallTalk;
       } else {
-        ranked = rankCandidates(user);
+        ranked = rankCandidates(user, interactionPlan);
         renderTopCandidates(ranked.slice(0, 8));
         bot = chooseResponse(user, ranked);
       }
+      const guarded = finalizeResponseForInteraction(bot, user, interactionPlan);
+      bot = guarded.text;
       const dt = performance.now() - t0;
 
       addMessage('bot', bot);
-      addMessage('sys', `Timing: ${dt.toFixed(1)} ms`);
+      addMessage('sys', `Timing: ${dt.toFixed(1)} ms · Interaction: ${JSON.stringify(interactionDiagnostics(interactionPlan, guarded))}`);
 
       state.history.push({ user, bot });
       state.recentAssistant.push(bot);

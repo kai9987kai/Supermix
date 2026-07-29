@@ -408,6 +408,7 @@ def build_collective_distillation_bundle(
                 "cmd_open_enabled": allow_cmd_open,
                 "web_search_budget": 3,
                 "web_search_results": 5,
+                "interaction_intelligence": False,
             }
             teacher_candidates: List[Dict[str, Any]] = []
             for teacher_key in teacher_model_keys:

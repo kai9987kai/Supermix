@@ -13,13 +13,21 @@ from typing import Any, Dict, Iterable, Optional, Sequence
 
 
 MANIFEST_SCHEMA_VERSION = "supermix-studio-runtime-manifest-v1"
-STUDIO_APP_VERSION = "2026.07.18"
+STUDIO_APP_VERSION = "2026.07.27"
 DEFAULT_MANIFEST_PATH = Path("source/studio_runtime_manifest.json")
 
 RUNTIME_MODULES = (
     "source/chat_app.py",
+    "source/chat_pipeline.py",
     "source/chat_web_app.py",
+    "source/conversation_state.py",
+    "source/score_fusion.py",
+    "source/grounding_runtime.py",
+    "source/interaction_planner.py",
+    "source/prompt_understanding.py",
+    "source/reasoning_engine.py",
     "source/model_variants.py",
+    "source/qwen_chat_web_app.py",
     "source/route_policy_ledger.py",
     "source/route_policy_lab.py",
     "source/route_policy_explorer.py",
@@ -33,6 +41,12 @@ RUNTIME_MODULES = (
     "source/supermix_multimodel_desktop_app.py",
     "runtime_python/chat_app.py",
     "runtime_python/chat_web_app.py",
+    "runtime_python/conversation_state.py",
+    "runtime_python/score_fusion.py",
+    "runtime_python/grounding_runtime.py",
+    "runtime_python/interaction_planner.py",
+    "runtime_python/prompt_understanding.py",
+    "runtime_python/reasoning_engine.py",
     "runtime_python/chat_pipeline.py",
     "runtime_python/chat_memory.py",
     "runtime_python/device_utils.py",
@@ -48,6 +62,43 @@ CONTRACT_CONSTANTS = {
         "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K",
         "DEFAULT_PREDICTION_STABILITY_MARGIN",
         "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH",
+    ),
+    "source/grounding_runtime.py": (
+        "GROUNDING_SCHEMA_VERSION",
+        "GROUNDING_RUNTIME_VERSION",
+    ),
+    "source/interaction_planner.py": ("PLANNER_VERSION",),
+    "source/prompt_understanding.py": (
+        "PROMPT_UNDERSTANDING_SCHEMA_VERSION",
+        "PROMPT_UNDERSTANDING_VERSION",
+    ),
+    "runtime_python/prompt_understanding.py": (
+        "PROMPT_UNDERSTANDING_SCHEMA_VERSION",
+        "PROMPT_UNDERSTANDING_VERSION",
+    ),
+    "source/reasoning_engine.py": (
+        "REASONING_SCHEMA_VERSION",
+        "REASONING_ENGINE_VERSION",
+    ),
+    "runtime_python/reasoning_engine.py": (
+        "REASONING_SCHEMA_VERSION",
+        "REASONING_ENGINE_VERSION",
+    ),
+    "source/conversation_state.py": (
+        "CONVERSATION_STATE_SCHEMA_VERSION",
+        "CONVERSATION_STATE_VERSION",
+    ),
+    "runtime_python/conversation_state.py": (
+        "CONVERSATION_STATE_SCHEMA_VERSION",
+        "CONVERSATION_STATE_VERSION",
+    ),
+    "source/score_fusion.py": (
+        "SCORE_FUSION_SCHEMA_VERSION",
+        "SCORE_FUSION_VERSION",
+    ),
+    "runtime_python/score_fusion.py": (
+        "SCORE_FUSION_SCHEMA_VERSION",
+        "SCORE_FUSION_VERSION",
     ),
     "source/route_policy_ledger.py": (
         "LEDGER_SCHEMA_VERSION",

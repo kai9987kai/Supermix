@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 DEFAULT_MODELS_DIR = Path(r"C:\Users\kai99\Desktop\models")
@@ -840,6 +840,7 @@ def choose_auto_model(
     prompt: str,
     action_mode: str = "auto",
     uploaded_image_path: str = "",
+    prompt_profile: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Optional[ModelRecord], str]:
     available = {record.key: record for record in records}
     text_models = [record for record in records if record.supports_chat]
@@ -848,6 +849,36 @@ def choose_auto_model(
     prompt_text = str(prompt or "").strip()
     lowered = prompt_text.lower()
     has_uploaded_image = bool(str(uploaded_image_path or "").strip())
+    profile = prompt_profile if isinstance(prompt_profile, Mapping) else {}
+    objective_acts = {
+        str(item.get("act") or "").strip().lower()
+        for item in profile.get("objectives") or []
+        if isinstance(item, Mapping)
+        and str(item.get("mode") or "required").lower() != "forbidden"
+        and str(item.get("act") or "").strip()
+    }
+    knowledge = (
+        profile.get("knowledge")
+        if isinstance(profile.get("knowledge"), Mapping)
+        else {}
+    )
+    profile_deep = bool(
+        objective_acts
+        & {
+            "problem_solving",
+            "decision_support",
+            "explanation",
+            "analysis",
+            "coding",
+            "debugging",
+            "benchmark_analysis",
+            "solve",
+            "compare",
+            "recommend",
+            "explain",
+            "retrieve",
+        }
+    )
 
     if not prompt_text:
         return (
@@ -867,21 +898,38 @@ def choose_auto_model(
 
     wants_image = action_mode == "image" or (
         action_mode == "auto"
-        and bool(IMAGE_PROMPT_RE.search(prompt_text) or GAN_IMAGE_PROMPT_RE.search(prompt_text))
+        and bool(
+            IMAGE_PROMPT_RE.search(prompt_text)
+            or GAN_IMAGE_PROMPT_RE.search(prompt_text)
+            or objective_acts & {"image_generation", "visual_generation"}
+        )
     )
     wants_vision = (
         action_mode == "vision"
         or has_uploaded_image
         or (action_mode == "auto" and bool(VISION_PROMPT_RE.search(prompt_text)))
     )
-    wants_fast = bool(FAST_PROMPT_RE.search(prompt_text)) or len(prompt_text) < 34
-    wants_latest = action_mode != "image" and bool(LATEST_PROMPT_RE.search(prompt_text))
-    wants_benchmark = action_mode != "image" and bool(BENCHMARK_PROMPT_RE.search(prompt_text))
-    wants_math = action_mode != "image" and bool(MATH_PROMPT_RE.search(prompt_text))
+    explicit_fast = bool(FAST_PROMPT_RE.search(prompt_text))
+    wants_fast = explicit_fast or (len(prompt_text) < 34 and not profile_deep)
+    wants_latest = action_mode != "image" and bool(
+        LATEST_PROMPT_RE.search(prompt_text)
+        or bool(knowledge.get("freshness_required", False))
+    )
+    wants_benchmark = action_mode != "image" and bool(
+        BENCHMARK_PROMPT_RE.search(prompt_text)
+        or "benchmark_analysis" in objective_acts
+    )
+    wants_math = action_mode != "image" and bool(
+        MATH_PROMPT_RE.search(prompt_text)
+        or objective_acts & {"arithmetic", "math", "equation_solving"}
+    )
     wants_protein = action_mode != "image" and bool(PROTEIN_PROMPT_RE.search(prompt_text))
     wants_materials = action_mode != "image" and bool(MATERIALS_PROMPT_RE.search(prompt_text))
     wants_3d = action_mode != "image" and bool(THREE_D_PROMPT_RE.search(prompt_text))
-    wants_model_selection = any(token in lowered for token in ("which model", "best model", "select a model", "pick a model"))
+    wants_model_selection = (
+        "model_selection" in objective_acts
+        or any(token in lowered for token in ("which model", "best model", "select a model", "pick a model"))
+    )
 
     if wants_model_selection:
         for key in ("omni_collective_v47", "omni_collective_v46", "omni_collective_v42", "omni_collective_v41", "omni_collective_v8", "omni_collective_v7", "omni_collective_v6", "v40_benchmax", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "omni_collective_v2", "omni_collective_v1", "v33_final", "qwen_v28"):
@@ -943,7 +991,11 @@ def choose_auto_model(
     if EXPERIMENTAL_PROMPT_RE.search(prompt_text) and "v39_final" in available:
         return available["v39_final"], "Auto picked the newest experimental reasoning checkpoint."
 
-    if CODE_PROMPT_RE.search(prompt_text) or ANALYTIC_PROMPT_RE.search(prompt_text):
+    if (
+        CODE_PROMPT_RE.search(prompt_text)
+        or ANALYTIC_PROMPT_RE.search(prompt_text)
+        or profile_deep
+    ):
         if wants_benchmark:
             for key in ("v40_benchmax", "omni_collective_v46", "omni_collective_v42", "omni_collective_v41", "omni_collective_v47", "omni_collective_v6", "omni_collective_v5", "omni_collective_v4", "omni_collective_v3", "v33_final", "v35_final", "v34_final", "qwen_v28"):
                 if key in available:

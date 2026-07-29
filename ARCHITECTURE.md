@@ -210,8 +210,20 @@ The project has evolved through several classifier head architectures, each buil
 | **v24** | **`OmniversalQuantumSimulationExpert`** | **Complex Superposition + Neural ODE + Holographic Binding + Entanglement** |
 | **v25** | **`FractalGenesisExpertHead`** | **Hyperbolic Space + Fractal Recursion + Cellular Automata + Self-Assembly** |
 | **v26** | **`LiquidSpikingTensorExpertHead`** | **Spiking Neurons (LIF) + Liquid Synapses + Test-Time Training + Tensor Networks** |
+| **v50** | **`CognitiveLeapExpertHead`** | **Weight-tied latent refinement + cross-latent attention + ACT halting + deep supervision** |
+| **v51** | **`CognitiveLeapUltraExpertHead`** | **Adaptive early exit gated by a checkpoint-bound prediction-stability verifier** |
+| **v52** | **`CognitiveLeapV52ExpertHead`** | **Quality/continue verifier head + sparse top-k core routing + emotion/intent/strategy appraisal + calibrated entropy** |
 
 > **Note**: All heads preserve backward-compatible weight keys (`weight`, `bias`, `alpha`, etc.) to enable warm-starting from earlier checkpoints.
+
+> **v52 status**: `CognitiveLeapV52ExpertHead` subclasses the v51 ultra head, so a
+> v51 checkpoint loads unchanged and the dense path stays bit-identical. Sparse
+> core routing (`--core_top_k`) and verifier escalation
+> (`--verifier_adaptive_compute`) are both **off by default**: sparse dispatch is
+> not always faster than the dense path on small CPU batches, and the verifier
+> and appraisal heads are randomly initialised until they are trained with
+> labelled auxiliary supervision. Their outputs are not semantic merely because
+> the heads exist.
 
 ---
 

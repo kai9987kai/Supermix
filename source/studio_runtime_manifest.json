@@ -1,13 +1,48 @@
 {
   "active_runtime_tree": "source",
-  "app_version": "2026.07.18",
+  "app_version": "2026.07.27",
   "contracts": {
+    "runtime_python/conversation_state.py": {
+      "CONVERSATION_STATE_SCHEMA_VERSION": "supermix-conversation-state-v1",
+      "CONVERSATION_STATE_VERSION": "supermix-conversation-state-runtime-v1"
+    },
+    "runtime_python/prompt_understanding.py": {
+      "PROMPT_UNDERSTANDING_SCHEMA_VERSION": "supermix-prompt-understanding-v1",
+      "PROMPT_UNDERSTANDING_VERSION": "supermix-prompt-understanding-runtime-v1"
+    },
+    "runtime_python/reasoning_engine.py": {
+      "REASONING_ENGINE_VERSION": "supermix-reasoning-engine-v1",
+      "REASONING_SCHEMA_VERSION": "supermix-reasoning-v1"
+    },
+    "runtime_python/score_fusion.py": {
+      "SCORE_FUSION_SCHEMA_VERSION": "supermix-score-fusion-v1",
+      "SCORE_FUSION_VERSION": "supermix-score-fusion-runtime-v1"
+    },
     "source/chat_app.py": {
       "AUTO_COMPUTE_PLAN_SCHEMA_VERSION": "runtime-auto-compute-plan-v2",
       "AUTO_COMPUTE_STRATEGY": "progressive_accepted_probe",
       "DEFAULT_AUTO_COMPUTE_DISTRIBUTION_TOP_K": 5,
       "DEFAULT_PREDICTION_STABILITY_MARGIN": 0.0005,
       "DEFAULT_PREDICTION_STABILITY_RANK_DEPTH": 3
+    },
+    "source/conversation_state.py": {
+      "CONVERSATION_STATE_SCHEMA_VERSION": "supermix-conversation-state-v1",
+      "CONVERSATION_STATE_VERSION": "supermix-conversation-state-runtime-v1"
+    },
+    "source/grounding_runtime.py": {
+      "GROUNDING_RUNTIME_VERSION": "supermix-grounding-runtime-v1",
+      "GROUNDING_SCHEMA_VERSION": "supermix-grounding-v1"
+    },
+    "source/interaction_planner.py": {
+      "PLANNER_VERSION": "supermix-plan-evaluate-v1"
+    },
+    "source/prompt_understanding.py": {
+      "PROMPT_UNDERSTANDING_SCHEMA_VERSION": "supermix-prompt-understanding-v1",
+      "PROMPT_UNDERSTANDING_VERSION": "supermix-prompt-understanding-runtime-v1"
+    },
+    "source/reasoning_engine.py": {
+      "REASONING_ENGINE_VERSION": "supermix-reasoning-engine-v1",
+      "REASONING_SCHEMA_VERSION": "supermix-reasoning-v1"
     },
     "source/route_policy_explorer.py": {
       "REHEARSAL_RECEIPT_SCHEMA_VERSION": "route-exploration-rehearsal-receipt-v1",
@@ -59,6 +94,10 @@
       "SHADOW_SEED_CAPSULE_SCHEMA_VERSION": "route-study-shadow-seed-capsule-v1",
       "SHADOW_SEED_REVEAL_SCHEMA_VERSION": "route-study-shadow-seed-reveal-v1",
       "SHADOW_TOTAL_ALLOCATION_BPS": 10000
+    },
+    "source/score_fusion.py": {
+      "SCORE_FUSION_SCHEMA_VERSION": "supermix-score-fusion-v1",
+      "SCORE_FUSION_VERSION": "supermix-score-fusion-runtime-v1"
     }
   },
   "entrypoints": {
@@ -77,18 +116,58 @@
   "modules": [
     {
       "path": "source/chat_app.py",
-      "sha256": "210ab471cc97832d6e00c891ff2179941895986b40010cd06f983547c21ac2ea",
-      "size_bytes": 84166
+      "sha256": "336760b19659873a9fc5363eeb26798b925b26db7a18aef6cb8ff1b0567f59e0",
+      "size_bytes": 97013
+    },
+    {
+      "path": "source/chat_pipeline.py",
+      "sha256": "39563e6d34084bd5971aaea7370e2da1994845c47502d741cd895527e47c853d",
+      "size_bytes": 118889
     },
     {
       "path": "source/chat_web_app.py",
-      "sha256": "d50b665b87a99ba6a48a1363a05a46bc6e60e34f8b3a007ec8153cf6968fb1a6",
-      "size_bytes": 70608
+      "sha256": "8c7fa4145a3174cc71c6bbb88a1bcbee5affcd78ceb87cf59cc8e3404a2cf0ba",
+      "size_bytes": 92155
+    },
+    {
+      "path": "source/conversation_state.py",
+      "sha256": "077790a79c13058ae2e3409d30d5d302d7844cef52072a2649199626d3ee50f1",
+      "size_bytes": 34259
+    },
+    {
+      "path": "source/score_fusion.py",
+      "sha256": "0110875f920065612d2c8443af6d353eb98c50dee8b8240665725f98b21127e6",
+      "size_bytes": 15470
+    },
+    {
+      "path": "source/grounding_runtime.py",
+      "sha256": "b1eb463bdfd27be4f039ccfb9222fe30a665d27913c8e7d8a2c80c152f9d8f2e",
+      "size_bytes": 42269
+    },
+    {
+      "path": "source/interaction_planner.py",
+      "sha256": "d8b7c532f84661bbf0f3c123658f3ff620da87d8859b01d531f82cf784271bcf",
+      "size_bytes": 61240
+    },
+    {
+      "path": "source/prompt_understanding.py",
+      "sha256": "bf9a56dc2f666d19cd997dc0c35f019864a99e92057305624ac6402f3b25ba83",
+      "size_bytes": 74421
+    },
+    {
+      "path": "source/reasoning_engine.py",
+      "sha256": "d80079e9e7f996a37d8adcec5d198c27ce30a41547aac86ce4151e85fd2cf9e7",
+      "size_bytes": 81423
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "849cffd386ca41c081861632f9891516b40f29e53037e5467fd29015b0ddb6a3",
-      "size_bytes": 377061
+      "sha256": "5126c67c223e4834cd5c9722547d2d0607f1c1f5d2dd43f0ac418f9d394ff3a5",
+      "size_bytes": 398427
+    },
+    {
+      "path": "source/qwen_chat_web_app.py",
+      "sha256": "bbd9511d4b52b625632bd6568fb35b0f67803c3024daef98cbb578690a19e832",
+      "size_bytes": 97278
     },
     {
       "path": "source/route_policy_ledger.py",
@@ -132,13 +211,13 @@
     },
     {
       "path": "source/multimodel_runtime.py",
-      "sha256": "d5074b4ea1ea483db928f92006251d7cfcc22c62ef4f3a4ede88ee1b9891b832",
-      "size_bytes": 264169
+      "sha256": "968f7c5cf28f730d9f6892d239aea6f1eac01e3371305755b19be681e529e38a",
+      "size_bytes": 277253
     },
     {
       "path": "source/supermix_multimodel_web_app.py",
-      "sha256": "caa016f43eb1c1d91b6d59140381a7b1127392c6afd607c0ac4109b986be9138",
-      "size_bytes": 164215
+      "sha256": "ab44ac98a029a973d82e0118cef9170d7662a1927c63358c51d2602259c6caa3",
+      "size_bytes": 169573
     },
     {
       "path": "source/supermix_multimodel_desktop_app.py",
@@ -147,18 +226,48 @@
     },
     {
       "path": "runtime_python/chat_app.py",
-      "sha256": "210ab471cc97832d6e00c891ff2179941895986b40010cd06f983547c21ac2ea",
-      "size_bytes": 84166
+      "sha256": "336760b19659873a9fc5363eeb26798b925b26db7a18aef6cb8ff1b0567f59e0",
+      "size_bytes": 97013
     },
     {
       "path": "runtime_python/chat_web_app.py",
-      "sha256": "4217b4027e95e0d75a3d57bc6556331eeca14531f81ad37569c9d36536f11eb7",
-      "size_bytes": 62611
+      "sha256": "db64a03714284ea8be64578a8bb55860d6f99555a51f4a602af441b775df9ceb",
+      "size_bytes": 84286
+    },
+    {
+      "path": "runtime_python/conversation_state.py",
+      "sha256": "077790a79c13058ae2e3409d30d5d302d7844cef52072a2649199626d3ee50f1",
+      "size_bytes": 34259
+    },
+    {
+      "path": "runtime_python/score_fusion.py",
+      "sha256": "0110875f920065612d2c8443af6d353eb98c50dee8b8240665725f98b21127e6",
+      "size_bytes": 15470
+    },
+    {
+      "path": "runtime_python/grounding_runtime.py",
+      "sha256": "b1eb463bdfd27be4f039ccfb9222fe30a665d27913c8e7d8a2c80c152f9d8f2e",
+      "size_bytes": 42269
+    },
+    {
+      "path": "runtime_python/interaction_planner.py",
+      "sha256": "d8b7c532f84661bbf0f3c123658f3ff620da87d8859b01d531f82cf784271bcf",
+      "size_bytes": 61240
+    },
+    {
+      "path": "runtime_python/prompt_understanding.py",
+      "sha256": "bf9a56dc2f666d19cd997dc0c35f019864a99e92057305624ac6402f3b25ba83",
+      "size_bytes": 74421
+    },
+    {
+      "path": "runtime_python/reasoning_engine.py",
+      "sha256": "d80079e9e7f996a37d8adcec5d198c27ce30a41547aac86ce4151e85fd2cf9e7",
+      "size_bytes": 81423
     },
     {
       "path": "runtime_python/chat_pipeline.py",
-      "sha256": "4ca8d6e376f0d367a12bbaa3d36809da6d591afec0ef3c106d9911a32b9cf09e",
-      "size_bytes": 109394
+      "sha256": "050921bb238bcd496281866f4bb53bb9a651c4e7bb4d44e472d4d53f75555a17",
+      "size_bytes": 118714
     },
     {
       "path": "runtime_python/chat_memory.py",
@@ -172,13 +281,13 @@
     },
     {
       "path": "runtime_python/llm_database.py",
-      "sha256": "b3debd5ec9e122d3d8d37e4ee03099c82c9d31fce2cd543bb9d7e58fd20ff3d2",
-      "size_bytes": 10235
+      "sha256": "ce03a9d0d2d5a870b1b305fb3fafcf91daadaa79df9d31c46e074d36ce77bb05",
+      "size_bytes": 13320
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "849cffd386ca41c081861632f9891516b40f29e53037e5467fd29015b0ddb6a3",
-      "size_bytes": 377061
+      "sha256": "5126c67c223e4834cd5c9722547d2d0607f1c1f5d2dd43f0ac418f9d394ff3a5",
+      "size_bytes": 398427
     },
     {
       "path": "runtime_python/run.py",

@@ -329,6 +329,7 @@ def _all_model_distill_rows(
                         "temperature": 0.0,
                         "max_new_tokens": 144,
                         "top_p": 0.92,
+                        "interaction_intelligence": False,
                     },
                 )
                 candidate = str(result.response or "").strip()

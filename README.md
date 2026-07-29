@@ -15,18 +15,40 @@ It is intentionally a mixed workspace, not a minimal source-only model repo.
 
 ## Current status
 
-As of July 22, 2026:
+As of July 27, 2026 this tree is the **v52 unified line**: the v51 adaptive-compute
+and understanding work and the previously unmerged v52 model generation now live in
+one tree. See [`docs/V52_UNIFIED_ARCHITECTURE.md`](docs/V52_UNIFIED_ARCHITECTURE.md)
+for the merge contract and [`docs/V52_MERGE_LOG.md`](docs/V52_MERGE_LOG.md) for what
+was taken from where.
 
 - `source/` is the active Supermix Studio runtime and packaging tree
 - the curated desktop build selects `11` core model artifacts and leaves expansion to the model store
 - the route control plane includes durable lifecycle evidence, Policy Lab diagnostics,
   bounded-exposure rehearsal, and a fail-closed stateful experiment protocol preflight
+- a shared Plan-Evaluate interaction layer builds one bounded intent, appraisal,
+  risk, and response contract per turn; it adds anti-sycophancy-aware candidate
+  ranking, high-precision response guards, and compact diagnostics
+- a shared Prompt Understanding v1 layer separates instructions from quoted or
+  code data, recovers bounded cue typos, tracks turn references, detects
+  conflicting constraints, and creates privacy-safe prompt diagnostics
+- a shared Deliberate Reasoning v1 layer solves word-stated problems across
+  fifteen solver families with exact rational arithmetic, and only lets an
+  answer replace a response after an independent verification passes with no
+  disagreement between solvers
+- a shared Conversation State v1 layer accumulates across the whole session rather
+  than a four-turn window: durable user commitments with supersession, questions the
+  assistant asked and whether they were answered, topic threads, cross-conversation
+  repetition, and stated contradictions
+- the `cognitive_leap_v52_expert` model variant adds a supervised quality/continue
+  verifier, bounded emotion/intent/strategy appraisal heads, trainable temperature
+  calibration, and optional sparse top-k recurrent-core execution, while still
+  forwarding the v51 prediction-stability controls it inherits
 - v51 local inference supports progressive accepted-probe reuse plus a post-head,
   allowed-label-scoped decision verifier that checks the ordered top-3 boundary before
   an adaptive early exit
 - `runtime_python/` remains a legacy compatibility snapshot for the smaller chat runtime;
   it is not the source of truth for the multimodel Studio route control plane
-- the Windows installer contract version is `2026.07.18`
+- the Windows installer contract version is `2026.07.27`
 
 ## What is in this repo
 
@@ -57,6 +79,8 @@ As of July 22, 2026:
 - benchmark sweeps across common text benchmarks
 - release-gated v51 adaptive compute with source/package parity and frozen-prompt
   response-fidelity checks
+- Plan-Evaluate interaction intelligence across the source and compatibility
+  runtimes, Studio routes, Qwen, and the static browser copies
 - export and publishing workflows for GitHub releases and Hugging Face model/dataset repos
 
 ## Quick start
@@ -95,6 +119,17 @@ python source/route_policy_protocol_cli.py --example
 
 Both commands are prompt-free, non-executing design tools. They do not assign a
 route, write evidence, estimate policy value, or enable promotion.
+
+### Inspect the deliberate reasoning engine
+
+```bash
+python source/reasoning_cli.py --example
+python source/reasoning_cli.py --query "Convert 5 km to miles" --steps
+```
+
+This shows, for each request, which solver applied, how the answer was checked,
+whether that check is independent, and whether the result would be allowed to
+replace a retrieved response. It computes and audits only.
 
 ### Run the browser-only static bundle
 
@@ -337,6 +372,141 @@ This is type separation, not proof against a hostile local caller fabricating an
 executed envelope.
 
 ## Research and experiment notes
+
+The `supermix-interaction-plan-v1` layer uses observable request and recent-turn
+cues to select a response strategy and contract before generation, then
+reranks or audits the response against that contract. Its ranking contribution
+is bounded, and automatic rewrites are limited to high-precision crisis,
+urgent-medical, explicit unearned-agreement, and explicit dismissive-language
+cases. Missing empathy, unsupported certainty, topical continuity, and lexical
+relevance remain audit-only signals. Interaction diagnostics omit the raw
+prompt.
+
+The plan's compute advice is `shadow_advisory_only`: it cannot change the
+reasoning budget or bypass the checkpoint-bound prediction verifier. Controlled
+Studio evaluations can preserve a response unmodified by this layer with
+`settings.interaction_intelligence=false`; direct Champion and Qwen engine
+calls use `interaction_enabled=False`. Design rationale and research boundaries
+are recorded in
+[`source/RESEARCH_UPGRADES.md`](source/RESEARCH_UPGRADES.md#july-2026-plan-evaluate-interaction-intelligence-v1).
+
+## Prompt Understanding v1
+
+`prompt_understanding.py` creates one deterministic, JSON-safe prompt profile
+from the raw turn and bounded recent context. It recognizes multiple requested
+acts, negation and instruction polarity, output constraints, hard conflicts,
+follow-up references, evidence/freshness needs, and immediate personal-safety
+cues. Quoted text, code, URLs, and paths are masked before intent matching, and
+typo recovery is restricted to a small cue vocabulary instead of rewriting the
+user's content. The raw prompt is never replaced, and diagnostics omit prompt
+text and extracted literals.
+
+The profile is shared across planning, retrieval, grounding, and response
+constraint auditing. Missing required references or irreconcilable hard
+constraints produce one targeted clarification; profile signals cannot enable
+tools, expand permissions, change compute, or override the existing safety
+path. Any consumer that uses the profile for routing remains bound by its
+existing model-eligibility and permission checks.
+
+The design is motivated by ambiguity clarification, realistic typo robustness,
+composed constraint following, and multi-turn dialogue research, including
+[ClarifyMT-Bench](https://arxiv.org/abs/2512.21120),
+[MulTypo](https://arxiv.org/abs/2510.09536),
+[ComplexBench](https://arxiv.org/abs/2407.03978),
+[Multi-IF](https://arxiv.org/abs/2410.15553), and
+[StructFlowBench](https://arxiv.org/abs/2502.14494), with
+[RECAP](https://arxiv.org/abs/2509.04472) and
+[SAGE](https://arxiv.org/abs/2511.08798) informing contextual rewriting and
+ask-versus-act decisions. These sources motivate the design; they do not
+validate Supermix. This upgrade improves runtime logic, pipeline integration,
+tests, and a verifier-gated curriculum. Existing model weights were not
+retrained, so it is not evidence of a smarter trained checkpoint. Full design
+and evaluation boundaries are in
+[`source/RESEARCH_UPGRADES.md`](source/RESEARCH_UPGRADES.md#july-2026-prompt-understanding-v1).
+
+## Grounded problem solving and verified training
+
+Normal chat now enables a bounded grounding layer alongside the existing
+interaction planner:
+
+- explicit arithmetic such as `Calculate (7 * 9) + 5.` is evaluated with a
+  no-eval exact rational solver;
+- local evidence is assigned stable `S1` identifiers and audited for coverage,
+  conflict, and fabricated citations;
+- Champion Web can use the same optional `llm_chat.db` and persistent
+  `chat_memory.db` paths as Champion Terminal;
+- Qwen keeps evidence separate from conversation history and treats retrieved
+  text as untrusted data; and
+- Studio shows grounding status and source cards without giving the grounding
+  layer any model-routing or adaptive-exit authority.
+
+Raw fidelity evaluations can pass `grounding_enabled=False` to direct Champion
+or Qwen engine calls, or `settings.grounding_intelligence=false` to Studio.
+
+## Deliberate Reasoning v1
+
+`reasoning_engine.py` extends solving from literal arithmetic expressions to
+problems stated in words. It is deterministic, dependency-free, uses no `eval`
+and no network, and computes every answer with exact rational arithmetic, so
+`10% of 0.1` is `1/100` rather than a float approximation.
+
+Fifteen solver families are covered: percentages and percent change, ordered
+percent chains such as a discount followed by tax, unit conversion across
+length, mass, volume, time, data, area, speed, and temperature, linear
+equations, speed-distance-time, combined work rates, proportions, sequences,
+statistics, gcd/lcm/primality/factorization, combinatorics, date differences
+and offsets, simple and compound interest, and sum-and-difference problems.
+
+Verification is a precondition for authority rather than a report:
+
+- each solver publishes how its answer was checked and whether that check is
+  independent of the path that produced it;
+- a linear equation is re-checked by a second substitution evaluator written
+  against a different strategy than the symbolic collector that solved it;
+- a unit conversion must pass both an exact round trip and a magnitude
+  direction test, because a round trip alone cancels an inverted factor;
+- a sequence rule must hold for every supplied term, not just the last pair;
+- `deep` tier runs every applicable solver and any disagreement withdraws
+  override authority.
+
+Compute is adaptive and bounded. A deterministic complexity score selects
+`fast`, which stops at the first self-verified path, or `deep`, which explores
+all paths and requires agreement. Solver count, literal digit length, list and
+sequence sizes, factorial and combination sizes, date deltas, and result bit
+width are all capped.
+
+A computed answer replaces a retrieved response at exactly one point,
+`finalize_grounded_response`, and only when the problem is solved, its
+verification passed, and no solver disagreed. Explicit arithmetic keeps its
+existing dedicated path and takes precedence; the strict-evidence override
+outranks both. If the request asks for working, the recorded steps are
+included. The layer has no routing, compute, or adaptive-exit authority, and
+its diagnostics carry class, method, verification, consensus, and budget only —
+never the prompt, the extracted numbers, or the answer.
+
+The same `settings.grounding_intelligence=false` and `grounding_enabled=False`
+switches disable it for raw fidelity evaluation. Design rationale, the papers
+that motivate it, and the evaluation boundary are in
+[`source/RESEARCH_UPGRADES.md`](source/RESEARCH_UPGRADES.md#july-2026-deliberate-reasoning-v1).
+This upgrade changes runtime logic and tests only; no model weights were
+retrained, so it is not evidence of a smarter trained checkpoint.
+
+Build a deterministic verifier-grounded Qwen curriculum:
+
+```powershell
+python source/build_verifiable_reasoning_curriculum.py `
+  --output-dir output/verifiable_reasoning_curriculum_v1 `
+  --train-rows 2000 `
+  --eval-rows 400
+```
+
+The generated train/evaluation templates are disjoint and every included answer
+passes a safe deterministic verifier. The Qwen pipeline revalidates tagged
+teacher caches and reports verified accuracy by problem family. This adds a
+training and promotion path; it does not claim that model weights improved
+until an adapter is trained and passes the fixed held-out gate. Design details
+and research boundaries are in
+[`source/RESEARCH_UPGRADES.md`](source/RESEARCH_UPGRADES.md#july-2026-grounded-problem-solving-and-verifier-grounded-training-v1).
 
 The accepted v51 decision-fidelity configuration is checkpoint- and
 workload-calibrated: ordered top-3 persistence, a `0.0005` minimum adjacent

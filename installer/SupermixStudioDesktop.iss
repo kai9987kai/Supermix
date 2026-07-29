@@ -5,7 +5,7 @@
   #define MyAppExeName "SupermixStudioDesktop.exe"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "2026.07.18"
+  #define MyAppVersion "2026.07.27"
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\dist\SupermixStudioDesktop"
@@ -48,6 +48,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
+
+[InstallDelete]
+; Model bundles are content-addressed at build time and shipped via PyInstaller
+; --add-data into _internal\bundled_models. Remove an older bundle on upgrade so
+; a model dropped from the new manifest cannot survive and stay loadable.
+Type: filesandordirs; Name: "{app}\_internal\bundled_models"
 
 [Files]
 Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.log,*.tmp,*.pyc,__pycache__"
