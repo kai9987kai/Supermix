@@ -13,6 +13,71 @@ This repository combines:
 
 It is intentionally a mixed workspace, not a minimal source-only model repo.
 
+## MiMoMix v53 (new, additive)
+
+`source/mimomix_*.py` is a new self-contained line that fuses the current Xiaomi
+MiMo structural techniques, the Supermix v51/v52 verified-recursion cognition,
+and the AI-Dem-Lab research-sandbox concepts into one stack:
+
+- **hybrid attention** — local sliding-window layers interleaved with global
+  layers at a configurable ratio (MiMo-V2-Flash uses 5:1, V2.5-Pro 6:1, both with
+  a 128-token window), plus a learnable per-head attention sink. Only the global
+  layers keep an unbounded KV cache, which is where the cache saving comes from
+- **auxiliary-loss-free sparse MoE** — experts are *selected* by score + bias but
+  *weighted* by score alone, so the balancer can never distort the forward value;
+  plus router z-loss, shared always-on experts, and dense lower layers
+- **multi-token prediction** reused at inference as a self-speculative draft.
+  Greedy output is bit-identical to plain autoregressive decoding, proven by
+  `assert_greedy_equivalence` across seeds, batches, RoPE policies and layouts
+- **progressive RoPE context extension** with explicit `none` / NTK-aware / YaRN
+  policies rather than one implicit default
+- **the v52 recursive thinking core** — weight-tied refinement, ACT halting with
+  a ponder cost, trainable temperature calibration, and the supervised
+  quality/continue verifier
+- **a progressive thinking controller** — fast/deep/agent routing, difficulty and
+  epistemic-risk floors, and a budget ladder whose early exit needs the verifier
+  to stand down *and* confidence/entropy targets met *and* cross-budget ordered
+  top-k agreement. The accepted output is the probe the model actually produced,
+  never a blend
+- **the Dem-Lab observatory** — entropy and randomness batteries with exact
+  chi-square p-values, novelty/stability meters, semantic resonance, routing
+  attribution, robust anomaly detection, replicator dynamics over controller
+  policies, and Q-learning feedback that proposes a starting budget
+- **MOPD post-training** — group-relative domain RL, then multi-teacher
+  on-policy distillation with a dense per-token teacher signal
+
+Measured end to end on a 1.2M-parameter model trained for 250 CPU steps on a
+synthetic periodic task: **6.00x smaller KV cache** than all-global attention at
+1M tokens, **4.000 MTP acceptance length** (74.5% fewer trunk forwards) with
+output bit-identical to greedy decoding, **0.970 normalised routing entropy**
+with no starved experts, and **+25% cycle reduction at 100% top-1 and ordered
+top-3 decision fidelity**. Reproduce with:
+
+```bash
+python source/benchmark_mimomix.py --steps 250 --enforce-gates
+```
+
+Run the routing demo, the browser observatory, and the tests:
+
+```bash
+python source/mimomix_api.py --example
+```
+
+```text
+web_static/mimomix_lab.html
+```
+
+```bash
+python -m pytest test_mimomix_core.py test_mimomix_decoding.py test_mimomix_controller.py test_mimomix_observatory.py test_mimomix_distill.py test_mimomix_api.py
+```
+
+Design, the research each mechanism comes from, and an explicit list of what this
+does **not** prove are in
+[`docs/V53_MIMOMIX_ARCHITECTURE.md`](docs/V53_MIMOMIX_ARCHITECTURE.md). The
+default backends are randomly initialised: they produce well-formed responses and
+honest telemetry, and their text is noise until real weights are trained. v53 is
+additive — no existing v52 module, checkpoint, manifest, or gate changed.
+
 ## Current status
 
 As of July 27, 2026 this tree is the **v52 unified line**: the v51 adaptive-compute

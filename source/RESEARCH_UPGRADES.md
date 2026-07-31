@@ -2466,3 +2466,102 @@ rather than assumed, and closing it is the obvious next step.
 
 As with every other entry in this file: no weights were retrained, so none of
 this is evidence of a smarter trained checkpoint.
+
+## July 2026: v53 MiMoMix Hybrid (Attention + MoE + MTP + Verified Recursion)
+
+New, additive line in `source/mimomix_*.py`. It fuses the current Xiaomi MiMo
+structural techniques, the Supermix v51/v52 verified-recursion cognition, and the
+AI-Dem-Lab research-sandbox concepts into one CPU-runnable stack. No existing
+v52 module, checkpoint, manifest, or gate changed.
+
+Full design and boundaries: `docs/V53_MIMOMIX_ARCHITECTURE.md`.
+
+### Papers and sources this draws on
+
+Attention and long context:
+
+- [StreamingLLM](https://arxiv.org/abs/2309.17453) and
+  [Why do LLMs attend to the first token?](https://arxiv.org/abs/2504.02732) --
+  the attention-sink pathology and the learnable-sink fix
+- [YaRN](https://arxiv.org/abs/2309.00071) -- per-frequency-band RoPE
+  interpolation plus the `0.1*ln(s)+1` attention temperature
+- MiMo-V2-Flash technical report ([arXiv 2601.02780](https://arxiv.org/abs/2601.02780))
+  and the MiMo-V2.5 / V2.5-Pro model pages -- the 5:1 and 6:1 SWA/global
+  interleave at a 128-token window, and the KV-cache consequence
+
+Sparse mixture of experts:
+
+- [Auxiliary-Loss-Free Load Balancing](https://arxiv.org/abs/2408.15664) -- the
+  select-by-bias, weight-by-score rule and the sign update
+- ST-MoE router z-loss; DeepSeekMoE shared/fine-grained experts
+- [Mixture-of-Depths](https://arxiv.org/abs/2404.02258) -- already cited by v52
+  for sparse recurrent-core execution
+
+Multi-token prediction and speculative decoding:
+
+- [Better & Faster LLMs via Multi-token Prediction](https://arxiv.org/abs/2404.19737)
+- DeepSeek-V3's sequential MTP modules with shared embedding and head
+- MiMo's three-layer MTP reused as the draft model for self-speculative decoding
+
+Adaptive test-time compute:
+
+- [Compute-optimal test-time scaling](https://arxiv.org/abs/2408.03314)
+- [REFRAIN](https://arxiv.org/abs/2510.10103) -- the "reason just enough"
+  direction, already cited by v52.1
+- PonderNet / ACT halting, carried over from the v50-v52 cognitive-leap line
+
+Post-training:
+
+- On-policy distillation (student-sampled trajectories, teacher scores each
+  token, reverse KL), generalised by MiMo to Multi-Teacher On-Policy
+  Distillation
+- GRPO and the Dr.GRPO critique of dividing group advantages by their standard
+  deviation
+
+These sources motivate the design. They do not validate this implementation.
+
+### What was implemented
+
+- `mimomix_core.py` -- hybrid SWA/global attention with learnable per-head
+  sinks and per-layer cache spans, `none`/NTK/YaRN RoPE extension,
+  auxiliary-loss-free top-k MoE with router z-loss and shared experts,
+  sequential MTP depths with dense FFNs, and a recursive thinking core carrying
+  ACT halting, a ponder cost, trainable verifier temperature, and supervised
+  `p(correct)`/`p(continue)` heads
+- `mimomix_decoding.py` -- MTP self-speculative decoding with exact
+  greedy-equivalence, safe cache rollback under sliding-window trimming, and
+  acceptance-length accounting
+- `mimomix_controller.py` -- deterministic difficulty and epistemic-risk
+  scoring, fast/deep/agent routing with a safety fast path, a bounded budget
+  ladder gated on verifier stand-down plus confidence/entropy targets plus
+  ordered top-k cross-budget agreement, accepted-probe reuse, and a paid-in-full
+  decision-fidelity audit
+- `mimomix_observatory.py` -- exact chi-square survival via regularised
+  incomplete gamma, monobit and runs tests, min-entropy, JSD, CHSH as a harness
+  self-test, evidence with an optional-stopping penalty, novelty/stability/RSI
+  meters, semantic resonance, routing attribution, median/MAD anomalies,
+  replicator dynamics, and a tabular budget Q-learner
+- `mimomix_distill.py` -- group-relative advantages, clipped GRPO surrogate, and
+  MOPD with a probability-space teacher mixture and per-token dense reward
+- `mimomix_api.py` -- byte tokenizer, backend registry, `/v1/think` with plan-
+  driven routing, and an optional Flask surface
+- `web_static/mimomix_lab.html` -- single-file browser observatory reimplementing
+  the same algorithms in JavaScript
+
+172 tests across six suites. The load-bearing ones assert properties, not
+outputs: that the router bias cannot reach the forward value, that the balancer
+recovers a deliberately collapsed router, that speculative decoding is
+bit-identical to greedy, that the accepted budget's output is reused rather than
+blended, that the verifier can veto but never authorise an early exit, and that
+the observatory's statistics match textbook critical points.
+
+### What this is not
+
+The default backends are randomly initialised. The suites prove integration,
+gradient flow, and the named invariants; they prove nothing about quality. The
+parameter counts, acceptance lengths, cache ratios, and tool-call accuracies
+published for MiMo's checkpoints describe those checkpoints -- v53 implements the
+same mechanisms five orders of magnitude smaller, and a mechanism transferring
+does not mean a result transfers. No weights were trained, no checkpoint was
+promoted, and `cycle_reduction` on an untrained model is correctly negative
+because the gates refuse every early exit.
