@@ -21,6 +21,12 @@ from grounding_runtime import (
     finalize_grounded_response,
     plan_grounding,
 )
+from conversation_directive import build_conversation_directive
+from conversation_state import (
+    audit_response_against_state,
+    build_conversation_state,
+    conversation_state_diagnostics,
+)
 from interaction_planner import (
     finalize_response_for_interaction,
     interaction_plan_diagnostics,
@@ -68,6 +74,19 @@ PRESET_GENERATION = {
     "coding": {"max_new_tokens": 160, "temperature": 0.12, "top_p": 0.88},
 }
 VALID_PRESETS = tuple(PRESET_GENERATION.keys())
+
+# The prompt window and the memory horizon are deliberately different numbers.
+# The prompt still carries the last few messages verbatim, because that is what
+# the model reads; the conversation state is derived from a much longer span,
+# because a constraint stated twenty turns ago has to survive without paying
+# twenty turns of prompt for it.
+PROMPT_HISTORY_MESSAGES = 12
+STATE_HISTORY_MESSAGES = 40
+MAX_SESSION_MESSAGES = 80
+
+# Fixed lock stripes keep same-session turns transactional without an unbounded
+# session-id keyed lock table or unsafe eviction of a lock that is still held.
+SESSION_TURN_LOCK_STRIPES = 64
 
 HTML = r"""<!doctype html>
 <html lang="en">
@@ -213,6 +232,7 @@ HTML = r"""<!doctype html>
         <div class="field">
           <label>Preset</label>
           <div class="preset-row">
+            <button class="preset-btn" data-preset="auto" title="Use a standing conversation preference when one exists; otherwise use Balanced">Auto</button>
             <button class="preset-btn" data-preset="direct">Direct</button>
             <button class="preset-btn" data-preset="balanced">Balanced</button>
             <button class="preset-btn" data-preset="reasoning">Reasoning</button>
@@ -314,7 +334,13 @@ HTML += r"""
     const SESSION_KEY = "supermix-qwen-v26-session";
     const HISTORY_KEY_PREFIX = "supermix-qwen-v26-history-";
     const DRAFT_KEY_PREFIX = "supermix-qwen-v26-draft-";
+    // The server derives conversation state from what it is sent, so sending
+    // more of the session is what lets a preference stated early in it survive.
+    // The prompt window itself stays short; the server slices it back down.
+    const STORED_MESSAGES = 80;
+    const SENT_MESSAGES = 40;
     const PRESETS = {
+      auto: { maxNew: 112, temp: 0.20, topP: 0.92, inherited: true },
       direct: { maxNew: 72, temp: 0.05, topP: 0.82 },
       balanced: { maxNew: 112, temp: 0.20, topP: 0.92 },
       reasoning: { maxNew: 176, temp: 0.14, topP: 0.90 },
@@ -377,7 +403,7 @@ HTML += r"""
 
     const state = {
       sessionId: "",
-      settings: { preset: "balanced", maxNew: 112, temp: 0.20, topP: 0.92, systemHint: "" },
+      settings: { preset: "auto", maxNew: 112, temp: 0.20, topP: 0.92, systemHint: "" },
       status: null,
       messages: [],
       lastBotText: "",
@@ -449,7 +475,7 @@ HTML += r"""
           meta: item.meta && typeof item.meta === "object" ? item.meta : {},
           at: String(item.at || new Date().toISOString())
         };
-      }).filter(Boolean).slice(-24);
+      }).filter(Boolean).slice(-STORED_MESSAGES);
     }
 
     function mountWelcomeCard() {
@@ -480,7 +506,7 @@ HTML += r"""
         localStorage.removeItem(historyStorageKey(state.sessionId));
         return;
       }
-      localStorage.setItem(historyStorageKey(state.sessionId), JSON.stringify(state.messages.slice(-24)));
+      localStorage.setItem(historyStorageKey(state.sessionId), JSON.stringify(state.messages.slice(-STORED_MESSAGES)));
     }
 
     function restoreConversation() {
@@ -551,7 +577,7 @@ HTML += r"""
     function buildHistoryPayload() {
       return state.messages
         .filter((message) => (message.kind === "user" || message.kind === "bot") && !(message.meta && message.meta.local_only))
-        .slice(-20)
+        .slice(-SENT_MESSAGES)
         .map((message) => ({
           role: message.kind === "bot" ? "assistant" : "user",
           content: message.text
@@ -603,15 +629,25 @@ HTML += r"""
       document.querySelectorAll("[data-preset]").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.preset === state.settings.preset);
       });
+      const inherited = state.settings.preset === "auto";
+      [els.maxNew, els.temp, els.topP].forEach((input) => {
+        input.disabled = inherited;
+        input.title = inherited
+          ? "Auto inherits generation values from the resolved conversation preset."
+          : "";
+      });
     }
 
     function updateSendNote() {
       const profile = PRESETS[state.settings.preset] || PRESETS.balanced;
-      els.sendNote.textContent =
-        "Preset: " + state.settings.preset +
-        " | " + profile.maxNew + " max tokens" +
-        " | T=" + Number(state.settings.temp).toFixed(2) +
-        " | top-p " + Number(state.settings.topP).toFixed(2);
+      els.sendNote.textContent = state.settings.preset === "auto"
+        ? "Preset: auto | conversation-aware | balanced fallback"
+        : (
+          "Preset: " + state.settings.preset +
+          " | " + profile.maxNew + " max tokens" +
+          " | T=" + Number(state.settings.temp).toFixed(2) +
+          " | top-p " + Number(state.settings.topP).toFixed(2)
+        );
       updateConversationSummary();
     }
 
@@ -904,6 +940,29 @@ HTML += r"""
             metaRow.appendChild(item);
           });
         }
+        if (meta.conversation && typeof meta.conversation === "object") {
+          const conversation = meta.conversation;
+          const directive = conversation.directive || {};
+          const audit = conversation.response_audit || {};
+          const labels = [
+            "session turns " + Number(conversation.turn_count || 0),
+            "standing " + Number(conversation.active_commitment_count || 0)
+          ];
+          if (directive.contract_line_count) {
+            labels.push("contract " + directive.contract_line_count + " lines");
+          }
+          if (directive.preset_changed) {
+            labels.push("preset from memory (" + (directive.preset_reason || "") + ")");
+          }
+          if (Array.isArray(audit.violations) && audit.violations.length) {
+            labels.push("audit " + audit.violations.join("+"));
+          }
+          labels.forEach((label) => {
+            const item = document.createElement("span");
+            item.textContent = label;
+            metaRow.appendChild(item);
+          });
+        }
         if (meta.grounding && typeof meta.grounding === "object") {
           const grounding = meta.grounding;
           const diagnostics = grounding.diagnostics || {};
@@ -1111,21 +1170,28 @@ HTML += r"""
       setSending(true);
       setPendingMessage();
       try {
-        const data = await jpost("/api/chat", {
+        const requestPayload = {
           session_id: state.sessionId,
           history: history,
           message: text,
           preset: state.settings.preset,
-          system_hint: state.settings.systemHint,
-          max_new_tokens: Number(state.settings.maxNew),
-          temperature: Number(state.settings.temp),
-          top_p: Number(state.settings.topP)
-        });
+          system_hint: state.settings.systemHint
+        };
+        // In Auto, omission is meaningful: it lets the server apply the
+        // generation values of the preset resolved from conversation state.
+        // Explicit presets continue to send the editable values verbatim.
+        if (state.settings.preset !== "auto") {
+          requestPayload.max_new_tokens = Number(state.settings.maxNew);
+          requestPayload.temperature = Number(state.settings.temp);
+          requestPayload.top_p = Number(state.settings.topP);
+        }
+        const data = await jpost("/api/chat", requestPayload);
         clearPendingMessage();
         const responseMeta = {
           ...(data.timing || {}),
           prompt_understanding: data.prompt_understanding || null,
           interaction: data.interaction || null,
+          conversation: data.conversation || null,
           grounding: data.grounding || null
         };
         addMessage("bot", data.response, responseMeta, { at: new Date().toISOString() });
@@ -1437,10 +1503,18 @@ def clamp_float(value: Any, minimum: float, maximum: float, fallback: float) -> 
 
 
 def normalize_history_payload(value: Any) -> List[Dict[str, str]]:
+    """Accept the whole client history the conversation state can use.
+
+    This used to truncate to twelve messages, which silently capped the memory
+    horizon at six turns no matter how much the browser sent: the prompt window
+    and the memory horizon were the same number because nothing else read the
+    history.
+    """
+
     if not isinstance(value, list):
         return []
     cleaned: List[Dict[str, str]] = []
-    for item in value[-20:]:
+    for item in value[-MAX_SESSION_MESSAGES:]:
         if not isinstance(item, dict):
             continue
         role = str(item.get("role") or "").strip().lower()
@@ -1450,7 +1524,72 @@ def normalize_history_payload(value: Any) -> List[Dict[str, str]]:
         if not content:
             continue
         cleaned.append({"role": role, "content": content[:4000]})
-    return cleaned[-12:]
+    return cleaned[-STATE_HISTORY_MESSAGES:]
+
+
+def resolve_preset_name(directive_preset: Any, requested_preset: Any) -> str:
+    """Settle on a preset this surface actually defines.
+
+    The directive layer names a preset without knowing this surface's table, so
+    an unknown name from it is ignored rather than trusted, and the caller's own
+    request is what stands.
+    """
+
+    resolved = str(directive_preset or "").strip().lower()
+    if resolved in PRESET_GENERATION:
+        return resolved
+    requested = str(requested_preset or "").strip().lower()
+    return requested if requested in PRESET_GENERATION else "balanced"
+
+
+def compose_chat_messages(
+    history: Sequence[Mapping[str, Any]],
+    user_text: str,
+    preset: str,
+    system_hint: str,
+    grounding_context: str = "",
+    prompt_contract_context: str = "",
+    conversation_contract: str = "",
+) -> List[Dict[str, str]]:
+    """Assemble the message list for one turn.
+
+    Split out of `Engine._build_prompt` so what reaches the model can be
+    asserted without a checkpoint: the routing is testable even when the
+    generation it steers is not.
+
+    Order is intentional. Trusted system controls stay in system messages.
+    Historical user-authored memory is prepended to the newest user message,
+    keeping it at user authority and placing the current request last so it wins
+    conflicts. This avoids elevating remembered prompt injection to system
+    priority.
+    """
+
+    messages: List[Dict[str, str]] = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
+    preset_hint = PRESET_HINTS.get(preset)
+    if preset_hint:
+        messages.append({"role": "system", "content": preset_hint})
+    if system_hint:
+        messages.append({"role": "system", "content": f"Session steering: {system_hint}"})
+    if prompt_contract_context:
+        messages.append({"role": "system", "content": prompt_contract_context})
+    if grounding_context:
+        messages.append({"role": "system", "content": grounding_context})
+    for message in history:
+        role = str(message.get("role") or "user")
+        messages.append(
+            {
+                "role": "assistant" if role.startswith("a") else "user",
+                "content": str(message.get("content") or ""),
+            }
+        )
+    current_content = user_text
+    if conversation_contract:
+        current_content = (
+            f"{conversation_contract}\n\n"
+            f"Current request (newer; it overrides conflicting memory above):\n{user_text}"
+        )
+    messages.append({"role": "user", "content": current_content})
+    return messages
 
 
 def slug_to_label(value: str) -> str:
@@ -1779,6 +1918,10 @@ class Engine:
         self.adapter_loaded = adapter_loaded
         self.profile = dict(profile)
         self.lock = threading.RLock()
+        self.inference_lock = threading.Lock()
+        self.session_turn_locks = tuple(
+            threading.Lock() for _ in range(SESSION_TURN_LOCK_STRIPES)
+        )
         self.sessions: Dict[str, List[Dict[str, str]]] = {}
 
     def status(self) -> Dict[str, Any]:
@@ -1788,12 +1931,22 @@ class Engine:
             "adapter_loaded": bool(self.adapter_loaded),
             "sessions": len(self.sessions),
             "profile": self.profile,
-            "defaults": {"preset": "balanced", "generation": PRESET_GENERATION["balanced"]},
+            "defaults": {
+                "preset": "auto",
+                "fallback_preset": "balanced",
+                "generation": PRESET_GENERATION["balanced"],
+            },
         }
 
+    def _session_turn_lock(self, session_id: str) -> "threading.Lock":
+        """Return a stable lock stripe for the full read-generate-append turn."""
+
+        return self.session_turn_locks[hash(str(session_id)) % len(self.session_turn_locks)]
+
     def clear(self, session_id: str) -> None:
-        with self.lock:
-            self.sessions.pop(session_id, None)
+        with self._session_turn_lock(session_id):
+            with self.lock:
+                self.sessions.pop(session_id, None)
 
     def _build_prompt(
         self,
@@ -1803,19 +1956,17 @@ class Engine:
         system_hint: str,
         grounding_context: str = "",
         prompt_contract_context: str = "",
+        conversation_contract: str = "",
     ) -> str:
-        messages = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
-        preset_hint = PRESET_HINTS.get(preset)
-        if preset_hint:
-            messages.append({"role": "system", "content": preset_hint})
-        if system_hint:
-            messages.append({"role": "system", "content": f"Session steering: {system_hint}"})
-        if prompt_contract_context:
-            messages.append({"role": "system", "content": prompt_contract_context})
-        if grounding_context:
-            messages.append({"role": "system", "content": grounding_context})
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_text})
+        messages = compose_chat_messages(
+            history,
+            user_text,
+            preset,
+            system_hint,
+            grounding_context=grounding_context,
+            prompt_contract_context=prompt_contract_context,
+            conversation_contract=conversation_contract,
+        )
         if hasattr(self.tokenizer, "apply_chat_template"):
             return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         lines = []
@@ -1828,9 +1979,28 @@ class Engine:
         self,
         session_id: str,
         user_text: str,
-        max_new_tokens: int,
-        temperature: float,
-        top_p: float,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Run one atomic turn for a session.
+
+        Flask serves requests on multiple threads. The transaction lock covers
+        the history snapshot, directive construction, generation, and append so
+        concurrent requests cannot overwrite each other's turns.
+        """
+
+        if not user_text.strip():
+            raise ValueError("Empty message")
+        with self._session_turn_lock(session_id):
+            return self._chat_transaction(session_id, user_text, *args, **kwargs)
+
+    def _chat_transaction(
+        self,
+        session_id: str,
+        user_text: str,
+        max_new_tokens: Optional[int],
+        temperature: Optional[float],
+        top_p: Optional[float],
         preset: str,
         system_hint: str,
         history_override: Optional[List[Dict[str, str]]] = None,
@@ -1840,17 +2010,29 @@ class Engine:
         prompt_profile: Optional[Mapping[str, Any]] = None,
         grounding_enabled: bool = True,
         evidence_rows: Optional[Sequence[Mapping[str, Any]]] = None,
+        conversation_enabled: bool = True,
+        conversation_state: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not user_text.strip():
             raise ValueError("Empty message")
 
-        preset_name = preset if preset in PRESET_GENERATION else "balanced"
-        defaults = PRESET_GENERATION[preset_name]
         system_hint = str(system_hint or "").strip()[:320]
 
         with self.lock:
-            stored_history = list(self.sessions.get(session_id, []))[-12:]
-        history = list(history_override)[-12:] if history_override is not None else stored_history
+            stored_history = list(self.sessions.get(session_id, []))
+        # A client history hydrates a new/restarted server session. Once the
+        # server has state, it is authoritative: a stale second tab must not
+        # erase a turn that already completed on this process.
+        history_source = "server" if stored_history else (
+            "client_hydration" if history_override else "empty"
+        )
+        retained_history = (
+            stored_history
+            if stored_history
+            else list(history_override or ())
+        )[-MAX_SESSION_MESSAGES:]
+        session_history = retained_history[-STATE_HISTORY_MESSAGES:]
+        history = session_history[-PROMPT_HISTORY_MESSAGES:]
         interaction_request_text = str(interaction_user_text or user_text)
         recent_user_messages = [
             str(message.get("content") or "")
@@ -1902,6 +2084,25 @@ class Engine:
                 prompt_profile=prompt_profile,
             )
 
+        # Accumulated over the whole retained session rather than the twelve
+        # messages the prompt carries. A controlled evaluation can switch the
+        # whole layer off, and a caller that already built the state (the Studio
+        # runtime does) passes it in rather than paying for it twice.
+        if not conversation_enabled:
+            conversation_state = None
+        elif conversation_state is None:
+            conversation_state = build_conversation_state(
+                session_history, current_user_text=interaction_request_text
+            )
+        directive = build_conversation_directive(
+            conversation_state,
+            requested_preset=preset,
+            current_user_text=interaction_request_text,
+            enabled=conversation_enabled,
+        )
+        preset_name = resolve_preset_name(directive.get("preset"), preset)
+        defaults = PRESET_GENERATION[preset_name]
+
         grounding_plan = (
             plan_grounding(
                 interaction_request_text,
@@ -1947,6 +2148,7 @@ class Engine:
                 if interaction_enabled
                 else ""
             ),
+            conversation_contract=str(directive.get("contract") or ""),
         )
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1536).to(self.device)
 
@@ -1954,6 +2156,18 @@ class Engine:
         final_temperature = clamp_float(temperature, 0.0, 1.4, float(defaults["temperature"]))
         final_top_p = clamp_float(top_p, 0.1, 1.0, float(defaults["top_p"]))
         do_sample = final_temperature >= 0.16
+        generation_diag = {
+            "preset": preset_name,
+            "max_new_tokens": final_max_new_tokens,
+            "temperature": final_temperature,
+            "top_p": final_top_p,
+            "do_sample": do_sample,
+            "inherited_from_preset": {
+                "max_new_tokens": max_new_tokens is None,
+                "temperature": temperature is None,
+                "top_p": top_p is None,
+            },
+        }
 
         gen_kwargs = {
             "max_new_tokens": final_max_new_tokens,
@@ -1970,8 +2184,12 @@ class Engine:
             gen_kwargs["top_k"] = 40
 
         wall_start = time.perf_counter()
-        with torch.no_grad():
-            out = self.model.generate(**inputs, **gen_kwargs)
+        # Transformer generation and tokenizer/model telemetry are shared by
+        # every session. Keep model execution single-flight while allowing
+        # request parsing and independent session bookkeeping to proceed.
+        with self.inference_lock:
+            with torch.no_grad():
+                out = self.model.generate(**inputs, **gen_kwargs)
         total_ms = (time.perf_counter() - wall_start) * 1000.0
 
         new_tokens = out[0, inputs["input_ids"].shape[1] :]
@@ -2035,12 +2253,28 @@ class Engine:
             prompt_profile,
         )
 
+        conversation_diag: Optional[Dict[str, Any]] = None
+        if conversation_state is not None:
+            conversation_diag = conversation_state_diagnostics(conversation_state)
+            conversation_diag["directive"] = dict(directive.get("diagnostics") or {})
+            conversation_diag["directive"]["generation"] = generation_diag
+            conversation_diag["history_source"] = history_source
+            # Audit only. `audit_response_against_state` has existed since v1
+            # and was never called by a runtime surface, so nothing has ever
+            # reported whether a reply repeats an earlier answer or re-asks a
+            # question the user already answered. It still changes no text.
+            conversation_diag["response_audit"] = audit_response_against_state(
+                response,
+                conversation_state,
+                current_user_text=interaction_request_text,
+            )
+
         with self.lock:
-            new_history = history + [
+            new_history = retained_history + [
                 {"role": "user", "content": user_text},
                 {"role": "assistant", "content": response},
             ]
-            self.sessions[session_id] = new_history[-20:]
+            self.sessions[session_id] = new_history[-MAX_SESSION_MESSAGES:]
 
         output_tokens = int(new_tokens.shape[0])
         seconds = max(1e-6, total_ms / 1000.0)
@@ -2049,9 +2283,11 @@ class Engine:
             "session_id": session_id,
             "response": response,
             "preset_used": preset_name,
+            "generation": generation_diag,
             "output_tokens": output_tokens,
             "prompt_understanding": understanding_diag,
             "interaction": interaction_diag,
+            "conversation": conversation_diag,
             "grounding": grounding_diag,
             "timing": {
                 "total_ms": round(total_ms, 1),
@@ -2180,20 +2416,36 @@ def build_app(engine: Engine) -> Flask:
         payload = request.get_json(force=True, silent=True) or {}
         session_id = str(payload.get("session_id") or "").strip() or str(uuid.uuid4())
         message = str(payload.get("message") or "").strip()
-        preset = str(payload.get("preset") or "balanced").strip().lower()
+        # "auto" rather than "balanced": a caller that names no preset has
+        # expressed no preference, so a preference the user stated earlier in
+        # the session is allowed to fill it in. An explicit name still wins.
+        preset = str(payload.get("preset") or "auto").strip().lower()
         history_override = normalize_history_payload(payload.get("history")) if "history" in payload else None
         try:
             return jsonify(
                 engine.chat(
                     session_id=session_id,
                     user_text=message,
-                    max_new_tokens=int(payload.get("max_new_tokens") or PRESET_GENERATION["balanced"]["max_new_tokens"]),
-                    temperature=float(payload.get("temperature") or PRESET_GENERATION["balanced"]["temperature"]),
-                    top_p=float(payload.get("top_p") or PRESET_GENERATION["balanced"]["top_p"]),
+                    max_new_tokens=(
+                        int(payload["max_new_tokens"])
+                        if payload.get("max_new_tokens") not in (None, "")
+                        else None
+                    ),
+                    temperature=(
+                        float(payload["temperature"])
+                        if payload.get("temperature") not in (None, "")
+                        else None
+                    ),
+                    top_p=(
+                        float(payload["top_p"])
+                        if payload.get("top_p") not in (None, "")
+                        else None
+                    ),
                     preset=preset,
                     system_hint=str(payload.get("system_hint") or ""),
                     history_override=history_override,
                     grounding_enabled=bool(payload.get("grounding_enabled", True)),
+                    conversation_enabled=bool(payload.get("conversation_enabled", True)),
                     evidence_rows=(
                         payload.get("evidence")
                         if isinstance(payload.get("evidence"), list)

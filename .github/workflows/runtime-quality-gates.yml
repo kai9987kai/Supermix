@@ -56,6 +56,14 @@ jobs:
             source/route_policy_study_cli.py \
             source/route_policy_protocol_cli.py \
             source/route_policy_shadow_cli.py \
+            source/conversation_state.py \
+            source/conversation_directive.py \
+            source/mimomix_api.py \
+            source/mimomix_controller.py \
+            source/mimomix_core.py \
+            source/mimomix_decoding.py \
+            source/mimomix_distill.py \
+            source/mimomix_observatory.py \
             source/generate_studio_runtime_manifest.py \
             source/multimodel_runtime.py \
             source/qwen_supermix_pipeline.py \
@@ -78,6 +86,8 @@ jobs:
           python -m pytest -q test_route_policy_explorer.py test_route_policy_protocol.py test_route_policy_ledger.py test_route_policy_lab.py test_route_policy_shadow_registry.py test_route_policy_study_cli.py test_route_policy_protocol_cli.py test_route_policy_shadow_cli.py test_route_policy_shadow_web_status.py test_studio_runtime_manifest.py test_multimodel_memory_tools.py
           python -m pytest -q test_multimodel_runtime.py
           python -m pytest -q test_supermix_multimodel_web_app.py
+          python -m pytest -q test_conversation_state.py test_conversation_style_memory.py test_conversation_directive.py test_qwen_conversation_routing.py test_multimodel_conversation_hook.py
+          python -m pytest -q test_mimomix_core.py test_mimomix_decoding.py test_mimomix_distill.py test_mimomix_controller.py test_mimomix_observatory.py test_mimomix_api.py
           python -m pytest -q test_training_improvements.py
 
       - name: Freeze and smoke-test protocol console

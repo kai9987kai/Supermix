@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "source"))
@@ -36,6 +35,19 @@ class StubTeacher(nn.Module):
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         b, t = input_ids.shape
         return self.fixed.view(1, 1, -1).expand(b, t, -1).clone()
+
+
+class SequenceTeacher(nn.Module):
+    """Predict either the causal next token or the already-observed token."""
+
+    def __init__(self, predicts_next: bool):
+        super().__init__()
+        self.predicts_next = bool(predicts_next)
+
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        targets = torch.roll(input_ids, shifts=-1, dims=1) if self.predicts_next else input_ids
+        logits = torch.full((*input_ids.shape, VOCAB), -12.0, device=input_ids.device)
+        return logits.scatter(-1, targets.unsqueeze(-1), 12.0)
 
 
 def build(seed: int = 0, **overrides) -> mc.MiMoMixModel:
@@ -80,6 +92,12 @@ def test_config_validates_its_options():
         dl.MOPDConfig(temperature=0.0)
     with pytest.raises(ValueError):
         dl.MOPDConfig(min_teacher_weight=1.0)
+    with pytest.raises(ValueError):
+        dl.MOPDConfig(teacher_top_k=-1)
+    with pytest.raises(ValueError):
+        dl.MOPDConfig(teacher_probability_floor=0.0)
+    with pytest.raises(ValueError):
+        dl.MOPDConfig(max_position_kl=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -152,14 +170,14 @@ def test_domain_weighting_uses_the_supplied_weights():
         dl.teacher_mixture_log_probs(teachers, tokens, dl.MOPDConfig(weighting="domain"))
 
 
-def test_teacher_top_k_truncation_zeroes_the_tail():
+def test_teacher_top_k_truncation_keeps_only_a_tiny_finite_tail():
     logits = torch.tensor([5.0, 4.0, 3.0, 2.0] + [0.0] * (VOCAB - 4)).view(1, 1, -1)
     mixture, _ = dl.teacher_mixture_log_probs(
         [logits], torch.zeros(1, 1, dtype=torch.long), dl.MOPDConfig(teacher_top_k=2)
     )
     probs = mixture.exp()[0, 0]
     assert probs[0] + probs[1] == pytest.approx(1.0, abs=1e-5)
-    assert probs[2] < 1e-9
+    assert 0.0 < probs[2] < 1e-7
 
 
 def test_mixture_requires_a_teacher():
@@ -187,6 +205,26 @@ def test_reverse_kl_is_positive_and_differentiable():
     assert float(result.loss.detach()) > 0.0
     result.loss.backward()
     assert student.grad is not None and student.grad.abs().sum() > 0
+
+
+def test_top_k_reverse_kl_is_finite_when_sample_lies_outside_teacher_support():
+    student = torch.randn(1, 2, VOCAB, requires_grad=True)
+    teacher = torch.full((1, 2, VOCAB), -20.0)
+    teacher[..., 3] = 10.0
+    teacher[..., 7] = 9.0
+    sampled = torch.zeros(1, 2, dtype=torch.long)  # outside the teacher's top-2
+
+    result = dl.on_policy_distillation_loss(
+        student,
+        [teacher],
+        sampled,
+        config=dl.MOPDConfig(teacher_top_k=2),
+    )
+    assert bool(torch.isfinite(result.loss))
+    result.loss.backward()
+    assert student.grad is not None
+    assert bool(torch.isfinite(student.grad).all())
+    assert float(student.grad.abs().sum()) > 0.0
 
 
 def test_dense_reward_is_per_position():
@@ -364,6 +402,32 @@ def test_trainer_only_scores_generated_positions():
     report = trainer.step(torch.randint(0, VOCAB, (1, 6)), generator=torch.Generator().manual_seed(0))
     assert report["sequence_length"] == 9
     assert report["scored_positions"] == 3
+
+
+def test_trainer_confidence_weights_the_teacher_of_the_causal_next_token(monkeypatch):
+    student = build(0, use_moe=False)
+    sequence = torch.tensor([[0, 1, 2, 3, 4]])
+
+    def fixed_rollout(model, prompt_ids, **kwargs):
+        del model, kwargs
+        return sequence.to(prompt_ids.device)
+
+    monkeypatch.setattr(dl, "sample_rollout", fixed_rollout)
+    trainer = dl.MOPDTrainer(
+        student=student,
+        teachers=[
+            dl.TeacherSpec("causal-next", SequenceTeacher(predicts_next=True)),
+            dl.TeacherSpec("current-token", SequenceTeacher(predicts_next=False)),
+        ],
+        optimizer=torch.optim.SGD(student.parameters(), lr=1e-3),
+        config=dl.MOPDConfig(weighting="confidence", min_teacher_weight=0.0),
+        max_new_tokens=2,
+    )
+
+    report = trainer.step(sequence[:, :3])
+    assert report["scored_positions"] == 2
+    assert report["mean_teacher_weights"][0] > 0.99
+    assert report["mean_teacher_weights"][1] < 0.01
 
 
 def test_teacher_spec_accepts_a_mimomix_model():

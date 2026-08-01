@@ -123,6 +123,52 @@ def test_repeated_clarification_raises_a_loop_flag() -> None:
     assert audit["authority"] == "audit_only"
 
 
+def test_response_audit_respects_a_newer_opposite_style_request() -> None:
+    concise = source.build_conversation_state(
+        [("Please always keep answers concise", "Understood.")],
+        current_user_text="Explain that in detail",
+    )
+    detailed_response = " ".join(["detail"] * 100)
+    assert source.audit_response_against_state(
+        detailed_response,
+        concise,
+        current_user_text="Explain that in detail",
+    )["ignores_style_request"] is False
+
+    detailed = source.build_conversation_state(
+        [("I prefer detailed answers", "Understood.")],
+        current_user_text="Just briefly this time",
+    )
+    assert source.audit_response_against_state(
+        "Short answer.",
+        detailed,
+        current_user_text="Just briefly this time",
+    )["ignores_style_request"] is False
+
+
+def test_turn_scoped_style_request_does_not_become_standing_memory() -> None:
+    state = source.build_conversation_state(
+        [
+            ("I prefer detailed answers", "Understood."),
+            ("Keep it short this time", "Short answer."),
+        ],
+        current_user_text="Now explain closures",
+    )
+
+    assert state["style_request"] == "detailed"
+    assert all(
+        "this time" not in row["text"].lower()
+        for row in state["commitments"]
+        if row["active"]
+    )
+
+    no_prior_style = source.build_conversation_state(
+        [("Keep it short this time", "Short answer.")],
+        current_user_text="Now explain closures",
+    )
+    assert no_prior_style["style_request"] == ""
+
+
 def test_repetition_is_detected_across_the_whole_conversation() -> None:
     answer = (
         "A closure is a function that captures variables from its enclosing "
@@ -253,6 +299,38 @@ def test_brief_summarises_what_the_conversation_established() -> None:
     assert "concise" in brief
     assert len(brief) <= 600
     assert source.render_state_brief(None) == ""
+
+
+def test_a_turn_log_keyed_by_speaker_is_not_dropped_in_silence() -> None:
+    """The Studio memory store writes `{"user": ..., "assistant": ...}` rows.
+
+    They matched neither the role-dict branch nor the pair branch, so every turn
+    produced an empty `content` and was skipped: the whole history read as an
+    empty conversation, with no error anywhere.
+    """
+
+    turns = [
+        {"user": "I always deploy with the staging profile first", "assistant": "Understood."},
+        {"user": "what changed in the last release", "assistant": "Three fixes."},
+    ]
+    state = source.build_conversation_state(turns, current_user_text="ship it")
+
+    assert state["turn_count"] == 5
+    assert state["user_turn_count"] == 3
+    assert any(
+        "staging profile" in row["text"] for row in state["commitments"] if row["active"]
+    )
+    # The documented pair form must produce exactly the same state.
+    assert state == source.build_conversation_state(
+        [(row["user"], row["assistant"]) for row in turns], current_user_text="ship it"
+    )
+
+
+def test_a_style_statement_is_classified_the_same_way_everywhere() -> None:
+    assert source.style_preference_of("please keep answers concise") == "concise"
+    assert source.style_preference_of("I prefer detailed answers") == "detailed"
+    assert source.style_preference_of("I use Python 3.12") == ""
+    assert source.style_preference_of(None) == ""
 
 
 def test_source_and_runtime_contracts_are_exact_mirrors() -> None:

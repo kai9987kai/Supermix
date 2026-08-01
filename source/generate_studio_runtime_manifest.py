@@ -21,6 +21,7 @@ RUNTIME_MODULES = (
     "source/chat_pipeline.py",
     "source/chat_web_app.py",
     "source/conversation_state.py",
+    "source/conversation_directive.py",
     "source/score_fusion.py",
     "source/grounding_runtime.py",
     "source/interaction_planner.py",
@@ -36,6 +37,7 @@ RUNTIME_MODULES = (
     "source/route_policy_study_cli.py",
     "source/route_policy_protocol_cli.py",
     "source/route_policy_shadow_cli.py",
+    "source/multimodel_memory.py",
     "source/multimodel_runtime.py",
     "source/supermix_multimodel_web_app.py",
     "source/supermix_multimodel_desktop_app.py",
@@ -92,6 +94,11 @@ CONTRACT_CONSTANTS = {
         "CONVERSATION_STATE_SCHEMA_VERSION",
         "CONVERSATION_STATE_VERSION",
     ),
+    "source/conversation_directive.py": (
+        "CONVERSATION_DIRECTIVE_SCHEMA_VERSION",
+        "CONVERSATION_DIRECTIVE_VERSION",
+    ),
+    "source/multimodel_memory.py": ("MEMORY_SCHEMA_VERSION",),
     "source/score_fusion.py": (
         "SCORE_FUSION_SCHEMA_VERSION",
         "SCORE_FUSION_VERSION",

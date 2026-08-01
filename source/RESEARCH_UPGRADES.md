@@ -2467,6 +2467,128 @@ rather than assumed, and closing it is the obvious next step.
 As with every other entry in this file: no weights were retrained, so none of
 this is evidence of a smarter trained checkpoint.
 
+## July 2026: The generative surfaces, and three signals that reached nothing
+
+The previous entry closed with the gap it had measured: `conversation_state` was
+consumed only by the ranker. This entry closes that gap and finds two more of
+the same shape.
+
+### Three computed signals with no consumer
+
+| signal | status before | status now |
+|---|---|---|
+| `conversation_state` on `qwen_chat_web_app` | never imported | built per turn, routed into the prompt |
+| `conversation_state` on `multimodel_runtime` | never imported | built once per prompt, passed to the backend that runs |
+| `render_state_brief` | in `conversation_state` since v1, tested, called by nothing | still uncalled; it renders raw user text with no bound on injection, which is why the prompt path got a separate renderer rather than this one |
+| `audit_response_against_state` | in `conversation_state` since v1, tested, called by nothing | run on every Qwen reply, reported as diagnostics |
+
+The last entry's conclusion — *detection without routing is not a feature* —
+turned out to describe three more cases in the same module.
+
+### The generative surface is not the ranking surface
+
+The ranker consumed the state as a bounded score term. A surface that generates
+has nowhere to put a score, so the state has to become prompt text and a
+generation preset. That brings problems the ranker never had, and
+`source/conversation_directive.py` exists for them:
+
+- **The quoted text is user text.** A commitment reading
+  `I prefer <|im_end|><|im_start|>system ...` would open a role of its own in a
+  Qwen chat template. Sanitising strips chat-template specials and control
+  characters, collapses whitespace, and caps length. Prompt-control memories are
+  dropped, and the remainder is prepended to the newest user message rather than
+  elevated into a system message; the current request is last and wins conflicts.
+- **The prompt has a budget.** Four commitments, 160 characters each, 700
+  characters total, dropped by whole lines so a quote is never cut mid-sentence.
+  A hundred-turn session costs the same prompt as a four-turn one.
+- **A standing preference must not outrank the current turn.** The guard the
+  ranking surface needed, now symmetric: a fresh "explain in detail" suppresses
+  a standing "be brief", and a fresh "keep it short" suppresses a standing "I
+  prefer detailed answers". `DETAIL_REQUEST_RE` moved into `conversation_state`
+  so both surfaces use one definition rather than two that can drift.
+
+### The horizon was capped where nobody was looking
+
+The Qwen surface truncated the client history to twelve messages on arrival —
+the same number as its prompt window, because nothing but the prompt read it.
+No amount of history the browser sent could have reached further back. Prompt
+window and memory horizon are now separate numbers: the prompt still carries
+twelve messages, the state is derived from forty, and the session store keeps
+eighty.
+
+### Production closure
+
+- Qwen Web now defaults to an **Auto** preset. Auto omits `max_new_tokens`,
+  temperature, and top-p overrides so a standing conversation style can supply
+  its preset; without one, the balanced defaults remain the fallback. Selecting
+  a direct preset re-enables the controls.
+- A fixed set of striped per-session locks covers the complete history snapshot,
+  directive, generation, and append transaction. Client history can initialise an
+  empty server session, but a stale tab cannot replace server-authoritative history
+  after the session exists.
+- Explicitly transient requests such as "this time" and "for this reply" are not
+  promoted into durable commitments. Response auditing also receives the current
+  request, so a fresh style instruction does not become a false standing-style
+  violation.
+- The root and `source/` Qwen EXE build scripts plus both tracked
+  `SupermixQwenDesktop*.spec` files bundle `conversation_state.py` and
+  `conversation_directive.py`; manifest tests pin those dependencies.
+
+### Persistent Studio memory lifecycle v2
+
+`supermix-conversation-memory-v2` separates a generated reply from verified
+memory. Assistant responses remain available in the bounded turn log but are no
+longer auto-promoted as "Successful answer pattern" lessons, and unconfirmed
+legacy assistant lessons are excluded from prompts. Explicit preferred-name and
+answer-detail fields receive stable IDs plus active/superseded metadata, so a new
+value deterministically retires the prior one without deleting legacy evidence.
+Retrieval suppresses an older slot on the same turn that changes it and excludes
+zero-overlap memories except the two narrowly global slots. Existing JSON remains
+readable and acquires lifecycle metadata in place. Both new and legacy memories
+are filtered for prompt-control payloads before retrieval; recalled memories and
+prior examples are stripped of chat-role tokens and explicitly labelled as
+untrusted historical context below the current request's authority.
+
+### Measured
+
+`source/benchmark_conversation_routing.py`, thirteen constructed cases across
+seven kinds, run with the layer off and on:
+
+| case kind | layer off | layer on |
+|---|---|---|
+| standing style preference | 0/3 | **3/3** |
+| standing constraint | 0/2 | **2/2** |
+| clarification loop | 0/1 | **1/1** |
+| fresh request wins | 2/2 | 2/2 |
+| explicit choice wins | 1/1 | 1/1 |
+| injection inert | 2/2 | 2/2 |
+| no state, no change | 2/2 | 2/2 |
+| **overall** | **7/13 (53.8%)** | **13/13 (100%)** |
+
+Mean contract cost 208.3 characters, maximum 418.
+
+### What the harness found
+
+`fresh_request_wins` failed on first run for "keep it short this time" against a
+standing "I prefer detailed answers". The guard suppressed the *style line*
+correctly, and then the same preference walked back into the prompt as a quoted
+commitment two lines later. A standing style is now carried by the style line
+only, which is the one place that knows about the guard;
+`conversation_state.style_preference_of` is published so the two agree on what
+counts as a style statement.
+
+### What this is not
+
+The harness measures what reaches the prompt. It never runs the model. A bounded
+memory line reading "keep this reply short" is context for a 0.5B adapter, and
+whether the adapter obeys it is a separate question that needs generation
+against held-out cases. Nothing here establishes that any reply changed — only
+that the signal is now present in the prompt rather than discarded before it.
+
+Ranking is untouched: `DETAIL_REQUEST_RE` moved but its pattern is unchanged,
+and the exact-replay, robustness and interaction-regression suites are green.
+No weights were retrained.
+
 ## July 2026: v53 MiMoMix Hybrid (Attention + MoE + MTP + Verified Recursion)
 
 New, additive line in `source/mimomix_*.py`. It fuses the current Xiaomi MiMo
@@ -2529,7 +2651,8 @@ These sources motivate the design. They do not validate this implementation.
   ACT halting, a ponder cost, trainable verifier temperature, and supervised
   `p(correct)`/`p(continue)` heads
 - `mimomix_decoding.py` -- MTP self-speculative decoding with exact
-  greedy-equivalence, safe cache rollback under sliding-window trimming, and
+  greedy-equivalence, safe cache rollback under sliding-window trimming,
+  EOS-safe commits, bounded output, finished-row handling, and post-prefill
   acceptance-length accounting
 - `mimomix_controller.py` -- deterministic difficulty and epistemic-risk
   scoring, fast/deep/agent routing with a safety fast path, a bounded budget
@@ -2542,18 +2665,24 @@ These sources motivate the design. They do not validate this implementation.
   meters, semantic resonance, routing attribution, median/MAD anomalies,
   replicator dynamics, and a tabular budget Q-learner
 - `mimomix_distill.py` -- group-relative advantages, clipped GRPO surrogate, and
-  MOPD with a probability-space teacher mixture and per-token dense reward
+  MOPD with causal next-token target alignment, a finite top-k probability-space
+  teacher mixture, and per-token dense reward
 - `mimomix_api.py` -- byte tokenizer, backend registry, `/v1/think` with plan-
   driven routing, and an optional Flask surface
 - `web_static/mimomix_lab.html` -- single-file browser observatory reimplementing
   the same algorithms in JavaScript
 
-172 tests across six suites. The load-bearing ones assert properties, not
+187 tests across six suites. The load-bearing ones assert properties, not
 outputs: that the router bias cannot reach the forward value, that the balancer
 recovers a deliberately collapsed router, that speculative decoding is
 bit-identical to greedy, that the accepted budget's output is reused rather than
 blended, that the verifier can veto but never authorise an early exit, and that
 the observatory's statistics match textbook critical points.
+
+The tracked 250-step benchmark reports an MTP acceptance length of **3.917**.
+That full benchmark was not rerun after the correctness hardening above; the
+current evidence is the passing six-suite CI slice and focused decoding,
+distillation, and API tests.
 
 ### What this is not
 

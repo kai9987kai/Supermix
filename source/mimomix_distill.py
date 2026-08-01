@@ -44,8 +44,7 @@ of the objectives; a checkpoint has to earn its numbers separately.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
@@ -97,8 +96,14 @@ class TeacherSpec:
 class MOPDConfig:
     temperature: float = 1.0
     weighting: str = "confidence"  # "uniform" | "confidence" | "domain"
-    #: keep only the teachers' top-k tokens; 0 disables truncation
+    #: keep almost all teacher mass on the top-k tokens; 0 disables truncation.
+    #: A tiny tail floor remains because reverse KL is undefined when the
+    #: student has non-zero mass outside a teacher's hard-zero support.
     teacher_top_k: int = 0
+    #: per-token probability floor used after top-k truncation.  This keeps the
+    #: reverse-KL target finite and differentiable without materially changing
+    #: the selected support (1e-8 allocates <0.1% tail mass at a 50k vocab).
+    teacher_probability_floor: float = 1e-8
     #: floor on any single teacher's mixture weight, so a specialist cannot be
     #: switched off entirely by a confident sibling
     min_teacher_weight: float = 0.05
@@ -111,8 +116,14 @@ class MOPDConfig:
             raise ValueError(f"unknown weighting: {self.weighting!r}")
         if self.temperature <= 0.0:
             raise ValueError("temperature must be positive")
+        if self.teacher_top_k < 0:
+            raise ValueError("teacher_top_k must be non-negative")
+        if not 0.0 < self.teacher_probability_floor < 1.0:
+            raise ValueError("teacher_probability_floor must lie in (0, 1)")
         if not 0.0 <= self.min_teacher_weight < 1.0:
             raise ValueError("min_teacher_weight must lie in [0, 1)")
+        if self.max_position_kl <= 0.0:
+            raise ValueError("max_position_kl must be positive")
 
 
 # ---------------------------------------------------------------------------
@@ -144,12 +155,28 @@ def teacher_mixture_log_probs(
         [logits.float() / config.temperature for logits in teacher_logits], dim=0
     )  # (K, B, T, V)
     n_teachers = stacked.shape[0]
+    full_teacher_log_probs = F.log_softmax(stacked, dim=-1)
 
     if config.teacher_top_k and config.teacher_top_k < stacked.shape[-1]:
-        kth = stacked.topk(config.teacher_top_k, dim=-1).values[..., -1:]
-        stacked = stacked.masked_fill(stacked < kth, float("-inf"))
-
-    teacher_log_probs = F.log_softmax(stacked, dim=-1)  # (K, B, T, V)
+        vocab = int(stacked.shape[-1])
+        floor = float(config.teacher_probability_floor)
+        if floor * vocab >= 1.0:
+            raise ValueError(
+                "teacher_probability_floor * vocab_size must be below 1"
+            )
+        top_indices = stacked.topk(config.teacher_top_k, dim=-1).indices
+        support = torch.zeros_like(stacked, dtype=torch.bool)
+        support.scatter_(-1, top_indices, True)
+        truncated = full_teacher_log_probs.exp().masked_fill(~support, 0.0)
+        truncated = truncated / truncated.sum(dim=-1, keepdim=True).clamp_min(1e-30)
+        # Preserve a tiny, explicit full-vocabulary tail. Hard -inf masking is
+        # incompatible with reverse KL: a softmax student has non-zero mass at
+        # every token, so the KL becomes infinite (and confidence weighting can
+        # become NaN when every picked score is -inf).
+        teacher_probs = truncated * (1.0 - floor * vocab) + floor
+        teacher_log_probs = teacher_probs.log()
+    else:
+        teacher_log_probs = full_teacher_log_probs
 
     if config.weighting == "uniform":
         weights = teacher_log_probs.new_full((n_teachers,) + teacher_log_probs.shape[1:3], 1.0 / n_teachers)
@@ -165,7 +192,10 @@ def teacher_mixture_log_probs(
         weights = weights / weights.sum(dim=0, keepdim=True).clamp_min(1e-9)
     else:  # confidence
         # How much probability does teacher k give the token the student chose?
-        picked = teacher_log_probs.gather(
+        # Use the full teacher distributions for this comparison. A sampled
+        # token outside every truncated top-k still carries finite evidence
+        # about which teacher predicted it best.
+        picked = full_teacher_log_probs.gather(
             -1, student_tokens.unsqueeze(0).unsqueeze(-1).expand(n_teachers, -1, -1, 1)
         ).squeeze(-1)  # (K, B, T)
         weights = F.softmax(picked, dim=0)
@@ -220,8 +250,10 @@ def on_policy_distillation_loss(
 
     ``student_logits``  ``(B, T, V)``, gradient-carrying.
     ``teacher_logits``  list of ``(B, T, V)``, detached.
-    ``student_tokens``  ``(B, T)`` -- the tokens the student actually emitted,
-                        used only for confidence weighting.
+    ``student_tokens``  ``(B, T)`` -- the sampled tokens predicted by the
+                        corresponding logit positions, used only for confidence
+                        weighting. For a causal LM this is ``sequence[:, 1:]``
+                        aligned with ``logits[:, :-1]``.
     ``position_mask``   optional ``(B, T)`` bool; ``False`` positions (padding,
                         or the prompt prefix) are excluded from the mean.
     """
@@ -423,18 +455,33 @@ class MOPDTrainer:
         student_out = self.student(sequence, return_mtp=False, past_length=0)
         teacher_logits = [spec.logits(sequence) for spec in self.teachers]
 
-        # Score only the positions the student generated. The prompt prefix was
-        # not sampled on-policy, so distilling on it is off-policy and would
-        # reintroduce exactly the distribution mismatch MOPD exists to avoid.
-        mask = torch.zeros(sequence.shape, dtype=torch.bool, device=sequence.device)
-        mask[:, prompt_length - 1 : -1] = True
+        # Causal alignment is load-bearing here: logits at position i predict
+        # sequence[i + 1]. Confidence weighting must therefore inspect the
+        # *next* sampled token, not sequence[i] (the already-observed input).
+        student_logits = student_out.logits[:, :-1]
+        aligned_teacher_logits = [logits[:, :-1] for logits in teacher_logits]
+        sampled_next_tokens = sequence[:, 1:]
+
+        # Score only predictions whose targets were generated by the student.
+        # The prompt prefix was not sampled on-policy, so distilling on it is
+        # off-policy and would reintroduce the mismatch MOPD exists to remove.
+        mask = torch.zeros_like(sampled_next_tokens, dtype=torch.bool)
+        mask[:, prompt_length - 1 :] = True
+
+        aligned_domain_weights = domain_weights
+        if (
+            aligned_domain_weights is not None
+            and aligned_domain_weights.dim() >= 3
+            and aligned_domain_weights.shape[-1] == sequence.shape[1]
+        ):
+            aligned_domain_weights = aligned_domain_weights[..., :-1]
 
         result = on_policy_distillation_loss(
-            student_out.logits,
-            teacher_logits,
-            sequence,
+            student_logits,
+            aligned_teacher_logits,
+            sampled_next_tokens,
             config=self.config,
-            domain_weights=domain_weights,
+            domain_weights=aligned_domain_weights,
             position_mask=mask,
         )
         total = result.loss

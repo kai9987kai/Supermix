@@ -896,6 +896,13 @@ HTML_TEMPLATE = r"""<!doctype html>
           </select>
         </div>
         <div class="cfg-row">
+          <label>Conversation</label>
+          <select class="cfg-input" id="conversationToggle" style="width:90px" title="Carry standing preferences and constraints from earlier in this session into the prompt. Advisory only: it changes no routing or compute decision, and disabling it removes the layer entirely for a controlled comparison">
+            <option value="on">Enabled</option>
+            <option value="off">Disabled</option>
+          </select>
+        </div>
+        <div class="cfg-row">
           <label>Web Access</label>
           <select class="cfg-input" id="webToggle" style="width:90px">
             <option value="off">Local Only</option>
@@ -1652,6 +1659,36 @@ HTML_TEMPLATE = r"""<!doctype html>
       wrapper.appendChild(body);
     }
 
+    const conversation = trace.conversation;
+    if (conversation && typeof conversation === 'object') {
+      const directive = conversation.directive && typeof conversation.directive === 'object'
+        ? conversation.directive
+        : {};
+      const flags = conversation.flags && typeof conversation.flags === 'object'
+        ? conversation.flags
+        : {};
+      const bits = [
+        `<span class="trace-pill">Session turns ${escHtml(conversation.turn_count ?? 0)}</span>`,
+        `<span class="trace-pill">Standing ${escHtml(conversation.active_commitment_count ?? 0)}</span>`,
+      ];
+      if (conversation.style_request) {
+        bits.push(`<span class="trace-pill trace-score">Style ${escHtml(conversation.style_request)}</span>`);
+      }
+      if (directive.contract_line_count) {
+        bits.push(`<span class="trace-pill">Contract ${escHtml(directive.contract_line_count)} lines</span>`);
+      }
+      if (directive.preset_changed) {
+        bits.push(`<span class="trace-pill trace-score">Preset ${escHtml(directive.resolved_preset || '')}</span>`);
+      }
+      if (flags.clarification_loop) {
+        bits.push('<span class="trace-pill trace-warn">Clarification loop</span>');
+      }
+      const body = document.createElement('div');
+      body.className = 'trace-body trace-summary';
+      body.innerHTML = bits.join('');
+      wrapper.appendChild(body);
+    }
+
     const grounding = trace.grounding;
     if (grounding && typeof grounding === 'object') {
       const diagnostics = grounding.diagnostics && typeof grounding.diagnostics === 'object'
@@ -2390,6 +2427,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       loop_max_steps: parseInt(el('loopBudget').value),
       memory_enabled: el('memToggle').value === 'on',
       grounding_intelligence: el('groundingToggle').value === 'on',
+      conversation_intelligence: el('conversationToggle').value === 'on',
       web_search_enabled: el('webToggle').value === 'on',
       uploaded_image_path: currentUpload
     };

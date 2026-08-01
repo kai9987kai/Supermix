@@ -205,9 +205,12 @@ Two details are load-bearing:
   statistic, so `speculative_generate` **refuses** `adaptive_thinking=True`
   instead of quietly breaking the guarantee.
 
-`DecodeStats.acceptance_length` is tokens committed per trunk forward. Plain
-greedy scores exactly 1.0. An untrained model scores near 1.0 because its drafts
-are noise — that is correct behaviour, not a bug, which is why
+`DecodeStats.acceptance_length` is tokens committed per post-prefill trunk
+forward. The first generated token and the common prompt-prefill forward are
+excluded from both sides of that ratio. Plain greedy therefore scores exactly
+1.0, and a decoder with `d` draft depths cannot exceed `d + 1`. An untrained
+model scores near 1.0 because its drafts are noise — that is correct behaviour,
+not a bug, which is why
 `test_a_learnable_pattern_produces_real_acceptance` trains a small model on a
 repeating cycle first and then requires acceptance above 1.5 with strictly fewer
 forwards than greedy.
@@ -405,8 +408,8 @@ depths, 250 steps, ~143s):
 | KV cache vs all-global @ 1M tokens | **6.00x smaller** (83.3% saved) |
 | LM loss | 2.947 → 0.000 (uniform baseline 2.773) |
 | routing entropy (8 batches accumulated) | **0.970** normalised, 0 starved experts |
-| MTP acceptance, untrained | 1.5% rate, 1.067 acceptance length |
-| MTP acceptance, trained | **100% rate, 4.000 acceptance length** |
+| MTP acceptance, untrained | 1.5% rate, 1.044 acceptance length |
+| MTP acceptance, trained | **100% rate, 3.917 acceptance length** |
 | trunk forwards, trained | **12 vs 47 greedy (−74.5%)** |
 | speculative output == greedy | **true, both before and after training** |
 | thinking ladder, 16 requests | **+25.0% cycle reduction** |
@@ -417,8 +420,9 @@ Read these as *the mechanisms work*, nothing more. The task is a periodic
 sequence chosen precisely because a tiny model can learn it in seconds, which is
 what makes the MTP numbers meaningful at all — an untrained draft is noise, and
 the untrained row shows exactly that. An acceptance length of 4.000 is the
-arithmetic maximum for 3 MTP depths and reflects a model that has memorised a
-5-token cycle. It is not a claim about text.
+asymptotic arithmetic maximum for 3 MTP depths. This finite 48-token run scores
+47 post-prefill tokens over 12 verification forwards, or 3.917, and reflects a
+model that has memorised a 5-token cycle. It is not a claim about text.
 
 The KV-cache row is arithmetic over the layout, not a memory benchmark, and it
 says nothing about the quality cost of restricting most layers to a small

@@ -68,6 +68,8 @@ try {
     "--collect-all", "pythonnet",
     "--collect-all", "clr_loader",
     "--add-data", "source\\qwen_chat_web_app.py;source",
+    "--add-data", "source\\conversation_state.py;source",
+    "--add-data", "source\\conversation_directive.py;source",
     "--add-data", "source\\grounding_runtime.py;source",
     "--add-data", "source\\interaction_planner.py;source",
     "--add-data", "source\\prompt_understanding.py;source",

@@ -48,7 +48,7 @@ and the AI-Dem-Lab research-sandbox concepts into one stack:
 
 Measured end to end on a 1.2M-parameter model trained for 250 CPU steps on a
 synthetic periodic task: **6.00x smaller KV cache** than all-global attention at
-1M tokens, **4.000 MTP acceptance length** (74.5% fewer trunk forwards) with
+1M tokens, **3.917 MTP acceptance length** (74.5% fewer trunk forwards) with
 output bit-identical to greedy decoding, **0.970 normalised routing entropy**
 with no starved experts, and **+25% cycle reduction at 100% top-1 and ordered
 top-3 decision fidelity**. Reproduce with:
@@ -56,6 +56,12 @@ top-3 decision fidelity**. Reproduce with:
 ```bash
 python source/benchmark_mimomix.py --steps 250 --enforce-gates
 ```
+
+The later correctness hardening did not rerun that 250-step benchmark. It makes
+speculative decoding EOS- and output-budget-safe, handles finished batch rows,
+fixes post-prefill acceptance accounting, aligns distillation targets to causal
+next-token prediction, and keeps top-k teacher reverse-KL finite. The current CI
+slice runs all six MiMoMix suites (`187` tests).
 
 Run the routing demo, the browser observatory, and the tests:
 
@@ -103,7 +109,26 @@ was taken from where.
 - a shared Conversation State v1 layer accumulates across the whole session rather
   than a four-turn window: durable user commitments with supersession, questions the
   assistant asked and whether they were answered, topic threads, cross-conversation
-  repetition, and stated contradictions
+  repetition, and stated contradictions; explicitly per-turn requests such as
+  "this time" are not promoted into standing commitments
+- a Conversation Directive v1 layer routes that state onto the generative surfaces
+  (the Qwen web app and the Studio Qwen backend), which previously read none of it:
+  it renders a bounded, sanitised, prompt-control-filtered contract as user-level
+  history, keeps the current request last, and selects a generation preset from a
+  standing style preference only when the caller did not provide one
+- Qwen Web defaults to an **Auto** preset that omits generation overrides so the
+  conversation preset can apply (with a balanced fallback); one striped session
+  lock covers history snapshot, routing, generation, and append, while stale client
+  history may hydrate only an empty server session. The server retains 80 messages,
+  derives state from 40, and sends at most 12 to the model
+- persistent Studio memory uses `supermix-conversation-memory-v2`: generated
+  assistant replies remain in the turn log but are not promoted as successful
+  lessons; explicit name and answer-detail slots have stable IDs and deterministic
+  supersession, inactive/irrelevant legacy rows stay stored but are not retrieved,
+  and recalled text is labelled untrusted, stripped of chat-role tokens, and
+  filtered for prompt-control payloads before prompt construction
+- both Qwen EXE build scripts and the tracked `SupermixQwenDesktop*.spec` files
+  bundle `conversation_state.py` and `conversation_directive.py`
 - the `cognitive_leap_v52_expert` model variant adds a supervised quality/continue
   verifier, bounded emotion/intent/strategy appraisal heads, trainable temperature
   calibration, and optional sparse top-k recurrent-core execution, while still

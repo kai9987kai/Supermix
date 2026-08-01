@@ -29,6 +29,10 @@ from chat_image_variant_app import (
     DEFAULT_NEGATIVE_PROMPT,
     ImageVariantEngine,
 )
+from conversation_state import (
+    build_conversation_state,
+    conversation_state_diagnostics,
+)
 from device_utils import configure_torch_runtime, resolve_device
 from grounding_runtime import (
     build_evidence_bundle,
@@ -91,7 +95,7 @@ from three_d_generation_model import ThreeDGenerationEngine, format_3d_generatio
 from native_image_infer_v36 import ChampionNetFrontierCollectiveNativeImage, save_prompt_image as save_prompt_image_v36
 from native_image_infer_v37_lite import ChampionNetUltraExpertNativeImageLite, save_prompt_image as save_prompt_image_v37
 from native_image_infer_v38_xlite import ChampionNetUltraExpertNativeImageExtraLite, save_prompt_image as save_prompt_image_v38
-from image_recognition_model import ScienceImageRecognitionEngine, looks_like_vision_prompt
+from image_recognition_model import ScienceImageRecognitionEngine
 from omni_collective_model import OmniCollectiveEngine
 from omni_collective_v3_model import OmniCollectiveEngineV3
 from omni_collective_v4_model import OmniCollectiveEngineV4
@@ -141,6 +145,7 @@ class ChatResult:
     prompt_used: str = ""
     refined_prompt: str = ""
     agent_trace: Optional[Dict[str, Any]] = None
+    conversation: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -157,6 +162,7 @@ class ChatResult:
             "prompt_used": self.prompt_used,
             "refined_prompt": self.refined_prompt,
             "agent_trace": self.agent_trace or {},
+            "conversation": self.conversation or {},
         }
 
 
@@ -826,6 +832,7 @@ class ChampionChatBackend(BaseBackend):
                 else None
             ),
             grounding_enabled=False,
+            conversation_enabled=bool(settings.get("_conversation_enabled", True)),
         )
         return ChatResult(
             kind="text",
@@ -836,6 +843,14 @@ class ChampionChatBackend(BaseBackend):
             timing=dict(payload.get("timing_ms") or {}),
             compute=dict(payload.get("compute") or {}),
             prompt_used=effective_prompt,
+            # The engine derives its own state from the history it keeps for
+            # this session. It was already doing so; the diagnostics were simply
+            # dropped on the floor here, so no Studio surface could report it.
+            conversation=(
+                dict(payload.get("conversation") or {})
+                if isinstance(payload.get("conversation"), Mapping)
+                else None
+            ),
         )
 
     def clear(self, session_id: str) -> None:
@@ -929,19 +944,29 @@ class QwenBackend(BaseBackend):
 
     def chat(self, session_id: str, prompt: str, settings: Dict[str, Any]) -> ChatResult:
         style_mode = str(settings.get("style_mode") or "auto").strip().lower()
+        # "auto" is the absence of a choice, so it stays unresolved here and a
+        # style the user asked for earlier in the session is allowed to fill it
+        # in. Every other style mode is an explicit choice and maps as before.
         preset = {
             "concise": "direct",
             "creative": "creative",
             "analyst": "reasoning",
             "coding": "coding",
-        }.get(style_mode, "balanced")
+        }.get(style_mode, "auto" if style_mode in ("", "auto") else "balanced")
         effective_prompt = _compose_text_prompt(prompt, settings)
+        max_new_tokens = settings.get("max_new_tokens")
+        temperature = settings.get("temperature")
+        top_p = settings.get("top_p")
         payload = self.engine.chat(
             session_id=session_id,
             user_text=effective_prompt,
-            max_new_tokens=int(settings.get("max_new_tokens") or 160),
-            temperature=float(settings.get("temperature") or 0.18),
-            top_p=float(settings.get("top_p") or 0.92),
+            max_new_tokens=(
+                int(max_new_tokens) if max_new_tokens not in (None, "") else None
+            ),
+            temperature=(
+                float(temperature) if temperature not in (None, "") else None
+            ),
+            top_p=float(top_p) if top_p not in (None, "") else None,
             preset=preset,
             system_hint=str(settings.get("system_hint") or ""),
             interaction_enabled=bool(
@@ -961,6 +986,12 @@ class QwenBackend(BaseBackend):
                 else None
             ),
             grounding_enabled=False,
+            conversation_enabled=bool(settings.get("_conversation_enabled", True)),
+            conversation_state=(
+                settings.get("_conversation_state")
+                if isinstance(settings.get("_conversation_state"), Mapping)
+                else None
+            ),
         )
         return ChatResult(
             kind="text",
@@ -970,6 +1001,11 @@ class QwenBackend(BaseBackend):
             response=str(payload.get("response") or ""),
             timing=dict(payload.get("timing") or {}),
             prompt_used=effective_prompt,
+            conversation=(
+                dict(payload.get("conversation") or {})
+                if isinstance(payload.get("conversation"), Mapping)
+                else None
+            ),
         )
 
     def clear(self, session_id: str) -> None:
@@ -1568,7 +1604,7 @@ class OmniCollectiveV41Backend(BaseBackend):
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
         if OmniCollectiveEngineV41 is None:
-            raise ImportError(f"OmniCollectiveEngineV41 is not available. Please ensure omni_collective_v41_model.py exists.")
+            raise ImportError("OmniCollectiveEngineV41 is not available. Please ensure omni_collective_v41_model.py exists.")
         self.engine = OmniCollectiveEngineV41(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1613,7 +1649,7 @@ class OmniCollectiveV42Backend(BaseBackend):
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
         if OmniCollectiveEngineV42 is None:
-            raise ImportError(f"OmniCollectiveEngineV42 is not available. Please ensure omni_collective_v42_model.py exists.")
+            raise ImportError("OmniCollectiveEngineV42 is not available. Please ensure omni_collective_v42_model.py exists.")
         self.engine = OmniCollectiveEngineV42(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1658,7 +1694,7 @@ class OmniCollectiveV46Backend(BaseBackend):
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
         if OmniCollectiveEngineV46 is None:
-            raise ImportError(f"OmniCollectiveEngineV46 is not available. Please ensure omni_collective_v46_model.py exists.")
+            raise ImportError("OmniCollectiveEngineV46 is not available. Please ensure omni_collective_v46_model.py exists.")
         self.engine = OmniCollectiveEngineV46(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1719,7 +1755,7 @@ class OmniCollectiveV47Backend(BaseBackend):
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
         if OmniCollectiveEnginev47 is None:
-            raise ImportError(f"OmniCollectiveEnginev47 is not available. Please ensure omni_collective_v47_model.py exists.")
+            raise ImportError("OmniCollectiveEnginev47 is not available. Please ensure omni_collective_v47_model.py exists.")
         self.engine = OmniCollectiveEnginev47(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -1780,7 +1816,7 @@ class OmniCollectiveV48Backend(BaseBackend):
         self.weights_path = weights_path.resolve()
         self.meta_path = meta_path.resolve()
         if OmniCollectiveEnginev48 is None:
-            raise ImportError(f"OmniCollectiveEnginev48 is not available. Please ensure omni_collective_v48_model.py exists.")
+            raise ImportError("OmniCollectiveEnginev48 is not available. Please ensure omni_collective_v48_model.py exists.")
         self.engine = OmniCollectiveEnginev48(weights_path=self.weights_path, meta_path=self.meta_path)
 
     def status(self) -> Dict[str, Any]:
@@ -5076,6 +5112,21 @@ class UnifiedModelManager:
             )
             settings["_prompt_profile"] = prompt_profile
 
+            # Studio persists every turn of the session but only ever handed the
+            # last four to the planner, so nothing here accumulated. The state
+            # is built once per prompt from the durable turn log and passed to
+            # whichever backend runs, rather than each backend deriving its own
+            # from whatever short window it happens to keep.
+            conversation_enabled = bool(settings.get("conversation_intelligence", True))
+            conversation_state: Optional[Dict[str, Any]] = None
+            if conversation_enabled:
+                conversation_state = build_conversation_state(
+                    raw_turns if isinstance(raw_turns, (list, tuple)) else (),
+                    current_user_text=prompt,
+                )
+                settings["_conversation_state"] = conversation_state
+            settings["_conversation_enabled"] = conversation_enabled
+
             requested_key = model_key or self.selected_model_key or "auto"
             if requested_key == "auto":
                 chosen_record, route_reason = choose_auto_model(
@@ -5477,6 +5528,15 @@ class UnifiedModelManager:
                     )
                 )
             trace["prompt_understanding"] = understanding_diag
+            if conversation_state is not None:
+                # A backend that routed the state reports its own view; the rest
+                # get the session-level one, so the trace answers the question
+                # either way rather than only for one backend.
+                trace["conversation"] = (
+                    dict(result.conversation)
+                    if isinstance(result.conversation, Mapping) and result.conversation
+                    else conversation_state_diagnostics(conversation_state)
+                )
             trace["route_id"] = route_id
             if result.compute:
                 trace["compute"] = dict(result.compute)
@@ -5524,6 +5584,12 @@ class UnifiedModelManager:
             self.selected_model_key = model_key or self.selected_model_key
             self.last_route_reason = result.route_reason
             payload = result.to_dict()
+            if conversation_state is not None and not payload.get("conversation"):
+                # Backends that route their own state report it themselves. The
+                # rest — agent modes, image routes, the wrappers — reported
+                # nothing at all, so the session-level state is attached here
+                # and every Studio route now answers the same question.
+                payload["conversation"] = conversation_state_diagnostics(conversation_state)
             payload["selected_model_key"] = self.selected_model_key
             payload["active_model_key"] = result.model_key
             payload["active_model_label"] = result.model_label

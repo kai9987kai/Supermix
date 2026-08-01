@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -19,6 +20,44 @@ sys.path.insert(0, str(ROOT / "source"))
 
 import mimomix_core as mc  # noqa: E402
 import mimomix_decoding as md  # noqa: E402
+
+
+class PerfectDraftStub:
+    """Small deterministic target whose three draft tokens are all accepted."""
+
+    def __init__(self):
+        self.mtp_modules = [object(), object(), object()]
+
+    def eval(self):
+        return self
+
+    def propose_draft(self, trunk_hidden_last, seed_token, position):
+        del trunk_hidden_last, position
+        offsets = torch.tensor([1, 2, 3], device=seed_token.device)
+        return seed_token + offsets.unsqueeze(0)
+
+    def __call__(self, input_ids, **kwargs):
+        past_length = int(kwargs.get("past_length", 0))
+        batch, length = input_ids.shape
+        if past_length == 0:
+            targets = (
+                (10 + 10 * torch.arange(batch, device=input_ids.device))
+                .unsqueeze(1)
+                .expand(batch, length)
+            )
+        elif length > 1:
+            bases = (10 + 10 * torch.arange(batch, device=input_ids.device)).unsqueeze(1)
+            targets = bases + torch.arange(1, length + 1, device=input_ids.device).unsqueeze(0)
+        else:
+            targets = input_ids + 1
+        logits = torch.full((batch, length, 64), -100.0, device=input_ids.device)
+        logits.scatter_(-1, targets.unsqueeze(-1), 100.0)
+        return SimpleNamespace(
+            logits=logits,
+            past_key_values=[],
+            trunk_hidden=torch.zeros((batch, length, 4), device=input_ids.device),
+            telemetry={},
+        )
 
 
 def build(seed: int = 0, **overrides) -> mc.MiMoMixModel:
@@ -171,9 +210,43 @@ def test_greedy_scores_exactly_one_token_per_forward():
     model = build(0)
     ids = torch.randint(0, 48, (1, 5))
     stats = md.greedy_generate(model, ids, max_new_tokens=12).stats
-    # one prefill token plus one per verify forward
+    # One token comes from prefill. Decode throughput excludes that common
+    # setup token and the prefill forward from both sides of the ratio.
     assert stats.new_tokens == stats.verify_forwards + 1
-    assert stats.acceptance_length == pytest.approx(stats.new_tokens / stats.verify_forwards)
+    assert stats.decoding_tokens == stats.verify_forwards
+    assert stats.acceptance_length == pytest.approx(1.0)
+
+
+def test_acceptance_length_never_exceeds_draft_plus_bonus_bound():
+    result = md.speculative_generate(
+        PerfectDraftStub(), torch.tensor([[1, 2]]), max_new_tokens=5
+    )
+    assert result.new_tokens.tolist() == [[10, 11, 12, 13, 14]]
+    assert result.stats.verify_forwards == 1
+    assert result.stats.decoding_tokens == 4
+    assert result.stats.acceptance_length == pytest.approx(4.0)
+
+
+def test_speculation_stops_at_eos_inside_an_accepted_draft_block():
+    model = PerfectDraftStub()
+    prompt = torch.tensor([[1, 2]])
+    greedy = md.greedy_generate(model, prompt, max_new_tokens=8, eos_token_id=12)
+    speculative = md.speculative_generate(model, prompt, max_new_tokens=8, eos_token_id=12)
+
+    assert greedy.new_tokens.tolist() == [[10, 11, 12]]
+    assert speculative.new_tokens.tolist() == [[10, 11, 12]]
+    assert torch.equal(speculative.new_tokens, greedy.new_tokens)
+
+
+def test_finished_batch_rows_stay_at_eos_while_other_rows_continue():
+    model = PerfectDraftStub()
+    prompt = torch.tensor([[1, 2], [3, 4]])
+    greedy = md.greedy_generate(model, prompt, max_new_tokens=5, eos_token_id=12)
+    speculative = md.speculative_generate(model, prompt, max_new_tokens=5, eos_token_id=12)
+
+    expected = [[10, 11, 12, 12, 12], [20, 21, 22, 23, 24]]
+    assert greedy.new_tokens.tolist() == expected
+    assert speculative.new_tokens.tolist() == expected
 
 
 def test_stats_are_json_safe():

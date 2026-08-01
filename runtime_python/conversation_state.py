@@ -126,6 +126,51 @@ _STYLE_DIRECTIVE_RE = re.compile(
 _CONCISE_RE = re.compile(r"\b(?:concise|brief|short|shorter|terse|to the point|tl;?dr|summar)\w*\b", re.IGNORECASE)
 _DETAIL_RE = re.compile(r"\b(?:detailed?|thorough|in depth|in-depth|elaborate|comprehensive|verbose|explain fully)\b", re.IGNORECASE)
 
+# A fresh request on the *current* turn, in either direction. A standing
+# preference must never override what the user just asked for, so every surface
+# that routes `style_request` needs the same guard. These live here, next to the
+# commitment patterns they override, rather than being restated per surface:
+# `chat_pipeline` re-exports DETAIL_REQUEST_RE for the ranker and
+# `conversation_directive` uses both for the generative surfaces.
+DETAIL_REQUEST_RE = re.compile(
+    r"\b(?:in (?:more )?detail|detailed|thorough(?:ly)?|in[- ]depth|elaborate|"
+    r"expand|comprehensive|walk me through|walkthrough|explain (?:it |this |that )?fully|"
+    r"tell me more|say more|more detail|at length|step by step)\b",
+    re.IGNORECASE,
+)
+BREVITY_REQUEST_RE = re.compile(
+    r"\b(?:briefly|be brief|in brief|keep it (?:short|brief)|short(?:er)? (?:answer|version)|"
+    r"concisely|in one (?:line|sentence)|one[- ](?:line|sentence) (?:answer|version)|"
+    r"tl;?dr|just the answer|summari[sz]e (?:it|this|that))\b",
+    re.IGNORECASE,
+)
+# Explicitly turn-scoped instructions are useful for the current request but
+# must not become durable session commitments. The current prompt still carries
+# them; excluding them here only prevents "this time" from silently becoming
+# "from now on" on later turns.
+_TRANSIENT_COMMITMENT_RE = re.compile(
+    r"\b(?:this time|for (?:just )?this (?:reply|answer|request|task|turn)|"
+    r"(?:only|just) for (?:this (?:reply|answer|request|task|turn)|now)|"
+    r"on this (?:turn|occasion))\b",
+    re.IGNORECASE,
+)
+
+
+def style_preference_of(text: Any) -> str:
+    """Which standing style, if any, a single statement expresses.
+
+    Published because a surface that quotes commitments into a prompt has to be
+    able to tell which of them are already carried by the style request, and
+    saying the same instruction twice in one prompt is worse than saying it once.
+    """
+
+    value = str(text or "")
+    if _CONCISE_RE.search(value):
+        return "concise"
+    if _DETAIL_RE.search(value):
+        return "detailed"
+    return ""
+
 
 def _clean(value: Any, limit: int = MAX_TEXT_CHARS) -> str:
     return _WS_RE.sub(" ", str(value or "")).strip()[: max(0, int(limit))]
@@ -225,6 +270,17 @@ def _normalize_turns(turns: Any, current_user_text: Any = "") -> List[_Turn]:
         turns = ()
     for item in list(turns)[-MAX_TURNS:]:
         if isinstance(item, Mapping):
+            # A turn log keyed by speaker rather than by role. The Studio memory
+            # store writes this shape, and it used to fall through to the
+            # `content` lookup, produce nothing, and be dropped in silence.
+            if "role" not in item and ("user" in item or "assistant" in item):
+                user_text = _clean(item.get("user"))
+                assistant_text = _clean(item.get("assistant"))
+                if user_text:
+                    rows.append(("user", user_text))
+                if assistant_text:
+                    rows.append(("assistant", assistant_text))
+                continue
             role = str(item.get("role") or "").strip().lower()
             content = _clean(item.get("content") or item.get("text") or "")
             if not content:
@@ -274,6 +330,8 @@ def _extract_commitments(turns: Sequence[_Turn]) -> List[Dict[str, Any]]:
             continue
         for sentence in _sentences(turn.text):
             if _is_question(sentence):
+                continue
+            if _TRANSIENT_COMMITMENT_RE.search(sentence):
                 continue
             kind = _commitment_kind(sentence)
             if not kind:
@@ -567,11 +625,8 @@ def build_conversation_state(
     for row in reversed(commitments):
         if not row["active"]:
             continue
-        if _CONCISE_RE.search(row["text"]):
-            style = "concise"
-            break
-        if _DETAIL_RE.search(row["text"]):
-            style = "detailed"
+        style = style_preference_of(row["text"])
+        if style:
             break
 
     flags = {
@@ -793,6 +848,7 @@ def score_candidates_for_conversation(
 def audit_response_against_state(
     response_text: Any,
     state: Optional[Mapping[str, Any]],
+    current_user_text: Any = "",
 ) -> Dict[str, Any]:
     """Report conversational problems with a response. Audit only."""
 
@@ -828,6 +884,15 @@ def audit_response_against_state(
         violations.append("repeats_open_question")
 
     style = str(state.get("style_request") or "")
+    current = str(current_user_text or "")
+    if (
+        (style == "concise" and DETAIL_REQUEST_RE.search(current))
+        or (style == "detailed" and BREVITY_REQUEST_RE.search(current))
+    ):
+        # The current request has the same precedence as it does in the
+        # directive and ranker. Do not label a response as wrong for correctly
+        # following the user's newer, opposite request.
+        style = ""
     word_count = len(_TOKEN_RE.findall(text))
     ignores_style = bool(
         (style == "concise" and word_count > 90)
@@ -909,8 +974,10 @@ def conversation_state_diagnostics(state: Optional[Mapping[str, Any]]) -> Dict[s
 
 
 __all__ = [
+    "BREVITY_REQUEST_RE",
     "CONVERSATION_STATE_SCHEMA_VERSION",
     "CONVERSATION_STATE_VERSION",
+    "DETAIL_REQUEST_RE",
     "MAX_CONVERSATION_SCORE",
     "audit_response_against_state",
     "build_conversation_state",
@@ -919,4 +986,5 @@ __all__ = [
     "repetition_score",
     "score_candidate_for_conversation",
     "score_candidates_for_conversation",
+    "style_preference_of",
 ]

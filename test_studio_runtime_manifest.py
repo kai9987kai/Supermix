@@ -175,7 +175,7 @@ def test_qwen_packaging_sources_are_machine_portable():
         assert "C:\\Users\\" not in build
 
 
-def test_qwen_packaging_includes_prompt_understanding_source_and_compatibility_runtime():
+def test_qwen_packaging_includes_runtime_import_dependencies():
     specs = (
         ROOT / "SupermixQwenDesktop.spec",
         ROOT / "SupermixQwenDesktopV26.spec",
@@ -189,11 +189,15 @@ def test_qwen_packaging_includes_prompt_understanding_source_and_compatibility_r
         text = path.read_text(encoding="utf-8")
         assert "source\\\\\\\\prompt_understanding.py" in text
         assert "runtime_python\\\\\\\\prompt_understanding.py" in text
+        assert "source\\\\\\\\conversation_state.py" in text
+        assert "source\\\\\\\\conversation_directive.py" in text
 
     for path in builds:
         text = path.read_text(encoding="utf-8")
         assert "source\\\\prompt_understanding.py;source" in text
         assert "runtime_python\\\\prompt_understanding.py;runtime_python" in text
+        assert "source\\\\conversation_state.py;source" in text
+        assert "source\\\\conversation_directive.py;source" in text
 
 
 def test_manifest_check_rejects_tampered_or_syntax_broken_runtime_module(

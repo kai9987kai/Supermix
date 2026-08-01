@@ -10,7 +10,10 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 
 import torch
 
-from conversation_state import score_candidates_for_conversation
+from conversation_state import (
+    DETAIL_REQUEST_RE,
+    score_candidates_for_conversation,
+)
 from score_fusion import calibrate_signal, consensus_multiplier, resolve_fusion_mode
 from interaction_planner import score_candidate_for_interaction
 
@@ -2031,13 +2034,10 @@ def choose_bucket_from_logits(
 
 
 # A fresh request for depth on the current turn. Used to stop a standing
-# "be brief" from silently overriding an explicit "explain that in detail".
-DETAIL_REQUEST_RE = re.compile(
-    r"\b(?:in (?:more )?detail|detailed|thorough(?:ly)?|in[- ]depth|elaborate|"
-    r"expand|comprehensive|walk me through|walkthrough|explain (?:it |this |that )?fully|"
-    r"tell me more|say more|more detail|at length|step by step)\b",
-    re.IGNORECASE,
-)
+# "be brief" from silently overriding an explicit "explain that in detail". The
+# pattern lives in `conversation_state` beside the commitment patterns it
+# overrides, so the generative surfaces apply the identical guard; it is
+# re-exported here because that is the name this module has always published.
 
 
 def infer_style_mode(

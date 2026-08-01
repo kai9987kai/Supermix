@@ -75,11 +75,26 @@ class DecodeStats:
         with three MTP layers on a real checkpoint; an untrained toy model will
         score near 1 because its drafts are noise, and that is the correct
         behaviour, not a bug.
+
+        The prompt prefill both consumes a trunk forward and produces the first
+        generated token.  Decode throughput deliberately excludes that common
+        setup cost from *both* sides of the ratio: ``verify_forwards`` does not
+        include prefill, so the token produced by prefill must not be counted in
+        the numerator either.  Mixing those conventions makes greedy score
+        ``N / (N - 1)`` and can put speculation above its theoretical
+        ``draft_length + 1`` maximum.
         """
 
         if self.verify_forwards == 0:
-            return 0.0
-        return self.new_tokens / self.verify_forwards
+            return 1.0 if self.mode == "greedy" and self.new_tokens > 0 else 0.0
+        return self.decoding_tokens / self.verify_forwards
+
+    @property
+    def decoding_tokens(self) -> int:
+        """Generated tokens attributable to post-prefill decode forwards."""
+
+        prefill_token = 1 if self.prefill_forwards > 0 and self.new_tokens > 0 else 0
+        return max(0, int(self.new_tokens) - prefill_token)
 
     @property
     def acceptance_rate(self) -> float:
@@ -97,6 +112,7 @@ class DecodeStats:
 
     def to_dict(self) -> Dict[str, object]:
         payload = asdict(self)
+        payload["decoding_tokens"] = self.decoding_tokens
         payload["acceptance_length"] = round(self.acceptance_length, 4)
         payload["acceptance_rate"] = round(self.acceptance_rate, 4)
         payload["tokens_per_second"] = round(self.tokens_per_second, 3)
@@ -172,6 +188,16 @@ def greedy_generate(
     finished = torch.zeros(input_ids.shape[0], dtype=torch.bool, device=device)
 
     for _ in range(max_new_tokens):
+        if eos_token_id is not None and bool(finished.any()):
+            # Keep already-finished batch rows pinned to EOS while unfinished
+            # rows continue.  For batch size one the loop exits immediately;
+            # for larger batches this gives every row standard stop semantics
+            # without returning ragged tensors.
+            token = torch.where(
+                finished.unsqueeze(1),
+                torch.full_like(token, int(eos_token_id)),
+                token,
+            )
         emitted.append(token)
         stats.new_tokens += 1
         if eos_token_id is not None:
@@ -253,8 +279,14 @@ def speculative_generate(
 
     while stats.new_tokens < max_new_tokens and not bool(finished.all()):
         draft = model.propose_draft(trunk_state, token, position=committed_length - 1)
-        if max_draft < draft.shape[1]:
-            draft = draft[:, :max_draft]
+        # Do not verify draft positions that cannot fit in the caller's output
+        # budget.  One slot is reserved for the target model's bonus/correction
+        # token, so all accounting describes tokens that can actually be
+        # returned.
+        remaining = max_new_tokens - stats.new_tokens
+        draft_budget = min(max_draft, max(0, remaining - 1))
+        if draft_budget < draft.shape[1]:
+            draft = draft[:, :draft_budget]
         block = torch.cat([token, draft], dim=1) if draft.numel() else token
         block_len = int(block.shape[1])
         n_draft = block_len - 1
@@ -273,20 +305,51 @@ def speculative_generate(
         stats.drafted_tokens += n_draft * batch
 
         target = step.logits.argmax(dim=-1)  # (B, block_len)
-        # Accept the longest prefix that every batch row agrees with. Batching
-        # forces a common accept length; per-row divergence just costs speed.
+        # Accept the longest prefix that every *unfinished* batch row agrees
+        # with. Batching forces a common accept length; per-row divergence just
+        # costs speed. Rows that reached EOS inside the block are ignored at
+        # later positions and are pinned to EOS in the returned tensor.
         accepted = 0
+        verification_finished = finished.clone()
         for index in range(n_draft):
-            if bool(torch.equal(block[:, index + 1], target[:, index])):
-                accepted += 1
-            else:
+            candidate = block[:, index + 1]
+            matches = candidate.eq(target[:, index])
+            if not bool(matches[~verification_finished].all()):
                 break
+            accepted += 1
+            if eos_token_id is not None:
+                verification_finished = verification_finished | candidate.eq(int(eos_token_id))
+                if bool(verification_finished.all()):
+                    break
         stats.accepted_draft_tokens += accepted * batch
 
+        committed: List[torch.Tensor] = []
         for index in range(accepted):
-            emitted.append(block[:, index + 1 : index + 2])
-        bonus = target[:, accepted : accepted + 1]
-        emitted.append(bonus)
+            candidate = block[:, index + 1 : index + 2]
+            if eos_token_id is not None:
+                candidate = torch.where(
+                    finished.unsqueeze(1),
+                    torch.full_like(candidate, int(eos_token_id)),
+                    candidate,
+                )
+                finished = finished | candidate.squeeze(1).eq(int(eos_token_id))
+            committed.append(candidate)
+
+        # If every row ended on an accepted draft token, greedy decoding would
+        # stop there.  Do not append the block's bonus token after EOS.
+        bonus: Optional[torch.Tensor] = None
+        if not bool(finished.all()):
+            bonus = target[:, accepted : accepted + 1]
+            if eos_token_id is not None:
+                bonus = torch.where(
+                    finished.unsqueeze(1),
+                    torch.full_like(bonus, int(eos_token_id)),
+                    bonus,
+                )
+                finished = finished | bonus.squeeze(1).eq(int(eos_token_id))
+            committed.append(bonus)
+
+        emitted.extend(committed)
 
         committed_length += accepted + 1
         rejected = n_draft - accepted
@@ -295,13 +358,11 @@ def speculative_generate(
         else:
             past = step.past_key_values
 
+        stats.new_tokens += len(committed)
+        if bonus is None:
+            break
         trunk_state = step.trunk_hidden[:, accepted : accepted + 1]
         token = bonus
-        stats.new_tokens += accepted + 1
-        if eos_token_id is not None:
-            for index in range(accepted + 1):
-                offset = len(emitted) - (accepted + 1) + index
-                finished = finished | emitted[offset].squeeze(1).eq(int(eos_token_id))
 
     stats.seconds = time.perf_counter() - started
     new_tokens = torch.cat(emitted, dim=1)[:, :max_new_tokens]

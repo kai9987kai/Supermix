@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('source\\\\qwen_chat_web_app.py', 'source'), ('source\\\\grounding_runtime.py', 'source'), ('source\\\\interaction_planner.py', 'source'), ('source\\\\prompt_understanding.py', 'source'), ('source\\\\reasoning_engine.py', 'source'), ('runtime_python\\\\prompt_understanding.py', 'runtime_python'), ('runtime_python\\\\reasoning_engine.py', 'runtime_python'), ('assets', 'assets'), ('artifacts\\qwen_supermix_enhanced_v25_selective_pref\\adapter', 'bundled_latest_adapter')]
+datas = [('source\\\\qwen_chat_web_app.py', 'source'), ('source\\\\conversation_state.py', 'source'), ('source\\\\conversation_directive.py', 'source'), ('source\\\\grounding_runtime.py', 'source'), ('source\\\\interaction_planner.py', 'source'), ('source\\\\prompt_understanding.py', 'source'), ('source\\\\reasoning_engine.py', 'source'), ('runtime_python\\\\prompt_understanding.py', 'runtime_python'), ('runtime_python\\\\reasoning_engine.py', 'runtime_python'), ('assets', 'assets'), ('artifacts\\qwen_supermix_enhanced_v25_selective_pref\\adapter', 'bundled_latest_adapter')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('webview')
