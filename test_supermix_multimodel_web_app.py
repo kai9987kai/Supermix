@@ -21,6 +21,9 @@ class _StubManager:
         self.review_audit_payloads = []
         self.shadow_status_calls = 0
         self.feedback_payloads = []
+        self.memory_review_payloads = []
+        self.memory_snapshot_sessions = []
+        self.cleared_sessions = []
         self._store_rows = [
             {
                 "file_name": "supermix_omni_collective_v8_preview_20260407_001155.zip",
@@ -138,6 +141,47 @@ class _StubManager:
             "response": "stub response",
             "agent_trace": {},
         }
+
+    def session_memory_snapshot(self, session_id: str):
+        self.memory_snapshot_sessions.append(session_id)
+        return {
+            "session_id": session_id,
+            "memory_schema_version": "supermix-conversation-memory-v3",
+            "memory_authority_policy_version": "supermix-memory-authority-firewall-v1",
+            "memory_count": 1,
+            "recent_turns": [
+                {"user": "private prompt", "assistant": "private answer"}
+            ],
+            "memory_records": [
+                {
+                    "memory_id": "memory-1",
+                    "kind": "preference",
+                    "text": "Prefers concise answers",
+                    "lifecycle_state": "active",
+                    "origin": "direct_user",
+                    "authority_class": "user_personalization",
+                    "allowed_uses": ["response_personalization"],
+                    "truth_status": "self_reported",
+                    "integrity_status": "valid",
+                    "prompt_eligible": True,
+                }
+            ],
+        }
+
+    def review_session_memory(self, *, session_id: str, memory_id: str, action: str):
+        self.memory_review_payloads.append(
+            {"session_id": session_id, "memory_id": memory_id, "action": action}
+        )
+        return {
+            "ok": True,
+            "memory_id": memory_id,
+            "action": action,
+            "lifecycle_state": "revoked" if action == "revoke" else "active",
+            "truth_status": "self_reported",
+        }
+
+    def clear(self, session_id: str):
+        self.cleared_sessions.append(session_id)
 
     def preview_route_plan(self, *, session_id: str, prompt: str, model_key: str, action_mode: str, settings: dict):
         if model_key == "missing-model":
@@ -662,6 +706,14 @@ def test_index_contains_discovery_ui():
         assert 'id="progressiveAutoCompute"' in html
         assert 'id="predictionStabilityMargin"' in html
         assert 'id="predictionStabilityRankDepth"' in html
+        assert 'id="memoryReviewBtn"' in html
+        assert 'id="memoryReviewList"' in html
+        assert "supermix.studio.session.v55" in html
+        assert "localStorage.getItem" in html
+        assert "typeof crypto.randomUUID === 'function'" in html
+        assert "([1e7]+-1e3+-4e3+-8e3+-1e11)" in html
+        assert "([1e7]+-1e3+-4e3+-8e2+-1e11)" not in html
+        assert "'/api/memory/review'" in html
         assert 'id="sessionBudget"' in html
         assert 'id="sessionBudgetTargetRoutes"' in html
         assert 'data-mode="auto"' in html
@@ -684,6 +736,9 @@ def test_index_contains_discovery_ui():
         assert 'id="routeHealth"' in html
         assert 'id="routeHealthCount"' in html
         assert 'id="routeHealthQuality"' in html
+        assert "adapter_attestation" in html
+        assert "adapter trust:" in html
+        assert "legacy compatibility" in html
         assert 'id="policyLab"' in html
         assert 'id="policyLabProfile"' in html
         assert 'id="policyLabGate"' in html
@@ -788,6 +843,10 @@ def test_index_contains_discovery_ui():
         assert "prediction_stability_rank_depth" in html
         assert "prediction_class_count" in html
         assert "Verifier scope" in html
+        assert "grounding.answer_receipt" in html
+        assert "Receipt ${escHtml(receipt.decision" in html
+        assert "Independently verified" in html
+        assert "Model-conditional, not calibrated" in html
         assert "rows[selectedIndex]" in html
         assert "rows[rows.length - 1].mutual_stability_shadow" not in html
         assert "route_alternatives" in html
@@ -865,6 +924,109 @@ def test_chat_endpoint_passes_session_budget_setting_to_manager():
         assert stub.chat_payloads[0]["session_id"] == "chat-session"
         assert stub.chat_payloads[0]["settings"]["auto_session_budget_units"] == 7.5
         assert stub.chat_payloads[0]["settings"]["auto_session_budget_target_routes"] == 4
+
+
+def test_chat_endpoint_requires_an_explicit_nonempty_session_id():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        zip_path = root / "supermix_3d_generation_micro_v1_20260403.zip"
+        summary_path = root / "three_d_generation_micro_v1_summary.json"
+        zip_path.write_bytes(b"zip-bytes")
+        summary_path.write_bytes(b"{}")
+
+        stub = _StubManager(zip_path, summary_path)
+        app = build_app(stub)
+        client = app.test_client()
+
+        for session_payload in ({}, {"session_id": "   "}):
+            response = client.post(
+                "/api/chat",
+                json={"message": "Do not use a shared default.", **session_payload},
+            )
+            assert response.status_code == 400
+            assert response.get_json() == {"ok": False, "error": "session_id is required"}
+        assert stub.chat_payloads == []
+
+
+def test_remote_chat_forces_durable_memory_off_without_changing_other_settings():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        zip_path = root / "supermix_3d_generation_micro_v1_20260403.zip"
+        summary_path = root / "three_d_generation_micro_v1_summary.json"
+        zip_path.write_bytes(b"zip-bytes")
+        summary_path.write_bytes(b"{}")
+
+        stub = _StubManager(zip_path, summary_path)
+        app = build_app(stub)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/chat",
+            json={
+                "session_id": "remote-session",
+                "message": "Answer without durable memory.",
+                "settings": {"memory_enabled": True, "agent_mode": "collective"},
+            },
+            environ_overrides={"REMOTE_ADDR": "203.0.113.9"},
+        )
+        defaulted = client.post(
+            "/api/chat",
+            json={
+                "session_id": "remote-default",
+                "message": "Do not fall back to memory.",
+            },
+            environ_overrides={"REMOTE_ADDR": "2001:db8::9"},
+        )
+
+        assert response.status_code == 200
+        assert defaulted.status_code == 200
+        assert stub.chat_payloads[0] == {
+            "session_id": "remote-session",
+            "prompt": "Answer without durable memory.",
+            "model_key": "auto",
+            "action_mode": "text",
+            "settings": {"memory_enabled": False, "agent_mode": "collective"},
+        }
+        assert stub.chat_payloads[1]["settings"] == {"memory_enabled": False}
+
+
+def test_local_chat_preserves_requested_and_default_memory_settings():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        zip_path = root / "supermix_3d_generation_micro_v1_20260403.zip"
+        summary_path = root / "three_d_generation_micro_v1_summary.json"
+        zip_path.write_bytes(b"zip-bytes")
+        summary_path.write_bytes(b"{}")
+
+        stub = _StubManager(zip_path, summary_path)
+        app = build_app(stub)
+        client = app.test_client()
+
+        requested = client.post(
+            "/api/chat",
+            json={
+                "session_id": "local-requested",
+                "message": "Use my requested setting.",
+                "settings": {"memory_enabled": True, "agent_mode": "loop"},
+            },
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        defaulted = client.post(
+            "/api/chat",
+            json={
+                "session_id": "local-default",
+                "message": "Use the manager default.",
+            },
+            environ_overrides={"REMOTE_ADDR": "::1"},
+        )
+
+        assert requested.status_code == 200
+        assert defaulted.status_code == 200
+        assert stub.chat_payloads[0]["settings"] == {
+            "memory_enabled": True,
+            "agent_mode": "loop",
+        }
+        assert stub.chat_payloads[1]["settings"] == {}
 
 
 def test_route_plan_endpoint_passes_payload_to_preview_without_chat():
@@ -1147,6 +1309,119 @@ def test_route_plan_endpoint_returns_compact_error_when_no_models_are_discovered
         assert "No local models were discovered" in payload["error"]
         assert stub.chat_payloads == []
         assert stub.preview_payloads == []
+
+
+def test_memory_endpoints_are_no_store_and_use_exact_lifecycle_actions():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        zip_path = root / "supermix_3d_generation_micro_v1_20260403.zip"
+        summary_path = root / "three_d_generation_micro_v1_summary.json"
+        zip_path.write_bytes(b"zip-bytes")
+        summary_path.write_bytes(b"{}")
+
+        stub = _StubManager(zip_path, summary_path)
+        app = build_app(stub)
+        client = app.test_client()
+
+        snapshot_response = client.post(
+            "/api/memory",
+            json={"session_id": "memory-session"},
+        )
+        assert snapshot_response.status_code == 200
+        assert snapshot_response.headers["Cache-Control"] == "no-store"
+        snapshot = snapshot_response.get_json()
+        assert snapshot["ok"] is True
+        assert snapshot["memory"]["session_id"] == "memory-session"
+        assert snapshot["memory"]["memory_records"][0]["origin"] == "direct_user"
+        assert "recent_turns" not in snapshot["memory"]
+
+        review_response = client.post(
+            "/api/memory/review",
+            json={
+                "session_id": "memory-session",
+                "memory_id": "memory-1",
+                "action": "revoke",
+            },
+        )
+        assert review_response.status_code == 200
+        assert review_response.headers["Cache-Control"] == "no-store"
+        assert review_response.get_json()["lifecycle_state"] == "revoked"
+        assert stub.memory_review_payloads == [
+            {
+                "session_id": "memory-session",
+                "memory_id": "memory-1",
+                "action": "revoke",
+            }
+        ]
+
+
+def test_memory_review_endpoint_rejects_incomplete_requests_without_mutation():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        zip_path = root / "supermix_3d_generation_micro_v1_20260403.zip"
+        summary_path = root / "three_d_generation_micro_v1_summary.json"
+        zip_path.write_bytes(b"zip-bytes")
+        summary_path.write_bytes(b"{}")
+
+        stub = _StubManager(zip_path, summary_path)
+        app = build_app(stub)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/memory/review",
+            json={"session_id": "memory-session", "action": "revoke"},
+        )
+        assert response.status_code == 400
+        assert response.headers["Cache-Control"] == "no-store"
+        assert response.get_json() == {"ok": False, "error": "memory_id is required"}
+        assert stub.memory_review_payloads == []
+
+
+def test_memory_endpoints_require_explicit_local_same_origin_session():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        zip_path = root / "supermix_3d_generation_micro_v1_20260403.zip"
+        summary_path = root / "three_d_generation_micro_v1_summary.json"
+        zip_path.write_bytes(b"zip-bytes")
+        summary_path.write_bytes(b"{}")
+
+        stub = _StubManager(zip_path, summary_path)
+        app = build_app(stub)
+        client = app.test_client()
+
+        missing = client.post("/api/memory", json={})
+        assert missing.status_code == 400
+        assert missing.headers["Cache-Control"] == "no-store"
+        assert missing.get_json()["error"] == "session_id is required"
+
+        remote = client.post(
+            "/api/memory",
+            json={"session_id": "known-session"},
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+        )
+        assert remote.status_code == 403
+        assert remote.headers["Cache-Control"] == "no-store"
+
+        cross_origin = client.post(
+            "/api/memory/review",
+            json={
+                "session_id": "known-session",
+                "memory_id": "memory-1",
+                "action": "revoke",
+            },
+            headers={"Origin": "https://attacker.example"},
+        )
+        assert cross_origin.status_code == 403
+        assert cross_origin.headers["Cache-Control"] == "no-store"
+        remote_clear = client.post(
+            "/api/clear",
+            json={"session_id": "known-session"},
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+        )
+        assert remote_clear.status_code == 403
+        assert stub.memory_snapshot_sessions == []
+        assert stub.memory_review_payloads == []
+        assert stub.cleared_sessions == []
 
 
 def test_route_feedback_endpoint_passes_compact_payload_to_manager():

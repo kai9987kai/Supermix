@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 PROMPT_UNDERSTANDING_SCHEMA_VERSION = "supermix-prompt-understanding-v1"
-PROMPT_UNDERSTANDING_VERSION = "supermix-prompt-understanding-runtime-v1"
+PROMPT_UNDERSTANDING_VERSION = "supermix-prompt-understanding-runtime-v3"
 SCHEMA_VERSION = PROMPT_UNDERSTANDING_SCHEMA_VERSION
 RUNTIME_VERSION = PROMPT_UNDERSTANDING_VERSION
 MAX_PROMPT_CHARS = 12_000
@@ -25,10 +25,10 @@ MAX_RENDER_CHARS = 3_200
 _MASK_RE = re.compile(
     r"```[\s\S]{0,6000}?```|"
     r"`[^`\n]{0,1000}`|"
-    r'"[^"\n]{0,1000}"|'
-    r"\u201c[^\u201d\n]{0,1000}\u201d|"
-    r"(?<!\w)'[^'\n]{1,1000}'(?!\w)|"
-    r"\u2018[^\u2019\n]{0,1000}\u2019|"
+    r'"[^"]{0,1000}"|'
+    r"\u201c[^\u201d]{0,1000}\u201d|"
+    r"(?<!\w)'[^']{1,1000}'(?!\w)|"
+    r"\u2018[^\u2019]{0,1000}\u2019|"
     r"https?://[^\s<>{}\[\]]+|www\.[^\s<>{}\[\]]+|"
     r"(?<!\w)(?:[A-Za-z]:\\|\\\\)[^\s<>:\"|?*]{1,500}|"
     r"(?<!\w)/(?:[A-Za-z0-9._~-]+/)+[A-Za-z0-9._~-]*",
@@ -73,6 +73,20 @@ _CUE_LEXICON: Dict[str, str] = {
     "invent": "objective",
     "translate": "objective",
     "summarize": "objective",
+    "predict": "objective",
+    "forecast": "objective",
+    "investigate": "objective",
+    "experiment": "objective",
+    "understand": "objective",
+    # reasoning domains
+    "conversation": "domain",
+    "response": "domain",
+    "reasoning": "domain",
+    "prediction": "domain",
+    "mathematics": "domain",
+    "science": "domain",
+    "scientific": "domain",
+    "hypothesis": "domain",
     # constraints and evidence
     "exactly": "constraint",
     "maximum": "constraint",
@@ -126,6 +140,16 @@ _EXPLICIT_ALIASES: Dict[str, Tuple[str, str]] = {
     "citaiton": ("citation", "knowledge"),
     "curent": ("current", "knowledge"),
     "latset": ("latest", "knowledge"),
+    # Frequent transpositions in broad capability requests.  These aliases are
+    # deliberately closed-vocabulary; they cannot rewrite arbitrary content.
+    "innvoate": ("innovate", "objective"),
+    "covnersation": ("conversation", "domain"),
+    "covnersations": ("conversations", "domain"),
+    "undersatand": ("understand", "objective"),
+    "responser": ("response", "domain"),
+    "reasning": ("reasoning", "domain"),
+    "prediciton": ("prediction", "domain"),
+    "sceince": ("science", "domain"),
 }
 _NO_FUZZY_COMMON = {
     "about",
@@ -178,7 +202,7 @@ _OBJECTIVE_PATTERNS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
         "solve",
         re.compile(
             r"\b(solve|fix|debug|diagnose|calculate|derive|prove|implement|"
-            r"build|plan|improve|optimi[sz]e)\b",
+            r"build|plan|improve|innovate|advance|optimi[sz]e)\b",
             re.I,
         ),
     ),
@@ -216,6 +240,24 @@ _OBJECTIVE_PATTERNS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
     ),
     ("translate", re.compile(r"\b(translate|translation)\b", re.I)),
     ("summarize", re.compile(r"\b(summarize|summarise|summary)\b", re.I)),
+    (
+        "predict",
+        re.compile(
+            r"\b(predict(?:ed|ing|ion|ive)?|forecast|projections?|"
+            r"project(?=\s+(?:the\s+)?(?:next|future|demand|sales|revenue|outcome))|"
+            r"estimate (?:the )?(?:next|future)|"
+            r"what (?:will|would|is likely to) happen)\b",
+            re.I,
+        ),
+    ),
+    (
+        "investigate",
+        re.compile(
+            r"\b(investigate|formulate (?:a )?hypothesis|test (?:a |the )?hypothesis|"
+            r"design (?:an? )?(?:scientific )?(?:experiment|test)|scientific method)\b",
+            re.I,
+        ),
+    ),
     (
         "retrieve",
         re.compile(
@@ -264,6 +306,41 @@ _FACTUAL_RE = re.compile(
     re.I,
 )
 
+_MATH_DOMAIN_RE = re.compile(
+    r"\b(math(?:s|ematics|ematical)?|arithmetic|algebra|geometry|calculus|"
+    r"equation|probability|statistics?|calculat(?:e|ion)|compute|derive|proof)\b|"
+    r"(?<!\w)[+-]?\d+(?:\.\d+)?\s*(?:[+\-*/=\u00d7\u00f7])\s*"
+    r"[+-]?\d+(?:\.\d+)?(?!\w)",
+    re.I,
+)
+_SCIENCE_DOMAIN_RE = re.compile(
+    r"\b(science|scientific|physics|chemistry|biology|astronomy|geology|"
+    r"constant acceleration|kinematics|ideal gas(?: law| model| equation)?|"
+    r"hypothesis|experiment|experimental|observation|measurement|"
+    r"(?:independent|dependent|controlled)\s+variables?|"
+    r"control group|replicate|mechanism)\b",
+    re.I,
+)
+_PREDICTION_DOMAIN_RE = re.compile(
+    r"\b(predict(?:ed|ing|ion|ive)?|forecast|projections?|"
+    r"project(?=\s+(?:the\s+)?(?:next|future|demand|sales|revenue|outcome))|"
+    r"probability of (?:the )?next|"
+    r"likelihood|odds|expected outcome|what (?:will|would|is likely to) happen)\b",
+    re.I,
+)
+_CAUSAL_DOMAIN_RE = re.compile(
+    r"\b(cause|causal|causality|mechanism|confound(?:er|ing)?|correlation|"
+    r"counterfactual|effect of)\b|"
+    r"\bwhy (?:did|does)\b[^?.]{0,80}\b(?:affect|change|increase|decrease|"
+    r"lead|cause|result)\w*\b",
+    re.I,
+)
+_CONVERSATION_DOMAIN_RE = re.compile(
+    r"\b(conversations?|conversational|dialogue|chat|multi[- ]turn|follow[- ]?up|"
+    r"turn context|conversation memory|understand (?:the )?user|response logic)\b",
+    re.I,
+)
+
 _RAW_CRISIS_RE = re.compile(
     r"\b(?:kill(?:ing)?|hurt(?:ing)?)\s+myself\b"
     r"(?!\s+(?:laughing|with\s+laughter)\b)|"
@@ -303,7 +380,7 @@ _REFERENCE_RE = re.compile(
     re.I,
 )
 _FOLLOWUP_RE = re.compile(
-    r"\b(same|again|continue|keep going|previous|above|earlier|"
+    r"\b(same(?!\s+(?:success\s+)?(?:probability|rate)\b)|again|continue|keep going|previous|above|earlier|"
     r"former|latter|first message|previous answer|do that|make it)\b",
     re.I,
 )
@@ -1037,6 +1114,18 @@ def _reference_profiles(
             )
         )
 
+    def is_local_same_probability(match: re.Match[str]) -> bool:
+        """Do not resolve a within-model equality as conversation context."""
+
+        if match.group(0).lower() != "same":
+            return False
+        suffix = parser_text[match.end() : match.end() + 48]
+        return re.match(
+            r"\s+(?:success\s+)?(?:probability|rate)\b",
+            suffix,
+            re.I,
+        ) is not None
+
     matches = [
         match
         for match in _REFERENCE_RE.finditer(parser_text)
@@ -1050,6 +1139,7 @@ def _reference_profiles(
             and match.group(0).lower() in {"it", "that", "this"}
         )
         and not is_complementizer_that(match)
+        and not is_local_same_probability(match)
     ]
     required_acts = {
         str(row.get("act"))
@@ -1306,10 +1396,164 @@ def _knowledge_profile(parser_text: str) -> Dict[str, bool]:
     }
 
 
+def _reasoning_profile(
+    parser_text: str,
+    objectives: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Classify observable reasoning needs without inferring an answer.
+
+    The profile is deliberately a closed set of flags and obligations.  It can
+    choose a response *shape*, but it cannot grant tool access, increase model
+    compute, or certify that a generated claim is correct.
+    """
+
+    text = str(parser_text or "")
+    # Remove forbidden objective spans before domain classification. This keeps
+    # "do not design an experiment; rewrite this" from recreating scientific
+    # obligations from the forbidden phrase itself.
+    facet_chars = list(text)
+    for row in objectives:
+        if str(row.get("mode") or "required") != "forbidden":
+            continue
+        origin = row.get("origin") if isinstance(row.get("origin"), Mapping) else {}
+        span = origin.get("span") if isinstance(origin, Mapping) else None
+        if not isinstance(span, (list, tuple)) or len(span) != 2:
+            continue
+        try:
+            start = max(0, min(len(facet_chars), int(span[0])))
+            end = max(start, min(len(facet_chars), int(span[1])))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        facet_chars[start:end] = " " * (end - start)
+    facet_text = "".join(facet_chars)
+
+    mathematical = bool(_MATH_DOMAIN_RE.search(facet_text))
+    scientific = bool(_SCIENCE_DOMAIN_RE.search(facet_text))
+    predictive = bool(_PREDICTION_DOMAIN_RE.search(facet_text))
+    causal = bool(_CAUSAL_DOMAIN_RE.search(facet_text))
+    conversational = bool(_CONVERSATION_DOMAIN_RE.search(facet_text))
+    required_acts = {
+        str(row.get("act") or "")
+        for row in objectives
+        if row.get("mode") == "required"
+    }
+    forbidden_acts = {
+        str(row.get("act") or "")
+        for row in objectives
+        if row.get("mode") == "forbidden"
+    }
+    prediction_forbidden = "predict" in forbidden_acts and "predict" not in required_acts
+    calculation_forbidden = "solve" in forbidden_acts and "solve" not in required_acts
+    predictive = (predictive or "predict" in required_acts) and not prediction_forbidden
+    investigative = "investigate" in required_acts
+    scientific = scientific or investigative
+    numeric_problem = bool(
+        re.search(
+            r"(?<!\w)[+-]?\d+(?:\.\d+)?\s*(?:[+\-*/=\u00d7\u00f7])\s*"
+            r"[+-]?\d+(?:\.\d+)?(?!\w)|"
+            r"(?<!\w)[+-]?\d+(?:\.\d+)?\s*(?:%|percent)\s+of\s+"
+            r"[+-]?\d+(?:\.\d+)?(?!\w)",
+            facet_text,
+            re.I,
+        )
+    )
+    explicit_calculation = bool(
+        re.search(
+            r"\b(calculate|calculation|compute|evaluate|solve (?:for|the|this|an?|\d)|"
+            r"(?:find|what is) (?:the )?(?:area|volume|perimeter|force|density|energy|"
+            r"current|voltage|resistance|probability))\b",
+            facet_text,
+            re.I,
+        )
+    )
+    verification_required = bool(
+        mathematical
+        and not calculation_forbidden
+        and (explicit_calculation or numeric_problem)
+    )
+
+    question_count = min(8, text.count("?"))
+    multi_part = bool(
+        question_count >= 2
+        or re.search(
+            r"\b(?:answer|address|cover) (?:both|each|all)|"
+            r"\bfirst\b[^?.]{0,120}\bsecond\b|\bparts?\s+[12]\b",
+            facet_text,
+            re.I,
+        )
+    )
+    domains = [
+        name
+        for name, enabled in (
+            ("mathematics", mathematical),
+            ("science", scientific),
+            ("prediction", predictive),
+            ("causal", causal),
+            ("conversation", conversational),
+        )
+        if enabled
+    ]
+
+    if predictive and scientific:
+        strategy = "scientific_forecast"
+    elif predictive:
+        strategy = "probabilistic_forecast"
+    elif investigative:
+        strategy = "scientific_method"
+    elif verification_required:
+        strategy = "quantitative_verification"
+    elif causal:
+        strategy = "causal_analysis"
+    elif scientific:
+        strategy = "scientific_explanation"
+    elif conversational:
+        strategy = "conversation_context"
+    else:
+        strategy = "direct"
+
+    requirements: List[str] = []
+    if verification_required:
+        requirements.append("compute_then_verify")
+    if investigative:
+        requirements.extend(("separate_observation_inference", "state_testable_hypothesis"))
+    elif scientific:
+        requirements.append("ground_claims_in_evidence")
+    if predictive:
+        requirements.extend(("state_assumptions", "conditional_forecast", "calibrate_or_abstain"))
+    if causal:
+        requirements.extend(("identify_mechanism", "distinguish_correlation_causation"))
+    if conversational:
+        requirements.extend(("preserve_turn_context", "address_user_corrections"))
+    if multi_part:
+        requirements.append("answer_each_part")
+
+    return {
+        "domains": domains,
+        "strategy": strategy,
+        "mathematical": mathematical,
+        "verification_required": verification_required,
+        "scientific": scientific,
+        "investigative": investigative,
+        "predictive": predictive,
+        "causal": causal,
+        "conversational": conversational,
+        "question_count": question_count,
+        "multi_part": multi_part,
+        "requirements": list(dict.fromkeys(requirements)),
+        "authority": {
+            "controls_compute": False,
+            "controls_routes": False,
+            "may_enable_tools": False,
+            "certifies_correctness": False,
+        },
+    }
+
+
 def _response_contract(
     objectives: Sequence[Mapping[str, Any]],
     constraints: Sequence[Mapping[str, Any]],
     knowledge: Mapping[str, Any],
+    reasoning: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     capability_for_act = {
         "solve": ("actionable_solution", "reasoning"),
@@ -1321,6 +1565,15 @@ def _response_contract(
         "translate": ("translation",),
         "summarize": ("summarization",),
         "retrieve": ("evidence_or_calibration",),
+        "predict": ("calibrated_prediction", "assumptions"),
+        "investigate": ("scientific_reasoning", "evidence_or_calibration"),
+    }
+    forbidden_capability_for_act = {
+        # Forbidding an activity does not forbid discussing all of its support.
+        # "Do not predict" need not ban assumptions, and "do not design an
+        # experiment" need not ban every reference to evidence.
+        "predict": ("calibrated_prediction",),
+        "investigate": ("scientific_reasoning",),
     }
     required: List[str] = []
     forbidden: List[str] = []
@@ -1331,7 +1584,12 @@ def _response_contract(
         if mode == "required" and act != "conversation":
             required_acts.append(act)
         target = required if mode == "required" else forbidden
-        target.extend(capability_for_act.get(act, ()))
+        capabilities = (
+            forbidden_capability_for_act.get(act, capability_for_act.get(act, ()))
+            if mode == "forbidden"
+            else capability_for_act.get(act, ())
+        )
+        target.extend(capabilities)
     capability_for_constraint = {
         "format.bullets": "bullets",
         "format.headings": "headings",
@@ -1351,6 +1609,21 @@ def _response_contract(
         required.append("citations")
     if knowledge.get("evidence_requested") or knowledge.get("strict_evidence_only"):
         required.append("evidence_or_calibration")
+    reasoning = dict(reasoning or {})
+    if reasoning.get("verification_required"):
+        required.append("verified_calculation")
+    if reasoning.get("scientific"):
+        required.append("evidence_or_calibration")
+    if reasoning.get("investigative"):
+        required.append("scientific_reasoning")
+    if reasoning.get("predictive"):
+        required.extend(("calibrated_prediction", "assumptions"))
+    if reasoning.get("causal"):
+        required.extend(("causal_reasoning", "assumptions"))
+    if reasoning.get("conversational"):
+        required.append("conversation_continuity")
+    if reasoning.get("multi_part"):
+        required.append("multi_part_coverage")
     deterministic = [
         str(row.get("id"))
         for row in constraints
@@ -1428,6 +1701,7 @@ def analyze_prompt(
     raw_urgent = bool(_RAW_URGENT_HEALTH_RE.search(raw_safety_text))
     normalized_urgent = bool(_RAW_URGENT_HEALTH_RE.search(safety_typo_text))
     knowledge = _knowledge_profile(parser_text)
+    reasoning = _reasoning_profile(parser_text, objectives)
 
     requested_tools = [
         str(row.get("value"))
@@ -1483,6 +1757,7 @@ def analyze_prompt(
             "hard_conflict_count": len(hard_conflicts),
         },
         "knowledge": knowledge,
+        "reasoning": reasoning,
         "safety": {
             "personal_crisis_signal": bool(raw_crisis or normalized_crisis),
             "urgent_health_signal": bool(raw_urgent or normalized_urgent),
@@ -1500,6 +1775,7 @@ def analyze_prompt(
             objectives,
             constraints,
             knowledge,
+            reasoning,
         ),
         "context": {
             "turn_relation": turn_relation,
@@ -1615,6 +1891,19 @@ def prompt_understanding_diagnostics(profile: Any) -> Dict[str, Any]:
                 "citations_requested",
                 "strict_evidence_only",
             }
+        },
+        "reasoning": {
+            "domains": [
+                str(value)
+                for value in dict(data.get("reasoning") or {}).get("domains", ())
+                if str(value) in {"mathematics", "science", "prediction", "causal", "conversation"}
+            ],
+            "strategy": str(dict(data.get("reasoning") or {}).get("strategy") or "direct"),
+            "question_count": min(
+                8,
+                max(0, int(dict(data.get("reasoning") or {}).get("question_count") or 0)),
+            ),
+            "multi_part": bool(dict(data.get("reasoning") or {}).get("multi_part")),
         },
         "safety": {
             key: bool(value)
@@ -2143,6 +2432,7 @@ def render_prompt_contract(profile: Any) -> str:
             ),
         },
         "knowledge": _safe_render_value(dict(data.get("knowledge") or {})),
+        "reasoning": _safe_render_value(dict(data.get("reasoning") or {})),
         "response_contract": _safe_render_value(
             dict(data.get("response_contract") or {})
         ),

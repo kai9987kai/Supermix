@@ -295,7 +295,8 @@ function reasoningCyclesValue(){const raw=el('reasoningCycles').value.trim();if(
 function addOptionalFiniteNumber(payload,key,input){const raw=input.value.trim();if(raw==='')return;const value=Number(raw);if(Number.isFinite(value))payload[key]=value;}
 function interactionText(interaction){if(!interaction)return'';const guard=interaction.response_guard||{};return `Interaction: intent ${interaction.intent||'conversation'} | strategy ${interaction.strategy||'direct_then_offer_depth'} | risk ${interaction.risk_tier||'low'} | guard ${guard.reason||'candidate_aligned'}`;}
 function understandingText(understanding){if(!understanding)return'';const acts=Array.isArray(understanding.objective_acts)?understanding.objective_acts:(Array.isArray(understanding.acts)?understanding.acts:[]);const ambiguity=understanding.ambiguity||{};const context=understanding.context||{};const normalization=understanding.normalization||{};const safety=understanding.safety||{};const audit=understanding.response_constraint_audit||{};const parts=[`acts ${acts.slice(0,3).join('+')||understanding.primary_act||'direct'}`,`constraints ${understanding.constraint_count??0}`,`ambiguity ${ambiguity.status||understanding.ambiguity_status||understanding.decision||'clear'}`,`turn ${context.turn_relation||understanding.turn_relation||'standalone'}`];if(audit.accepted===true)parts.push('contract pass');else if(audit.accepted===false)parts.push(`contract ${Array.isArray(audit.violations)?audit.violations.length:1} issue(s)`);if(Number(normalization.correction_count||0)>0||safety.typo_recovery_applied||understanding.typo_recovery_applied||understanding.cue_typos_recovered)parts.push('cue typo recovered');return `Understanding: ${parts.join(' | ')}`;}
-function groundingText(grounding){if(!grounding)return'';const diagnostics=grounding.diagnostics||{};const guard=grounding.response_guard||{};return `Grounding: evidence ${diagnostics.evidence_count??0} | ${diagnostics.sufficiency||'no_evidence'} | guard ${guard.reason||'audit_only'}`;}
+function answerReceiptText(receipt){if(!receipt||receipt.kind==='none')return'';const verification=receipt.verification||{};const epistemics=receipt.epistemics||{};const parts=[`receipt ${receipt.decision||'not_attempted'}`];if(receipt.problem_class)parts.push(receipt.problem_class);if(receipt.method)parts.push(receipt.method);if(verification.passed)parts.push(verification.independent?'independently verified':'deterministically verified');if(epistemics.model_conditional)parts.push('model-conditional, not calibrated');return parts.join(' | ');}
+function groundingText(grounding){if(!grounding)return'';const diagnostics=grounding.diagnostics||{};const guard=grounding.response_guard||{};const base=`Grounding: evidence ${diagnostics.evidence_count??0} | ${diagnostics.sufficiency||'no_evidence'} | guard ${guard.reason||'audit_only'}`;const receipt=answerReceiptText(grounding.answer_receipt);return receipt?`${base} | ${receipt}`:base;}
 function add(kind,text,timing,top,compute,interaction,promptUnderstanding,grounding){
     const d=document.createElement('div');
     d.className='msg '+kind;
@@ -1347,6 +1348,9 @@ class Engine:
                         "changed": bool(grounding_guard.get("changed", False)),
                         "reason": str(grounding_guard.get("reason") or "audit_only"),
                     },
+                    "answer_receipt": dict(
+                        grounding_guard.get("answer_receipt") or {}
+                    ),
                     "authority": dict(grounding_guard.get("authority") or {}),
                 }
             interaction_diag: Optional[Dict[str, Any]] = None

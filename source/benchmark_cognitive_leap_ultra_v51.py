@@ -26,8 +26,8 @@ SOURCE_DIR = Path(__file__).resolve().parent
 if str(SOURCE_DIR) not in sys.path:
     sys.path.append(str(SOURCE_DIR))
 
-from device_utils import resolve_device
-from model_variants import ChampionNetCognitiveLeapUltraExpert
+from device_utils import resolve_device  # noqa: E402
+from model_variants import ChampionNetCognitiveLeapUltraExpert  # noqa: E402
 
 
 N_CLASSES = 10
@@ -36,9 +36,75 @@ IN_DIM = 128
 # Calibrated for this v51 checkpoint/workload, not a universal safety threshold.
 DEFAULT_PREDICTION_STABILITY_MARGIN = 5e-4
 DEFAULT_PREDICTION_STABILITY_RANK_DEPTH = 3
+GENERATOR_SCHEMA = "supermix-cognitive-leap-generator-v1"
+FAMILY_TAG_SCHEMA = "supermix-cognitive-leap-family-tags-v1"
+OPERATION_NAMES = ("add", "mul", "sub")
 
 
-def make_chained_task(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
+def derive_chained_targets(
+    starts: torch.Tensor,
+    op_types: torch.Tensor,
+    operands: torch.Tensor,
+) -> torch.Tensor:
+    """Reconstruct modulo-10 targets from canonical task metadata."""
+
+    if (
+        starts.ndim != 1
+        or op_types.shape != (starts.numel(), N_OPS)
+        or operands.shape != (starts.numel(), N_OPS)
+        or starts.dtype != torch.long
+        or op_types.dtype != torch.long
+        or operands.dtype != torch.long
+        or not bool(((starts >= 0) & (starts < 10)).all().item())
+        or not bool(((op_types >= 0) & (op_types < len(OPERATION_NAMES))).all().item())
+        or not bool(((operands >= 1) & (operands < 10)).all().item())
+    ):
+        raise ValueError("Invalid Cognitive Leap task metadata")
+    result = starts.clone()
+    for offset in range(N_OPS):
+        operation = op_types[:, offset]
+        operand = operands[:, offset]
+        result = torch.where(
+            operation.eq(0),
+            (result + operand) % 10,
+            torch.where(operation.eq(1), (result * operand) % 10, (result - operand) % 10),
+        )
+    return result
+
+
+def operation_family_tags(op_types: torch.Tensor) -> tuple[str, str]:
+    """Return the two versioned coarse-family tags for one four-op example."""
+
+    if (
+        op_types.shape != (N_OPS,)
+        or op_types.dtype != torch.long
+        or not bool(((op_types >= 0) & (op_types < len(OPERATION_NAMES))).all().item())
+    ):
+        raise ValueError("Invalid operation row")
+    values = [int(value) for value in op_types.tolist()]
+    return (
+        f"first_{OPERATION_NAMES[values[0]]}",
+        f"mul_count_{sum(value == 1 for value in values)}",
+    )
+
+
+def make_chained_task_with_metadata(
+    n: int,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
+    """Build the canonical task plus provenance needed by bounded gates.
+
+    The tensor-generation order deliberately matches the original v51 helper,
+    so existing seed/checkpoint evidence remains replayable byte-for-byte.
+    Metadata tensors are returned as clones to prevent a caller from changing
+    the generated cohort through an alias.
+    """
+
+    if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+        raise ValueError("n must be a positive integer")
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**63:
+        raise ValueError("seed must be an integer in [0, 2**63)")
+
     gen = torch.Generator().manual_seed(seed)
     x = torch.zeros(n, IN_DIM)
     y = torch.zeros(n, dtype=torch.long)
@@ -61,8 +127,19 @@ def make_chained_task(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
             else:
                 acc = (acc - operand) % 10
         y[i] = acc
+    if not torch.equal(y, derive_chained_targets(starts, op_types, operands)):
+        raise RuntimeError("Canonical task target derivation mismatch")
     x = x + 0.01 * torch.randn(n, IN_DIM, generator=gen)
-    return x.unsqueeze(1), y
+    return x.unsqueeze(1), y, {
+        "starts": starts.clone(),
+        "op_types": op_types.clone(),
+        "operands": operands.clone(),
+    }
+
+
+def make_chained_task(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
+    x, y, _metadata = make_chained_task_with_metadata(n, seed)
+    return x, y
 
 
 def force_alpha(model: nn.Module, value: float = 1.0) -> None:

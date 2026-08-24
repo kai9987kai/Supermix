@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -8,7 +9,7 @@ SOURCE_DIR = Path(__file__).resolve().parent / "source"
 if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
 
-from source.qwen_chat_web_app import Engine
+from source.qwen_chat_web_app import Engine, HTML  # noqa: E402
 
 
 class _Batch(dict):
@@ -57,6 +58,13 @@ def _chat(engine: Engine, prompt: str, **kwargs):
     )
 
 
+def test_qwen_ui_renders_verified_answer_receipt_state():
+    assert "grounding.answer_receipt" in HTML
+    assert '"receipt " + (receipt.decision' in HTML
+    assert "independently verified" in HTML
+    assert "model-conditional, not calibrated" in HTML
+
+
 def test_qwen_exact_arithmetic_overrides_unverified_generation():
     tokenizer = _Tokenizer("The answer might be 8.")
     engine = Engine(_Model(), tokenizer, torch.device("cpu"), False, {})
@@ -70,6 +78,40 @@ def test_qwen_exact_arithmetic_overrides_unverified_generation():
     }
     assert payload["grounding"]["authority"]["controls_compute"] is False
     assert payload["grounding"]["authority"]["controls_routes"] is False
+    receipt = payload["grounding"]["answer_receipt"]
+    assert receipt["kind"] == "exact_arithmetic"
+    assert receipt["decision"] == "verified_selected"
+    assert receipt["verification"] == {"passed": True, "independent": False}
+    assert "68" not in json.dumps(receipt, sort_keys=True)
+
+
+def test_qwen_propagates_prompt_free_model_conditional_verification_receipt():
+    tokenizer = _Tokenizer("The probability might be 1/3.")
+    engine = Engine(_Model(), tokenizer, torch.device("cpu"), False, {})
+    prompt = (
+        "Assuming 5 independent Bernoulli trials with fixed success probability "
+        "of 1/2, what is the probability of exactly 3 successes?"
+    )
+
+    payload = _chat(engine, prompt)
+    receipt = payload["grounding"]["answer_receipt"]
+
+    assert payload["grounding"]["response_guard"]["reason"] == (
+        "verified_reasoning_solution"
+    )
+    assert receipt["schema_version"] == "supermix-verified-answer-receipt-v2"
+    assert receipt["decision"] == "verified_selected"
+    assert receipt["method"] == "finite_binomial_event_probability"
+    assert receipt["verification"] == {"passed": True, "independent": True}
+    assert receipt["epistemics"] == {
+        "model_conditional": True,
+        "assumptions_explicit": True,
+        "calibration_claimed": False,
+    }
+    assert set(receipt["authority"].values()) == {False}
+    serialized = json.dumps(receipt, sort_keys=True).lower()
+    for leaked in ("bernoulli trials", "success probability", "1/3", "5/16"):
+        assert leaked not in serialized
 
 
 def test_qwen_evidence_is_isolated_as_untrusted_context_and_citations_are_audited():

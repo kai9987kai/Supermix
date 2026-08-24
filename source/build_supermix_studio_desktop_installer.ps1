@@ -20,12 +20,15 @@ if (-not $IsccPath) {
   throw "Inno Setup compiler not found. Install Inno Setup 6, then rerun this script."
 }
 
-$IsccArgs = @()
+$EffectiveSetupBaseName = if ($SetupBaseName) {
+  $SetupBaseName
+} else {
+  "SupermixStudioDesktopSetup"
+}
+
+$IsccArgs = @("/DMySetupBaseName=$EffectiveSetupBaseName")
 if ($Version) {
   $IsccArgs += "/DMyAppVersion=$Version"
-}
-if ($SetupBaseName) {
-  $IsccArgs += "/DMySetupBaseName=$SetupBaseName"
 }
 $IsccArgs += $InstallerScript
 
@@ -36,12 +39,16 @@ if ($LASTEXITCODE -ne 0) {
 
 $InstallerDir = Join-Path $RepoRoot "dist\installer"
 $ExePath = Join-Path $RepoRoot "dist\SupermixStudioDesktop\SupermixStudioDesktop.exe"
-$SetupPath = Join-Path $InstallerDir "SupermixStudioDesktopSetup.exe"
+$SetupPath = Join-Path $InstallerDir "$EffectiveSetupBaseName.exe"
 $BundleManifestSource = Join-Path $RepoRoot "output\supermix_studio_bundled_models_manifest.json"
 $BundleManifestTarget = Join-Path $InstallerDir "SupermixStudioDesktopCuratedBundleManifest.json"
 $RuntimeManifestSource = Join-Path $RepoRoot "source\studio_runtime_manifest.json"
 $RuntimeManifestTarget = Join-Path $InstallerDir "SupermixStudioRuntimeManifest.json"
 $HashFilePath = Join-Path $InstallerDir "SupermixStudioDesktopReleaseSHA256.txt"
+
+if (-not (Test-Path -LiteralPath $SetupPath -PathType Leaf)) {
+  throw "Expected freshly built installer at $SetupPath"
+}
 
 if (Test-Path $BundleManifestSource) {
   Copy-Item -Force $BundleManifestSource $BundleManifestTarget
@@ -51,7 +58,7 @@ if (Test-Path $RuntimeManifestSource) {
 }
 
 $HashTargets = @()
-if (Test-Path $SetupPath) { $HashTargets += Get-Item $SetupPath }
+$HashTargets += Get-Item -LiteralPath $SetupPath
 if (Test-Path $ExePath) { $HashTargets += Get-Item $ExePath }
 if (Test-Path $BundleManifestTarget) { $HashTargets += Get-Item $BundleManifestTarget }
 if (Test-Path $RuntimeManifestTarget) { $HashTargets += Get-Item $RuntimeManifestTarget }

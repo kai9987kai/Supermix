@@ -94,6 +94,7 @@ class ModelSpec:
     preferred_weights: Sequence[str] = ()
     preferred_meta: Sequence[str] = ()
     adapter_markers: Sequence[str] = ()
+    manual_only: bool = False
 
 
 @dataclass
@@ -114,6 +115,7 @@ class ModelRecord:
     preferred_weights: Tuple[str, ...] = ()
     preferred_meta: Tuple[str, ...] = ()
     adapter_markers: Tuple[str, ...] = ()
+    manual_only: bool = False
 
     @property
     def display_score(self) -> Optional[float]:
@@ -150,6 +152,7 @@ class ModelRecord:
             "note": self.note,
             "benchmark_hint": self.benchmark_hint,
             "per_benchmark": dict(self.per_benchmark),
+            "manual_only": self.manual_only,
         }
 
 
@@ -478,6 +481,55 @@ MODEL_SPECS: Tuple[ModelSpec, ...] = (
         note="Experimental Qwen adapter.",
         benchmark_hint="Experimental Qwen branch.",
         adapter_markers=("adapter/adapter_config.json",),
+    ),
+    ModelSpec(
+        key="cognitive_leap_v50",
+        label="Cognitive Leap V50 Chat",
+        family="champion",
+        kind="champion_chat",
+        filename_tokens=("supermix_cognitive_leap_v50_chat_20260812",),
+        common_row_key=None,
+        capabilities=("chat",),
+        note="Local Cognitive Leap V50 chat checkpoint; no cross-family benchmark claim is attached.",
+        benchmark_hint="Explicitly selected local V50 chat checkpoint.",
+        preferred_weights=("champion_model_chat_v50_cognitive_leap.pth",),
+        preferred_meta=("chat_model_meta_v50_cognitive_leap.json",),
+        manual_only=True,
+    ),
+    ModelSpec(
+        key="cognitive_leap_ultra_v51_demo",
+        label="Cognitive Leap Ultra V51 (Bounded Arithmetic Demo)",
+        family="champion",
+        kind="champion_chat",
+        filename_tokens=("supermix_cognitive_leap_ultra_v51_demo_20260812",),
+        common_row_key=None,
+        capabilities=("chat",),
+        note=(
+            "Bounded synthetic chained-arithmetic checkpoint and runtime demo; "
+            "it is not evidence of broad assistant superiority."
+        ),
+        benchmark_hint="Bounded synthetic arithmetic/runtime demonstration only.",
+        preferred_weights=("cognitive_leap_ultra_v51_trained.pth",),
+        preferred_meta=("chat_demo_meta_v51.json",),
+        manual_only=True,
+    ),
+    ModelSpec(
+        key="cognitive_leap_ultra_v51_1_balanced_blend30",
+        label="Cognitive Leap Ultra v51.1 Balanced Blend (Unpromoted)",
+        family="champion",
+        kind="champion_chat",
+        filename_tokens=("supermix_cognitive_leap_ultra_v51_1_balanced_blend30_20260812",),
+        common_row_key=None,
+        capabilities=("chat",),
+        note=(
+            "Unpromoted experimental checkpoint with an aggregate synthetic mod-10 improvement, "
+            "but its bounded promotion gate failed the 15/20 seed criterion. Manual selection "
+            "only; it is not evidence of broad assistant superiority."
+        ),
+        benchmark_hint="Unpromoted bounded synthetic arithmetic experiment; manual selection only.",
+        preferred_weights=("cognitive_leap_ultra_v51_1_balanced_blend30.pth",),
+        preferred_meta=("chat_demo_meta_v51_1_balanced_blend30.json",),
+        manual_only=True,
     ),
     ModelSpec(
         key="v30_lite",
@@ -829,6 +881,7 @@ def discover_model_records(
                 preferred_weights=tuple(spec.preferred_weights),
                 preferred_meta=tuple(spec.preferred_meta),
                 adapter_markers=tuple(spec.adapter_markers),
+                manual_only=spec.manual_only,
             )
         )
     records.sort(key=lambda item: ((item.display_score or -1.0), item.label.lower()), reverse=True)
@@ -842,10 +895,11 @@ def choose_auto_model(
     uploaded_image_path: str = "",
     prompt_profile: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Optional[ModelRecord], str]:
-    available = {record.key: record for record in records}
-    text_models = [record for record in records if record.supports_chat]
-    image_models = [record for record in records if record.supports_image]
-    vision_models = [record for record in records if record.supports_vision]
+    auto_records = [record for record in records if not record.manual_only]
+    available = {record.key: record for record in auto_records}
+    text_models = [record for record in auto_records if record.supports_chat]
+    image_models = [record for record in auto_records if record.supports_image]
+    vision_models = [record for record in auto_records if record.supports_vision]
     prompt_text = str(prompt or "").strip()
     lowered = prompt_text.lower()
     has_uploaded_image = bool(str(uploaded_image_path or "").strip())

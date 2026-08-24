@@ -54,10 +54,19 @@ def test_resolve_peft_bootstrap_moves_dml_wrap_to_cpu_float32():
     assert "DirectML PEFT init" in reason
 
 
-def test_disable_peft_init_for_weight_load_forces_saved_adapter_loads_to_skip_init():
+def test_disable_peft_init_for_weight_load_preserves_weight_transforming_initializers():
     cfg = _DummyPeftConfig(init_lora_weights="pissa_niter_4")
 
     disabled_mode = _disable_peft_init_for_weight_load(cfg)
 
-    assert disabled_mode == "pissa_niter_4"
+    assert disabled_mode == ""
+    assert cfg.init_lora_weights == "pissa_niter_4"
+
+
+def test_disable_peft_init_for_weight_load_skips_ordinary_lora_initialization():
+    cfg = _DummyPeftConfig(init_lora_weights=True)
+
+    disabled_mode = _disable_peft_init_for_weight_load(cfg)
+
+    assert disabled_mode == "True"
     assert cfg.init_lora_weights is False

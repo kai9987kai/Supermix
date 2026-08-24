@@ -6,6 +6,7 @@ import json
 import math
 import random
 import re
+import shutil
 import sys
 import time
 from dataclasses import dataclass, field
@@ -875,7 +876,8 @@ def _normalize_rule_reward(value: Optional[float]) -> float:
     return float(max(-1.0, min(1.0, parsed)))
 
 
-_VERIFIER_SCHEMA = "supermix-verifier-v1"
+_VERIFIER_SCHEMA = "supermix-verifier-v2"
+_PREPARED_DATA_CACHE_VERSION = 2
 
 
 def _chat_pair_verifier_payload(metadata: object) -> Optional[Dict[str, object]]:
@@ -884,17 +886,18 @@ def _chat_pair_verifier_payload(metadata: object) -> Optional[Dict[str, object]]
     normalized = _normalize_chat_pair_metadata(metadata)
     nested = normalized.get("verifier_spec")
     nested_spec = dict(nested) if isinstance(nested, dict) else {}
-    schema = _coerce_text(normalized.get("verifier_schema") or nested_spec.get("verifier_schema")).lower()
-    has_nested_spec = bool(
-        nested_spec
-        and _coerce_text(nested_spec.get("verifier_type"))
-        and nested_spec.get("expected_answer") is not None
-    )
-    if schema != _VERIFIER_SCHEMA and not has_nested_spec:
+    root_schema = _coerce_text(normalized.get("verifier_schema")).lower()
+    nested_schema = _coerce_text(nested_spec.get("verifier_schema")).lower()
+    schema = root_schema or nested_schema
+    if schema != _VERIFIER_SCHEMA or (
+        root_schema and nested_schema and root_schema != nested_schema
+    ):
         return None
 
     payload = dict(normalized)
     for key, value in nested_spec.items():
+        if key in payload and key != "verifier_spec" and payload[key] != value:
+            return None
         payload.setdefault(key, value)
     payload["verifier_schema"] = _VERIFIER_SCHEMA
     return payload
@@ -1055,6 +1058,26 @@ def _verify_chat_candidate(
     }
 
 
+def _verified_training_pair(
+    prompt: str,
+    response: str,
+    metadata: object,
+) -> Optional[bool]:
+    """Return the current verifier verdict for tagged training data.
+
+    ``None`` means the row has no current, internally consistent verifier-v2
+    specification and must use the normal heuristic quality path. Tagged rows
+    fail closed: only a recomputed, available, correct verdict is accepted.
+    """
+
+    verification = _verify_chat_candidate(prompt, response, metadata)
+    if verification is None:
+        return None
+    return bool(verification.get("available", False)) and bool(
+        verification.get("correct", False)
+    )
+
+
 def _chat_pair_verifier_metrics(pair: ChatPair) -> Dict[str, float]:
     metadata = pair.metadata if isinstance(pair.metadata, dict) else {}
     verification = _verify_chat_candidate(pair.user, pair.assistant, metadata)
@@ -1170,9 +1193,24 @@ def _iter_clean_pairs_from_jsonl(
                 if _looks_like_placeholder_assistant(assistant_text):
                     stats["filtered_placeholder"] += 1
                     continue
-                if not _is_quality_pair(user_text, assistant_text, min_chars=min_chars):
-                    stats["filtered_quality"] += 1
+                verified_pair = _verified_training_pair(
+                    user_text,
+                    assistant_text,
+                    pair.metadata,
+                )
+                if verified_pair is False:
+                    stats["filtered_verifier"] += 1
                     continue
+                quality_pair = _is_quality_pair(
+                    user_text,
+                    assistant_text,
+                    min_chars=min_chars,
+                )
+                if not quality_pair:
+                    if verified_pair is not True:
+                        stats["filtered_quality"] += 1
+                        continue
+                    stats["verified_quality_bypass"] += 1
                 key = (user_text, assistant_text)
                 if key in seen:
                     stats["deduped"] += 1
@@ -1204,7 +1242,9 @@ def load_jsonl_pairs(
         "kept": 0,
         "empty_after_clean": 0,
         "filtered_placeholder": 0,
+        "filtered_verifier": 0,
         "filtered_quality": 0,
+        "verified_quality_bypass": 0,
         "deduped": 0,
         "filtered_source_cap": 0,
         "filtered_synthetic_cap": 0,
@@ -1325,7 +1365,9 @@ def load_jsonl_pairs(
         f"raw={stats['raw']} kept={stats['kept']} "
         f"empty={stats['empty_after_clean']} "
         f"placeholder={stats['filtered_placeholder']} "
+        f"verifier_rejected={stats['filtered_verifier']} "
         f"filtered={stats['filtered_quality']} "
+        f"verifier_bypass={stats['verified_quality_bypass']} "
         f"deduped={stats['deduped']} "
         f"source_cap={stats['filtered_source_cap']} "
         f"synthetic_cap={stats['filtered_synthetic_cap']} "
@@ -1808,7 +1850,6 @@ def apply_supermix_distillation(
         )
         required_score = max(float(min_quality_score), base_score + max(0.0, float(min_quality_gain)))
         best_response = ""
-        best_score = -1e9
         best_rank = -1e9
         best_density = 0.0
         for teacher_resp in teacher.generate_candidates(pair.user, temperatures=candidate_temperatures):
@@ -1849,7 +1890,6 @@ def apply_supermix_distillation(
                 )
             ):
                 best_rank = teacher_rank
-                best_score = teacher_score
                 best_density = teacher_density
                 best_response = teacher_resp
         if best_response:
@@ -2383,6 +2423,14 @@ def _patch_dora_linear_forward_for_dml() -> bool:
 def _disable_peft_init_for_weight_load(peft_cfg: Any) -> str:
     init_mode = getattr(peft_cfg, "init_lora_weights", None)
     if init_mode in (None, False):
+        return ""
+    normalized = str(init_mode).strip().lower()
+    # PiSSA, CorDA, and OLoRA move part of the pretrained base weight into the
+    # adapter at initialization time.  A legacy, unconverted adapter therefore
+    # has to reconstruct that initialization before its saved tensors are
+    # loaded.  Disabling it (as ordinary LoRA loading safely does) evaluates a
+    # different model and produced the repo's misleading archived regressions.
+    if normalized.startswith("pissa") or normalized in {"corda", "olora"}:
         return ""
     try:
         peft_cfg.init_lora_weights = False
@@ -6634,6 +6682,15 @@ def _evaluate_model_internal(
         latencies = []
         prompt_token_count = 0.0
         generated_token_count = 0.0
+        generation_limit = max(8, int(max_new_tokens))
+        generation_cap_hits = 0
+        raw_eos_ids = tokenizer.eos_token_id
+        if isinstance(raw_eos_ids, (list, tuple, set)):
+            eos_ids = {int(value) for value in raw_eos_ids}
+        elif raw_eos_ids is None:
+            eos_ids = set()
+        else:
+            eos_ids = {int(raw_eos_ids)}
         verified_count = 0
         verified_correct_count = 0
         verified_family_counts: Dict[str, int] = {}
@@ -6657,7 +6714,7 @@ def _evaluate_model_internal(
                 t0 = time.time()
                 gen = model.generate(
                     **enc,
-                    max_new_tokens=max(8, int(max_new_tokens)),
+                    max_new_tokens=generation_limit,
                     do_sample=False,
                     eos_token_id=tokenizer.eos_token_id,
                     pad_token_id=tokenizer.pad_token_id,
@@ -6667,12 +6724,24 @@ def _evaluate_model_internal(
                 prompt_token_count += float(prompt_tokens)
                 new_tokens = gen[0, enc["input_ids"].shape[1] :]
                 generated_tokens = int(new_tokens.shape[0])
+                ended_with_eos = bool(
+                    generated_tokens > 0
+                    and eos_ids
+                    and int(new_tokens[-1].item()) in eos_ids
+                )
+                generation_cap_hit = bool(generated_tokens >= generation_limit and not ended_with_eos)
+                generation_cap_hits += 1 if generation_cap_hit else 0
                 generated_token_count += float(generated_tokens)
                 pred = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
                 token_f1_value = float(token_f1(pair.assistant, pred))
                 char_similarity_value = float(SequenceMatcher(None, pair.assistant, pred).ratio())
                 f1s.append(token_f1_value)
                 sims.append(char_similarity_value)
+                pair_metadata = pair.metadata if isinstance(pair.metadata, dict) else {}
+                eval_identity = {
+                    key: _coerce_text(pair_metadata.get(key))
+                    for key in ("example_id", "template_id", "split_group", "problem_family")
+                }
                 sample_row: Dict[str, object] = {
                     "sample_index": int(sample_index),
                     "source": str(pair.source),
@@ -6682,6 +6751,8 @@ def _evaluate_model_internal(
                     "reference_words": int(len(pair.assistant.split())),
                     "prompt_tokens": int(prompt_tokens),
                     "generated_tokens": int(generated_tokens),
+                    "generation_cap": int(generation_limit),
+                    "generation_cap_hit": bool(generation_cap_hit),
                     "gen_seconds": float(latency_value),
                     "loss": float(loss_value),
                     "token_f1": float(token_f1_value),
@@ -6689,6 +6760,7 @@ def _evaluate_model_internal(
                     "user": pair.user,
                     "reference": pair.assistant,
                     "prediction": pred,
+                    **eval_identity,
                 }
                 verification = _verify_chat_candidate(pair.user, pred, pair.metadata)
                 if verification is not None:
@@ -6727,6 +6799,9 @@ def _evaluate_model_internal(
             "avg_generated_tokens": float(generated_token_count / max(1, len(losses))),
             "total_prompt_tokens": float(prompt_token_count),
             "total_generated_tokens": float(generated_token_count),
+            "generation_cap": float(generation_limit),
+            "generation_cap_hits": float(generation_cap_hits),
+            "generation_cap_rate": float(generation_cap_hits / max(1, len(losses))),
             "eval_seconds": eval_seconds,
             "generated_tokens_per_sec": float(generated_token_count / eval_seconds),
         }
@@ -6846,6 +6921,12 @@ def build_benchmark_sample_comparison(
             {
                 "sample_index": int(sample_index),
                 "source": str(base_row.get("source", tuned_row.get("source", "")) or ""),
+                "example_id": str(base_row.get("example_id", tuned_row.get("example_id", "")) or ""),
+                "template_id": str(base_row.get("template_id", tuned_row.get("template_id", "")) or ""),
+                "split_group": str(base_row.get("split_group", tuned_row.get("split_group", "")) or ""),
+                "problem_family": str(
+                    base_row.get("problem_family", tuned_row.get("problem_family", "")) or ""
+                ),
                 "prompt_signature": str(base_row.get("prompt_signature", tuned_row.get("prompt_signature", "")) or ""),
                 "prompt_complexity": float(
                     base_row.get("prompt_complexity", tuned_row.get("prompt_complexity", 0.0)) or 0.0
@@ -7030,7 +7111,7 @@ def _save_prepared_data_cache(
     save_jsonl(eval_path, eval_pairs)
     meta = {
         "cache_key": str(cache_key),
-        "cache_version": 1,
+        "cache_version": _PREPARED_DATA_CACHE_VERSION,
         "raw_eval_count": int(raw_eval_count),
         "train_count": int(len(train_pairs)),
         "eval_count": int(len(eval_pairs)),
@@ -7292,7 +7373,6 @@ def _build_explicit_resume_checkpoint(
 
 def plot_benchmark(results: Dict[str, Dict[str, float]], out_png: Path) -> None:
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    models = ["base", "tuned"]
     higher_metrics = ["token_f1", "char_similarity"]
     lower_metrics = ["eval_loss", "perplexity", "avg_gen_seconds"]
 
@@ -8268,6 +8348,7 @@ def main() -> None:
 
     print("[data] loading Supermix pairs...")
     prepared_cache_payload = {
+        "cache_version": _PREPARED_DATA_CACHE_VERSION,
         "data_files": [_path_fingerprint(p) for p in args.data],
         "max_records": int(args.max_records),
         "max_source_fraction": float(args.max_source_fraction),

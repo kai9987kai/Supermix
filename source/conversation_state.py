@@ -33,11 +33,12 @@ Design contract
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 
 CONVERSATION_STATE_SCHEMA_VERSION = "supermix-conversation-state-v1"
-CONVERSATION_STATE_VERSION = "supermix-conversation-state-runtime-v1"
+CONVERSATION_STATE_VERSION = "supermix-conversation-state-runtime-v2"
 
 MAX_TURNS = 40
 MAX_TEXT_CHARS = 400
@@ -154,6 +155,67 @@ _TRANSIENT_COMMITMENT_RE = re.compile(
     r"on this (?:turn|occasion))\b",
     re.IGNORECASE,
 )
+_MIXED_ORIGIN_FENCE_RE = re.compile(
+    r"```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)"
+)
+_MIXED_ORIGIN_INLINE_CODE_RE = re.compile(r"`[^`]{1,500}`")
+_MIXED_ORIGIN_QUOTED_RE = re.compile(
+    r'"[^"\r\n]*(?:"|$)|“[^”\r\n]*(?:”|$)|‘[^’\r\n]*(?:’|$)'
+)
+_MIXED_ORIGIN_BLOCKQUOTE_RE = re.compile(
+    r"(?:^|\s)(?:[-*+]\s*)?>\s*.*?(?:[.!?]+|$)",
+    re.DOTALL,
+)
+_EXTERNAL_ATTRIBUTION_RE = re.compile(
+    r"(?:\b(?:quote|quoted|example|sample|hypothetical|attachment|document|file|"
+    r"readme|web\s*page|website|search\s+result|email|article|post|transcript|"
+    r"tool\s+output|model\s+output|assistant\s+output|external\s+(?:text|content))\b"
+    r"[^.!?]{0,140}(?::|\b(?:says?|said|states?|stated|reads?|wrote|writes|"
+    r"contains?|includes?|shows?|suggests?|recommends?))\s*$|"
+    r"\b(?:according\s+to|copied\s+from|quoted\s+from)\b[^.!?]{0,140}$|"
+    r"\b(?:says?|said|states?|stated|reads?|wrote|writes)\s*:?\s*$)",
+    re.IGNORECASE,
+)
+_EXTERNAL_SOURCE_RE = re.compile(
+    r"\b(?:quote|quoted|example|sample|hypothetical|attachment|document|file|"
+    r"readme|web\s*page|website|search\s+result|email|article|post|transcript|"
+    r"tool\s+(?:output|result|response)|model\s+(?:output|result|response)|"
+    r"assistant\s+(?:output|result|response|message)|system\s+message|developer\s+message|"
+    r"retrieval\s+result|external\s+(?:text|content))\b",
+    re.IGNORECASE,
+)
+_MIXED_ORIGIN_ROLE_WRAPPER_RE = re.compile(
+    r"(?:<\/?(?:tool|assistant|model|system|developer|result|response)[^>]{0,80}>|"
+    r"\[(?:tool|assistant|model|system|developer|result|response)\]|"
+    r"(?:^|[,{]\s*)[\"']?(?:tool|assistant|model|system|developer)[\"']?\s*:|"
+    r"[\"']?role[\"']?\s*:\s*[\"']?(?:tool|assistant|model|system|developer)\b|"
+    r"^\s*(?:tool|assistant|model|system|developer|retrieval)\s+"
+    r"(?:output|result|response|message)\s*[:\-—])",
+    re.IGNORECASE,
+)
+_DIRECT_USER_FRAME = (
+    r"(?:actually|personally|generally|normally|usually|currently|also|instead|"
+    r"fyi|for\s+your\s+information|by\s+the\s+way|just\s+so\s+you\s+know|"
+    r"as\s+a\s+reminder|to\s+clarify|for\s+the\s+record|"
+    r"for\s+(?:this\s+)?(?:project|conversation|context)|"
+    r"in\s+this\s+(?:project|conversation|context)|"
+    r"(?:hi|hello|hey)(?:\s+there)?)"
+)
+_DIRECT_USER_CUE_PREFIX_RE = re.compile(
+    rf"^\s*(?:{_DIRECT_USER_FRAME}\s*[,;:—-]?\s*){{0,2}}"
+    r"(?:(?:i|we|please)\s+|you\s+(?:can|may)\s+)?$",
+    re.IGNORECASE,
+)
+_DIRECT_FIRST_PERSON_COMPOUND_PREFIX_RE = re.compile(
+    rf"^\s*(?:{_DIRECT_USER_FRAME}\s*[,;:—-]?\s*){{0,2}}"
+    r"(?:i(?:'m|\s+am)?|my|we(?:'re|\s+are)?|our)\b[^.!?;:]{1,160}"
+    r"\b(?:and|but)\s+(?:(?:i|we|please)\s+)?$",
+    re.IGNORECASE,
+)
+_REPORTED_SPEECH_VERB_RE = re.compile(
+    r"\b(?:says?|said|repl(?:y|ies|ied)|respond(?:s|ed)?|wrote|writes|quoted?|states?|stated)\b",
+    re.IGNORECASE,
+)
 
 
 def style_preference_of(text: Any) -> str:
@@ -173,7 +235,11 @@ def style_preference_of(text: Any) -> str:
 
 
 def _clean(value: Any, limit: int = MAX_TEXT_CHARS) -> str:
-    return _WS_RE.sub(" ", str(value or "")).strip()[: max(0, int(limit))]
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    without_format_controls = "".join(
+        ch for ch in normalized if unicodedata.category(ch) != "Cf"
+    )
+    return _WS_RE.sub(" ", without_format_controls).strip()[: max(0, int(limit))]
 
 
 def _stem(token: str) -> str:
@@ -256,12 +322,25 @@ class _Turn(NamedTuple):
     index: int
     role: str
     text: str
+    commitment_eligible: bool
+
+
+def _normalize_turn_value(value: Any, role: str) -> Tuple[str, bool]:
+    raw = str(value or "")
+    text = _clean(raw)
+    eligible = bool(
+        role == "user"
+        and len(raw) <= MAX_TEXT_CHARS
+        and not _EXTERNAL_SOURCE_RE.search(raw)
+        and not _MIXED_ORIGIN_ROLE_WRAPPER_RE.search(raw)
+    )
+    return text, eligible
 
 
 def _normalize_turns(turns: Any, current_user_text: Any = "") -> List[_Turn]:
     """Accept role dicts, (user, assistant) pairs, or a flat message list."""
 
-    rows: List[Tuple[str, str]] = []
+    rows: List[Tuple[str, str, bool]] = []
     if isinstance(turns, Mapping):
         turns = turns.get("turns") or turns.get("messages") or ()
     if isinstance(turns, (str, bytes, bytearray)) or not isinstance(turns, (list, tuple)):
@@ -274,37 +353,46 @@ def _normalize_turns(turns: Any, current_user_text: Any = "") -> List[_Turn]:
             # store writes this shape, and it used to fall through to the
             # `content` lookup, produce nothing, and be dropped in silence.
             if "role" not in item and ("user" in item or "assistant" in item):
-                user_text = _clean(item.get("user"))
-                assistant_text = _clean(item.get("assistant"))
+                user_text, user_eligible = _normalize_turn_value(item.get("user"), "user")
+                assistant_text, _ = _normalize_turn_value(item.get("assistant"), "assistant")
                 if user_text:
-                    rows.append(("user", user_text))
+                    rows.append(("user", user_text, user_eligible))
                 if assistant_text:
-                    rows.append(("assistant", assistant_text))
+                    rows.append(("assistant", assistant_text, False))
                 continue
             role = str(item.get("role") or "").strip().lower()
-            content = _clean(item.get("content") or item.get("text") or "")
-            if not content:
+            content, commitment_eligible = _normalize_turn_value(
+                item.get("content") or item.get("text") or "", role
+            )
+            # Unknown, tool, system, and future roles are not user statements.
+            # Dropping them is safer than the historical default that mapped
+            # every non-assistant role to user and could manufacture a durable
+            # commitment from tool output or imported metadata.
+            if role not in {"user", "assistant"} or not content:
                 continue
-            rows.append(("assistant" if role.startswith("a") else "user", content))
+            rows.append((role, content, commitment_eligible))
             continue
         if isinstance(item, (list, tuple)) and len(item) >= 2:
-            user_text = _clean(item[0])
-            assistant_text = _clean(item[1])
+            user_text, user_eligible = _normalize_turn_value(item[0], "user")
+            assistant_text, _ = _normalize_turn_value(item[1], "assistant")
             if user_text:
-                rows.append(("user", user_text))
+                rows.append(("user", user_text, user_eligible))
             if assistant_text:
-                rows.append(("assistant", assistant_text))
+                rows.append(("assistant", assistant_text, False))
             continue
-        text = _clean(item)
+        text, commitment_eligible = _normalize_turn_value(item, "user")
         if text:
-            rows.append(("user", text))
+            rows.append(("user", text, commitment_eligible))
 
-    current = _clean(current_user_text)
-    if current and not (rows and rows[-1] == ("user", current)):
-        rows.append(("user", current))
+    current, current_eligible = _normalize_turn_value(current_user_text, "user")
+    if current and not (rows and rows[-1][:2] == ("user", current)):
+        rows.append(("user", current, current_eligible))
 
     rows = rows[-MAX_TURNS:]
-    return [_Turn(index=index, role=role, text=text) for index, (role, text) in enumerate(rows)]
+    return [
+        _Turn(index=index, role=role, text=text, commitment_eligible=eligible)
+        for index, (role, text, eligible) in enumerate(rows)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -323,15 +411,91 @@ def _commitment_kind(text: str) -> str:
     return ""
 
 
+def _commitment_source_text(text: str) -> str:
+    """Remove embedded data spans before interpreting durable user intent."""
+
+    cooked = _MIXED_ORIGIN_FENCE_RE.sub(" ", str(text or ""))
+    cooked = _MIXED_ORIGIN_INLINE_CODE_RE.sub(" ", cooked)
+    cooked = _MIXED_ORIGIN_QUOTED_RE.sub(" ", cooked)
+    cooked = _MIXED_ORIGIN_BLOCKQUOTE_RE.sub(" ", cooked)
+    return cooked
+
+
+def _commitment_has_external_attribution(sentence: str) -> bool:
+    if _EXTERNAL_SOURCE_RE.search(sentence) or _MIXED_ORIGIN_ROLE_WRAPPER_RE.search(sentence):
+        return True
+    cue_matches = [
+        match
+        for pattern in (
+            _IDENTITY_RE,
+            _TOOLING_RE,
+            _PROHIBITION_RE,
+            _PREFERENCE_RE,
+            _STYLE_DIRECTIVE_RE,
+        )
+        if (match := pattern.search(sentence)) is not None
+    ]
+    if not cue_matches:
+        return False
+    cue_start = min(match.start() for match in cue_matches)
+    prefix = sentence[:cue_start]
+    if prefix.rstrip().endswith((":", '"', "'", "`", ">")):
+        return True
+    return bool(_EXTERNAL_ATTRIBUTION_RE.search(prefix[-200:]))
+
+
+def _commitment_is_direct_user_statement(sentence: str) -> bool:
+    """Require the first durable cue to belong to a direct user clause.
+
+    The cue regexes intentionally recognize both first-person statements and
+    direct imperatives.  Reported speech can contain either form, so a durable
+    commitment is admitted only when the text before its first cue is a bounded
+    user framing such as ``Actually,`` or ``For this project,``.  A compound
+    direct statement such as ``My name is Kai and I prefer concise answers``
+    starts with an identity cue and remains eligible as one commitment.
+    """
+
+    cue_matches = [
+        match
+        for pattern in (
+            _IDENTITY_RE,
+            _TOOLING_RE,
+            _PROHIBITION_RE,
+            _PREFERENCE_RE,
+            _STYLE_DIRECTIVE_RE,
+        )
+        if (match := pattern.search(sentence)) is not None
+    ]
+    if not cue_matches:
+        return False
+    cue_start = min(match.start() for match in cue_matches)
+    prefix = sentence[:cue_start]
+    return bool(
+        _DIRECT_USER_CUE_PREFIX_RE.fullmatch(prefix)
+        or (
+            not _REPORTED_SPEECH_VERB_RE.search(prefix)
+            and _DIRECT_FIRST_PERSON_COMPOUND_PREFIX_RE.fullmatch(prefix)
+        )
+    )
+
+
 def _extract_commitments(turns: Sequence[_Turn]) -> List[Dict[str, Any]]:
     commitments: List[Dict[str, Any]] = []
     for turn in turns:
-        if turn.role != "user":
+        if turn.role != "user" or not turn.commitment_eligible:
             continue
-        for sentence in _sentences(turn.text):
+        if _EXTERNAL_SOURCE_RE.search(turn.text) or _MIXED_ORIGIN_ROLE_WRAPPER_RE.search(
+            turn.text
+        ):
+            continue
+        for sentence in _sentences(_commitment_source_text(turn.text)):
             if _is_question(sentence):
                 continue
             if _TRANSIENT_COMMITMENT_RE.search(sentence):
+                continue
+            if _commitment_has_external_attribution(sentence):
+                continue
+            if not _commitment_is_direct_user_statement(sentence):
                 continue
             kind = _commitment_kind(sentence)
             if not kind:
@@ -567,12 +731,18 @@ def _extract_unaddressed(turns: Sequence[_Turn]) -> List[Dict[str, Any]]:
             {
                 "id": f"U{len(rows) + 1}",
                 "turn": turn.index,
+                # Kept as user-authored data, never diagnostics or a system
+                # instruction.  The directive layer may surface one bounded,
+                # sanitised row only after an explicit "you missed..." repair
+                # request from the current user.
+                "text": _clean(turn.text),
                 "terms": request_terms[:8],
                 "reply_turn": reply.index,
             }
         )
-        if len(rows) >= MAX_UNADDRESSED:
-            break
+    rows = rows[-MAX_UNADDRESSED:]
+    for row_index, row in enumerate(rows, start=1):
+        row["id"] = f"U{row_index}"
     return rows
 
 

@@ -2694,3 +2694,470 @@ same mechanisms five orders of magnitude smaller, and a mechanism transferring
 does not mean a result transfers. No weights were trained, no checkpoint was
 promoted, and `cycle_reduction` on an untrained model is correctly negative
 because the gates refuse every early exit.
+
+## August 2026: Epistemic Conversation and Deliberate Reasoning v2
+
+This upgrade makes the runtime better at identifying what kind of reasoning a
+request needs, enforcing an answer contract appropriate to that task, and using
+deterministic verified answers where the supported problem grammar is exact. It
+does not claim that a checkpoint learned new knowledge.
+
+### Research basis
+
+- [Self-Discover](https://arxiv.org/abs/2402.03620) motivates selecting a compact,
+  task-specific reasoning structure rather than applying one generic chain-of-
+  thought prompt to every request.
+- [T1](https://arxiv.org/abs/2504.04718) and
+  [CRITIC](https://arxiv.org/abs/2305.11738) motivate routing mechanically
+  checkable claims through an external verifier instead of trusting unsupported
+  intrinsic self-correction.
+- [Semantic entropy](https://www.nature.com/articles/s41586-024-07421-0) motivates
+  separating uncertainty about answer meaning from surface wording; it also
+  shows why confidence signals do not catch every systematic error.
+- [Conformal factuality](https://arxiv.org/abs/2402.10978) motivates progressive
+  backoff toward less specific claims when evidence cannot support a precise
+  answer. Its statistical guarantee depends on representative calibration data,
+  which this deterministic runtime does not claim to possess.
+- [Compute-optimal test-time scaling](https://arxiv.org/abs/2408.03314) motivates
+  spending bounded extra work on harder instances instead of using the maximum
+  reasoning budget on every prompt.
+- [MathCheck](https://arxiv.org/abs/2407.08733) motivates testing mathematical
+  reasoning with consistency, metamorphic changes, and invalid-problem cases,
+  not answer matching alone.
+- [MultiChallenge](https://aclanthology.org/2025.findings-acl.958/) and
+  [MT-OSC](https://aclanthology.org/2026.findings-acl.1354/) motivate explicit
+  multi-turn request tracking and selective conversation condensation rather
+  than replaying an ever-growing transcript.
+
+### Runtime design
+
+- Prompt Understanding v2 extracts polarity-aware mathematical, scientific,
+  predictive, causal, investigative, conversational, and multi-part facets after
+  quoted/code masking and bounded typo recovery.
+- Plan-Evaluate v2 maps those facets to conjunctive response checks. Mentioning
+  words such as `evidence`, `units`, or `assumptions` is not sufficient on its
+  own to pass a scientific, calculation, or forecast contract.
+- Grounding consumes the same privacy-safe facets so science, forecast, and causal
+  requests recommend evidence without granting the parser routing, tool, compute,
+  or correctness authority.
+- Conversation State v2 preserves a bounded missed user request, while Conversation
+  Directive v2 resurfaces at most one only after an explicit "you missed this"
+  repair cue. Stored text remains filtered as untrusted user-level data and is
+  absent from diagnostics.
+- Deliberate Reasoning v2 adds geometry, finite probability, formula-based physics,
+  a deliberately narrow empirical Bernoulli estimator, and bounded ordered
+  quantity transitions with exact same-dimension conversion. The transition
+  solver requires one explicit initial state and two to four unambiguous clauses,
+  then reverses every operation to reconstruct the initial state before it can
+  override an answer. Contradictory directions, competing bases, mixed
+  dimensions, negative intermediate states, or incomplete plans abstain. Exact
+  supported calculations require bounded consistency checks and full-registry consensus;
+  checks are labelled independent only when they actually use an independent
+  path. Model-conditional estimates never receive answer-replacement authority.
+
+### Epistemic boundary
+
+The empirical prediction path requires explicit independent, constant-probability
+assumptions. Its observed-frequency estimate is labelled model-conditional,
+uncalibrated, and not a guarantee. Weather, markets, experiments with distribution
+shift, and other open-world forecasts never receive deterministic override
+authority. Prediction-stable adaptive exits mean stable model decisions across
+budgets, not real-world predictive accuracy.
+
+No model weights were retrained. The changes improve parsing, contracts,
+verification, conversation repair, and supported deterministic calculations. They
+do not establish broader scientific knowledge, general mathematical intelligence,
+or calibrated forecasting outside the tested grammars.
+
+### General Intelligence curriculum v2
+
+The mixed curriculum now includes `quantity_transition_reasoning`: two to four
+ordered changes that must mix percentage-of-current-state and fixed deltas.
+Training and held-out rows use disjoint domains, templates, wording, and operation
+orders. Targets are generated with exact decimal state updates, rechecked by the
+versioned verifier, and negative tests reject reordered answers, single-step
+plans, one-kind-only plans, non-finite values, 100% decreases, and negative
+intermediate states. The downstream repair curriculum is versioned with the same
+sixteen-family registry so repair sampling cannot silently discard the new family.
+
+[CryptoX](https://arxiv.org/abs/2502.07813) motivates measuring compositional
+reasoning across transformations rather than treating isolated arithmetic as
+generalization. [Let's Verify Step by Step](https://proceedings.iclr.cc/paper_files/paper/2024/hash/aca97732e30bcf1303bc22ac3924fd16-Abstract-Conference.html)
+motivates verifier-grounded supervision. Supermix's current verifier certifies
+the exact final outcome and curriculum invariants; it does not claim a learned
+process-reward model or proof that every natural-language intermediate sentence
+is faithful. No checkpoint was retrained or promoted by this data-only change.
+
+## August 2026: Promotion Evidence v3 and trusted Qwen adapter lifecycle
+
+The general-intelligence curriculum made candidate training reproducible, and
+the v2 promotion receipt bound a candidate to its benchmark and evaluator. It
+still treated aggregate benchmark metrics as the decision evidence. That is too
+weak for a small held-out run: an aggregate gain does not show which exact
+questions changed, related template variants are not independent observations,
+and a mutable detailed-sample file was not part of the receipt.
+
+### Research basis
+
+- [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640) recommends
+  comparing models on question-level paired differences and accounting for
+  clusters of related questions. V3 records the paired transition table, uses
+  an exact binary test, and resamples whole template clusters rather than
+  pretending every generated variant is independent.
+- [LiveBench](https://arxiv.org/abs/2406.19314) motivates objective,
+  automatically verifiable scoring that avoids an LLM judge. Supermix therefore
+  replays its deterministic verifier from the trusted held-out row instead of
+  accepting a candidate-produced correctness label.
+- [MathCheck](https://arxiv.org/abs/2407.08733) motivates evaluating robustness
+  across related checklist and perturbation variants. Supermix keeps those
+  variants visible through `template_id` and treats the template, not each
+  surface variation, as the bootstrap sampling unit.
+
+These papers motivate the evaluation design; they do not validate Supermix's
+adapter, verifier, or thresholds.
+
+### Content-bound paired evidence
+
+`supermix-qwen-evaluation-v3` records SHA-256 digests for
+`base_samples.jsonl`, `tuned_samples.jsonl`, `sample_comparison.jsonl`, and the
+canonical `supermix-qwen-paired-evidence-v1` object. Each detailed row is aligned
+by a unique, complete sample index to the selected evaluation artifact. Trusted
+`example_id`, `template_id`, split group, family, prompt, reference, and verifier
+specification come from that evaluation row. The sample contributes only the
+generated prediction and measured generation data.
+
+The gate opens only fixed filenames beneath the benchmark directory, checks
+their declared and actual hashes, replays `verify_candidate` against the trusted
+metadata, recomputes aggregate metrics and per-family outcomes, and requires the
+canonical evidence object to match byte-for-byte. Adapter weights, configuration,
+benchmark, curriculum, selected eval, evidence files, and evaluator/verifier code
+are checked again for change during the gate. The v3 promotion manifest and gate
+record all of those issuance-time hashes. Runtime validation rechecks the
+current adapter, configuration, gate, manifest, schemas, and production policy;
+revalidating external evidence files requires rerunning the gate. The receipt is
+local historical provenance, not a continuously witnessed evidence store.
+
+### Paired decision rule
+
+For every held-out item, v3 records one of four transitions: both correct, both
+incorrect, tuned-only correct (a win), or base-only correct (a regression). It
+then computes:
+
+- an exact one-sided McNemar/binomial tail over discordant pairs, with the
+  alternative that tuned accuracy is greater; and
+- a deterministic 95% percentile interval for verified-accuracy delta by
+  resampling complete `template_id` clusters. The default configuration is
+  5,000 resamples with seed 5203 and R7 linear-interpolated percentiles.
+
+The default gate requires `p <= 0.05`, paired regression rate no greater than
+0.02, at least five template clusters, and a bootstrap lower 95% bound strictly
+above zero. Those checks are additional to the existing aggregate requirements:
+at least 20 verified samples, at least +0.05 verified accuracy, tuned accuracy
+of at least 0.20, no family regression, loss ratio at most 1.05, token-F1 delta
+at least -0.02, at least one verified item per family, and generation-cap rate
+at most 0.05. Missing paired evidence, zero discordant evidence, a non-positive
+lower bound, a threshold miss, a family regression, a stale hash, or any replay
+mismatch is a blocker. A failed run writes an inspectable failed gate, removes a
+stale promotion manifest, and does not update the implicit-adapter pointer.
+
+Production eligibility is no longer caller-defined. Policy
+`supermix-qwen-production-promotion-policy-v3` pins the 150-row curriculum
+holdout digest, deterministic family-balanced selection, decode limits, exact
+5,000-resample/seed-5203 cluster bootstrap, and the minimum statistical floors.
+The gate reconstructs the selected set from the bound curriculum, requires all
+identity fields plus unique `example_id` values, and strictly derives the
+comparison JSONL from the sample artifacts. Custom thresholds, alternate
+holdouts, decode settings, or bootstrap seeds remain useful for research, but
+`--no-write-pointer`/review mode writes no activating promotion manifest.
+
+The inspected v1-holdout 30-item repair candidate improved five net answers:
+six wins, one regression, and 23 ties, for a +0.1667 point estimate. The exact one-sided result
+is `p = 0.0625`, its paired regression rate is 0.0333, and the deterministic
+template-cluster interval is approximately `[-0.0323, 0.3667]`. All three v3
+statistical safeguards therefore block promotion. The correct conclusion is
+"encouraging but underpowered," not that the adapter has established a
+general-intelligence improvement. Curriculum v2 adds a sixteenth compositional
+family and pins a 32-item family-balanced production selection, so this older
+receipt cannot be reused for the new holdout.
+
+### Studio activation boundary
+
+Studio no longer equates a readable adapter directory with a trusted implicit
+adapter. Before constructing the Qwen engine it classifies and attests the
+artifact. A content-valid v3 promotion is eligible; a present but invalid gate
+or manifest acts as a revocation, and candidate/general-intelligence namespaces
+are not implicitly loadable. Receipt-free compatibility is limited to exact
+allowlisted historical adapter and configuration hashes; legacy-looking names
+alone are untrusted.
+
+The active-backend status and browser display expose `activation_kind`, adapter
+hash, promotion/gate schemas, and `base_revision_status`. A promoted adapter
+resolved from a Hugging Face cache must match both the receipt's repository and
+its exact `snapshots/<revision>` value. Local model copies without that identity
+proof are rejected. Studio uses one promotion-validation snapshot and re-hashes
+adapter weights and configuration immediately before and after model loading to
+detect a concurrent file swap. The generated Studio runtime manifest binds
+`qwen_adapter_promotion.py`, the three v3 schema constants, the pinned production
+policy ID, and enforcement guards so packaging drift fails its normal manifest
+check. This attestation is a fail-closed local content and
+provenance check. It is not a digital signature, secure measurement,
+hardware-backed attestation, trusted timestamp, or proof that the recorded
+generations were produced by an untampered model process.
+
+## August 2026: Formal Deliberation v3 and oracle-grounded Promotion v4
+
+Two representative failures remained after Deliberate Reasoning v2. A compact
+multi-hop rule theory was treated as a numeric prompt with no applicable solver,
+and exact arithmetic lost its protected deterministic path when a user appended
+an otherwise ordinary request to explain, show, or verify the result. The first
+gap prevented structured non-numeric deliberation; the second let presentation
+wording change correctness authority. V3 addresses both without granting a
+language model, a retrieved answer, or generated prose verifier authority.
+
+### Research basis
+
+- [LogicGame](https://aclanthology.org/2025.findings-acl.77/) motivates explicit,
+  automatically verifiable intermediate rule execution and planning tasks.
+- [RuleArena](https://aclanthology.org/2025.acl-long.27/) motivates separating
+  complex rule-guided reasoning from oracle/tool support and measuring both.
+- [Dissecting Logical Reasoning in Language Models](https://aclanthology.org/2025.findings-emnlp.926/)
+  shows why final-answer accuracy alone is not enough to establish stepwise
+  logical soundness and motivates symbolic supervision.
+- [SATBench](https://aclanthology.org/2025.emnlp-main.1716/) motivates solver-
+  validated evaluation artifacts for logical puzzles rather than self-judged
+  correctness.
+
+These results motivate the architecture and tests. They do not validate
+Supermix's runtime, curriculum, thresholds, or model quality.
+
+### Bounded runtime semantics
+
+Deliberate Reasoning v3 adds the exact positive-Horn grammar
+`Facts: a, b. Rules: a & b -> c; c -> d. Query: d.`. At runtime it accepts at
+most 12 opaque atoms, 16 rules, and three antecedents per rule. Facts, rules,
+and antecedents are canonicalized, so semantically irrelevant reordering cannot
+change the proof or answer. Natural-language predicates, negation, disjunction,
+quantifiers, duplicate clauses, malformed sections, and oversized theories
+abstain rather than falling through to a permissive parser.
+
+The primary derivation computes the least Horn model by forward closure and
+retains one canonical dependency proof. A separate verifier enumerates every
+Boolean interpretation within the same finite atom bound, filters the models
+that satisfy all facts and implications, and checks whether the query is true
+in every satisfying model. An answer is authoritative only when closure and
+finite-model semantics agree. `Not entailed` is explicitly open-world: it means
+that at least one satisfying model leaves the query false, not that the query is
+false outside the supplied theory. Cycles, unseeded chains, missing conjuncts,
+permuted rules, maximum bounds, and injected verifier disagreement have direct
+tests.
+
+The explicit-arithmetic parser now recognizes only three bounded suffixes:
+`Explain your reasoning`, `Show your work`, and `Verify the result`. It emits a
+short exact-arithmetic explanation or verification statement while retaining
+the previous high-stakes and strict-evidence ordering. Arbitrary prose,
+multiple expressions, injection-like text, code, and quoted expressions remain
+ineligible for deterministic replacement.
+
+### Curriculum v3 and verifier v2
+
+`supermix-general-intelligence-curriculum-v3` adds `logical_entailment` as its
+seventeenth family. Its training and evaluation splits use disjoint atom
+vocabularies, graph topologies, template identities, and surface markers. The
+curriculum subset is further capped at 10 atoms, four facts, eight rules, and
+three premises. Each row stores canonical
+`supermix-logical-entailment-ir-v1` JSON and names the
+`exhaustive-positive-horn-models-v1` oracle.
+
+`supermix-verifier-v2` does not trust the stored answer. It parses the prompt's
+single final grammar statement, requires exact agreement with the separately
+stored canonical IR, independently recomputes entailment by exhaustive model
+enumeration, and accepts only the exact candidate text `entailed` or
+`not entailed`. Legacy verifier-v1 metadata, duplicate JSON keys, answer or IR
+tampering, prompt/IR disagreement, and decorated candidate output fail closed.
+The repair curriculum is versioned v3 and requires all 17 families, so repair
+sampling cannot silently omit the new capability.
+
+For production seed 6201 with 1,200 training and 150 evaluation rows, the
+canonical training digest is
+`8d072c364ecb970e70aa2a8e86b2d2ffa9505f429111f5e6a23d87d803fadb39`
+and the evaluation digest is
+`45a84eb8e95f2a687b8c8ab951e8c687948446f0c23266f4550671f3095c7617`.
+The deterministic family-balanced promotion selection contains 34 examples,
+two from each family.
+
+### Promotion v4 boundary
+
+The v4 evaluation, gate, promotion-manifest, and production-policy schemas bind
+verifier v2, curriculum v3, the new evaluation digest, and the 34-row selected
+holdout. The gate now replays the current verifier over every curriculum
+reference before it accepts the manifest's `all_targets_verified` claim.
+Issuance-time code hashes must contain the exact evaluator, policy, and verifier
+file sets; the verifier set includes both `verifiable_reasoning.py` and the new
+`logical_entailment.py` oracle. Omitting the oracle, adding an unexpected file,
+using a v1 verifier, or presenting a v3 receipt invalidates runtime promotion.
+The paired McNemar, clustered-bootstrap, family non-regression, generation-cap,
+base-revision, content-hash, and no-write-pointer safeguards from Promotion v3
+remain conjunctive.
+
+This is a formal, bounded reasoning and evidence-pipeline improvement. It does
+not support unrestricted natural-language logic, first-order logic, negation,
+disjunction, quantification, defeasible rules, or world knowledge. No adapter or
+checkpoint was trained or promoted by this change; all candidates remain
+inactive until they pass the fixed v4 production holdout and statistical gate.
+
+## August 2026: Supermix v54 Verified Probabilistic Scenarios
+
+V54 is an additive deterministic-runtime and release-contract advance. It keeps
+the v52 model line, the v53 MiMoMix research modules, Deliberate Reasoning v3,
+and Qwen Promotion Evidence v4 intact. It does not introduce a checkpoint,
+adapter, route policy, or model-training claim.
+
+### Bounded finite-Bernoulli contract
+
+The reasoning source and compatibility mirror expose
+`supermix-finite-bernoulli-scenario-v1` through reasoning engine v4. The parser
+consumes one complete request and accepts only:
+
+- 1 to 200 explicitly IID trials, or independent trials with an explicitly
+  fixed/constant/same success probability;
+- IID fair-coin tosses or flips, whose event probability is exactly `1/2`;
+- an exact probability written as a reduced or unreduced fraction, bounded
+  decimal, or percent; and
+- one `exactly`, `at least`, or `at most` count over successes, heads, or tails.
+
+The grammar is deliberately not a general probability-language parser.
+Dependent trials, changing or unknown probabilities, without-replacement
+sampling, malformed bounds, certainty requests, late corrections, unrelated
+trailing instructions, and high-stakes or open-world predictions abstain. The
+canonical IR records only schema, model kind, trial count, event relation,
+event count, outcome, exact probability numerator/denominator, and whether the
+full query was consumed.
+
+### Exact computation and independent verification
+
+The primary path evaluates the required binomial mass or tail with
+`math.comb` and `fractions.Fraction`; it never samples and never uses a float to
+decide correctness. A structurally different verifier rebuilds the entire
+Bernoulli distribution by repeated convolution. A result is verified only when:
+
+- direct binomial evaluation equals the convolution-derived event mass;
+- every reconstructed mass is non-negative;
+- all `n + 1` masses sum exactly to one; and
+- the event and complementary event sum exactly to one.
+
+The result remains explicitly model-conditional even when it is authoritative
+for the supplied mathematical scenario. It does not establish that the stated
+probability or independence assumptions hold in the world.
+
+### Defense in depth and release integration
+
+`grounding_runtime.py` reparses the original raw request through the loaded
+reasoning engine before accepting the `finite_binomial_event_probability`
+method. A stale, replaced, or fabricated reasoning result therefore cannot gain
+rewrite authority merely by claiming the method name. Normal exhaustive solver
+consensus, strict-evidence precedence, and the source/runtime opt-out controls
+remain unchanged.
+
+The Studio distribution contract moves to application version `54.0.0`, binds
+the finite-Bernoulli schema from both reasoning mirrors, and declares that the
+capability has no open-world authority. The Windows installer uses the same
+version. Its build helper resolves the effective output basename before
+compilation and hashes that exact newly built installer, preventing a custom v54
+name from accidentally hashing a stale default-name artifact.
+
+The checked runtime manifest is regenerated only after production source/runtime
+parity is final. Release readiness still requires the manifest and model-snapshot
+checks, focused and full tests, PowerShell parsing, live source and packaged
+probes, frozen executable inspection, installer upgrade/uninstall verification,
+and independently recomputed SHA-256 files. No EXE or installer was produced by
+this documentation and release-contract change.
+
+## August 2026: Supermix v55 memory authority and verified receipts
+
+V55 addresses two trust-boundary gaps without changing model weights or granting
+new execution authority. First, persistent memory could sanitize recalled text
+yet still lose immutable speaker provenance, treat arbitrary direct-user facts
+as ordinary context, and reuse generated assistant exemplars. Second, verified
+reasoning metadata reached Studio internally but was not expressed as one
+privacy-safe cross-surface receipt.
+
+### Memory-poisoning research basis
+
+[AgentPoison (NeurIPS 2024)](https://proceedings.neurips.cc/paper_files/paper/2024/hash/eb113910e9c3f6242541c1652e30dfd6-Abstract-Conference.html),
+[MINJA (NeurIPS 2025)](https://proceedings.neurips.cc/paper_files/paper/2025/hash/42a97bbd9844d2bf68596730af80bcdf-Abstract-Conference.html),
+and [PoisonedRAG (USENIX Security 2025)](https://www.usenix.org/conference/usenixsecurity25/presentation/zou-poisonedrag)
+motivate persistent-origin tracking, authority separation, and retrieval-time
+attack evaluation. [Task Shield (ACL 2025)](https://aclanthology.org/2025.acl-long.1435/)
+and [CaMeL](https://arxiv.org/abs/2503.18813) motivate keeping task and capability
+authorization outside untrusted text. [LongMemEval](https://arxiv.org/abs/2410.10813)
+motivates preserving benign long-term personalization utility while hardening
+recall. These papers inform the design; they do not validate this implementation.
+
+### Implemented boundary
+
+`supermix-conversation-memory-v3` binds newly extracted memory to the
+`supermix-memory-authority-v1` schema and
+`supermix-memory-authority-firewall-v1` policy. Only direct-user rows can be
+eligible. Identity and answer-detail style may personalize responses; projects
+and facts remain attributed and unverified outside the shared planner/tool
+prompt. Relevance cannot elevate authority. All memory is denied evidence,
+grounding, route, compute, tool, permission, safety, and solver authority.
+Legacy, assistant, tool, consultant, malformed-role, quoted, fenced, encoded,
+prompt-control, and digest-mismatched rows fail closed. Assistant exemplars are
+not reinjected. Exact-ID review supports confirmation, quarantine, terminal
+revocation, and conflict-safe restoration of quarantined rows through no-store,
+loopback-only local Studio controls. Revocation retains an inspectable audit row;
+only a fresh direct-user restatement can reissue it.
+
+`supermix-verified-answer-receipt-v1` is built from allowlisted grounding and
+reasoning diagnostics. It contains no prompt, answer, expression, proof step, or
+evidence text. It reports verification, independent checking, conflicts,
+selection/abstention, strict-evidence/high-stakes precedence, and explicit
+model-conditional/no-calibration state. Every compute, route, interaction, tool,
+permission, safety, and promotion authority field is false.
+
+The Studio manifest moves to `55.0.0`, binds both new contracts, and enforces the
+recursive local-import closure of every packaged entry point. This establishes a
+stronger deterministic source/package contract, not digital signatures, secure
+storage, trusted execution, external fact verification, unrestricted reasoning,
+or a newly promoted model.
+
+## August 2026: Supermix v71 verified scientific scenarios
+
+V71 implements a bounded tool-verified scientific-plan path instead of making a
+new model-training claim. Read-only probes showed that the existing reasoning
+engine handled canonical Newtonian force but rejected fully specified
+constant-acceleration and ideal-gas scenarios. The new path covers that measured
+gap with one strict, non-executable plan schema and a versioned local registry.
+
+[SciAgent](https://openreview.net/forum?id=N48b6pzMJc),
+[T1](https://arxiv.org/abs/2504.04718), and
+[neuro-symbolic verifier-feedback work](https://arxiv.org/abs/2505.14479)
+motivate tool-first reasoning and deterministic feedback. Work on
+[compute-optimal test-time scaling](https://arxiv.org/abs/2408.03314) and
+[the limits of resampling with imperfect verifiers](https://openreview.net/forum?id=j8H84v6AZ1)
+motivates the bounded one-plan policy: this implementation never samples until
+something passes. [SciBench](https://proceedings.mlr.press/v235/wang24z.html)
+supports reporting narrow task coverage rather than a universal prompting or
+science claim. These papers guide the architecture; their results are not
+reproduced here.
+
+`supermix-science-plan-v1` accepts only one explicitly assumed constant-
+acceleration or ideal-gas scenario, one supported target, and all labelled
+quantities with supported units. It binds prompt spans by digest, normalises in
+exact SI arithmetic, and requires registry, plan, binding, dimensional, domain,
+and substitution checks. Receipts contain only allowlisted identifiers, hashes,
+counts, pass bits, epistemic limits, and false authority flags. Raw text, answers,
+and proof traces are excluded.
+
+The same release also distinguishes forecast-shaped language from a bounded
+estimate. Irrelevant assumptions no longer satisfy the prediction contract,
+domain-local `same success probability` no longer resolves against unrelated
+conversation history, and a verified empirical rate may protect the final text
+only with explicit model-conditional, non-guarantee, and uncalibrated wording.
+
+The Studio source/runtime contract moves to `71.0.0` and packages the science
+module in Studio and Qwen build surfaces. This is not evidence that either
+physical assumption holds in the world, an independent empirical validation, a
+general formula solver, a high-stakes engineering tool, or a rebuilt/signed
+Windows release.

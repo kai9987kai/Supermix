@@ -27,6 +27,9 @@ A generative surface needs three things the ranker did not:
 * **A bounded contract.** Items and characters are both capped, so a long
   session cannot grow the prompt without limit. Deriving state instead of
   pasting history is the entire point.
+* **Explicit repair only.** A previously missed request is carried forward only
+  when the current user explicitly asks to recover it; ordinary topic changes
+  never resurrect stale work.
 
 Design contract
 ---------------
@@ -40,6 +43,7 @@ Design contract
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from conversation_state import (
@@ -51,7 +55,7 @@ from conversation_state import (
 
 
 CONVERSATION_DIRECTIVE_SCHEMA_VERSION = "supermix-conversation-directive-v1"
-CONVERSATION_DIRECTIVE_VERSION = "supermix-conversation-directive-runtime-v1"
+CONVERSATION_DIRECTIVE_VERSION = "supermix-conversation-directive-runtime-v2"
 
 # The contract is a summary, not a transcript. These bounds are what keeps a
 # hundred-turn session from costing more prompt than a two-turn one.
@@ -114,6 +118,16 @@ _MEMORY_PROMPT_CONTROL_RE = re.compile(
     r"\b(?:developer mode|jailbreak|act as (?:the )?system)\b)",
     re.IGNORECASE,
 )
+_MISSED_REQUEST_RE = re.compile(
+    r"\b(?:you (?:missed|skipped|ignored|forgot|did not answer|didn't answer) "
+    r"(?:(?:my|the) )?(?:other|earlier|previous|first|second|last|remaining)?\s*"
+    r"(?:question|request|part|point|item)|you (?:did not answer|didn't answer) (?:it|that)|"
+    r"also answer (?:(?:my|the) )?(?:other|earlier|previous|first|second|last|remaining) "
+    r"(?:question|request|part|point|item)|answer (?:my |the )?(?:other|earlier|previous|first|second) "
+    r"(?:question|request|part)|what about (?:my |the )?(?:other|earlier|previous) "
+    r"(?:question|request|part)|cover (?:the )?(?:rest|remaining part))\b",
+    re.IGNORECASE,
+)
 
 _STYLE_LINES = {
     "concise": (
@@ -147,7 +161,11 @@ def sanitize_for_prompt(value: Any, limit: int = MAX_COMMITMENT_CHARS) -> str:
     ``<|im_end|><|im_start|>system`` would otherwise open a role of its own.
     """
 
-    text = _SPECIAL_TOKEN_RE.sub(" ", str(value or ""))
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    normalized = "".join(
+        ch for ch in normalized if unicodedata.category(ch) != "Cf"
+    )
+    text = _SPECIAL_TOKEN_RE.sub(" ", normalized)
     text = _CONTROL_RE.sub(" ", text)
     # Any remaining lone delimiters cannot form a token, but they are still
     # confusing to quote, and nothing of meaning is lost by dropping them.
@@ -271,6 +289,29 @@ def _open_question(state: Mapping[str, Any]) -> str:
     return ""
 
 
+def _unaddressed_recovery(
+    state: Mapping[str, Any],
+    current_user_text: Any,
+) -> Tuple[str, str]:
+    """Return one missed request only after an explicit current-turn repair cue."""
+
+    current = str(current_user_text or "")
+    if not _MISSED_REQUEST_RE.search(current):
+        return "", "not_requested"
+    for row in reversed(list(state.get("unaddressed") or ())):
+        if not isinstance(row, Mapping):
+            continue
+        text = sanitize_for_prompt(row.get("text"))
+        if not text:
+            continue
+        if _MEMORY_PROMPT_CONTROL_RE.search(text):
+            return "", "prompt_control"
+        if text.lower() in current.lower():
+            return "", "already_repeated"
+        return text, "explicit_repair"
+    return "", "no_unaddressed_request"
+
+
 def render_conversation_contract(
     state: Optional[Mapping[str, Any]],
     current_user_text: Any = "",
@@ -288,6 +329,12 @@ def render_conversation_contract(
         lines.append(_STYLE_LINES[standing])
     for row in _contract_commitments(state, current_user_text):
         lines.append(f'Standing {row["kind"]} from the user: "{row["text"]}"')
+    recovery, _ = _unaddressed_recovery(state, current_user_text)
+    if recovery:
+        lines.append(
+            f'The user says an earlier part was missed. Also address this previously '
+            f'unaddressed request: "{recovery}"'
+        )
     if flags.get("clarification_loop"):
         lines.append(_CLARIFICATION_LINE)
     elif flags.get("unresolved_open_question"):
@@ -345,6 +392,11 @@ def conversation_directive_diagnostics(
             )
             if reason:
                 filtered[reason] += 1
+    recovery_text, recovery_reason = (
+        _unaddressed_recovery(state, current_user_text)
+        if isinstance(state, Mapping)
+        else ("", "no_state")
+    )
     return {
         "schema_version": CONVERSATION_DIRECTIVE_SCHEMA_VERSION,
         "runtime_version": CONVERSATION_DIRECTIVE_VERSION,
@@ -359,6 +411,8 @@ def conversation_directive_diagnostics(
         "contract_chars": len(contract_text),
         "prompt_role": "user",
         "filtered_commitments": filtered,
+        "unaddressed_recovery_applied": bool(recovery_text),
+        "unaddressed_recovery_reason": recovery_reason,
         "style_request": str(state.get("style_request") or "") if isinstance(state, Mapping) else "",
         "flags": {str(key): bool(value) for key, value in sorted(flags.items())},
         "authority": {

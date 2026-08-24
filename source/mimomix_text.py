@@ -1,0 +1,441 @@
+"""Text tokenisation and corpus construction for the v57 talking MiMoMix model.
+
+V53 built a full decoder-only language model and never trained it on language.
+Its API says so in its own docstring: the backends are randomly initialised and
+their text is noise. This module supplies the missing half -- a tokenizer and a
+corpus -- so `MiMoMixModel` can be trained to actually generate text.
+
+## The tokenizer
+
+`WordTokenizer` is a whitespace-preserving word tokenizer, not BPE. Each token
+carries its own leading whitespace, so `"".join(tokens)` reconstructs the input
+exactly and decoding needs no spacing heuristics. `assert_roundtrip` pins that.
+
+It is deliberately simple because the corpus is: the local chat database uses
+292 distinct word types across 4.6M word tokens. A subword vocabulary would buy
+nothing on data with that shape, and byte-level would multiply the sequence
+length by five for no gain.
+
+**The vocabulary is the ceiling on what the model can say.** A word the
+tokenizer has never seen encodes to `<unk>` and can never be generated. That is a
+property of the available corpus, not a design choice, and
+`vocabulary_report` reports it so the limit travels with the checkpoint.
+
+## The corpus
+
+`databases/llm_chat.db` holds 120,000 `(user_text, response_text)` pairs, 21M
+characters. It is templated: 37,543 distinct responses over 120,000 rows. A model
+trained on it learns to hold a turn in that register -- coding-assistant small
+talk -- and learns nothing else. It has no world knowledge to learn from here.
+
+Prompt tokens are masked out of the loss with `-100`, which
+`torch.nn.functional.cross_entropy` ignores by default, so the model is trained to
+*produce* replies rather than to reproduce the user's own words.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+import torch
+
+__all__ = [
+    "ASSISTANT",
+    "BOS",
+    "EOS",
+    "PAD",
+    "UNK",
+    "USER",
+    "ChatCorpus",
+    "WordTokenizer",
+    "assert_roundtrip",
+    "build_training_tensors",
+    "load_chat_pairs",
+    "load_chat_pairs_jsonl",
+]
+
+PAD, BOS, EOS, UNK, USER, ASSISTANT = 0, 1, 2, 3, 4, 5
+SPECIAL_TOKENS = ("<pad>", "<bos>", "<eos>", "<unk>", "<user>", "<assistant>")
+
+#: Each alternative consumes its own leading whitespace, so joining the matches
+#: reproduces the input byte for byte. The trailing ``\s+`` catches a run of
+#: whitespace at the end that no token would otherwise absorb.
+TOKEN_PATTERN = re.compile(r"\s*[A-Za-z]+(?:'[A-Za-z]+)?|\s*\d+|\s*[^\sA-Za-z\d]|\s+")
+
+#: The same pattern with digit runs split into single digits.
+#:
+#: The default `\s*\d+` makes "498" one opaque token, which puts arithmetic out
+#: of reach in principle: answering "498 - 419" would require a memorised lookup
+#: from token(498) x token(419) to token(79), with no way to see that 498 is made
+#: of a 4, a 9 and an 8. Measured on a 240,000-row arithmetic corpus, **8,588 of
+#: 9,058 distinct tokens (94.8%) were numbers**, and a model trained under it
+#: scored 1.7% on arithmetic -- the same 1.7% on problems it had trained on,
+#: because there is nothing there to memorise either.
+#:
+#: Splitting digits replaces those 8,588 symbols with ten, and makes column-wise
+#: arithmetic something a model can represent. Roundtrip is preserved: each digit
+#: still carries its own leading whitespace, so joining the matches reproduces
+#: the input byte for byte.
+DIGIT_TOKEN_PATTERN = re.compile(r"\s*[A-Za-z]+(?:'[A-Za-z]+)?|\s*\d|\s*[^\sA-Za-z\d]|\s+")
+
+
+class WordTokenizer:
+    """Whitespace-preserving word tokenizer with a fixed vocabulary."""
+
+    def __init__(self, tokens: Sequence[str], digit_tokens: bool = False):
+        self.tokens: List[str] = list(SPECIAL_TOKENS) + [
+            token for token in tokens if token not in SPECIAL_TOKENS
+        ]
+        self.index: Dict[str, int] = {token: i for i, token in enumerate(self.tokens)}
+        #: Whether numbers are split into digits. Travels with the checkpoint,
+        #: because a tokenizer reloaded under the other setting would segment
+        #: every number differently and silently mis-encode the vocabulary.
+        self.digit_tokens = bool(digit_tokens)
+
+    @property
+    def pattern(self):
+        return DIGIT_TOKEN_PATTERN if self.digit_tokens else TOKEN_PATTERN
+
+    # -- construction ------------------------------------------------------
+
+    @classmethod
+    def build(cls, texts: Iterable[str], max_vocab: int = 16384, min_count: int = 1,
+              digit_tokens: bool = False) -> "WordTokenizer":
+        """Build a vocabulary, covering each word with and without leading space.
+
+        Tokens carry their own leading whitespace, so ``"Got"`` and ``" Got"`` are
+        different strings. A word seen only mid-sentence therefore has no
+        sentence-initial form in the vocabulary, and encoding a string that
+        *starts* with it yields `<unk>`.
+
+        That is not hypothetical: building this vocabulary from
+        ``user + " " + assistant`` put only the space-prefixed forms in it, and
+        17,709 of 19,600 replies then began with `<unk>`. Worse than the lost
+        text, it flattered perplexity, because `<unk>` became a trivially
+        predictable target at the position after `<assistant>`.
+
+        So every kept token is admitted in both forms. It roughly doubles a
+        whitespace-heavy vocabulary and removes the failure entirely.
+        """
+
+        pattern = DIGIT_TOKEN_PATTERN if digit_tokens else TOKEN_PATTERN
+        counter: Counter = Counter()
+        for text in texts:
+            counter.update(pattern.findall(text))
+
+        kept: List[str] = []
+        seen = set()
+        for token, count in counter.most_common():
+            if count < min_count:
+                break
+            for variant in (token, token.lstrip()):
+                if variant and variant not in seen:
+                    seen.add(variant)
+                    kept.append(variant)
+            if len(kept) >= max_vocab:
+                break
+        return cls(kept[:max_vocab], digit_tokens=digit_tokens)
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self.tokens)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {"tokens": self.tokens, "digit_tokens": self.digit_tokens}
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, object]) -> "WordTokenizer":
+        tokens = list(payload["tokens"])  # type: ignore[arg-type]
+        instance = cls.__new__(cls)
+        instance.tokens = tokens
+        instance.index = {token: i for i, token in enumerate(tokens)}
+        # Absent in every pre-v65 checkpoint, which all used whole-number tokens.
+        instance.digit_tokens = bool(payload.get("digit_tokens", False))
+        return instance
+
+    def save(self, path) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(json.dumps(self.to_dict(), ensure_ascii=False), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path) -> "WordTokenizer":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+    # -- encoding ----------------------------------------------------------
+
+    def encode(self, text: str) -> List[int]:
+        return [self.index.get(piece, UNK) for piece in self.pattern.findall(text)]
+
+    def decode(self, ids: Sequence[int]) -> str:
+        out: List[str] = []
+        for token_id in ids:
+            token_id = int(token_id)
+            if token_id < len(SPECIAL_TOKENS):
+                continue  # specials are structure, not text
+            if 0 <= token_id < len(self.tokens):
+                out.append(self.tokens[token_id])
+        return "".join(out)
+
+    def unknown_rate(self, text: str) -> float:
+        pieces = self.pattern.findall(text)
+        if not pieces:
+            return 0.0
+        return sum(1 for piece in pieces if piece not in self.index) / len(pieces)
+
+    def vocabulary_report(self, texts: Sequence[str]) -> Dict[str, object]:
+        """What the tokenizer can and cannot represent on a given sample."""
+
+        total = 0
+        unknown = 0
+        for text in texts:
+            pieces = self.pattern.findall(text)
+            total += len(pieces)
+            unknown += sum(1 for piece in pieces if piece not in self.index)
+        return {
+            "vocab_size": self.vocab_size,
+            "special_tokens": len(SPECIAL_TOKENS),
+            "sampled_tokens": total,
+            "unknown_tokens": unknown,
+            "coverage": round(1.0 - unknown / max(1, total), 6),
+            "note": (
+                "a word outside this vocabulary encodes to <unk> and can never be "
+                "generated; the vocabulary is the ceiling on what the model can say"
+            ),
+        }
+
+    # -- chat formatting ---------------------------------------------------
+
+    def encode_turn(self, user: str, assistant: Optional[str] = None) -> Tuple[List[int], int]:
+        """Return ``(ids, prompt_length)`` for one training turn.
+
+        The prompt is ``<bos><user> ... <assistant>``; ``prompt_length`` is where
+        the reply starts, so the caller can mask the prompt out of the loss.
+        """
+
+        ids = [BOS, USER] + self.encode(user) + [ASSISTANT]
+        prompt_length = len(ids)
+        if assistant is not None:
+            ids = ids + self.encode(assistant) + [EOS]
+        return ids, prompt_length
+
+
+def assert_roundtrip(tokenizer: WordTokenizer, samples: Sequence[str]) -> None:
+    """Encoding then decoding must reproduce the text exactly.
+
+    Only holds for text whose tokens are all in the vocabulary; an out-of-vocab
+    word becomes `<unk>` and is genuinely lost, which is the point of tracking it.
+    """
+
+    for text in samples:
+        if tokenizer.unknown_rate(text) > 0:
+            continue
+        restored = tokenizer.decode(tokenizer.encode(text))
+        if restored != text:
+            raise AssertionError(f"round trip changed the text:\n  in  {text!r}\n  out {restored!r}")
+
+
+# ---------------------------------------------------------------------------
+# Corpus
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ChatCorpus:
+    """Train/validation split of `(user, assistant)` pairs, split by row."""
+
+    train: List[Tuple[str, str]]
+    validation: List[Tuple[str, str]]
+    source: str
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "source": self.source,
+            "train_pairs": len(self.train),
+            "validation_pairs": len(self.validation),
+            "train_characters": sum(len(u) + len(a) for u, a in self.train),
+        }
+
+
+def load_chat_pairs_jsonl(
+    path: str,
+    limit: Optional[int] = None,
+    validation_fraction: float = 0.02,
+    seed: int = 57,
+    min_response_characters: int = 8,
+    user_key: str = "user",
+    assistant_key: str = "assistant",
+) -> ChatCorpus:
+    """Read `(user, assistant)` pairs from a JSONL corpus.
+
+    Same contract and same row split as :func:`load_chat_pairs`, which reads
+    SQLite. It exists because the corpora with real linguistic diversity in this
+    repo are JSONL, not SQLite, and the 292-word ceiling v58 names as its binding
+    constraint is a property of the one database the trainers happened to read --
+    not of the text available on disk.
+
+    Malformed lines are skipped rather than fatal: these files are pipeline
+    output, and one bad row should not cost a training run. The count of skipped
+    lines is not returned, so callers that care should validate separately.
+    """
+
+    pairs: List[Tuple[str, str]] = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            user = str(record.get(user_key) or "").strip()
+            assistant = str(record.get(assistant_key) or "").strip()
+            if not user or len(assistant) < min_response_characters:
+                continue
+            pairs.append((user, assistant))
+            if limit and len(pairs) >= limit:
+                break
+
+    if not pairs:
+        raise ValueError(f"no usable (user, assistant) pairs in {path!r}")
+
+    generator = torch.Generator().manual_seed(seed)
+    order = torch.randperm(len(pairs), generator=generator).tolist()
+    pairs = [pairs[i] for i in order]
+    cut = max(1, int(len(pairs) * validation_fraction))
+    return ChatCorpus(train=pairs[cut:], validation=pairs[:cut], source=path)
+
+
+def load_chat_pairs(
+    database: str,
+    limit: Optional[int] = None,
+    validation_fraction: float = 0.02,
+    seed: int = 57,
+    min_response_characters: int = 8,
+) -> ChatCorpus:
+    """Read `(user_text, response_text)` pairs out of the local chat database.
+
+    The split is by **row**, and rows are shuffled first, so a validation pair's
+    exact response can still appear in training -- the corpus is templated and
+    only 37,543 of the 120,000 responses are distinct. Held-out perplexity here
+    therefore measures fit to the template distribution, not generalisation to
+    unseen language, and the training receipt says so.
+    """
+
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    try:
+        query = "SELECT user_text, response_text FROM llm_entries"
+        if limit:
+            query += f" LIMIT {int(limit)}"
+        pairs = [
+            (user.strip(), response.strip())
+            for user, response in connection.execute(query)
+            if user and response and len(response.strip()) >= min_response_characters
+        ]
+    finally:
+        connection.close()
+
+    generator = torch.Generator().manual_seed(seed)
+    order = torch.randperm(len(pairs), generator=generator).tolist()
+    pairs = [pairs[i] for i in order]
+    cut = max(1, int(len(pairs) * validation_fraction))
+    return ChatCorpus(train=pairs[cut:], validation=pairs[:cut], source=database)
+
+
+def build_training_tensors(
+    pairs: Sequence[Tuple[str, str]],
+    tokenizer: WordTokenizer,
+    sequence_length: int = 128,
+    mask_prompt: bool = True,
+    turn_aligned: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Pack turns into fixed-length `(input_ids, labels)` blocks.
+
+    With ``turn_aligned=False`` (the default, and what every result up to v62 was
+    produced under) turns are concatenated into one stream and chopped on a fixed
+    stride, so no compute is wasted on padding.
+
+    That stride is blind to turn boundaries, and the cost is not small. Measured
+    on the v63 corpus at ``sequence_length=128``: **56.0% of supervised tokens
+    land in a block that does not contain their own prompt**, and 879 of 21,673
+    blocks contain no turn start at all. Over half the training signal therefore
+    teaches the model to continue a reply without having seen the question, which
+    is the same thing as teaching it to emit the corpus's most likely reply
+    unconditionally.
+
+    On a templated corpus that is nearly harmless -- the modal reply is usually
+    the right one -- which is why v57 through v60 trained happily this way. On a
+    corpus spanning several domains it is fatal, and it shows up exactly as
+    observed in v62 and v63: fluent sentences, ignoring the prompt.
+
+    ``turn_aligned=True`` gives every turn its own block, padded to
+    ``sequence_length``, so no supervised token is ever orphaned from its prompt.
+    It costs padding compute and drops turns longer than the block, both of which
+    the receipt should record.
+    """
+
+    if turn_aligned:
+        return _build_turn_aligned_tensors(pairs, tokenizer, sequence_length, mask_prompt)
+
+    stream_ids: List[int] = []
+    stream_labels: List[int] = []
+    for user, assistant in pairs:
+        ids, prompt_length = tokenizer.encode_turn(user, assistant)
+        labels = list(ids)
+        if mask_prompt:
+            for position in range(min(prompt_length, len(labels))):
+                labels[position] = -100
+        stream_ids.extend(ids)
+        stream_labels.extend(labels)
+
+    usable = (len(stream_ids) // sequence_length) * sequence_length
+    if usable == 0:
+        raise ValueError("not enough tokens for a single sequence")
+    input_ids = torch.tensor(stream_ids[:usable], dtype=torch.long).view(-1, sequence_length)
+    labels = torch.tensor(stream_labels[:usable], dtype=torch.long).view(-1, sequence_length)
+    return input_ids, labels
+
+
+def _build_turn_aligned_tensors(
+    pairs: Sequence[Tuple[str, str]],
+    tokenizer: WordTokenizer,
+    sequence_length: int,
+    mask_prompt: bool,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """One turn per block, padded, so every reply sees its own prompt.
+
+    Turns that do not fit are dropped rather than truncated. A truncated reply
+    would train the model to stop mid-sentence, and a truncated *prompt* would
+    reintroduce the very conditioning gap this exists to close.
+    """
+
+    blocks: List[List[int]] = []
+    block_labels: List[List[int]] = []
+    for user, assistant in pairs:
+        ids, prompt_length = tokenizer.encode_turn(user, assistant)
+        if len(ids) > sequence_length:
+            continue
+        labels = list(ids)
+        if mask_prompt:
+            for position in range(min(prompt_length, len(labels))):
+                labels[position] = -100
+        padding = sequence_length - len(ids)
+        blocks.append(ids + [PAD] * padding)
+        block_labels.append(labels + [-100] * padding)
+
+    if not blocks:
+        raise ValueError(
+            f"no turn fits in {sequence_length} tokens; raise sequence_length"
+        )
+    return (
+        torch.tensor(blocks, dtype=torch.long),
+        torch.tensor(block_labels, dtype=torch.long),
+    )

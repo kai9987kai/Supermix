@@ -6,9 +6,9 @@ SOURCE_DIR = Path(__file__).resolve().parent / "source"
 if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
 
-import source.multimodel_runtime as runtime_module
-from source.multimodel_catalog import ModelRecord
-from source.multimodel_runtime import ChatResult, UnifiedModelManager
+import source.multimodel_runtime as runtime_module  # noqa: E402
+from source.multimodel_catalog import ModelRecord  # noqa: E402
+from source.multimodel_runtime import ChatResult, UnifiedModelManager  # noqa: E402
 
 
 def _record(key: str) -> ModelRecord:
@@ -83,6 +83,10 @@ def test_studio_plans_grounding_once_and_exact_solver_precedes_interaction_guard
     assert grounding["diagnostics"]["evidence_count"] == 0
     assert grounding["authority"]["controls_compute"] is False
     assert grounding["authority"]["controls_routes"] is False
+    receipt = grounding["answer_receipt"]
+    assert receipt["kind"] == "exact_arithmetic"
+    assert receipt["decision"] == "verified_selected"
+    assert receipt["verification"] == {"passed": True, "independent": False}
     assert payload["agent_trace"]["interaction"]["response_guard"]["reason"] in {
         "candidate_aligned",
         "candidate_partially_aligned",
@@ -144,16 +148,25 @@ def test_studio_solves_verified_word_problems_and_reports_prompt_free_reasoning(
 
     grounding = payload["agent_trace"]["grounding"]
     reasoning = grounding["reasoning"]
+    receipt = grounding["answer_receipt"]
 
     assert "60" in payload["response"]
     assert grounding["response_guard"]["reason"] == "verified_reasoning_solution"
     assert reasoning["problem_class"] == "rate"
     assert reasoning["verified"] is True
     assert reasoning["override_allowed"] is True
+    assert receipt["schema_version"] == "supermix-verified-answer-receipt-v2"
+    assert receipt["decision"] == "verified_selected"
+    assert receipt["problem_class"] == "rate"
+    assert receipt["method"] == "speed_from_distance_time"
+    assert receipt["verification"] == {"passed": True, "independent": True}
+    assert receipt["diagnostic_only"] is True
+    assert set(receipt["authority"].values()) == {False}
 
     # The trace must carry metadata only, never the prompt or the answer.
     for leaked in ("120", "60", "train"):
         assert leaked not in str(reasoning)
+        assert leaked not in str(receipt)
 
 
 def test_studio_reasoning_is_disabled_with_the_grounding_layer(

@@ -9,6 +9,8 @@ Examples::
 
     python source/reasoning_cli.py --example
     python source/reasoning_cli.py --query "Convert 5 km to miles" --steps
+    python source/reasoning_cli.py --query "Assuming 5 independent Bernoulli trials with fixed success probability of 1/2, what is the probability of exactly 3 successes?" --steps
+    python source/reasoning_cli.py --query "Facts: robin. Rules: robin -> bird; bird -> animal. Query: animal." --steps
     python source/reasoning_cli.py --example --json
 """
 
@@ -53,6 +55,19 @@ EXAMPLE_PROBLEMS: Sequence[str] = (
     "What is the compound interest on $1000 at 5% for 3 years compounded annually?",
     "Two numbers sum to 30 and differ by 6. What are they?",
     "A shirt costs $80 with 25% off, then 8% tax is added. What is the final price?",
+    "What is the area of a rectangle with length 8 cm and width 5 cm?",
+    "Given 3 favourable outcomes among 8 equally likely total outcomes, what is the probability?",
+    "Assuming 5 independent Bernoulli trials with fixed success probability of 1/2, "
+    "what is the probability of exactly 3 successes?",
+    "Using Newton's second law, what is the net force on a 5 kg object accelerating at 3 m/s^2?",
+    "Using Ohm's law for one resistor, what is the voltage for 2 A through 10 ohms?",
+    "Facts: robin. Rules: robin -> bird; bird -> animal. Query: animal.",
+)
+
+EXAMPLE_ESTIMATES: Sequence[str] = (
+    "Assuming trials are independent with the same success probability, "
+    "we observed 7 successes in 10 trials. What is the predicted probability "
+    "for the next trial?",
 )
 
 EXAMPLE_NON_PROBLEMS: Sequence[str] = (
@@ -86,6 +101,8 @@ def _describe(query: str, *, show_steps: bool) -> Dict[str, Any]:
 def _print_row(row: Dict[str, Any]) -> None:
     if row["override_allowed"]:
         badge = "answer"
+    elif row["solved"] and row["problem_class"] == "prediction":
+        badge = "estimate"
     elif row["solved"]:
         badge = "unverified"
     else:
@@ -112,6 +129,11 @@ def _run_example(show_steps: bool) -> List[Dict[str, Any]]:
     for row in solvable:
         _print_row(row)
 
+    print("== model-conditional estimates that must not replace an answer ==\n")
+    estimates = [_describe(query, show_steps=show_steps) for query in EXAMPLE_ESTIMATES]
+    for row in estimates:
+        _print_row(row)
+
     print("== requests that should be left alone ==\n")
     non_problems = [_describe(query, show_steps=False) for query in EXAMPLE_NON_PROBLEMS]
     for row in non_problems:
@@ -122,7 +144,7 @@ def _run_example(show_steps: bool) -> List[Dict[str, Any]]:
     print("== summary ==")
     print(f"solved and verified : {answered}/{len(solvable)}")
     print(f"correctly abstained : {abstained}/{len(non_problems)}")
-    return solvable + non_problems
+    return solvable + estimates + non_problems
 
 
 def main(argv: Sequence[str] | None = None) -> int:

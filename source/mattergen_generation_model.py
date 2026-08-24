@@ -561,7 +561,12 @@ class MatterGenMicroEngine:
             heuristic_score = float(probabilities.get(heuristic, 0.0))
             if heuristic_score >= 0.14 or confidence < 0.45:
                 predicted = heuristic
-                confidence = max(confidence, heuristic_score, 0.91 if confidence < 0.45 else confidence)
+                # Report the probability of the label actually being returned.
+                # See the same fix in protein_folding_model.py: the previous
+                # expression substituted a literal 0.91 whenever the network was
+                # least certain, and otherwise reported the network's confidence
+                # in a label it was no longer returning. Routing is unchanged.
+                confidence = heuristic_score
         ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
         top_predictions = [{"concept": concept, "confidence": round(float(score), 4)} for concept, score in ranked[:3]]
         return MatterGenPrediction(

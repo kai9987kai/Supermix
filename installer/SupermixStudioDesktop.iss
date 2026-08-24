@@ -5,7 +5,7 @@
   #define MyAppExeName "SupermixStudioDesktop.exe"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "2026.07.27"
+  #define MyAppVersion "71.0.0"
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\dist\SupermixStudioDesktop"

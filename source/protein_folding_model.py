@@ -269,7 +269,20 @@ class ProteinFoldingEngine:
             heuristic_score = float(probabilities.get(heuristic, 0.0))
             if heuristic_score >= 0.14 or confidence < 0.45:
                 predicted = heuristic
-                confidence = max(confidence, heuristic_score, 0.91 if confidence < 0.45 else confidence)
+                # Report the probability of the label actually being returned.
+                #
+                # This previously read
+                #     max(confidence, heuristic_score, 0.91 if confidence < 0.45 else confidence)
+                # which had two separate defects. When the network was least
+                # certain (below 0.45) the reported figure became the literal
+                # 0.91, so the displayed confidence was *highest* exactly where
+                # the model was least sure, and was not a probability at all.
+                # Otherwise the label was replaced by the heuristic's while the
+                # number stayed the network's confidence in its own, different
+                # label -- a probability for something other than what was shown.
+                #
+                # The routing decision above is unchanged; only the number is.
+                confidence = heuristic_score
         ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
         top_predictions = [
             {

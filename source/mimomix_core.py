@@ -158,6 +158,17 @@ class MiMoMixConfig:
     thinking_cycles: int = 3
     thinking_max_cycles: int = 8
     thinking_inner_steps: int = 2
+    #: Initial value of ``RecursiveThinkingCore.residual_scale``, the single
+    #: scalar the whole recursive core is multiplied by.
+    #:
+    #: The default 0.0 reproduces every checkpoint trained before v59 exactly.
+    #: It is also why the core is inert in those checkpoints: the gate multiplies
+    #: the core's own gradient, so starting at zero leaves the mechanism with
+    #: almost no path to learn along, and after 1,000 steps v58's gate had
+    #: reached only 6.41e-04 -- small enough that closing it entirely changes
+    #: zero of 12,192 held-out predictions (see docs/V59_MECHANISM_CAUSALITY.md).
+    #: Set this above zero to give the core a gradient path from step 0.
+    thinking_residual_init: float = 0.0
     ponder_loss_weight: float = 1e-2
     consistency_loss_weight: float = 1e-2
 
@@ -625,7 +636,13 @@ class SparseMoEFeedForward(nn.Module):
             expert_out = expert(flat.index_select(0, token_ids))
             weight = (gate_weights * (expert_indices == expert_id)).sum(dim=-1)
             weight = weight.index_select(0, token_ids).unsqueeze(-1)
-            output.index_add_(0, token_ids, expert_out * weight.to(expert_out.dtype))
+            # `index_add_` requires the source to match the accumulator's dtype
+            # exactly. Under autocast the experts return bf16/fp16 while
+            # `output` was allocated from `flat` in fp32, so the cast is what
+            # lets mixed precision run at all -- without it the MoE path raises
+            # on the first step.
+            contribution = expert_out * weight.to(expert_out.dtype)
+            output.index_add_(0, token_ids, contribution.to(output.dtype))
 
         if self.shared_expert is not None:
             output = output + self.shared_expert(flat)
@@ -812,7 +829,9 @@ class RecursiveThinkingCore(nn.Module):
         )
         self.halt_head = nn.Linear(latent, 1)
         self.to_residual = nn.Linear(latent, hidden, bias=False)
-        self.residual_scale = nn.Parameter(torch.zeros(()))
+        self.residual_scale = nn.Parameter(
+            torch.full((), float(getattr(config, "thinking_residual_init", 0.0)))
+        )
         self.log_temperature = nn.Parameter(torch.zeros(()))
 
         self.quality_encoder = nn.Sequential(nn.Linear(latent + 3, latent), nn.GELU())

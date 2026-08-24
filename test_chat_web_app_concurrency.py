@@ -52,6 +52,35 @@ def _engine(web):
     )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [SOURCE / "chat_web_app.py", RUNTIME / "chat_web_app.py"],
+    ids=["source", "runtime"],
+)
+def test_web_surfaces_propagate_and_render_verified_answer_receipts(path: Path) -> None:
+    code = path.read_text(encoding="utf-8")
+
+    assert '"answer_receipt": dict(' in code
+    assert 'grounding_guard.get("answer_receipt")' in code
+    assert "function answerReceiptText(receipt)" in code
+    assert "receipt.decision" in code
+    assert "model-conditional, not calibrated" in code
+
+
+@pytest.mark.parametrize(
+    "path",
+    [SOURCE / "chat_app.py", RUNTIME / "chat_app.py"],
+    ids=["source", "runtime"],
+)
+def test_terminal_surfaces_render_verified_answer_receipts(path: Path) -> None:
+    code = path.read_text(encoding="utf-8")
+
+    assert 'grounding_guard.get("answer_receipt")' in code
+    assert "Verification receipt:" in code
+    assert "model_conditional=" in code
+    assert "diagnostic_only=" in code
+
+
 def test_engine_exposes_both_locks(web) -> None:
     engine = _engine(web)
     assert isinstance(engine.inference_lock, type(threading.Lock()))

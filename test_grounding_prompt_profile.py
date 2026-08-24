@@ -59,6 +59,47 @@ def test_grounding_reads_current_interaction_epistemic_risk_key(monkeypatch):
     assert plan["evidence_recommended"] is True
 
 
+def test_science_and_prediction_facets_request_evidence_without_claiming_tool_authority():
+    profile = _profile()
+    profile["knowledge"] = {
+        key: False for key in profile["knowledge"]
+    }
+    profile["reasoning"] = {
+        "mathematical": False,
+        "scientific": True,
+        "predictive": True,
+        "causal": True,
+    }
+
+    plan = SOURCE.plan_grounding(
+        "Predict the outcome of this scientific experiment.",
+        prompt_profile=profile,
+    )
+
+    assert plan["evidence_recommended"] is True
+    assert plan["reasoning_domains"] == ["science", "prediction", "causal"]
+    assert {
+        "scientific_reasoning",
+        "prediction_requires_calibration",
+        "causal_reasoning",
+    } <= set(plan["reasons"])
+    assert plan["authority"]["controls_routes"] is False
+
+
+def test_forbidden_experiment_does_not_reactivate_science_grounding():
+    prompt_module_path = ROOT / "source" / "prompt_understanding.py"
+    prompt_module = _load("source_prompt_for_grounding_negation", prompt_module_path)
+    query = "Do not design an experiment; just rewrite the paragraph."
+    profile = prompt_module.analyze_prompt(query)
+
+    plan = SOURCE.plan_grounding(query, prompt_profile=profile)
+
+    assert profile["reasoning"]["scientific"] is False
+    assert "evidence_or_calibration" not in profile["response_contract"]["required_capabilities"]
+    assert plan["evidence_recommended"] is False
+    assert "scientific_reasoning" not in plan["reasons"]
+
+
 def test_evidence_bundle_uses_supplied_plan_without_replanning(monkeypatch):
     plan = SOURCE.plan_grounding(
         "What is the latest release?",

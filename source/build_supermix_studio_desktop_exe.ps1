@@ -1,7 +1,9 @@
 param(
   [string]$Name = "SupermixStudioDesktop",
   [string]$ModelsDir = "",
-  [switch]$SkipDependencyInstall
+  [string]$PythonExe = "",
+  [switch]$SkipDependencyInstall,
+  [switch]$RuntimeOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,18 +11,30 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
-if (-not $ModelsDir) {
-  $ModelsDir = if ($env:SUPERMIX_MODELS_DIR) {
-    $env:SUPERMIX_MODELS_DIR
-  } else {
-    Join-Path $env:USERPROFILE "Desktop\models"
+if (-not $RuntimeOnly) {
+  if (-not $ModelsDir) {
+    $ModelsDir = if ($env:SUPERMIX_MODELS_DIR) {
+      $env:SUPERMIX_MODELS_DIR
+    } else {
+      Join-Path $env:USERPROFILE "Desktop\models"
+    }
   }
+  $ModelsDir = (Resolve-Path -LiteralPath $ModelsDir -ErrorAction Stop).Path
 }
-$ModelsDir = (Resolve-Path -LiteralPath $ModelsDir -ErrorAction Stop).Path
 
-$PythonExe = Join-Path $RepoRoot ".venv-dml\Scripts\python.exe"
-if (-not (Test-Path $PythonExe)) {
-  throw "Expected Python environment at $PythonExe"
+if (-not $PythonExe) {
+  $PreferredPython = Join-Path $RepoRoot ".venv-dml\Scripts\python.exe"
+  if (Test-Path $PreferredPython) {
+    $PythonExe = $PreferredPython
+  } else {
+    $PythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $PythonCommand) {
+      throw "No usable Python executable found. Pass -PythonExe explicitly."
+    }
+    $PythonExe = $PythonCommand.Source
+  }
+} elseif (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+  throw "Python executable not found at $PythonExe"
 }
 
 if (-not $SkipDependencyInstall) {
@@ -32,7 +46,7 @@ if ($LASTEXITCODE -ne 0) {
   throw "The checked Studio runtime manifest is stale. Regenerate and review it before packaging."
 }
 
-python "source\generate_desktop_branding.py" | Out-Host
+& $PythonExe "source\generate_desktop_branding.py" | Out-Host
 
 $BaseModelDir = & $PythonExe -c "import sys; sys.path.insert(0, 'source'); import qwen_chat_desktop_app as app; print(app.resolve_local_base_model_path(''))"
 if (-not $BaseModelDir) {
@@ -62,7 +76,9 @@ if (Test-Path $ModelsStageDir) { Remove-Item -Recurse -Force $ModelsStageDir }
 if (Test-Path $BaseModelStageDir) { Remove-Item -Recurse -Force $BaseModelStageDir }
 New-Item -ItemType Directory -Path $ModelsStageDir -Force | Out-Null
 
-$SelectedBundleJson = & $PythonExe -c @"
+$ModelZipFiles = @()
+if (-not $RuntimeOnly) {
+  $SelectedBundleJson = & $PythonExe -c @"
 import json, sys
 from pathlib import Path
 sys.path.insert(0, 'source')
@@ -84,19 +100,20 @@ payload = [
 ]
 print(json.dumps(payload))
 "@
-$ModelZipFiles = $SelectedBundleJson | ConvertFrom-Json
-if (-not $ModelZipFiles) {
-  throw "No curated model zip files resolved from $ModelsDir"
-}
-foreach ($ZipFile in $ModelZipFiles) {
-  Copy-Item -Force $ZipFile.path (Join-Path $ModelsStageDir $ZipFile.name)
+  $ModelZipFiles = @($SelectedBundleJson | ConvertFrom-Json)
+  if (-not $ModelZipFiles) {
+    throw "No curated model zip files resolved from $ModelsDir"
+  }
+  foreach ($ZipFile in $ModelZipFiles) {
+    Copy-Item -Force $ZipFile.path (Join-Path $ModelsStageDir $ZipFile.name)
+  }
 }
 $BundleManifest = [ordered]@{
   generated_at = (Get-Date).ToString("o")
-  models_dir = $ModelsDir
-  bundle_strategy = "curated_core_plus_model_store"
+  models_dir = if ($RuntimeOnly) { "" } else { $ModelsDir }
+  bundle_strategy = if ($RuntimeOnly) { "runtime_only_base_model_plus_model_store" } else { "curated_core_plus_model_store" }
   bundled_model_count = @($ModelZipFiles).Count
-  bundled_model_keys = @($BundledModelKeys)
+  bundled_model_keys = @($ModelZipFiles | ForEach-Object { $_.key })
   bundled_models = @($ModelZipFiles | ForEach-Object {
       [ordered]@{
         key = $_.key
@@ -112,11 +129,12 @@ $BundleManifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $BundleMa
 & $PythonExe "source\materialize_model_dir.py" $BaseModelDir $BaseModelStageDir | Out-Host
 
 $IconPath = Join-Path $RepoRoot "assets\supermix_qwen_icon.ico"
+$AssetsDir = Join-Path $RepoRoot "assets"
 $SummaryPath = Get-ChildItem -Path (Join-Path $RepoRoot "output") -Filter "benchmark_all_models_common_plus_summary_*.json" -File -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1 -ExpandProperty FullName
 if (-not (Test-Path $IconPath)) {
   throw "Expected icon asset at $IconPath"
 }
-if (-not (Test-Path $SummaryPath)) {
+if (-not $RuntimeOnly -and -not (Test-Path $SummaryPath)) {
   throw "Expected benchmark summary at $SummaryPath"
 }
 
@@ -132,7 +150,7 @@ try {
     "--windowed",
     "--name", $Name,
     "--icon", $IconPath,
-    "--paths", "source",
+    "--paths", (Join-Path $RepoRoot "source"),
     "--collect-all", "webview",
     "--collect-all", "flask",
     "--collect-all", "werkzeug",
@@ -142,18 +160,24 @@ try {
     "--collect-all", "safetensors",
     "--collect-all", "transformers",
     "--collect-all", "peft",
-    "--add-data", "assets;assets",
+    "--add-data", "$AssetsDir;assets",
     "--add-data", "$ModelsStageDir;bundled_models",
-    "--add-data", "$BaseModelStageDir;bundled_base_model",
-    "--add-data", "$SummaryPath;output",
+    "--add-data", "$BaseModelStageDir;bundled_base_model"
+  )
+  if ($SummaryPath) {
+    $PyInstallerArgs += @("--add-data", "$SummaryPath;output")
+  }
+  $PyInstallerArgs += @(
+    "--add-data", "$(Join-Path $RepoRoot 'source\reasoning_engine.py');.",
+    "--add-data", "$(Join-Path $RepoRoot 'source\science_plan.py');.",
     "--add-data", "$BundleManifestPath;output",
     "--add-data", "$RuntimeManifestPath;output",
     "--specpath", "build\studio_desktop_spec",
-    "source\supermix_multimodel_desktop_app.py"
+    (Join-Path $RepoRoot "source\supermix_multimodel_desktop_app.py")
   )
 
   Write-Host "Building $Name"
-  Write-Host "Bundled models from: $ModelsDir"
+  Write-Host $(if ($RuntimeOnly) { "Runtime-only bundle: curated model ZIPs omitted" } else { "Bundled models from: $ModelsDir" })
   Write-Host "Bundled base model from: $BaseModelDir"
   & $PythonExe @PyInstallerArgs
   if ($LASTEXITCODE -ne 0) {

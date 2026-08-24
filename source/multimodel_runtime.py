@@ -8,12 +8,13 @@ import json
 import logging
 import math
 import re
+import stat
 import threading
 import time
 import uuid
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 from urllib.request import urlopen
@@ -51,6 +52,7 @@ from prompt_understanding import (
     evaluate_response_constraints,
     prompt_understanding_diagnostics,
 )
+from qwen_adapter_promotion import attest_adapter_for_runtime, sha256_file
 from multimodel_catalog import (
     DEFAULT_COMMON_SUMMARY,
     DEFAULT_MODELS_DIR,
@@ -462,6 +464,26 @@ LOOP_AGENT_DEFAULT_MAX_STEPS = 4
 LOOP_AGENT_HARD_MAX_STEPS = 8
 LOOP_AGENT_DEFAULT_SCORE_THRESHOLD = 0.88
 MODEL_STORE_ARTIFACT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,180}\.zip$", re.IGNORECASE)
+MODEL_STORE_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+MODEL_STORE_ARTIFACT_MANIFEST_V1_SCHEMA = "supermix-model-store-artifact-manifest-v1"
+MODEL_STORE_ARTIFACT_MANIFEST_V2_SCHEMA = "supermix-model-store-artifact-manifest-v2"
+MODEL_STORE_CONTENT_BOUND_STATUS = "content_bound_not_authenticated"
+MODEL_STORE_ARTIFACT_MANIFEST_MAX_BYTES = 2 * 1024 * 1024
+MODEL_STORE_RECEIPT_AUTHORITY_KEYS = frozenset(
+    {
+        "activation",
+        "auto_route",
+        "default_model",
+        "fallback",
+        "consultant",
+        "tools",
+        "permissions",
+        "safety",
+        "promotion",
+        "store_publication",
+        "release",
+    }
+)
 AUTO_AGENT_MODE_ORDER = ("off", "collective", "loop", "collective_loop")
 AUTO_ROUTE_POLICY_ID = "auto-route-v2"
 AUTO_ROUTE_POLICY_VERSION = "2.0.0"
@@ -594,12 +616,444 @@ def _validate_model_store_file_name(file_name: str) -> str:
     return cooked
 
 
+def _validated_model_store_manifest_item(item: Mapping[str, Any]) -> Tuple[str, int, str]:
+    file_name = _validate_model_store_file_name(item.get("file_name") or "")
+    size_bytes = item.get("size_bytes")
+    if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes <= 0:
+        raise ValueError(f"Model store size_bytes must be a positive integer for {file_name!r}")
+    expected_sha256 = str(item.get("sha256") or "").strip().lower()
+    if not MODEL_STORE_SHA256_RE.fullmatch(expected_sha256):
+        raise ValueError(f"Model store sha256 must be 64 hexadecimal characters for {file_name!r}")
+    return file_name, size_bytes, expected_sha256
+
+
 def _is_safe_model_store_manifest_item(item: Dict[str, Any]) -> bool:
     try:
-        _validate_model_store_file_name(item.get("file_name") or "")
+        _validated_model_store_manifest_item(item)
         return True
     except ValueError:
         return False
+
+
+def _model_store_zip_member_identity(raw_name: str) -> Tuple[str, str]:
+    """Return normalized and case-folded member names after traversal checks."""
+
+    portable_name = raw_name.replace("\\", "/")
+    posix_path = PurePosixPath(portable_name)
+    windows_path = PureWindowsPath(raw_name)
+    parts = posix_path.parts
+    if (
+        not raw_name
+        or "\x00" in raw_name
+        or posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or any(part == ".." or ":" in part for part in parts)
+    ):
+        raise ValueError(f"Unsafe model store ZIP member path: {raw_name!r}")
+    normalized_name = "/".join(part for part in parts if part not in {"", "."})
+    if not normalized_name:
+        raise ValueError("Empty model store ZIP member path")
+    return normalized_name, normalized_name.casefold()
+
+
+def _reject_model_store_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON number is not allowed: {value}")
+
+
+def _reject_model_store_json_duplicate_keys(
+    pairs: List[Tuple[str, Any]],
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON key is not allowed: {key}")
+        result[key] = value
+    return result
+
+
+def _read_model_store_manifest(
+    archive: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    *,
+    archive_name: str,
+) -> Dict[str, Any]:
+    if member.is_dir() or member.filename != "artifact_manifest.json":
+        raise ValueError(
+            f"Model store v2 manifest must be the exact root file "
+            f"'artifact_manifest.json' in {archive_name}"
+        )
+    if member.file_size > MODEL_STORE_ARTIFACT_MANIFEST_MAX_BYTES:
+        raise ValueError(f"Model store artifact manifest is too large in {archive_name}")
+    try:
+        with archive.open(member, "r") as source:
+            raw_payload = source.read(MODEL_STORE_ARTIFACT_MANIFEST_MAX_BYTES + 1)
+    except (OSError, EOFError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"Could not read artifact_manifest.json in {archive_name}") from exc
+    if len(raw_payload) > MODEL_STORE_ARTIFACT_MANIFEST_MAX_BYTES:
+        raise ValueError(f"Model store artifact manifest is too large in {archive_name}")
+    try:
+        payload = json.loads(
+            raw_payload.decode("utf-8"),
+            parse_constant=_reject_model_store_json_constant,
+            object_pairs_hook=_reject_model_store_json_duplicate_keys,
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            f"Model store artifact manifest is not strict JSON in {archive_name}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Model store artifact manifest must be a JSON object in {archive_name}")
+    return payload
+
+
+def _stream_model_store_member_digest(
+    archive: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    *,
+    expected_size: int,
+    archive_name: str,
+) -> Tuple[int, str]:
+    if member.is_dir() or member.file_size != expected_size:
+        raise ValueError(
+            f"Model store member size does not match artifact manifest in {archive_name}: "
+            f"{member.filename!r}"
+        )
+    digest = hashlib.sha256()
+    actual_size = 0
+    try:
+        with archive.open(member, "r") as source:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                actual_size += len(chunk)
+                if actual_size > expected_size:
+                    raise ValueError(
+                        f"Model store member exceeds declared size in {archive_name}: "
+                        f"{member.filename!r}"
+                    )
+    except ValueError:
+        raise
+    except (OSError, EOFError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise ValueError(
+            f"Could not verify model store member in {archive_name}: {member.filename!r}"
+        ) from exc
+    return actual_size, digest.hexdigest()
+
+
+def _validate_model_store_v2_manifest(
+    archive: zipfile.ZipFile,
+    members: Sequence[zipfile.ZipInfo],
+    manifest: Mapping[str, Any],
+    *,
+    archive_name: str,
+) -> str:
+    policy_requirements = {
+        "manual_selection_only": True,
+        "auto_route_allowed": False,
+        "default_model_allowed": False,
+        "receipt_grants_activation": False,
+        "receipt_grants_store_publication": False,
+    }
+    for field, expected in policy_requirements.items():
+        if manifest.get(field) is not expected:
+            raise ValueError(
+                f"Model store artifact-manifest-v2 has unsafe {field!r} policy in "
+                f"{archive_name}"
+            )
+    if manifest.get("authentication") != "none":
+        raise ValueError(
+            f"Model store artifact-manifest-v2 authentication must be 'none' in "
+            f"{archive_name}"
+        )
+    for field in ("integrity_status", "runtime_status"):
+        if manifest.get(field) != MODEL_STORE_CONTENT_BOUND_STATUS:
+            raise ValueError(
+                f"Model store artifact-manifest-v2 {field} is invalid in {archive_name}"
+            )
+
+    authority = manifest.get("receipt_authority")
+    if not isinstance(authority, dict) or set(authority) != MODEL_STORE_RECEIPT_AUTHORITY_KEYS:
+        raise ValueError(
+            f"Model store artifact-manifest-v2 receipt_authority keys are invalid in "
+            f"{archive_name}"
+        )
+    if any(value is not False for value in authority.values()):
+        raise ValueError(
+            f"Model store artifact-manifest-v2 receipt_authority must be all false in "
+            f"{archive_name}"
+        )
+
+    member_rows = manifest.get("members")
+    if not isinstance(member_rows, list) or not member_rows:
+        raise ValueError(
+            f"Model store artifact-manifest-v2 members must be a non-empty list in "
+            f"{archive_name}"
+        )
+    declared: Dict[str, Tuple[int, str]] = {}
+    declared_casefolded: set[str] = set()
+    for index, row in enumerate(member_rows):
+        if not isinstance(row, dict) or set(row) != {"name", "size_bytes", "sha256"}:
+            raise ValueError(
+                f"Malformed artifact-manifest-v2 member record {index} in {archive_name}"
+            )
+        name = row.get("name")
+        if not isinstance(name, str):
+            raise ValueError(
+                f"Artifact-manifest-v2 member {index} has an invalid name in {archive_name}"
+            )
+        normalized_name, canonical_name = _model_store_zip_member_identity(name)
+        if name != normalized_name or "\\" in name or name.endswith("/"):
+            raise ValueError(
+                f"Artifact-manifest-v2 member name is not canonical in {archive_name}: "
+                f"{name!r}"
+            )
+        if canonical_name == "artifact_manifest.json" or canonical_name in declared_casefolded:
+            raise ValueError(
+                f"Duplicate or reserved artifact-manifest-v2 member in {archive_name}: "
+                f"{name!r}"
+            )
+        declared_casefolded.add(canonical_name)
+        size_bytes = row.get("size_bytes")
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
+            raise ValueError(
+                f"Artifact-manifest-v2 member size is invalid in {archive_name}: {name!r}"
+            )
+        expected_sha256 = row.get("sha256")
+        if (
+            not isinstance(expected_sha256, str)
+            or expected_sha256 != expected_sha256.lower()
+            or not MODEL_STORE_SHA256_RE.fullmatch(expected_sha256)
+        ):
+            raise ValueError(
+                f"Artifact-manifest-v2 member SHA-256 is invalid in {archive_name}: "
+                f"{name!r}"
+            )
+        declared[name] = (size_bytes, expected_sha256)
+
+    archive_member_names = {member.filename for member in members}
+    exact_names = set(declared) | {"artifact_manifest.json"}
+    if archive_member_names != exact_names or any(member.is_dir() for member in members):
+        missing = sorted(exact_names - archive_member_names)
+        extra = sorted(archive_member_names - exact_names)
+        raise ValueError(
+            f"Model store artifact-manifest-v2 member set mismatch in {archive_name}; "
+            f"missing={missing!r}, extra={extra!r}"
+        )
+
+    archive_by_name = {member.filename: member for member in members}
+    for name, (expected_size, expected_sha256) in declared.items():
+        actual_size, actual_sha256 = _stream_model_store_member_digest(
+            archive,
+            archive_by_name[name],
+            expected_size=expected_size,
+            archive_name=archive_name,
+        )
+        if actual_size != expected_size or actual_sha256 != expected_sha256:
+            raise ValueError(
+                f"Model store member does not match artifact manifest in {archive_name}: "
+                f"{name!r}"
+            )
+
+    evidence_links = manifest.get("evidence_links")
+    if not isinstance(evidence_links, dict) or not evidence_links:
+        raise ValueError(
+            f"Model store artifact-manifest-v2 evidence_links must be a non-empty object "
+            f"in {archive_name}"
+        )
+    linked_members: set[str] = set()
+    for label, link in evidence_links.items():
+        if not isinstance(label, str) or not label or not isinstance(link, dict):
+            raise ValueError(
+                f"Malformed artifact-manifest-v2 evidence link in {archive_name}"
+            )
+        archive_member = link.get("archive_member")
+        link_size = link.get("size_bytes")
+        link_sha256 = link.get("sha256")
+        if (
+            not isinstance(archive_member, str)
+            or archive_member not in declared
+            or archive_member in linked_members
+        ):
+            raise ValueError(
+                f"Artifact-manifest-v2 evidence link is missing or duplicated in "
+                f"{archive_name}: {label!r}"
+            )
+        expected_size, expected_sha256 = declared[archive_member]
+        if (
+            isinstance(link_size, bool)
+            or not isinstance(link_size, int)
+            or link_size != expected_size
+            or not isinstance(link_sha256, str)
+            or link_sha256 != expected_sha256
+        ):
+            raise ValueError(
+                f"Artifact-manifest-v2 evidence link does not match its member record in "
+                f"{archive_name}: {label!r}"
+            )
+        linked_members.add(archive_member)
+
+    status = manifest.get("status")
+    if not isinstance(status, str) or not status.strip():
+        raise ValueError(
+            f"Model store artifact-manifest-v2 status must be a non-empty string in "
+            f"{archive_name}"
+        )
+    return status
+
+
+def _validate_model_store_zip(zip_path: Path) -> Dict[str, Any]:
+    """Validate archive structure without extracting or loading model data."""
+
+    try:
+        archive = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"Model store artifact is not a readable ZIP archive: {zip_path.name}") from exc
+
+    with archive:
+        members = archive.infolist()
+        if not members:
+            raise ValueError(f"Model store ZIP archive is empty: {zip_path.name}")
+
+        seen: set[str] = set()
+        member_by_identity: Dict[str, zipfile.ZipInfo] = {}
+        file_count = 0
+        for member in members:
+            raw_name = str(member.filename or "")
+            try:
+                _normalized_name, canonical_name = _model_store_zip_member_identity(raw_name)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Unsafe path in model store ZIP {zip_path.name}: {raw_name!r}"
+                ) from exc
+
+            if canonical_name in seen:
+                raise ValueError(
+                    f"Duplicate member in model store ZIP {zip_path.name}: {raw_name!r}"
+                )
+            seen.add(canonical_name)
+            member_by_identity[canonical_name] = member
+
+            if member.flag_bits & 0x1:
+                raise ValueError(
+                    f"Encrypted member in model store ZIP {zip_path.name}: {raw_name!r}"
+                )
+            unix_mode = (member.external_attr >> 16) & 0xFFFF
+            if stat.S_ISLNK(unix_mode):
+                raise ValueError(
+                    f"Symbolic link in model store ZIP {zip_path.name}: {raw_name!r}"
+                )
+            if not member.is_dir():
+                file_count += 1
+
+        if file_count <= 0:
+            raise ValueError(f"Model store ZIP contains no files: {zip_path.name}")
+
+        inner_schema = ""
+        inner_status = "not_present"
+        inner_integrity_status = ""
+        inner_runtime_status = ""
+        manifest_member = member_by_identity.get("artifact_manifest.json")
+        if manifest_member is not None:
+            manifest = _read_model_store_manifest(
+                archive,
+                manifest_member,
+                archive_name=zip_path.name,
+            )
+            schema = manifest.get("schema")
+            if schema == MODEL_STORE_ARTIFACT_MANIFEST_V2_SCHEMA:
+                inner_status = _validate_model_store_v2_manifest(
+                    archive,
+                    members,
+                    manifest,
+                    archive_name=zip_path.name,
+                )
+                inner_integrity_status = MODEL_STORE_CONTENT_BOUND_STATUS
+                inner_runtime_status = MODEL_STORE_CONTENT_BOUND_STATUS
+            elif schema == MODEL_STORE_ARTIFACT_MANIFEST_V1_SCHEMA:
+                legacy_status = manifest.get("status")
+                inner_status = (
+                    legacy_status
+                    if isinstance(legacy_status, str) and legacy_status.strip()
+                    else "legacy_v1"
+                )
+            else:
+                raise ValueError(
+                    f"Unknown model store artifact manifest schema in {zip_path.name}: "
+                    f"{schema!r}"
+                )
+            inner_schema = schema
+        return {
+            "member_count": len(members),
+            "file_count": file_count,
+            "inner_manifest_schema": inner_schema,
+            "inner_manifest_status": inner_status,
+            "inner_manifest_integrity_status": inner_integrity_status,
+            "inner_manifest_runtime_status": inner_runtime_status,
+        }
+
+
+def _model_store_local_integrity(
+    path: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "algorithm": "sha256",
+        "expected_size_bytes": expected_size,
+        "expected_sha256": expected_sha256,
+        "local_size_bytes": 0,
+        "local_sha256": "",
+        "status": "missing",
+        "verified": False,
+        "archive_member_count": 0,
+        "archive_file_count": 0,
+        "inner_manifest_schema": "",
+        "inner_manifest_status": "not_present",
+        "inner_manifest_integrity_status": "",
+        "inner_manifest_runtime_status": "",
+        "error": "",
+    }
+    if not path.exists():
+        return result
+    if not path.is_file():
+        result.update(status="not_a_file", error="Local model-store target is not a file.")
+        return result
+
+    local_size = path.stat().st_size
+    result["local_size_bytes"] = local_size
+    if local_size != expected_size:
+        result.update(
+            status="size_mismatch",
+            error=f"Expected {expected_size} bytes but found {local_size} bytes.",
+        )
+        return result
+
+    actual_sha256 = sha256_file(path)
+    result["local_sha256"] = actual_sha256
+    if actual_sha256 != expected_sha256:
+        result.update(status="hash_mismatch", error="Local SHA-256 does not match the manifest.")
+        return result
+
+    try:
+        archive_summary = _validate_model_store_zip(path)
+    except ValueError as exc:
+        result.update(status="invalid_archive", error=str(exc))
+        return result
+    result.update(
+        status="verified",
+        verified=True,
+        archive_member_count=archive_summary["member_count"],
+        archive_file_count=archive_summary["file_count"],
+        inner_manifest_schema=archive_summary["inner_manifest_schema"],
+        inner_manifest_status=archive_summary["inner_manifest_status"],
+        inner_manifest_integrity_status=archive_summary["inner_manifest_integrity_status"],
+        inner_manifest_runtime_status=archive_summary["inner_manifest_runtime_status"],
+    )
+    return result
 
 
 def _hf_dataset_file_url(repo_id: str, filename: str) -> str:
@@ -927,11 +1381,30 @@ class QwenBackend(BaseBackend):
         self.adapter_dir = _find_adapter_dir(extracted_dir, record.adapter_markers)
         self.device = self._qwen.resolve_device("auto")
         self.base_model = self._qwen.resolve_base_model_path("", self.adapter_dir)
+        self.adapter_attestation = dict(
+            attest_adapter_for_runtime(
+                self.adapter_dir,
+                legacy_artifact_name=record.zip_path.name,
+                resolved_base_model=self.base_model,
+            )
+        )
+        if self.adapter_attestation.get("trusted") is not True:
+            raise ValueError("Qwen adapter runtime attestation did not establish trust.")
+        self._verify_attested_adapter_files()
         self.engine = self._qwen.load_engine(
             base_model=self.base_model,
             adapter_dir=self.adapter_dir,
             device=self.device,
         )
+        self._verify_attested_adapter_files()
+
+    def _verify_attested_adapter_files(self) -> None:
+        expected_weights = str(self.adapter_attestation.get("adapter_sha256") or "").lower()
+        expected_config = str(self.adapter_attestation.get("adapter_config_sha256") or "").lower()
+        actual_weights = sha256_file(self.adapter_dir / "adapter_model.safetensors")
+        actual_config = sha256_file(self.adapter_dir / "adapter_config.json")
+        if actual_weights != expected_weights or actual_config != expected_config:
+            raise ValueError("Qwen adapter files changed after runtime attestation.")
 
     def status(self) -> Dict[str, Any]:
         return {
@@ -939,6 +1412,7 @@ class QwenBackend(BaseBackend):
             "record": self.record.to_dict(),
             "adapter_dir": str(self.adapter_dir),
             "base_model": str(self.base_model),
+            "adapter_attestation": dict(self.adapter_attestation),
             "runtime": self.engine.status(),
         }
 
@@ -1019,6 +1493,40 @@ class QwenBackend(BaseBackend):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+class QwenBaseBackend(QwenBackend):
+    """Run the bundled local Qwen base model without activating an adapter."""
+
+    def __init__(self, record: ModelRecord, generated_dir: Path) -> None:
+        BaseBackend.__init__(self, record, record.zip_path, generated_dir)
+        import qwen_chat_web_app
+
+        self._qwen = qwen_chat_web_app
+        self.device = self._qwen.resolve_device("auto")
+        self.base_model = self._qwen.resolve_local_base_model_path("")
+        self.adapter_dir = Path(self.base_model) / ".supermix-no-adapter"
+        if self.adapter_dir.exists():
+            raise ValueError("Reserved base-only adapter sentinel unexpectedly exists.")
+        self.adapter_attestation = {
+            "trusted": True,
+            "activation_kind": "base_model_only",
+            "adapter_loaded": False,
+        }
+        self.engine = self._qwen.load_engine(
+            base_model=self.base_model,
+            adapter_dir=self.adapter_dir,
+            device=self.device,
+        )
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "backend": "qwen_base",
+            "record": self.record.to_dict(),
+            "base_model": str(self.base_model),
+            "adapter_attestation": dict(self.adapter_attestation),
+            "runtime": self.engine.status(),
+        }
 
 
 class NativeImageBackend(BaseBackend):
@@ -1924,6 +2432,8 @@ class UnifiedModelManager:
         self.cmd_open = CmdOpenTool()
 
     def _build_backend(self, record: ModelRecord) -> BaseBackend:
+        if record.kind == "qwen_base":
+            return QwenBaseBackend(record, self.generated_dir)
         extracted_dir = _extract_zip_once(record.zip_path, self.extraction_root)
         if record.kind == "champion_chat":
             return ChampionChatBackend(record, extracted_dir, self.generated_dir, self.device, self.device_info)
@@ -2019,7 +2529,7 @@ class UnifiedModelManager:
             seen.add(key)
             keys.append(key)
         for record in self.records:
-            if record.key in seen:
+            if record.key in seen or record.manual_only:
                 continue
             if failed_record.supports_chat and not record.supports_chat:
                 continue
@@ -2138,23 +2648,31 @@ class UnifiedModelManager:
     def model_store_catalog(self, force_refresh: bool = False) -> Dict[str, Any]:
         with self._lock:
             manifest = self._fetch_model_store_manifest_locked(force_refresh=force_refresh)
-            installed_names = {record.zip_path.name for record in self.records}
             rows: List[Dict[str, Any]] = []
             for item in manifest.get("models") or []:
                 if not isinstance(item, dict):
                     continue
                 try:
-                    file_name = _validate_model_store_file_name(item.get("file_name") or "")
+                    file_name, expected_size, expected_sha256 = (
+                        _validated_model_store_manifest_item(item)
+                    )
                 except ValueError:
                     continue
                 details = describe_model_artifact_name(file_name)
                 local_path = self.models_dir / file_name
-                installed = local_path.exists() or file_name in installed_names
+                integrity = _model_store_local_integrity(
+                    local_path,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
+                installed = integrity["verified"] is True
                 rows.append(
                     {
                         "file_name": file_name,
-                        "size_bytes": int(item.get("size_bytes") or 0),
-                        "size_mb": float(item.get("size_mb") or 0.0),
+                        "size_bytes": expected_size,
+                        "size_mb": float(item.get("size_mb") or expected_size / (1024 * 1024)),
+                        "sha256": expected_sha256,
+                        "integrity": integrity,
                         "family": str(item.get("family") or details.get("family") or "other"),
                         "known": bool(details.get("known")),
                         "model_key": str(details.get("key") or ""),
@@ -2166,13 +2684,22 @@ class UnifiedModelManager:
                         "download_url": _hf_dataset_file_url(self.model_store_repo_id, file_name),
                         "installed": installed,
                         "local_path": str(local_path.resolve()) if local_path.exists() else "",
-                        "selectable": bool(details.get("known")) and str(details.get("key") or "") in self.record_map,
+                        "selectable": (
+                            installed
+                            and bool(details.get("known"))
+                            and str(details.get("key") or "") in self.record_map
+                        ),
                     }
                 )
             rows.sort(key=lambda item: (not item["installed"], item["label"].lower(), item["file_name"].lower()))
             return {
                 "repo_id": self.model_store_repo_id,
                 "model_count": len(rows),
+                "integrity_contract": {
+                    "algorithm": "sha256",
+                    "positive_size_required": True,
+                    "safe_zip_required": True,
+                },
                 "models": rows,
             }
 
@@ -2191,7 +2718,13 @@ class UnifiedModelManager:
             payload.update(updates)
             self._model_store_jobs[job_id] = payload
 
-    def _install_model_store_worker(self, job_id: str, file_name: str, expected_size: int) -> None:
+    def _install_model_store_worker(
+        self,
+        job_id: str,
+        file_name: str,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
         file_name = _validate_model_store_file_name(file_name)
         target = self.models_dir / file_name
         temp_target = self.models_dir / f"{file_name}.{job_id}.part"
@@ -2199,28 +2732,66 @@ class UnifiedModelManager:
             self._set_model_store_job(job_id, status="downloading")
             url = _hf_dataset_file_url(self.model_store_repo_id, file_name)
             downloaded = 0
+            digest = hashlib.sha256()
             with urlopen(url, timeout=60) as response:
                 header_size = int(response.headers.get("Content-Length") or 0)
-                total_bytes = expected_size or header_size
-                self._set_model_store_job(job_id, total_bytes=total_bytes)
+                if header_size > 0 and header_size != expected_size:
+                    raise ValueError(
+                        f"Download size header mismatch for {file_name}: "
+                        f"expected {expected_size}, received {header_size}"
+                    )
+                self._set_model_store_job(job_id, total_bytes=expected_size)
                 with temp_target.open("wb") as handle:
                     while True:
                         chunk = response.read(1024 * 1024)
                         if not chunk:
                             break
                         handle.write(chunk)
+                        digest.update(chunk)
                         downloaded += len(chunk)
+                        if downloaded > expected_size:
+                            raise ValueError(
+                                f"Download exceeded manifest size for {file_name}: "
+                                f"expected {expected_size} bytes"
+                            )
                         self._set_model_store_job(job_id, downloaded_bytes=downloaded)
-            if target.exists():
-                target.unlink()
-            temp_target.replace(target)
+            if downloaded != expected_size:
+                raise ValueError(
+                    f"Download size mismatch for {file_name}: "
+                    f"expected {expected_size}, received {downloaded}"
+                )
+            actual_sha256 = digest.hexdigest()
+            if actual_sha256 != expected_sha256:
+                raise ValueError(f"Download SHA-256 mismatch for {file_name}")
+            _validate_model_store_zip(temp_target)
+
             with self._lock:
+                existing_integrity = _model_store_local_integrity(
+                    target,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
+                reused_existing = existing_integrity["verified"] is True
+                if reused_existing:
+                    temp_target.unlink(missing_ok=True)
+                else:
+                    temp_target.replace(target)
                 self._refresh_records_locked()
+            installed_integrity = _model_store_local_integrity(
+                target,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+            if installed_integrity["verified"] is not True:
+                raise ValueError(f"Installed model-store artifact failed verification: {file_name}")
             self._set_model_store_job(
                 job_id,
                 status="completed",
                 downloaded_bytes=target.stat().st_size,
                 total_bytes=target.stat().st_size,
+                sha256=expected_sha256,
+                integrity=installed_integrity,
+                reused_existing=reused_existing,
                 local_path=str(target.resolve()),
                 finished_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                 selectable=bool(describe_model_artifact_name(file_name).get("key") in self.record_map),
@@ -2241,20 +2812,28 @@ class UnifiedModelManager:
         cooked = _validate_model_store_file_name(file_name)
         with self._lock:
             manifest = self._fetch_model_store_manifest_locked(force_refresh=False)
-            manifest_rows = {
-                _validate_model_store_file_name(item.get("file_name") or ""): item
-                for item in (manifest.get("models") or [])
-                if isinstance(item, dict)
-                and _is_safe_model_store_manifest_item(item)
-            }
+            manifest_rows: Dict[str, Tuple[Dict[str, Any], int, str]] = {}
+            for item in manifest.get("models") or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    item_name, item_size, item_sha256 = _validated_model_store_manifest_item(item)
+                except ValueError:
+                    continue
+                manifest_rows[item_name] = (item, item_size, item_sha256)
             if cooked not in manifest_rows:
                 raise FileNotFoundError(f"{cooked} is not present in {self.model_store_repo_id}")
             for job in self._model_store_jobs.values():
                 if job.get("file_name") == cooked and job.get("status") in {"queued", "downloading"}:
                     return dict(job)
             target = self.models_dir / cooked
-            expected_size = int(manifest_rows[cooked].get("size_bytes") or 0)
-            if target.exists() and (expected_size <= 0 or target.stat().st_size == expected_size):
+            _manifest_item, expected_size, expected_sha256 = manifest_rows[cooked]
+            local_integrity = _model_store_local_integrity(
+                target,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+            if local_integrity["verified"] is True:
                 self._refresh_records_locked()
                 payload = {
                     "job_id": f"already-{int(time.time())}",
@@ -2262,6 +2841,9 @@ class UnifiedModelManager:
                     "status": "completed",
                     "downloaded_bytes": target.stat().st_size,
                     "total_bytes": target.stat().st_size,
+                    "sha256": expected_sha256,
+                    "integrity": local_integrity,
+                    "reused_existing": True,
                     "local_path": str(target.resolve()),
                     "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -2275,6 +2857,8 @@ class UnifiedModelManager:
                 "status": "queued",
                 "downloaded_bytes": 0,
                 "total_bytes": expected_size,
+                "sha256": expected_sha256,
+                "integrity": local_integrity,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "local_path": "",
                 "error": "",
@@ -2282,7 +2866,7 @@ class UnifiedModelManager:
             self._model_store_jobs[job_id] = payload
             worker = threading.Thread(
                 target=self._install_model_store_worker,
-                args=(job_id, cooked, expected_size),
+                args=(job_id, cooked, expected_size, expected_sha256),
                 daemon=True,
                 name=f"model-store-{job_id}",
             )
@@ -2297,7 +2881,7 @@ class UnifiedModelManager:
             if key in self.record_map and self.record_map[key].supports_chat:
                 return self.record_map[key]
         for record in self.records:
-            if record.supports_chat:
+            if record.supports_chat and not record.manual_only:
                 return record
         raise RuntimeError("No text-capable local models were discovered.")
 
@@ -2306,7 +2890,9 @@ class UnifiedModelManager:
         settings: Optional[Dict[str, Any]] = None,
         chosen_record: Optional[ModelRecord] = None,
     ) -> List[ModelRecord]:
-        consultants = [record for record in self.records if record.supports_chat]
+        consultants = [
+            record for record in self.records if record.supports_chat and not record.manual_only
+        ]
         if not consultants:
             return []
 
@@ -4624,6 +5210,22 @@ class UnifiedModelManager:
         with self._lock:
             return self.memory_store.session_snapshot(session_id)
 
+    def review_session_memory(
+        self,
+        *,
+        session_id: str,
+        memory_id: str,
+        action: str,
+    ) -> Dict[str, Any]:
+        """Apply an explicit lifecycle action to one authority-bound memory."""
+
+        with self._lock:
+            return self.memory_store.review_memory(
+                session_id=session_id,
+                memory_id=memory_id,
+                action=action,
+            )
+
     def record_route_feedback(self, *, session_id: str, feedback: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             route_id = str(feedback.get("route_id") or "").strip()
@@ -5501,6 +6103,9 @@ class UnifiedModelManager:
                     "reasoning": reasoning_diagnostics(
                         (grounding_guard or {}).get("reasoning")
                     ),
+                    "answer_receipt": dict(
+                        (grounding_guard or {}).get("answer_receipt") or {}
+                    ),
                     "authority": dict(
                         (grounding_guard or {}).get("authority")
                         or grounding_plan.get("authority")
@@ -5561,25 +6166,26 @@ class UnifiedModelManager:
             assistant_summary = result.response or result.prompt_used or result.refined_prompt or ""
             tools_for_memory = list((result.agent_trace or {}).get("tool_events") or [])
             consultants_for_memory = list((result.agent_trace or {}).get("consultation_rows") or [])
-            self.memory_store.add_route_usage(
-                session_id=session_id,
-                route_id=route_id,
-                prompt=prompt,
-                selected_agent_mode=agent_mode,
-                route_economics=route_economics,
-                auto_agent_policy=auto_agent_policy,
-                route_reason=result.route_reason,
-                model_key=result.model_key,
-            )
-            self.memory_store.update(
-                session_id=session_id,
-                user_text=prompt,
-                assistant_text=assistant_summary,
-                model_key=result.model_key,
-                route_reason=result.route_reason,
-                tools=tools_for_memory,
-                consultants=consultants_for_memory,
-            )
+            if settings.get("memory_enabled", True) is not False:
+                self.memory_store.add_route_usage(
+                    session_id=session_id,
+                    route_id=route_id,
+                    prompt=prompt,
+                    selected_agent_mode=agent_mode,
+                    route_economics=route_economics,
+                    auto_agent_policy=auto_agent_policy,
+                    route_reason=result.route_reason,
+                    model_key=result.model_key,
+                )
+                self.memory_store.update(
+                    session_id=session_id,
+                    user_text=prompt,
+                    assistant_text=assistant_summary,
+                    model_key=result.model_key,
+                    route_reason=result.route_reason,
+                    tools=tools_for_memory,
+                    consultants=consultants_for_memory,
+                )
 
             self.selected_model_key = model_key or self.selected_model_key
             self.last_route_reason = result.route_reason

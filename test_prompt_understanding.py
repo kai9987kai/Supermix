@@ -39,7 +39,7 @@ def test_schema_constants_and_json_safety():
         "supermix-prompt-understanding-v1"
     )
     assert SOURCE.PROMPT_UNDERSTANDING_VERSION == (
-        "supermix-prompt-understanding-runtime-v1"
+        "supermix-prompt-understanding-runtime-v3"
     )
     assert profile["schema_version"] == SOURCE.PROMPT_UNDERSTANDING_SCHEMA_VERSION
     assert json.loads(json.dumps(profile)) == profile
@@ -391,6 +391,30 @@ def test_complementizer_that_is_not_an_external_reference():
     assert profile["context"]["turn_relation"] == "standalone"
 
 
+@pytest.mark.parametrize("module", [SOURCE, RUNTIME], ids=["source", "runtime"])
+def test_empirical_prediction_is_self_contained_not_a_same_turn_reference(module):
+    prompt = (
+        "Assuming trials are independent with the same success probability, "
+        "we observed 7 successes in 10 trials. What is the predicted probability "
+        "for the next trial?"
+    )
+    turns = [
+        {
+            "turn_id": "unrelated",
+            "user": "Write a poem about winter.",
+            "assistant": "Snow settles softly.",
+        }
+    ]
+
+    profile = module.analyze_prompt(prompt, recent_turns=turns)
+
+    assert ("predict", "required") in _objective_pairs(profile)
+    assert profile["reasoning"]["predictive"] is True
+    assert profile["references"] == []
+    assert profile["context"]["turn_relation"] == "standalone"
+    assert module.build_contextual_query(prompt, profile, recent_turns=turns) == prompt
+
+
 def test_knowledge_contract_captures_freshness_evidence_and_citations():
     profile = SOURCE.analyze_prompt(
         "Using only the supplied evidence, cite current sources for this factual claim."
@@ -405,6 +429,129 @@ def test_knowledge_contract_captures_freshness_evidence_and_citations():
     }
     assert {"citations", "evidence_or_calibration"} <= set(
         profile["response_contract"]["required_capabilities"]
+    )
+
+
+def test_reasoning_profile_separates_math_science_prediction_and_multi_part_needs():
+    profile = SOURCE.analyze_prompt(
+        "Predict the next outcome from the data and design a scientific test. "
+        "What assumptions matter? What calculation verifies it?"
+    )
+
+    reasoning = profile["reasoning"]
+    assert reasoning["domains"] == ["mathematics", "science", "prediction"]
+    assert reasoning["strategy"] == "scientific_forecast"
+    assert reasoning["question_count"] == 2
+    assert reasoning["multi_part"] is True
+    assert {
+        "calibrated_prediction",
+        "assumptions",
+        "scientific_reasoning",
+        "verified_calculation",
+        "multi_part_coverage",
+    } <= set(profile["response_contract"]["required_capabilities"])
+    assert reasoning["authority"]["certifies_correctness"] is False
+
+
+def test_domain_words_inside_quoted_or_code_payloads_do_not_change_reasoning_profile():
+    profile = SOURCE.analyze_prompt(
+        'Rewrite "predict the physics result and design an experiment"; '
+        "leave `calculate probability` unchanged."
+    )
+
+    assert profile["reasoning"]["domains"] == []
+    assert profile["reasoning"]["strategy"] == "direct"
+    assert _objective_pairs(profile) == {("edit", "required")}
+
+
+def test_negated_prediction_and_calculation_are_not_reintroduced_as_requirements():
+    profile = SOURCE.analyze_prompt(
+        "Do not predict or calculate; explain the mathematics of probability conceptually."
+    )
+
+    assert profile["reasoning"]["predictive"] is False
+    assert profile["reasoning"]["verification_required"] is False
+    required = set(profile["response_contract"]["required_capabilities"])
+    forbidden = set(profile["response_contract"]["forbidden_capabilities"])
+    assert "calibrated_prediction" not in required
+    assert "verified_calculation" not in required
+    assert {"calibrated_prediction", "actionable_solution"} <= forbidden
+    assert "assumptions" not in forbidden
+
+
+def test_project_noun_is_not_misread_as_a_forecast_verb():
+    ordinary = SOURCE.analyze_prompt("Improve the project.")
+    negated = SOURCE.analyze_prompt(
+        "Do not predict anything; improve the project architecture."
+    )
+    forecast = SOURCE.analyze_prompt("Project next quarter demand and state assumptions.")
+
+    assert ordinary["reasoning"]["predictive"] is False
+    assert "calibrated_prediction" not in ordinary["response_contract"]["required_capabilities"]
+    assert negated["reasoning"]["predictive"] is False
+    assert "calibrated_prediction" not in negated["response_contract"]["required_capabilities"]
+    assert forecast["reasoning"]["predictive"] is True
+
+
+def test_negated_experiment_does_not_recreate_science_requirements():
+    rewrite = SOURCE.analyze_prompt(
+        "Do not design an experiment; just rewrite the paragraph."
+    )
+    physics = SOURCE.analyze_prompt(
+        "Do not design an experiment; explain the physics instead."
+    )
+
+    rewrite_required = set(rewrite["response_contract"]["required_capabilities"])
+    rewrite_forbidden = set(rewrite["response_contract"]["forbidden_capabilities"])
+    assert rewrite["reasoning"]["scientific"] is False
+    assert "evidence_or_calibration" not in rewrite_required
+    assert "scientific_reasoning" in rewrite_forbidden
+
+    assert physics["reasoning"]["scientific"] is True
+    assert "evidence_or_calibration" in physics["response_contract"]["required_capabilities"]
+    assert "evidence_or_calibration" not in physics["response_contract"]["forbidden_capabilities"]
+
+
+def test_generic_technical_words_and_format_counts_do_not_force_science_or_math():
+    environment = SOURCE.analyze_prompt("Fix the environment variable configuration.")
+    python = SOURCE.analyze_prompt("Why does Python list.append return None?")
+    formatting = SOURCE.analyze_prompt("Explain mathematics in 3 bullets.")
+
+    assert environment["reasoning"]["scientific"] is False
+    assert python["reasoning"]["causal"] is False
+    assert formatting["reasoning"]["verification_required"] is False
+    assert "verified_calculation" not in formatting["response_contract"]["required_capabilities"]
+
+
+def test_multiline_quoted_payload_is_masked_from_reasoning_facets():
+    profile = SOURCE.analyze_prompt(
+        'Rewrite "First line\npredict the physics result and design an experiment".'
+    )
+
+    assert profile["reasoning"]["domains"] == []
+    assert _objective_pairs(profile) == {("edit", "required")}
+
+
+def test_closed_vocabulary_typo_recovery_understands_capability_requests():
+    profile = SOURCE.analyze_prompt(
+        "Innvoate covnersations, undersatand responser logic, reasning, "
+        "prediciton, maths and sceince."
+    )
+
+    canonical = {
+        row["canonical"] for row in profile["normalization"]["corrections"]
+    }
+    assert {
+        "innovate",
+        "conversations",
+        "understand",
+        "response",
+        "reasoning",
+        "prediction",
+        "science",
+    } <= canonical
+    assert {"conversation", "mathematics", "science", "prediction"} <= set(
+        profile["reasoning"]["domains"]
     )
 
 
@@ -437,6 +584,28 @@ def test_rendered_contract_is_bounded_and_does_not_claim_authority():
     assert '"may_enable_disabled_tools":false' in rendered
 
 
+@pytest.mark.parametrize("module", [SOURCE, RUNTIME])
+def test_closed_world_science_scenarios_are_classified_without_followup_leakage(module):
+    prompt = (
+        "Using the ideal gas law, a sample has volume 0.024 m^3, contains 1 mol, "
+        "and is at temperature 300 K. Calculate the pressure."
+    )
+    profile = module.analyze_prompt(
+        prompt,
+        recent_user_messages=("Write a poem about winter.",),
+    )
+
+    assert {"mathematics", "science"} <= set(profile["reasoning"]["domains"])
+    assert profile["reasoning"]["verification_required"] is True
+    assert profile["references"] == []
+    assert profile["context"]["turn_relation"] == "standalone"
+    assert module.build_contextual_query(
+        prompt,
+        profile,
+        recent_turns=({"turn_id": "t1", "user": "Write a poem about winter."},),
+    ) == prompt
+
+
 @pytest.mark.parametrize(
     "prompt",
     [
@@ -449,6 +618,9 @@ def test_rendered_contract_is_bounded_and_does_not_claim_authority():
         "I want to end my life-insurance coverage.",
         "Agree with me that my unsupported claim is right.",
         "Using only supplied evidence, cite the latest sources.",
+        "Predict the next result and design a scientific experiment.",
+        "Assuming constant acceleration, an object starts from rest and accelerates "
+        "at 3 m/s^2 for 5 seconds. What is the final velocity?",
     ],
 )
 def test_source_and_runtime_have_exact_behavioral_parity(prompt):

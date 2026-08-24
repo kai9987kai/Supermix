@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import base64
 import html
 import logging
 import os
@@ -18,7 +17,7 @@ from typing import Optional
 
 from werkzeug.serving import make_server
 
-from multimodel_catalog import DEFAULT_MODELS_DIR, discover_model_records
+from multimodel_catalog import ModelRecord, discover_model_records
 from qwen_chat_desktop_app import (
     APP_ICON_FILENAME,
     SPLASH_IMAGE_FILENAME,
@@ -191,6 +190,25 @@ def build_manager(models_dir: Path, state_dir: Path, device_preference: str) -> 
         os.environ["SUPERMIX_QWEN_BASE_MODEL_DIR"] = str(bundled_base)
     models_dir = hydrate_bundled_models(models_dir)
     records = tuple(discover_model_records(models_dir=models_dir))
+    if not records and bundled_base is not None:
+        records = (
+            ModelRecord(
+                key="qwen_base_v54",
+                label="Qwen2.5 0.5B Instruct Base (No Adapter)",
+                family="qwen",
+                kind="qwen_base",
+                capabilities=("chat",),
+                zip_path=bundled_base,
+                common_row_key=None,
+                common_overall_exact=None,
+                score_source="runtime_base_model",
+                note=(
+                    "Bundled base-only fallback. No experimental or unpromoted "
+                    "adapter is activated."
+                ),
+                benchmark_hint="Runtime availability fallback; no adapter benchmark claim.",
+            ),
+        )
     if not records:
         raise RuntimeError(f"No supported model zips were found in {models_dir}")
     return UnifiedModelManager(
@@ -260,7 +278,7 @@ def main() -> None:
     splash_path = resolve_asset_path(Path.cwd().resolve(), SPLASH_IMAGE_FILENAME)
     splash_data_uri = encode_image_as_data_uri(splash_path)
 
-    window = webview.create_window(
+    webview.create_window(
         args.title,
         url=server.url,
         width=int(args.width),

@@ -1,18 +1,38 @@
 {
   "active_runtime_tree": "source",
-  "app_version": "2026.07.27",
+  "app_version": "71.0.0",
   "contracts": {
     "runtime_python/conversation_state.py": {
       "CONVERSATION_STATE_SCHEMA_VERSION": "supermix-conversation-state-v1",
-      "CONVERSATION_STATE_VERSION": "supermix-conversation-state-runtime-v1"
+      "CONVERSATION_STATE_VERSION": "supermix-conversation-state-runtime-v2"
+    },
+    "runtime_python/grounding_runtime.py": {
+      "GROUNDING_RUNTIME_VERSION": "supermix-grounding-runtime-v6",
+      "GROUNDING_SCHEMA_VERSION": "supermix-grounding-v1",
+      "VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION": "supermix-verified-answer-receipt-v2"
+    },
+    "runtime_python/interaction_planner.py": {
+      "PLANNER_VERSION": "supermix-plan-evaluate-v4"
+    },
+    "runtime_python/memory_authority.py": {
+      "MEMORY_AUTHORITY_POLICY_VERSION": "supermix-memory-authority-firewall-v1",
+      "MEMORY_AUTHORITY_SCHEMA_VERSION": "supermix-memory-authority-v1",
+      "MEMORY_EXTRACTION_RULE_VERSION": "supermix-explicit-user-memory-v3"
     },
     "runtime_python/prompt_understanding.py": {
       "PROMPT_UNDERSTANDING_SCHEMA_VERSION": "supermix-prompt-understanding-v1",
-      "PROMPT_UNDERSTANDING_VERSION": "supermix-prompt-understanding-runtime-v1"
+      "PROMPT_UNDERSTANDING_VERSION": "supermix-prompt-understanding-runtime-v3"
     },
     "runtime_python/reasoning_engine.py": {
-      "REASONING_ENGINE_VERSION": "supermix-reasoning-engine-v1",
-      "REASONING_SCHEMA_VERSION": "supermix-reasoning-v1"
+      "FINITE_BERNOULLI_SCHEMA_VERSION": "supermix-finite-bernoulli-scenario-v1",
+      "REASONING_ENGINE_VERSION": "supermix-reasoning-engine-v5",
+      "REASONING_SCHEMA_VERSION": "supermix-reasoning-v2"
+    },
+    "runtime_python/science_plan.py": {
+      "SCIENCE_FORMULA_REGISTRY_VERSION": "supermix-science-formula-registry-v1",
+      "SCIENCE_PLAN_ENGINE_VERSION": "supermix-science-plan-engine-v1",
+      "SCIENCE_PLAN_RECEIPT_SCHEMA_VERSION": "supermix-science-plan-receipt-v1",
+      "SCIENCE_PLAN_SCHEMA_VERSION": "supermix-science-plan-v1"
     },
     "runtime_python/score_fusion.py": {
       "SCORE_FUSION_SCHEMA_VERSION": "supermix-score-fusion-v1",
@@ -27,29 +47,43 @@
     },
     "source/conversation_directive.py": {
       "CONVERSATION_DIRECTIVE_SCHEMA_VERSION": "supermix-conversation-directive-v1",
-      "CONVERSATION_DIRECTIVE_VERSION": "supermix-conversation-directive-runtime-v1"
+      "CONVERSATION_DIRECTIVE_VERSION": "supermix-conversation-directive-runtime-v2"
     },
     "source/conversation_state.py": {
       "CONVERSATION_STATE_SCHEMA_VERSION": "supermix-conversation-state-v1",
-      "CONVERSATION_STATE_VERSION": "supermix-conversation-state-runtime-v1"
+      "CONVERSATION_STATE_VERSION": "supermix-conversation-state-runtime-v2"
     },
     "source/grounding_runtime.py": {
-      "GROUNDING_RUNTIME_VERSION": "supermix-grounding-runtime-v1",
-      "GROUNDING_SCHEMA_VERSION": "supermix-grounding-v1"
+      "GROUNDING_RUNTIME_VERSION": "supermix-grounding-runtime-v6",
+      "GROUNDING_SCHEMA_VERSION": "supermix-grounding-v1",
+      "VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION": "supermix-verified-answer-receipt-v2"
     },
     "source/interaction_planner.py": {
-      "PLANNER_VERSION": "supermix-plan-evaluate-v1"
+      "PLANNER_VERSION": "supermix-plan-evaluate-v4"
+    },
+    "source/memory_authority.py": {
+      "MEMORY_AUTHORITY_POLICY_VERSION": "supermix-memory-authority-firewall-v1",
+      "MEMORY_AUTHORITY_SCHEMA_VERSION": "supermix-memory-authority-v1",
+      "MEMORY_EXTRACTION_RULE_VERSION": "supermix-explicit-user-memory-v3"
     },
     "source/multimodel_memory.py": {
-      "MEMORY_SCHEMA_VERSION": "supermix-conversation-memory-v2"
+      "MEMORY_SCHEMA_VERSION": "supermix-conversation-memory-v3"
     },
     "source/prompt_understanding.py": {
       "PROMPT_UNDERSTANDING_SCHEMA_VERSION": "supermix-prompt-understanding-v1",
-      "PROMPT_UNDERSTANDING_VERSION": "supermix-prompt-understanding-runtime-v1"
+      "PROMPT_UNDERSTANDING_VERSION": "supermix-prompt-understanding-runtime-v3"
+    },
+    "source/qwen_adapter_promotion.py": {
+      "BENCHMARK_SCHEMA_VERSION": "supermix-qwen-evaluation-v4",
+      "GATE_SCHEMA_VERSION": "supermix-qwen-general-promotion-gate-v4",
+      "PRODUCTION_POLICY_ID": "supermix-qwen-production-promotion-policy-v4",
+      "PROMOTION_SCHEMA_VERSION": "supermix-qwen-adapter-promotion-v4",
+      "SUPPORTED_VERIFIER_SCHEMA_VERSION": "supermix-verifier-v2"
     },
     "source/reasoning_engine.py": {
-      "REASONING_ENGINE_VERSION": "supermix-reasoning-engine-v1",
-      "REASONING_SCHEMA_VERSION": "supermix-reasoning-v1"
+      "FINITE_BERNOULLI_SCHEMA_VERSION": "supermix-finite-bernoulli-scenario-v1",
+      "REASONING_ENGINE_VERSION": "supermix-reasoning-engine-v5",
+      "REASONING_SCHEMA_VERSION": "supermix-reasoning-v2"
     },
     "source/route_policy_explorer.py": {
       "REHEARSAL_RECEIPT_SCHEMA_VERSION": "route-exploration-rehearsal-receipt-v1",
@@ -102,6 +136,12 @@
       "SHADOW_SEED_REVEAL_SCHEMA_VERSION": "route-study-shadow-seed-reveal-v1",
       "SHADOW_TOTAL_ALLOCATION_BPS": 10000
     },
+    "source/science_plan.py": {
+      "SCIENCE_FORMULA_REGISTRY_VERSION": "supermix-science-formula-registry-v1",
+      "SCIENCE_PLAN_ENGINE_VERSION": "supermix-science-plan-engine-v1",
+      "SCIENCE_PLAN_RECEIPT_SCHEMA_VERSION": "supermix-science-plan-receipt-v1",
+      "SCIENCE_PLAN_SCHEMA_VERSION": "supermix-science-plan-v1"
+    },
     "source/score_fusion.py": {
       "SCORE_FUSION_SCHEMA_VERSION": "supermix-score-fusion-v1",
       "SCORE_FUSION_VERSION": "supermix-score-fusion-runtime-v1"
@@ -123,8 +163,23 @@
   "modules": [
     {
       "path": "source/chat_app.py",
-      "sha256": "336760b19659873a9fc5363eeb26798b925b26db7a18aef6cb8ff1b0567f59e0",
-      "size_bytes": 97013
+      "sha256": "d8274e6c7a25e6101fd2405b31c5543e21982e0b647b5dba53fd19fdbf0b9fc7",
+      "size_bytes": 98052
+    },
+    {
+      "path": "source/chat_export.py",
+      "sha256": "678ddc64c735ae2add2a7ecf4b21a91dddde34d2f37a564c58c3286dec4e66e3",
+      "size_bytes": 6733
+    },
+    {
+      "path": "source/chat_image_variant_app.py",
+      "sha256": "a6ecb6511f8d3618b4d429e4da14b7499e10c10770b75d41458444b28121305f",
+      "size_bytes": 30184
+    },
+    {
+      "path": "source/chat_memory.py",
+      "sha256": "0c550cacb4dc263526ba93dd988353561ddd0ca3c3bb05f42a6b425a9773a93f",
+      "size_bytes": 5683
     },
     {
       "path": "source/chat_pipeline.py",
@@ -133,53 +188,223 @@
     },
     {
       "path": "source/chat_web_app.py",
-      "sha256": "8c7fa4145a3174cc71c6bbb88a1bcbee5affcd78ceb87cf59cc8e3404a2cf0ba",
-      "size_bytes": 92155
-    },
-    {
-      "path": "source/conversation_state.py",
-      "sha256": "dc4a184eca54c408bc3af0db92cce6192a4e842bf39a45131b8ad2f23c24344c",
-      "size_bytes": 37481
+      "sha256": "9c56871c22c92ee441cddd398da929f6133fc5e842047e15a028b8fd71560d02",
+      "size_bytes": 92945
     },
     {
       "path": "source/conversation_directive.py",
-      "sha256": "1079e5a008f8d478aecd4fd352a3d1b01d14c1e953965d4c7a94b7924eeddc67",
-      "size_bytes": 16061
+      "sha256": "7d8f82fa20c803d92c00ba787396c9b0afc3da6da7dad54c995837c5218311ed",
+      "size_bytes": 18425
     },
     {
-      "path": "source/score_fusion.py",
-      "sha256": "0110875f920065612d2c8443af6d353eb98c50dee8b8240665725f98b21127e6",
-      "size_bytes": 15470
+      "path": "source/conversation_state.py",
+      "sha256": "8449aed470834712aa01f6b30e737c646c1782e7d22eca23f811dc0e0bbd1545",
+      "size_bytes": 44839
+    },
+    {
+      "path": "source/dcgan_image_model.py",
+      "sha256": "8c5313ccb3445446eabe6db93723115fd4694a8d40d825690c35c4efd0e2b516",
+      "size_bytes": 8471
+    },
+    {
+      "path": "source/device_utils.py",
+      "sha256": "4a435a9bfb20615c3dd8c283b3a3be9953630db49111ea5469f836560b40925d",
+      "size_bytes": 4009
     },
     {
       "path": "source/grounding_runtime.py",
-      "sha256": "b1eb463bdfd27be4f039ccfb9222fe30a665d27913c8e7d8a2c80c152f9d8f2e",
-      "size_bytes": 42269
+      "sha256": "e8379e196a09390fe3d7489ac88c5a80f48ba401b81db21d11bd99c027ccc458",
+      "size_bytes": 115273
+    },
+    {
+      "path": "source/image_feature_utils.py",
+      "sha256": "8c1eed033072dcfd6f9fc5722276cd81e1481e3927ca9cb5443cff2072403661",
+      "size_bytes": 4725
+    },
+    {
+      "path": "source/image_recognition_model.py",
+      "sha256": "45c6b3af56a423b81be625208297f83b7a33b58c6aa7af74eb6438b8489e3bb5",
+      "size_bytes": 7603
     },
     {
       "path": "source/interaction_planner.py",
-      "sha256": "d8b7c532f84661bbf0f3c123658f3ff620da87d8859b01d531f82cf784271bcf",
-      "size_bytes": 61240
+      "sha256": "8a785e0b442f3303ee56abe66e42e8872b1881e7f662ff1c769fb58d13e78e00",
+      "size_bytes": 94888
     },
     {
-      "path": "source/prompt_understanding.py",
-      "sha256": "bf9a56dc2f666d19cd997dc0c35f019864a99e92057305624ac6402f3b25ba83",
-      "size_bytes": 74421
+      "path": "source/llm_database.py",
+      "sha256": "ce03a9d0d2d5a870b1b305fb3fafcf91daadaa79df9d31c46e074d36ce77bb05",
+      "size_bytes": 13320
     },
     {
-      "path": "source/reasoning_engine.py",
-      "sha256": "d80079e9e7f996a37d8adcec5d198c27ce30a41547aac86ce4151e85fd2cf9e7",
-      "size_bytes": 81423
+      "path": "source/math_equation_model.py",
+      "sha256": "ed0fbf7e5a4cd50c4f9dc680f5679a76e96a8d262b8e2acd31384a9df640090a",
+      "size_bytes": 14976
+    },
+    {
+      "path": "source/mattergen_generation_model.py",
+      "sha256": "9952cda3709e5d4dbc80d5c608a85dd17fccc0553dc97eba60b65b60b5d095c6",
+      "size_bytes": 29843
+    },
+    {
+      "path": "source/memory_authority.py",
+      "sha256": "568358426c55bbce2f40b96420cbb9ddb4e59dc23ffcbac8582f434ab116c75e",
+      "size_bytes": 12158
+    },
+    {
+      "path": "source/mesh_feature_utils.py",
+      "sha256": "868144614410585fb213b6d1a68218c4e11185e1cec6918ceb629b5cc5a5d401",
+      "size_bytes": 3901
+    },
+    {
+      "path": "source/model_frontier_native_image_v36.py",
+      "sha256": "468bc3297fbf9df38ce2985d326cffcd0474ea46eac6ad8e8bfbf292e9043f6b",
+      "size_bytes": 5561
+    },
+    {
+      "path": "source/model_frontier_v33.py",
+      "sha256": "035a40028e173530e035fcc8f8b3141a20325b235cc73c8c4a1a07b17d51cd4d",
+      "size_bytes": 12456
+    },
+    {
+      "path": "source/model_frontier_v35.py",
+      "sha256": "ef0640bcef1f371a7cbe200a3cc97a1bf243f7ee4fa2c4b9fc14a70f964c5201",
+      "size_bytes": 14805
+    },
+    {
+      "path": "source/model_frontier_v39.py",
+      "sha256": "270b88a4d98dca3a9cc5e14a2f700e8d7fc45f1d8dd09cbf6bdc8e0e3cb44818",
+      "size_bytes": 18025
+    },
+    {
+      "path": "source/model_native_image_lite_v37.py",
+      "sha256": "e477bce89c7335c7929e4409e6c535951d49aa4fc867c7e4baa9ce97998c318b",
+      "size_bytes": 5332
+    },
+    {
+      "path": "source/model_native_image_xlite_v38.py",
+      "sha256": "cbd6161c55f4c0fbebc5921d0734d757e69d105c203fc8b2e5a50a1e573a6843",
+      "size_bytes": 5356
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "5126c67c223e4834cd5c9722547d2d0607f1c1f5d2dd43f0ac418f9d394ff3a5",
-      "size_bytes": 398427
+      "sha256": "d78fe95da64de88920398ae809302fae7c5d83e4aaf01ce2fc1b59ae361d481f",
+      "size_bytes": 399431
+    },
+    {
+      "path": "source/multimodel_catalog.py",
+      "sha256": "d06ee4119f6c6f7e9979593172781802a1490c6153c4d8b01f015e9f03334f77",
+      "size_bytes": 49359
+    },
+    {
+      "path": "source/multimodel_memory.py",
+      "sha256": "810929358e4092e86d7f850980ec50e96d45cb97a1662158f666e98ecb9f8704",
+      "size_bytes": 73480
+    },
+    {
+      "path": "source/multimodel_runtime.py",
+      "sha256": "954332335d512e1ef5ae26eb1627113e9914623af5b3731772a2c41f481437a7",
+      "size_bytes": 305554
+    },
+    {
+      "path": "source/multimodel_tools.py",
+      "sha256": "2df2357a844e86eba27f0ccd54c01a2f3b21e6fd781b259383aad6dab4ab2383",
+      "size_bytes": 7387
+    },
+    {
+      "path": "source/native_image_infer_v36.py",
+      "sha256": "49bd2447f6d2e0733e337ac2adf041f09c3959b22b9f2233a29ea3e80647832d",
+      "size_bytes": 1564
+    },
+    {
+      "path": "source/native_image_infer_v37_lite.py",
+      "sha256": "722c582f4b3eb403b70ff7ba2bf845e62ebf8acbc716c1cdd85c4042841369e6",
+      "size_bytes": 1309
+    },
+    {
+      "path": "source/native_image_infer_v38_xlite.py",
+      "sha256": "a1ebd38e9ffa4eada24b09d858dcd85ca6ea0302823d55d7262867b531c5e705",
+      "size_bytes": 1327
+    },
+    {
+      "path": "source/omni_collective_model.py",
+      "sha256": "2d366c5a829b084af05fc9f46d9707d16582d72cceb5bea79e6dd4d7cef65808",
+      "size_bytes": 24256
+    },
+    {
+      "path": "source/omni_collective_v3_model.py",
+      "sha256": "20317f775fe2353e1915ffc06ebe759d6f46ff27db9f6c427ad80be344735cbb",
+      "size_bytes": 16904
+    },
+    {
+      "path": "source/omni_collective_v41_model.py",
+      "sha256": "8c9ea1526a9916647a9ca6724b0a43cb2a41fb63f48eecc0c6e03dacfe4e40d7",
+      "size_bytes": 9828
+    },
+    {
+      "path": "source/omni_collective_v42_model.py",
+      "sha256": "52ea421a2609498894da85c0c12d10b9e040ff3c8373cbd27cf6f522924cb34d",
+      "size_bytes": 9504
+    },
+    {
+      "path": "source/omni_collective_v4_model.py",
+      "sha256": "4df669ee07223dec8764dc40d7d2988dcfba37478b3be26417b7840ca8eb0ddc",
+      "size_bytes": 21848
+    },
+    {
+      "path": "source/omni_collective_v5_model.py",
+      "sha256": "458a24cf5abf854031ae674a467539d36f05e96fde48379ee86a4cb398285ff5",
+      "size_bytes": 14472
+    },
+    {
+      "path": "source/omni_collective_v6_model.py",
+      "sha256": "1c2d5e9eb20e5f5f9c19dfd5b1ca0a40f8d92980a6b04a467c75f9dac1835151",
+      "size_bytes": 16591
+    },
+    {
+      "path": "source/omni_collective_v7_model.py",
+      "sha256": "f07fa9ed6dc524b5df528dd391f7c457586f0d9074f306b49bb9e6f8571a7673",
+      "size_bytes": 18627
+    },
+    {
+      "path": "source/omni_collective_v8_model.py",
+      "sha256": "1e3e46ff9c9515084bad87831e6e20f269a838799cbb72fe866609e9b9b24cd9",
+      "size_bytes": 20610
+    },
+    {
+      "path": "source/protein_folding_model.py",
+      "sha256": "d72e31f73f165b63a2944b9ab3ad8e2084320c2788a1d5ac6b0e75f454aadd99",
+      "size_bytes": 15605
+    },
+    {
+      "path": "source/prompt_understanding.py",
+      "sha256": "34a9e2383c6761469ee87f132a59109dbc7625896f93dfbc87bc074f943da90b",
+      "size_bytes": 85719
+    },
+    {
+      "path": "source/qwen_adapter_promotion.py",
+      "sha256": "03ba381ddd49944a87942280b4943be55a6b598a795155f1efda5e0ae9f46068",
+      "size_bytes": 21162
+    },
+    {
+      "path": "source/qwen_chat_desktop_app.py",
+      "sha256": "e0d11f2294f079aa4f5a62c52d8bff20a2c6a524ec45d0ffc911aaae97c833ed",
+      "size_bytes": 41000
     },
     {
       "path": "source/qwen_chat_web_app.py",
-      "sha256": "aa955228934453402b582701cb16fb8e7d385c7d27fd0743583662146725090d",
-      "size_bytes": 108341
+      "sha256": "10bcc45a2fc534e368d082c5459d1faa58cac8c1a5c68f9143e51a8c0a78c34a",
+      "size_bytes": 110443
+    },
+    {
+      "path": "source/reasoning_engine.py",
+      "sha256": "6d08fe6a70c3d663570cff3082ba42518a2e8f2fb45cf18ef69c706c572b00d9",
+      "size_bytes": 185198
+    },
+    {
+      "path": "source/science_plan.py",
+      "sha256": "effb37997081491c5f63af595651120b97477ad903dd5b5be8d2bc514b9fe373",
+      "size_bytes": 53594
     },
     {
       "path": "source/route_policy_ledger.py",
@@ -222,39 +447,59 @@
       "size_bytes": 26782
     },
     {
-      "path": "source/multimodel_memory.py",
-      "sha256": "5750aa169b41c2578dc2b7533a4f68193deb3550a8b8be8a2b1e88beba683e28",
-      "size_bytes": 54040
+      "path": "source/run.py",
+      "sha256": "3036d55821a2a88efd13b250c346d2c8c344c987178cd442028d6a0e952271e0",
+      "size_bytes": 20354
     },
     {
-      "path": "source/multimodel_runtime.py",
-      "sha256": "337030e85bd5fa7dbac3151f33d92077d77863caf18fbcc4824e30de42540f1a",
-      "size_bytes": 280901
+      "path": "source/score_fusion.py",
+      "sha256": "0110875f920065612d2c8443af6d353eb98c50dee8b8240665725f98b21127e6",
+      "size_bytes": 15470
     },
     {
       "path": "source/supermix_multimodel_web_app.py",
-      "sha256": "3428394817528b363600dadab08877e21616604c63d1e4694f33560673b91c41",
-      "size_bytes": 171551
+      "sha256": "753b19b4a2dd058a5b29f216b10a95ffe2bfffbdd45a5d63cb7b7c089084227e",
+      "size_bytes": 181535
     },
     {
       "path": "source/supermix_multimodel_desktop_app.py",
-      "sha256": "03b27ebaa19c695db1eac84b16a3d501d59041d38da6baa0cf9265b8527246b9",
-      "size_bytes": 11330
+      "sha256": "7322c5da56d1b7a67eb0e149e7d9bd6af21889fbcf3126d089e483ac26151414",
+      "size_bytes": 12056
+    },
+    {
+      "path": "source/three_d_generation_model.py",
+      "sha256": "7f712f271d987d2281e9881d90cd61b5fda31a73ae9d56fbefaf147e3e7cdef4",
+      "size_bytes": 24500
+    },
+    {
+      "path": "source/v40_benchmax_common.py",
+      "sha256": "cc75095d44a812a9e18993fe67c512d7ad00f03df33935d4f237e05722286b78",
+      "size_bytes": 35827
+    },
+    {
+      "path": "source/video_feature_utils.py",
+      "sha256": "eb9cd786ef61813773af2f641c6e7dc5bfd84a1d32241e17e1c961b04dc2bb96",
+      "size_bytes": 6197
     },
     {
       "path": "runtime_python/chat_app.py",
-      "sha256": "336760b19659873a9fc5363eeb26798b925b26db7a18aef6cb8ff1b0567f59e0",
-      "size_bytes": 97013
+      "sha256": "d8274e6c7a25e6101fd2405b31c5543e21982e0b647b5dba53fd19fdbf0b9fc7",
+      "size_bytes": 98052
     },
     {
       "path": "runtime_python/chat_web_app.py",
-      "sha256": "db64a03714284ea8be64578a8bb55860d6f99555a51f4a602af441b775df9ceb",
-      "size_bytes": 84286
+      "sha256": "541190ef662a4a6af1465c5ef160177bfda51c578c818b93bb969d9676af4137",
+      "size_bytes": 85076
     },
     {
       "path": "runtime_python/conversation_state.py",
-      "sha256": "dc4a184eca54c408bc3af0db92cce6192a4e842bf39a45131b8ad2f23c24344c",
-      "size_bytes": 37481
+      "sha256": "8449aed470834712aa01f6b30e737c646c1782e7d22eca23f811dc0e0bbd1545",
+      "size_bytes": 44839
+    },
+    {
+      "path": "runtime_python/memory_authority.py",
+      "sha256": "568358426c55bbce2f40b96420cbb9ddb4e59dc23ffcbac8582f434ab116c75e",
+      "size_bytes": 12158
     },
     {
       "path": "runtime_python/score_fusion.py",
@@ -263,23 +508,28 @@
     },
     {
       "path": "runtime_python/grounding_runtime.py",
-      "sha256": "b1eb463bdfd27be4f039ccfb9222fe30a665d27913c8e7d8a2c80c152f9d8f2e",
-      "size_bytes": 42269
+      "sha256": "e8379e196a09390fe3d7489ac88c5a80f48ba401b81db21d11bd99c027ccc458",
+      "size_bytes": 115273
     },
     {
       "path": "runtime_python/interaction_planner.py",
-      "sha256": "d8b7c532f84661bbf0f3c123658f3ff620da87d8859b01d531f82cf784271bcf",
-      "size_bytes": 61240
+      "sha256": "8a785e0b442f3303ee56abe66e42e8872b1881e7f662ff1c769fb58d13e78e00",
+      "size_bytes": 94888
     },
     {
       "path": "runtime_python/prompt_understanding.py",
-      "sha256": "bf9a56dc2f666d19cd997dc0c35f019864a99e92057305624ac6402f3b25ba83",
-      "size_bytes": 74421
+      "sha256": "34a9e2383c6761469ee87f132a59109dbc7625896f93dfbc87bc074f943da90b",
+      "size_bytes": 85719
     },
     {
       "path": "runtime_python/reasoning_engine.py",
-      "sha256": "d80079e9e7f996a37d8adcec5d198c27ce30a41547aac86ce4151e85fd2cf9e7",
-      "size_bytes": 81423
+      "sha256": "6d08fe6a70c3d663570cff3082ba42518a2e8f2fb45cf18ef69c706c572b00d9",
+      "size_bytes": 185198
+    },
+    {
+      "path": "runtime_python/science_plan.py",
+      "sha256": "effb37997081491c5f63af595651120b97477ad903dd5b5be8d2bc514b9fe373",
+      "size_bytes": 53594
     },
     {
       "path": "runtime_python/chat_pipeline.py",
@@ -303,8 +553,8 @@
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "5126c67c223e4834cd5c9722547d2d0607f1c1f5d2dd43f0ac418f9d394ff3a5",
-      "size_bytes": 398427
+      "sha256": "d78fe95da64de88920398ae809302fae7c5d83e4aaf01ce2fc1b59ae361d481f",
+      "size_bytes": 399431
     },
     {
       "path": "runtime_python/run.py",
@@ -313,8 +563,16 @@
     }
   ],
   "package_guards": {
+    "assistant_memory_examples_automatically_injected": false,
     "automatic_policy_promotion_available": false,
+    "distribution_recursive_import_closure_enforced": true,
     "full_output_verifier_includes_post_head_calibration": true,
+    "memory_authority_firewall_available": true,
+    "memory_claims_can_authorize_tools": false,
+    "memory_content_digests_are_authentication": false,
+    "memory_factual_claims_enter_shared_planning_context": false,
+    "memory_legacy_rows_prompt_eligible": false,
+    "memory_relevance_can_elevate_authority": false,
     "mutual_stability_shadow_can_select_output": false,
     "prediction_stability_decision_margin_telemetry": true,
     "prediction_stability_margin_default_is_universal": false,
@@ -325,6 +583,8 @@
     "prediction_stability_verifier_scoped_to_available_labels": true,
     "prediction_verifier_telemetry_requires_active_verifier": true,
     "progressive_auto_compute_accepted_probe_reuse": true,
+    "qwen_adapter_production_policy_pinned": true,
+    "qwen_adapter_promotion_enforced_in_studio": true,
     "route_ledger_requires_executed_assignment_namespace": true,
     "route_ledger_requires_issued_execution_assignment_record": true,
     "route_protocol_activation_available": false,
@@ -337,7 +597,21 @@
     "route_shadow_authenticity_proof_available": false,
     "route_shadow_private_seed_persisted_before_reveal": false,
     "route_shadow_registry_available": true,
-    "route_shadow_trusted_timestamp_available": false
+    "route_shadow_trusted_timestamp_available": false,
+    "science_plan_executes_model_code": false,
+    "science_plan_open_world_authority": false,
+    "science_plan_public_receipts_carry_prompt_derived_digests": false,
+    "science_plan_receipts_carry_prompt_or_source_text": false,
+    "science_plan_requires_explicit_assumptions": true,
+    "verified_answer_receipts_available": true,
+    "verified_answer_receipts_carry_expression_proof_steps_or_evidence": false,
+    "verified_answer_receipts_carry_prompt_or_answer_text": false,
+    "verified_answer_receipts_control_routes_or_permissions": false,
+    "verified_answer_receipts_control_runtime_authority": false,
+    "verified_answer_receipts_control_tools_or_safety": false,
+    "verified_probabilistic_scenarios_available": true,
+    "verified_probabilistic_scenarios_open_world_authority": false,
+    "verified_scientific_scenarios_available": true
   },
   "schema_version": "supermix-studio-runtime-manifest-v1"
 }

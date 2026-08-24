@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from source.multimodel_catalog import ModelRecord, choose_auto_model, describe_model_artifact_name
+from source.multimodel_catalog import (
+    MODEL_SPECS,
+    ModelRecord,
+    choose_auto_model,
+    describe_model_artifact_name,
+    discover_model_records,
+)
 
 
 def _record(key: str, kind: str, capabilities: tuple[str, ...], score: float | None = None) -> ModelRecord:
@@ -233,3 +239,78 @@ def test_describe_model_artifact_name_identifies_known_and_unknown_artifacts() -
     unknown = describe_model_artifact_name("totally_custom_external_model.zip")
     assert unknown["known"] is False
     assert unknown["label"] == "totally_custom_external_model"
+
+
+def test_cognitive_leap_packages_have_distinct_bounded_champion_contracts(
+    tmp_path: Path,
+) -> None:
+    expected = {
+        "supermix_cognitive_leap_v50_chat_20260812.zip": (
+            "cognitive_leap_v50",
+            "champion_model_chat_v50_cognitive_leap.pth",
+            "chat_model_meta_v50_cognitive_leap.json",
+        ),
+        "supermix_cognitive_leap_ultra_v51_demo_20260812.zip": (
+            "cognitive_leap_ultra_v51_demo",
+            "cognitive_leap_ultra_v51_trained.pth",
+            "chat_demo_meta_v51.json",
+        ),
+        "supermix_cognitive_leap_ultra_v51_1_balanced_blend30_20260812.zip": (
+            "cognitive_leap_ultra_v51_1_balanced_blend30",
+            "cognitive_leap_ultra_v51_1_balanced_blend30.pth",
+            "chat_demo_meta_v51_1_balanced_blend30.json",
+        ),
+    }
+    for package_name in expected:
+        (tmp_path / package_name).write_bytes(b"catalog-discovery-does-not-load-archives")
+
+    records = {
+        record.key: record
+        for record in discover_model_records(
+            models_dir=tmp_path,
+            common_summary_path=tmp_path / "missing-summary.json",
+        )
+    }
+
+    assert set(expected) == {
+        package_name for package_name in expected if describe_model_artifact_name(package_name)["known"]
+    }
+    for package_name, (model_key, weights_name, meta_name) in expected.items():
+        description = describe_model_artifact_name(package_name)
+        assert description["key"] == model_key
+        record = records[model_key]
+        assert record.kind == "champion_chat"
+        assert record.preferred_weights == (weights_name,)
+        assert record.preferred_meta == (meta_name,)
+        assert record.common_overall_exact is None
+
+    specs = {spec.key: spec for spec in MODEL_SPECS}
+    for model_key in (
+        "cognitive_leap_v50",
+        "cognitive_leap_ultra_v51_demo",
+        "cognitive_leap_ultra_v51_1_balanced_blend30",
+    ):
+        assert specs[model_key].manual_only is True
+
+    for model_key in (
+        "cognitive_leap_ultra_v51_demo",
+        "cognitive_leap_ultra_v51_1_balanced_blend30",
+    ):
+        note = specs[model_key].note.lower()
+        assert "synthetic" in note
+        assert "not evidence of broad assistant superiority" in note
+
+    balanced_key = "cognitive_leap_ultra_v51_1_balanced_blend30"
+    balanced = records[balanced_key]
+    assert balanced.label == "Cognitive Leap Ultra v51.1 Balanced Blend (Unpromoted)"
+    assert balanced.manual_only is True
+    assert "failed the 15/20 seed criterion" in balanced.note
+    assert "aggregate synthetic mod-10 improvement" in balanced.note
+    assert balanced.to_dict()["manual_only"] is True
+
+    chosen, reason = choose_auto_model(
+        list(records.values()),
+        "Analyze this synthetic modular arithmetic benchmark.",
+    )
+    assert chosen is None
+    assert "fell back" in reason.lower()

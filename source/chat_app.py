@@ -2179,6 +2179,20 @@ def main():
                         f"evidence={grounding_metrics.get('evidence_count', 0)} "
                         f"sufficiency={grounding_metrics.get('sufficiency', 'no_evidence')}"
                     )
+                    receipt = dict(grounding_guard.get("answer_receipt") or {})
+                    if receipt.get("kind") not in {None, "", "none"}:
+                        epistemics = dict(receipt.get("epistemics") or {})
+                        verification = dict(receipt.get("verification") or {})
+                        print(
+                            f"{TerminalColors.SYSTEM}Verification receipt:{TerminalColors.RESET} "
+                            f"decision={receipt.get('decision', 'not_attempted')} "
+                            f"class={receipt.get('problem_class') or 'none'} "
+                            f"method={receipt.get('method') or 'none'} "
+                            f"verified={verification.get('passed', False)} "
+                            f"independent={verification.get('independent', False)} "
+                            f"model_conditional={epistemics.get('model_conditional', False)} "
+                            f"diagnostic_only={receipt.get('diagnostic_only', True)}"
+                        )
                 
     finally:
         executor.shutdown(wait=False)

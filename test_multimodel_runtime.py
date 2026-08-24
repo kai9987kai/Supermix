@@ -1,5 +1,10 @@
+import hashlib
+import io
 import json
+import stat
 import sys
+import types
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -10,11 +15,18 @@ SOURCE_DIR = Path(__file__).resolve().parent / "source"
 if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
 
-import source.multimodel_runtime as runtime_module
-from source.multimodel_runtime import ChatResult, UnifiedModelManager
+import source.multimodel_runtime as runtime_module  # noqa: E402
+from source.multimodel_runtime import ChatResult, UnifiedModelManager  # noqa: E402
 
 
-def _record(key: str, kind: str, capabilities: tuple[str, ...], score: float | None = None) -> ModelRecord:
+def _record(
+    key: str,
+    kind: str,
+    capabilities: tuple[str, ...],
+    score: float | None = None,
+    *,
+    manual_only: bool = False,
+) -> ModelRecord:
     return ModelRecord(
         key=key,
         label=key,
@@ -24,6 +36,7 @@ def _record(key: str, kind: str, capabilities: tuple[str, ...], score: float | N
         zip_path=Path(f"{key}.zip"),
         common_row_key=key,
         common_overall_exact=score,
+        manual_only=manual_only,
     )
 
 
@@ -46,6 +59,246 @@ class _FakeBackend:
 
     def unload(self) -> None:
         return None
+
+
+def _qwen_fixture(tmp_path: Path, artifact_name: str) -> tuple[ModelRecord, Path, Path]:
+    zip_path = tmp_path / artifact_name
+    zip_path.write_bytes(b"qwen-artifact")
+    extracted_dir = tmp_path / "extracted"
+    adapter_dir = extracted_dir / "adapter"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (adapter_dir / "adapter_model.safetensors").write_bytes(b"adapter-weights")
+    record = ModelRecord(
+        key="qwen_test",
+        label="Qwen Test",
+        family="qwen",
+        kind="qwen_adapter",
+        capabilities=("chat",),
+        zip_path=zip_path,
+        common_row_key="qwen_test",
+        common_overall_exact=0.5,
+        adapter_markers=("adapter/adapter_config.json",),
+    )
+    return record, extracted_dir, adapter_dir.resolve()
+
+
+def _install_qwen_stub(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    resolved_base_model: Path,
+    load_calls: list[dict[str, object]],
+) -> None:
+    class _Engine:
+        def status(self) -> dict[str, object]:
+            return {"loaded": True, "adapter_loaded": True}
+
+    def load_engine(*, base_model: str, adapter_dir: Path, device: object) -> _Engine:
+        load_calls.append(
+            {
+                "base_model": base_model,
+                "adapter_dir": adapter_dir,
+                "device": device,
+            }
+        )
+        return _Engine()
+
+    stub = types.SimpleNamespace(
+        resolve_device=lambda _preference: "cpu",
+        resolve_base_model_path=lambda _explicit, _adapter: str(resolved_base_model),
+        load_engine=load_engine,
+    )
+    monkeypatch.setitem(sys.modules, "qwen_chat_web_app", stub)
+
+
+@pytest.mark.parametrize(
+    ("activation_kind", "artifact_name", "base_revision_status"),
+    (
+        ("promoted", "general_intelligence_candidate_v5.zip", "verified_snapshot"),
+        ("legacy", "qwen_supermix_enhanced_v28_adapter.zip", "legacy_not_applicable"),
+    ),
+)
+def test_qwen_backend_attests_before_loading_and_reports_trust(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    activation_kind: str,
+    artifact_name: str,
+    base_revision_status: str,
+) -> None:
+    record, extracted_dir, adapter_dir = _qwen_fixture(tmp_path, artifact_name)
+    base_model = tmp_path / "hub" / "snapshots" / "revision-abc"
+    base_model.mkdir(parents=True)
+    events: list[str] = []
+    load_calls: list[dict[str, object]] = []
+    _install_qwen_stub(
+        monkeypatch,
+        resolved_base_model=base_model,
+        load_calls=load_calls,
+    )
+
+    def attest(candidate: Path, **kwargs: object) -> dict[str, object]:
+        events.append("attest")
+        assert candidate == adapter_dir
+        assert kwargs == {
+            "legacy_artifact_name": artifact_name,
+            "resolved_base_model": str(base_model),
+        }
+        return {
+            "activation_kind": activation_kind,
+            "trusted": True,
+            "promotion_schema": (
+                "supermix-qwen-adapter-promotion-v4" if activation_kind == "promoted" else ""
+            ),
+            "gate_schema": (
+                "supermix-qwen-general-promotion-gate-v4" if activation_kind == "promoted" else ""
+            ),
+            "adapter_sha256": runtime_module.sha256_file(
+                adapter_dir / "adapter_model.safetensors"
+            ),
+            "adapter_config_sha256": runtime_module.sha256_file(
+                adapter_dir / "adapter_config.json"
+            ),
+            "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+            "base_model_revision": "revision-abc" if activation_kind == "promoted" else "",
+            "base_revision_status": base_revision_status,
+        }
+
+    def recording_load_engine(**kwargs: object) -> object:
+        events.append("load")
+        load_calls.append(dict(kwargs))
+        return types.SimpleNamespace(status=lambda: {"loaded": True, "adapter_loaded": True})
+
+    monkeypatch.setattr(runtime_module, "attest_adapter_for_runtime", attest)
+    sys.modules["qwen_chat_web_app"].load_engine = recording_load_engine
+
+    backend = runtime_module.QwenBackend(record, extracted_dir, tmp_path / "generated")
+
+    assert events == ["attest", "load"]
+    assert load_calls == [
+        {
+            "base_model": str(base_model),
+            "adapter_dir": adapter_dir,
+            "device": "cpu",
+        }
+    ]
+    status = backend.status()
+    assert status["adapter_attestation"]["trusted"] is True
+    assert status["adapter_attestation"]["activation_kind"] == activation_kind
+    assert status["adapter_attestation"]["base_revision_status"] == base_revision_status
+
+
+def test_qwen_backend_rejects_adapter_changed_during_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record, extracted_dir, adapter_dir = _qwen_fixture(
+        tmp_path,
+        "general_intelligence_promoted.zip",
+    )
+    base_model = tmp_path / "hub" / "snapshots" / "revision-abc"
+    base_model.mkdir(parents=True)
+    _install_qwen_stub(monkeypatch, resolved_base_model=base_model, load_calls=[])
+
+    def attest(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "activation_kind": "promoted",
+            "trusted": True,
+            "adapter_sha256": runtime_module.sha256_file(
+                adapter_dir / "adapter_model.safetensors"
+            ),
+            "adapter_config_sha256": runtime_module.sha256_file(
+                adapter_dir / "adapter_config.json"
+            ),
+        }
+
+    def mutating_load_engine(**_kwargs: object) -> object:
+        (adapter_dir / "adapter_model.safetensors").write_bytes(b"swapped-after-attestation")
+        return types.SimpleNamespace(status=lambda: {"loaded": True})
+
+    monkeypatch.setattr(runtime_module, "attest_adapter_for_runtime", attest)
+    sys.modules["qwen_chat_web_app"].load_engine = mutating_load_engine
+
+    with pytest.raises(ValueError, match="changed after runtime attestation"):
+        runtime_module.QwenBackend(record, extracted_dir, tmp_path / "generated")
+
+
+def test_qwen_base_backend_loads_without_adapter_or_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_model = tmp_path / "bundled_base_model"
+    base_model.mkdir()
+    record = ModelRecord(
+        key="qwen_base_v54",
+        label="Qwen Base",
+        family="qwen",
+        kind="qwen_base",
+        capabilities=("chat",),
+        zip_path=base_model,
+        common_row_key=None,
+        common_overall_exact=None,
+    )
+    load_calls: list[dict[str, object]] = []
+
+    class _Engine:
+        def status(self) -> dict[str, object]:
+            return {"loaded": True, "adapter_loaded": False}
+
+    stub = types.SimpleNamespace(
+        resolve_device=lambda _preference: "cpu",
+        resolve_local_base_model_path=lambda _explicit: str(base_model),
+        load_engine=lambda **kwargs: load_calls.append(dict(kwargs)) or _Engine(),
+    )
+    monkeypatch.setitem(sys.modules, "qwen_chat_web_app", stub)
+    monkeypatch.setattr(
+        runtime_module,
+        "attest_adapter_for_runtime",
+        lambda *_args, **_kwargs: pytest.fail("base-only runtime must not attest an adapter"),
+    )
+
+    backend = runtime_module.QwenBaseBackend(record, tmp_path / "generated")
+
+    assert load_calls == [
+        {
+            "base_model": str(base_model),
+            "adapter_dir": base_model / ".supermix-no-adapter",
+            "device": "cpu",
+        }
+    ]
+    status = backend.status()
+    assert status["backend"] == "qwen_base"
+    assert status["adapter_attestation"] == {
+        "trusted": True,
+        "activation_kind": "base_model_only",
+        "adapter_loaded": False,
+    }
+
+
+def test_qwen_backend_blocks_failed_attestation_before_model_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record, extracted_dir, _adapter_dir = _qwen_fixture(
+        tmp_path,
+        "general_intelligence_candidate_unpromoted.zip",
+    )
+    base_model = tmp_path / "hub" / "snapshots" / "revision-abc"
+    base_model.mkdir(parents=True)
+    load_calls: list[dict[str, object]] = []
+    _install_qwen_stub(
+        monkeypatch,
+        resolved_base_model=base_model,
+        load_calls=load_calls,
+    )
+
+    def reject(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise ValueError("adapter promotion receipt is invalid or revoked")
+
+    monkeypatch.setattr(runtime_module, "attest_adapter_for_runtime", reject)
+
+    with pytest.raises(ValueError, match="invalid or revoked"):
+        runtime_module.QwenBackend(record, extracted_dir, tmp_path / "generated")
+    assert load_calls == []
 
 
 def test_champion_backend_forwards_runtime_compute_controls_and_telemetry() -> None:
@@ -154,6 +407,38 @@ def test_manager_exposes_only_read_only_shadow_registry_status(tmp_path: Path) -
     assert "runtime-status-private-cluster" not in rendered
 
 
+def test_manager_exposes_exact_id_memory_review_without_truth_upgrade(tmp_path: Path) -> None:
+    manager = UnifiedModelManager(
+        records=(),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+    )
+    session_id = "memory-review-session"
+    manager.memory_store.update(
+        session_id=session_id,
+        user_text="My name is Kai.",
+        assistant_text="Understood.",
+        model_key="stub",
+        route_reason="test",
+    )
+
+    snapshot = manager.session_memory_snapshot(session_id)
+    assert snapshot["memory_count"] == 1
+    memory_id = snapshot["memory_records"][0]["memory_id"]
+    result = manager.review_session_memory(
+        session_id=session_id,
+        memory_id=memory_id,
+        action="revoke",
+    )
+
+    assert result["ok"] is True
+    assert result["lifecycle_state"] == "revoked"
+    assert result["truth_status"] == "self_reported"
+    reviewed = manager.session_memory_snapshot(session_id)["memory_records"][0]
+    assert reviewed["lifecycle_state"] == "revoked"
+    assert reviewed["prompt_eligible"] is False
+
+
 def test_collective_panel_includes_omni_collective_v2_v3_v4_v5_v6_v7_v8_v8_preview_v40_and_domain_specialists(tmp_path: Path) -> None:
     records = (
         _record("v33_final", "champion_chat", ("chat",), 0.18),
@@ -231,6 +516,29 @@ def test_default_text_record_keeps_stable_v46_preference_even_when_v48_exists(tm
     assert chosen.key == "omni_collective_v46"
 
 
+def test_unpromoted_manual_model_is_never_default_fallback_or_implicit_consultant(
+    tmp_path: Path,
+) -> None:
+    manual = _record(
+        "cognitive_leap_ultra_v51_1_balanced_blend30",
+        "champion_chat",
+        ("chat",),
+        1.0,
+        manual_only=True,
+    )
+    stable = _record("v33_final", "champion_chat", ("chat",), 0.18)
+    manager = UnifiedModelManager(
+        records=(manual, stable),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+    )
+
+    assert manager._default_text_record().key == "v33_final"
+    assert manual.key not in manager._fallback_model_keys(stable)
+    assert manual.key not in [record.key for record in manager._collective_consultants()]
+    assert manager.record_map[manual.key] is manual
+
+
 def test_collective_consultants_can_follow_configured_keys_and_keep_chosen_first(tmp_path: Path) -> None:
     records = (
         _record("omni_collective_v41", "omni_collective_v41", ("chat", "vision"), 0.17),
@@ -297,6 +605,45 @@ def test_handle_prompt_falls_back_when_requested_backend_cannot_initialize(tmp_p
     assert payload["ok"] is True
     assert payload["model_key"] == "omni_collective_v47"
     assert "fell back" in payload["route_reason"].lower()
+
+
+def test_memory_disabled_prevents_retrieval_turn_and_route_usage_writes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    record = _record("memory-off-model", "champion_chat", ("chat",), 0.9)
+    manager = UnifiedModelManager(
+        records=(record,),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+    )
+    backend = _FakeBackend(record)
+    monkeypatch.setattr(manager, "ensure_backend", lambda _key: (record, backend))
+    session_id = "memory-disabled-session"
+
+    payload = manager.handle_prompt(
+        session_id=session_id,
+        prompt="My name is Kai.",
+        model_key=record.key,
+        action_mode="text",
+        settings={
+            "agent_mode": "off",
+            "memory_enabled": False,
+            "web_search_enabled": False,
+            "cmd_open_enabled": False,
+        },
+    )
+
+    assert payload["ok"] is True
+    snapshot = manager.session_memory_snapshot(session_id)
+    assert snapshot["turn_count"] == 0
+    assert snapshot["memory_count"] == 0
+    assert snapshot["route_usage"]["total_routes"] == 0
+    assert not manager.memory_store._path_for(session_id).exists()
+
+    recalled = manager.memory_store.build_context(session_id, "What is my name?")
+    assert recalled["memory_notes"] == []
+    assert recalled["context_block"] == ""
 
 
 def test_auto_agent_mode_routes_complex_prompt_to_collective_loop(tmp_path: Path, monkeypatch) -> None:
@@ -1063,8 +1410,10 @@ def test_auto_agent_session_budget_paces_route_to_remaining_budget(tmp_path: Pat
     assert "Session budget pacing downgraded collective_loop to collective" in payload["route_reason"]
 
     health = manager.route_health_snapshot("session-budget-pacing")
-    assert health["route_usage"]["total_routes"] == 2
-    assert health["route_usage"]["economics"]["total_cost_units"] == 8.0
+    # The prior durable usage may pace this request, but Neural Memory is off
+    # for the request itself, so its prompt and route telemetry are not written.
+    assert health["route_usage"]["total_routes"] == 1
+    assert health["route_usage"]["economics"]["total_cost_units"] == 5.0
 
 
 def test_auto_agent_session_budget_target_routes_paces_early_route(tmp_path: Path, monkeypatch) -> None:
@@ -3694,11 +4043,133 @@ def test_auto_agent_max_budget_ignores_passive_economics_pressure(tmp_path: Path
     assert captured["settings"]["agent_mode"] == "collective_loop"
 
 
-def test_model_store_catalog_marks_installed_and_selectable_records(tmp_path: Path) -> None:
+def _model_store_zip_bytes(
+    entries: tuple[tuple[zipfile.ZipInfo | str, bytes], ...] = (("model/weights.pth", b"weights"),),
+) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, payload in entries:
+            archive.writestr(name, payload)
+    return buffer.getvalue()
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _model_store_manifest_row(file_name: str, payload: bytes) -> dict[str, object]:
+    return {
+        "file_name": file_name,
+        "size_bytes": len(payload),
+        "size_mb": len(payload) / (1024 * 1024),
+        "sha256": _sha256_bytes(payload),
+        "family": "test",
+    }
+
+
+_MODEL_STORE_V2_AUTHORITY = {
+    "activation": False,
+    "auto_route": False,
+    "default_model": False,
+    "fallback": False,
+    "consultant": False,
+    "tools": False,
+    "permissions": False,
+    "safety": False,
+    "promotion": False,
+    "store_publication": False,
+    "release": False,
+}
+
+
+def _model_store_v2_manifest(
+    member_payloads: dict[str, bytes],
+) -> dict[str, object]:
+    member_rows = [
+        {
+            "name": name,
+            "size_bytes": len(payload),
+            "sha256": _sha256_bytes(payload),
+        }
+        for name, payload in sorted(member_payloads.items())
+    ]
+    candidate = next(
+        (row for row in member_rows if str(row["name"]).endswith((".pth", ".pt"))),
+        member_rows[0],
+    )
+    return {
+        "schema": "supermix-model-store-artifact-manifest-v2",
+        "model_key": "dcgan_v2_in_progress",
+        "status": "bounded_evaluation_pass_manual_only",
+        "manual_selectable": True,
+        "manual_selection_only": True,
+        "auto_route_allowed": False,
+        "default_model_allowed": False,
+        "receipt_grants_activation": False,
+        "receipt_grants_store_publication": False,
+        "authentication": "none",
+        "integrity_status": "content_bound_not_authenticated",
+        "runtime_status": "content_bound_not_authenticated",
+        "receipt_authority": dict(_MODEL_STORE_V2_AUTHORITY),
+        "evidence_links": {
+            "candidate": {
+                "archive_member": candidate["name"],
+                "size_bytes": candidate["size_bytes"],
+                "sha256": candidate["sha256"],
+            }
+        },
+        "members": member_rows,
+    }
+
+
+def _model_store_v2_zip_bytes(
+    *,
+    manifest: dict[str, object],
+    archive_payloads: dict[str, bytes],
+    raw_manifest: bytes | None = None,
+) -> bytes:
+    entries = tuple(sorted(archive_payloads.items())) + (
+        (
+            "artifact_manifest.json",
+            raw_manifest
+            if raw_manifest is not None
+            else (json.dumps(manifest, sort_keys=True) + "\n").encode("utf-8"),
+        ),
+    )
+    return _model_store_zip_bytes(entries)
+
+
+def _model_store_local_integrity_for_payload(tmp_path: Path, payload: bytes) -> dict[str, object]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    archive_path = tmp_path / "dcgan_v2_in_progress.zip"
+    archive_path.write_bytes(payload)
+    return runtime_module._model_store_local_integrity(
+        archive_path,
+        expected_size=len(payload),
+        expected_sha256=_sha256_bytes(payload),
+    )
+
+
+class _DownloadResponse(io.BytesIO):
+    def __init__(self, payload: bytes) -> None:
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
+def test_model_store_catalog_marks_only_verified_artifacts_installed_and_selectable(
+    tmp_path: Path,
+) -> None:
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     installed = models_dir / "dcgan_v2_in_progress.zip"
-    installed.write_bytes(b"zip")
+    installed_payload = _model_store_zip_bytes()
+    installed.write_bytes(installed_payload)
     records = (
         _record("dcgan_v2_in_progress", "dcgan_image", ("image",), None),
     )
@@ -3712,15 +4183,28 @@ def test_model_store_catalog_marks_installed_and_selectable_records(tmp_path: Pa
 
     manager._fetch_model_store_manifest_locked = lambda force_refresh=False: {  # type: ignore[method-assign]
         "models": [
-            {"file_name": "dcgan_v2_in_progress.zip", "size_bytes": 3, "size_mb": 0.0, "family": "gan"},
-            {"file_name": "supermix_omni_collective_v8_preview_20260407_001155.zip", "size_bytes": 10, "size_mb": 0.0, "family": "fusion"},
+            _model_store_manifest_row("dcgan_v2_in_progress.zip", installed_payload),
+            {
+                "file_name": "supermix_omni_collective_v8_preview_20260407_001155.zip",
+                "size_bytes": 10,
+                "size_mb": 0.0,
+                "sha256": "a" * 64,
+                "family": "fusion",
+            },
         ]
     }
 
     payload = manager.model_store_catalog(force_refresh=True)
     by_name = {row["file_name"]: row for row in payload["models"]}
+    assert payload["integrity_contract"] == {
+        "algorithm": "sha256",
+        "positive_size_required": True,
+        "safe_zip_required": True,
+    }
     assert by_name["dcgan_v2_in_progress.zip"]["installed"] is True
     assert by_name["dcgan_v2_in_progress.zip"]["selectable"] is True
+    assert by_name["dcgan_v2_in_progress.zip"]["sha256"] == _sha256_bytes(installed_payload)
+    assert by_name["dcgan_v2_in_progress.zip"]["integrity"]["status"] == "verified"
     assert by_name["supermix_omni_collective_v8_preview_20260407_001155.zip"]["known"] is True
     assert by_name["supermix_omni_collective_v8_preview_20260407_001155.zip"]["installed"] is False
 
@@ -3738,9 +4222,12 @@ def test_model_store_catalog_skips_unsafe_remote_manifest_names(tmp_path: Path) 
 
     manager._fetch_model_store_manifest_locked = lambda force_refresh=False: {  # type: ignore[method-assign]
         "models": [
-            {"file_name": "../escape.zip", "size_bytes": 10},
-            {"file_name": "nested/escape.zip", "size_bytes": 10},
-            {"file_name": "dcgan_v2_in_progress.zip", "size_bytes": 3},
+            {"file_name": "../escape.zip", "size_bytes": 10, "sha256": "a" * 64},
+            {"file_name": "nested/escape.zip", "size_bytes": 10, "sha256": "a" * 64},
+            {"file_name": "missing-hash.zip", "size_bytes": 10},
+            {"file_name": "zero-size.zip", "size_bytes": 0, "sha256": "a" * 64},
+            {"file_name": "short-hash.zip", "size_bytes": 10, "sha256": "abc"},
+            {"file_name": "dcgan_v2_in_progress.zip", "size_bytes": 3, "sha256": "b" * 64},
         ]
     }
 
@@ -3759,12 +4246,442 @@ def test_model_store_install_rejects_unsafe_artifact_names(tmp_path: Path) -> No
         common_summary_path=tmp_path / "missing_summary.json",
     )
     manager._fetch_model_store_manifest_locked = lambda force_refresh=False: {  # type: ignore[method-assign]
-        "models": [{"file_name": "dcgan_v2_in_progress.zip", "size_bytes": 3}]
+        "models": [
+            {"file_name": "dcgan_v2_in_progress.zip", "size_bytes": 3, "sha256": "a" * 64}
+        ]
     }
 
     for bad_name in ("../escape.zip", "nested/escape.zip", "bad:name.zip", "not-a-zip.txt"):
         with pytest.raises(ValueError):
             manager.install_model_store_artifact(bad_name)
+
+
+def test_model_store_zip_validation_rejects_unsafe_archive_members(tmp_path: Path) -> None:
+    symlink = zipfile.ZipInfo("model/link.pth")
+    symlink.create_system = 3
+    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+
+    archives: dict[str, bytes] = {
+        "empty": _model_store_zip_bytes(()),
+        "traversal": _model_store_zip_bytes((("../escape.pth", b"escape"),)),
+        "symlink": _model_store_zip_bytes(((symlink, b"weights.pth"),)),
+    }
+    archives["duplicate"] = _model_store_zip_bytes(
+        (("model/weights.pth", b"one"), ("MODEL/WEIGHTS.PTH", b"two"))
+    )
+
+    encrypted = bytearray(_model_store_zip_bytes())
+    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        cursor = 0
+        while (position := encrypted.find(signature, cursor)) >= 0:
+            flags = int.from_bytes(encrypted[position + flag_offset : position + flag_offset + 2], "little")
+            encrypted[position + flag_offset : position + flag_offset + 2] = (flags | 0x1).to_bytes(
+                2,
+                "little",
+            )
+            cursor = position + len(signature)
+    archives["encrypted"] = bytes(encrypted)
+
+    for name, archive_bytes in archives.items():
+        archive_path = tmp_path / f"{name}.zip"
+        archive_path.write_bytes(archive_bytes)
+        with pytest.raises(ValueError):
+            runtime_module._validate_model_store_zip(archive_path)
+
+
+def test_model_store_v2_manifest_verifies_streamed_members_and_surfaces_policy(
+    tmp_path: Path,
+) -> None:
+    member_payloads = {
+        "cognitive_leap_ultra_v51_2.pth": b"bounded-candidate-weights",
+        "bounded_evaluation_receipt.json": b'{"gate_outcome":"pass"}\n',
+    }
+    manifest = _model_store_v2_manifest(member_payloads)
+    receipt_row = next(
+        row
+        for row in manifest["members"]  # type: ignore[union-attr]
+        if row["name"] == "bounded_evaluation_receipt.json"
+    )
+    manifest["evidence_links"]["receipt"] = {  # type: ignore[index]
+        "archive_member": receipt_row["name"],
+        "size_bytes": receipt_row["size_bytes"],
+        "sha256": receipt_row["sha256"],
+        "schema": "supermix-cognitive-leap-bounded-evaluation-v2",
+    }
+    payload = _model_store_v2_zip_bytes(
+        manifest=manifest,
+        archive_payloads=member_payloads,
+    )
+
+    integrity = _model_store_local_integrity_for_payload(tmp_path, payload)
+
+    assert integrity["verified"] is True
+    assert integrity["status"] == "verified"
+    assert integrity["archive_member_count"] == 3
+    assert integrity["archive_file_count"] == 3
+    assert (
+        integrity["inner_manifest_schema"]
+        == "supermix-model-store-artifact-manifest-v2"
+    )
+    assert integrity["inner_manifest_status"] == "bounded_evaluation_pass_manual_only"
+    assert (
+        integrity["inner_manifest_integrity_status"]
+        == "content_bound_not_authenticated"
+    )
+    assert (
+        integrity["inner_manifest_runtime_status"]
+        == "content_bound_not_authenticated"
+    )
+
+
+def test_model_store_catalog_does_not_select_v2_until_inner_manifest_verifies(
+    tmp_path: Path,
+) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    file_name = "dcgan_v2_in_progress.zip"
+    declared_payloads = {"candidate.pth": b"expected-weights"}
+    manifest = _model_store_v2_manifest(declared_payloads)
+    tampered_payload = _model_store_v2_zip_bytes(
+        manifest=manifest,
+        archive_payloads={"candidate.pth": b"tampered-weights"},
+    )
+    (models_dir / file_name).write_bytes(tampered_payload)
+    manager = UnifiedModelManager(
+        records=(_record("dcgan_v2_in_progress", "dcgan_image", ("image",)),),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+        models_dir=models_dir,
+        common_summary_path=tmp_path / "missing_summary.json",
+    )
+    manager._fetch_model_store_manifest_locked = lambda force_refresh=False: {  # type: ignore[method-assign]
+        "models": [_model_store_manifest_row(file_name, tampered_payload)]
+    }
+
+    row = manager.model_store_catalog(force_refresh=True)["models"][0]
+
+    assert row["integrity"]["status"] == "invalid_archive"
+    assert row["integrity"]["verified"] is False
+    assert row["installed"] is False
+    assert row["selectable"] is False
+
+
+@pytest.mark.parametrize(
+    ("case", "archive_payloads"),
+    (
+        ("tampered", {"candidate.pth": b"changed"}),
+        ("missing", {}),
+        (
+            "undeclared",
+            {
+                "candidate.pth": b"expected",
+                "undeclared.txt": b"must-not-be-ignored",
+            },
+        ),
+    ),
+)
+def test_model_store_v2_manifest_rejects_tampered_missing_and_undeclared_members(
+    tmp_path: Path,
+    case: str,
+    archive_payloads: dict[str, bytes],
+) -> None:
+    del case
+    declared_payloads = {"candidate.pth": b"expected"}
+    manifest = _model_store_v2_manifest(declared_payloads)
+    payload = _model_store_v2_zip_bytes(
+        manifest=manifest,
+        archive_payloads=archive_payloads,
+    )
+
+    integrity = _model_store_local_integrity_for_payload(tmp_path, payload)
+
+    assert integrity["verified"] is False
+    assert integrity["status"] == "invalid_archive"
+
+
+def test_model_store_v2_manifest_rejects_duplicate_and_mismatched_evidence_links(
+    tmp_path: Path,
+) -> None:
+    member_payloads = {"candidate.pth": b"expected"}
+    duplicate_manifest = _model_store_v2_manifest(member_payloads)
+    duplicate_manifest["evidence_links"]["same_candidate_again"] = dict(  # type: ignore[index]
+        duplicate_manifest["evidence_links"]["candidate"]  # type: ignore[index]
+    )
+    duplicate_payload = _model_store_v2_zip_bytes(
+        manifest=duplicate_manifest,
+        archive_payloads=member_payloads,
+    )
+    duplicate_integrity = _model_store_local_integrity_for_payload(
+        tmp_path / "duplicate",
+        duplicate_payload,
+    )
+
+    mismatch_manifest = _model_store_v2_manifest(member_payloads)
+    mismatch_manifest["evidence_links"]["candidate"]["sha256"] = "0" * 64  # type: ignore[index]
+    mismatch_payload = _model_store_v2_zip_bytes(
+        manifest=mismatch_manifest,
+        archive_payloads=member_payloads,
+    )
+    mismatch_integrity = _model_store_local_integrity_for_payload(
+        tmp_path / "mismatch",
+        mismatch_payload,
+    )
+
+    assert duplicate_integrity["status"] == "invalid_archive"
+    assert mismatch_integrity["status"] == "invalid_archive"
+
+
+@pytest.mark.parametrize(
+    ("field", "unsafe_value"),
+    (
+        ("manual_selection_only", False),
+        ("auto_route_allowed", True),
+        ("default_model_allowed", True),
+        ("receipt_grants_activation", True),
+        ("receipt_grants_store_publication", True),
+        ("authentication", "signed"),
+        ("integrity_status", "verified"),
+        ("runtime_status", "trusted"),
+    ),
+)
+def test_model_store_v2_manifest_rejects_unsafe_policy(
+    tmp_path: Path,
+    field: str,
+    unsafe_value: object,
+) -> None:
+    member_payloads = {"candidate.pth": b"expected"}
+    manifest = _model_store_v2_manifest(member_payloads)
+    manifest[field] = unsafe_value
+    payload = _model_store_v2_zip_bytes(
+        manifest=manifest,
+        archive_payloads=member_payloads,
+    )
+
+    integrity = _model_store_local_integrity_for_payload(tmp_path, payload)
+
+    assert integrity["verified"] is False
+    assert integrity["status"] == "invalid_archive"
+
+
+@pytest.mark.parametrize("authority_change", ("true", "missing", "extra"))
+def test_model_store_v2_manifest_requires_exact_all_false_receipt_authority(
+    tmp_path: Path,
+    authority_change: str,
+) -> None:
+    member_payloads = {"candidate.pth": b"expected"}
+    manifest = _model_store_v2_manifest(member_payloads)
+    authority = dict(_MODEL_STORE_V2_AUTHORITY)
+    if authority_change == "true":
+        authority["activation"] = True
+    elif authority_change == "missing":
+        del authority["release"]
+    else:
+        authority["future_authority"] = False
+    manifest["receipt_authority"] = authority
+    payload = _model_store_v2_zip_bytes(
+        manifest=manifest,
+        archive_payloads=member_payloads,
+    )
+
+    integrity = _model_store_local_integrity_for_payload(tmp_path, payload)
+
+    assert integrity["verified"] is False
+    assert integrity["status"] == "invalid_archive"
+
+
+def test_model_store_v2_manifest_rejects_unknown_schema_duplicate_keys_and_nan(
+    tmp_path: Path,
+) -> None:
+    member_payloads = {"candidate.pth": b"expected"}
+
+    unknown_manifest = _model_store_v2_manifest(member_payloads)
+    unknown_manifest["schema"] = "supermix-model-store-artifact-manifest-v999"
+    unknown_payload = _model_store_v2_zip_bytes(
+        manifest=unknown_manifest,
+        archive_payloads=member_payloads,
+    )
+
+    strict_manifest = _model_store_v2_manifest(member_payloads)
+    encoded = json.dumps(strict_manifest, sort_keys=True)
+    duplicate_status = (
+        encoded[:-1] + ', "status": "duplicate-must-fail"}'
+    ).encode("utf-8")
+    duplicate_payload = _model_store_v2_zip_bytes(
+        manifest=strict_manifest,
+        archive_payloads=member_payloads,
+        raw_manifest=duplicate_status,
+    )
+
+    nan_manifest = _model_store_v2_manifest(member_payloads)
+    nan_manifest["unsafe_number"] = float("nan")
+    nan_payload = _model_store_v2_zip_bytes(
+        manifest=nan_manifest,
+        archive_payloads=member_payloads,
+    )
+
+    for index, payload in enumerate((unknown_payload, duplicate_payload, nan_payload)):
+        integrity = _model_store_local_integrity_for_payload(
+            tmp_path / str(index),
+            payload,
+        )
+        assert integrity["verified"] is False
+        assert integrity["status"] == "invalid_archive"
+
+
+def test_model_store_zip_keeps_legacy_and_v1_archives_compatible(tmp_path: Path) -> None:
+    legacy_path = tmp_path / "legacy.zip"
+    legacy_path.write_bytes(_model_store_zip_bytes())
+    legacy_summary = runtime_module._validate_model_store_zip(legacy_path)
+
+    v1_path = tmp_path / "v1.zip"
+    v1_path.write_bytes(
+        _model_store_zip_bytes(
+            (
+                ("weights.pth", b"legacy-v1-weights"),
+                (
+                    "artifact_manifest.json",
+                    json.dumps(
+                        {
+                            "schema": "supermix-model-store-artifact-manifest-v1",
+                            "status": "legacy_archive",
+                            "members": [],
+                        }
+                    ).encode("utf-8"),
+                ),
+            )
+        )
+    )
+    v1_summary = runtime_module._validate_model_store_zip(v1_path)
+
+    assert legacy_summary["inner_manifest_schema"] == ""
+    assert legacy_summary["inner_manifest_status"] == "not_present"
+    assert v1_summary["inner_manifest_schema"] == "supermix-model-store-artifact-manifest-v1"
+    assert v1_summary["inner_manifest_status"] == "legacy_archive"
+
+
+def test_model_store_install_verifies_existing_hash_before_reuse(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    file_name = "dcgan_v2_in_progress.zip"
+    expected_payload = _model_store_zip_bytes()
+    target = models_dir / file_name
+    target.write_bytes(expected_payload)
+    manager = UnifiedModelManager(
+        records=(),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+        models_dir=models_dir,
+        common_summary_path=tmp_path / "missing_summary.json",
+    )
+    manager._fetch_model_store_manifest_locked = lambda force_refresh=False: {  # type: ignore[method-assign]
+        "models": [_model_store_manifest_row(file_name, expected_payload)]
+    }
+    monkeypatch.setattr(
+        runtime_module.threading,
+        "Thread",
+        lambda **_kwargs: pytest.fail("verified existing archive must not start a download"),
+    )
+
+    already = manager.install_model_store_artifact(file_name)
+    assert already["status"] == "completed"
+    assert already["reused_existing"] is True
+    assert already["integrity"]["status"] == "verified"
+
+    corrupted = bytearray(expected_payload)
+    corrupted[0] ^= 0x01
+    target.write_bytes(corrupted)
+
+    class _DeferredThread:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(runtime_module.threading, "Thread", _DeferredThread)
+    queued = manager.install_model_store_artifact(file_name)
+    assert queued["status"] == "queued"
+    assert queued["integrity"]["status"] == "hash_mismatch"
+    assert target.read_bytes() == bytes(corrupted)
+
+
+def test_model_store_worker_stream_verifies_and_atomically_replaces_bad_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    file_name = "dcgan_v2_in_progress.zip"
+    payload = _model_store_zip_bytes()
+    target = models_dir / file_name
+    target.write_bytes(b"bad-existing-target")
+    manager = UnifiedModelManager(
+        records=(),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+        models_dir=models_dir,
+        common_summary_path=tmp_path / "missing_summary.json",
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "urlopen",
+        lambda *_args, **_kwargs: _DownloadResponse(payload),
+    )
+
+    manager._install_model_store_worker(
+        "verified-download",
+        file_name,
+        len(payload),
+        _sha256_bytes(payload),
+    )
+
+    assert target.read_bytes() == payload
+    job = manager.model_store_jobs()["jobs"][0]
+    assert job["status"] == "completed"
+    assert job["integrity"]["status"] == "verified"
+    assert job["sha256"] == _sha256_bytes(payload)
+    assert not list(models_dir.glob("*.part"))
+
+
+def test_model_store_worker_hash_failure_preserves_good_existing_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    file_name = "dcgan_v2_in_progress.zip"
+    expected_payload = _model_store_zip_bytes()
+    downloaded_payload = _model_store_zip_bytes((("model/weights.pth", b"changed"),))
+    target = models_dir / file_name
+    target.write_bytes(expected_payload)
+    manager = UnifiedModelManager(
+        records=(),
+        extraction_root=tmp_path / "extract",
+        generated_dir=tmp_path / "generated",
+        models_dir=models_dir,
+        common_summary_path=tmp_path / "missing_summary.json",
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "urlopen",
+        lambda *_args, **_kwargs: _DownloadResponse(downloaded_payload),
+    )
+
+    manager._install_model_store_worker(
+        "bad-download",
+        file_name,
+        len(downloaded_payload),
+        _sha256_bytes(expected_payload),
+    )
+
+    assert target.read_bytes() == expected_payload
+    job = manager.model_store_jobs()["jobs"][0]
+    assert job["status"] == "error"
+    assert "SHA-256 mismatch" in job["error"]
+    assert not list(models_dir.glob("*.part"))
 
 
 def test_loop_agent_runs_until_reviewer_marks_complete(tmp_path: Path, monkeypatch) -> None:

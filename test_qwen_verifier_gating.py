@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,7 @@ def _verifier_metadata(
     **extra,
 ):
     metadata = {
-        "verifier_schema": "supermix-verifier-v1",
+        "verifier_schema": "supermix-verifier-v2",
         "verifier_type": verifier_type,
         "expected_answer": expected_answer,
         "problem_family": family,
@@ -87,6 +88,7 @@ def test_nested_verifier_spec_survives_cache_round_trip_and_is_enforced(tmp_path
         assistant="144",
         metadata={
             "verifier_spec": {
+                "verifier_schema": "supermix-verifier-v2",
                 "verifier_type": "integer",
                 "expected_answer": "145",
                 "problem_family": "arithmetic",
@@ -135,7 +137,7 @@ def test_distillation_rejects_wrong_teacher_candidate_and_keeps_verifier_spec():
     assert generated == 1
     assert len(teacher_pairs) == 1
     assert teacher_pairs[0].assistant == "The final answer is 145."
-    assert teacher_pairs[0].metadata["verifier_schema"] == "supermix-verifier-v1"
+    assert teacher_pairs[0].metadata["verifier_schema"] == "supermix-verifier-v2"
 
     correct_rank = pipeline._distillation_candidate_rank(
         user_text=original.user,
@@ -158,6 +160,61 @@ def test_distillation_rejects_wrong_teacher_candidate_and_keeps_verifier_spec():
     assert correct_rank[0] > wrong_rank[0]
     assert correct_rank[3]["verified_correct"] == 1.0
     assert wrong_rank[3]["verified_correct"] == 0.0
+
+
+def test_legacy_or_conflicting_verifier_schema_is_never_silently_upgraded():
+    legacy = _verifier_metadata("integer", "145")
+    legacy["verifier_schema"] = "supermix-verifier-v1"
+    conflicting = _verifier_metadata("integer", "145")
+    conflicting["verifier_spec"] = {
+        "verifier_schema": "supermix-verifier-v1",
+        "verifier_type": "integer",
+        "expected_answer": "145",
+    }
+
+    assert pipeline._chat_pair_verifier_payload(legacy) is None
+    assert pipeline._chat_pair_verifier_payload(conflicting) is None
+
+
+def test_training_ingestion_keeps_short_verified_targets_and_rejects_tampering(
+    tmp_path: Path,
+):
+    prompt = (
+        "Frontier decimal minimal pair 0001A: Out of 1000 checks, 41 succeed. "
+        "Write the observed success rate to three decimal places, including the "
+        "leading zero, without a percent sign."
+    )
+    metadata = _verifier_metadata(
+        "normalized_exact",
+        "0.041",
+        family="ratios_probability",
+    )
+    path = tmp_path / "verified-short-targets.jsonl"
+    rows = [
+        {
+            "user": prompt,
+            "assistant": "0.041",
+            "metadata": metadata,
+        },
+        {
+            "user": prompt.replace("0001A", "0001B"),
+            "assistant": "The requested value is definitely 0.042.",
+            "metadata": metadata,
+        },
+        {
+            "user": prompt.replace("0001A", "legacy"),
+            "assistant": "0.041",
+            "metadata": {**metadata, "verifier_schema": "supermix-verifier-v1"},
+        },
+    ]
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    loaded = pipeline.load_jsonl_pairs([str(path)], max_records=10)
+
+    assert [(pair.user, pair.assistant) for pair in loaded] == [(prompt, "0.041")]
 
 
 def test_preference_negative_picker_skips_verified_correct_alternatives():

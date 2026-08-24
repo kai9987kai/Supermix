@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import argparse
 import base64
-import io
+import ipaddress
 import json
 import logging
-import os
-import time
-import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, request, send_from_directory
-from multimodel_catalog import DEFAULT_COMMON_SUMMARY, DEFAULT_MODELS_DIR, discover_model_records
+from multimodel_catalog import DEFAULT_MODELS_DIR, discover_model_records
 from multimodel_runtime import UnifiedModelManager
-from PIL import Image
 
 app = Flask(__name__)
 manager: UnifiedModelManager | None = None
@@ -889,6 +886,11 @@ HTML_TEMPLATE = r"""<!doctype html>
           </select>
         </div>
         <div class="cfg-row">
+          <label>Memory Authority</label>
+          <button class="cfg-input" id="memoryReviewBtn" type="button" style="width:90px">Inspect</button>
+        </div>
+        <div id="memoryReviewList" style="display:none;margin:8px 0 14px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:11px"></div>
+        <div class="cfg-row">
           <label>Grounding</label>
           <select class="cfg-input" id="groundingToggle" style="width:90px" title="Audit evidence and solve explicit arithmetic without changing model routing or compute exits">
             <option value="on">Enabled</option>
@@ -1153,8 +1155,22 @@ HTML_TEMPLATE = r"""<!doctype html>
   const el   = id => document.getElementById(id);
   const qs   = (sel, root=document) => root.querySelector(sel);
   const qsa  = (sel, root=document) => [...root.querySelectorAll(sel)];
-  const sessionId = ([1e7]+-1e3+-4e3+-8e2+-1e11).replace(/[018]/g, c =>
-    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16));
+  const SESSION_ID_STORAGE_KEY = 'supermix.studio.session.v55';
+  const newSessionId = () => typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16));
+  let sessionId = '';
+  try {
+    const storedSessionId = localStorage.getItem(SESSION_ID_STORAGE_KEY) || '';
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storedSessionId)) {
+      sessionId = storedSessionId;
+    }
+  } catch (_) {}
+  if (!sessionId) {
+    sessionId = newSessionId();
+    try { localStorage.setItem(SESSION_ID_STORAGE_KEY, sessionId); } catch (_) {}
+  }
 
   let agentMode   = 'auto';
   let currentUpload = null;
@@ -1181,6 +1197,66 @@ HTML_TEMPLATE = r"""<!doctype html>
       throw new Error(message);
     }
     return r.json();
+  }
+
+  function renderMemoryReview(memory) {
+    const root = el('memoryReviewList');
+    if (!root) return;
+    root.innerHTML = '';
+    root.style.display = 'block';
+    const records = Array.isArray(memory && memory.memory_records)
+      ? memory.memory_records
+      : [];
+    if (!records.length) {
+      root.textContent = 'No authority-bound memories are stored for this session.';
+      return;
+    }
+    records.forEach(record => {
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:7px 0;border-bottom:1px solid var(--border)';
+      const textLine = document.createElement('div');
+      textLine.textContent = record.text || '(empty memory)';
+      textLine.style.color = 'var(--text)';
+      row.appendChild(textLine);
+      const meta = document.createElement('div');
+      meta.textContent = `${record.origin || 'unknown'} · ${record.authority_class || 'none'} · ${record.lifecycle_state || 'unknown'} · ${record.truth_status || 'unverified'}`;
+      meta.style.cssText = 'color:var(--muted);margin-top:3px';
+      row.appendChild(meta);
+      const actions = [];
+      if (record.lifecycle_state === 'active') actions.push('confirm', 'quarantine', 'revoke');
+      if (record.lifecycle_state === 'quarantined') actions.push('restore', 'revoke');
+      if (actions.length) {
+        const controls = document.createElement('div');
+        controls.style.cssText = 'display:flex;gap:5px;margin-top:5px;flex-wrap:wrap';
+        actions.forEach(action => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = action[0].toUpperCase() + action.slice(1);
+          button.className = 'cfg-input';
+          button.onclick = async () => {
+            try {
+              await api('/api/memory/review', {
+                session_id: sessionId,
+                memory_id: record.memory_id,
+                action,
+              });
+              await refreshMemoryReview();
+              toast('ok', `Memory ${action} applied`);
+            } catch (error) {
+              toast('err', error.message);
+            }
+          };
+          controls.appendChild(button);
+        });
+        row.appendChild(controls);
+      }
+      root.appendChild(row);
+    });
+  }
+
+  async function refreshMemoryReview() {
+    const result = await api('/api/memory', { session_id: sessionId });
+    renderMemoryReview(result.memory || {});
   }
 
   function toast(type, msg) {
@@ -1697,12 +1773,40 @@ HTML_TEMPLATE = r"""<!doctype html>
       const guard = grounding.response_guard && typeof grounding.response_guard === 'object'
         ? grounding.response_guard
         : {};
+      const receipt = grounding.answer_receipt && typeof grounding.answer_receipt === 'object'
+        ? grounding.answer_receipt
+        : {};
+      const receiptVerification = receipt.verification && typeof receipt.verification === 'object'
+        ? receipt.verification
+        : {};
+      const receiptEpistemics = receipt.epistemics && typeof receipt.epistemics === 'object'
+        ? receipt.epistemics
+        : {};
       const bits = [
         `<span class="trace-pill">Evidence ${escHtml(diagnostics.evidence_count ?? 0)}</span>`,
         `<span class="trace-pill${diagnostics.sufficiency === 'sufficient' ? ' trace-score' : ''}">Grounding ${escHtml(diagnostics.sufficiency || 'no_evidence')}</span>`,
         `<span class="trace-pill${Number(diagnostics.conflict_count || 0) > 0 ? ' trace-warn' : ''}">Conflicts ${escHtml(diagnostics.conflict_count ?? 0)}</span>`,
         `<span class="trace-pill${guard.changed ? ' trace-score' : ''}">Guard ${escHtml(guard.reason || 'audit_only')}</span>`,
       ];
+      if (receipt.kind && receipt.kind !== 'none') {
+        bits.push(
+          `<span class="trace-pill${receiptVerification.passed ? ' trace-score' : ' trace-warn'}">Receipt ${escHtml(receipt.decision || 'not_attempted')}</span>`
+        );
+        if (receipt.problem_class) {
+          bits.push(`<span class="trace-pill">Solver ${escHtml(receipt.problem_class)}</span>`);
+        }
+        if (receipt.method) {
+          bits.push(`<span class="trace-pill">Method ${escHtml(receipt.method)}</span>`);
+        }
+        if (receiptVerification.passed) {
+          bits.push(
+            `<span class="trace-pill">${receiptVerification.independent ? 'Independently verified' : 'Deterministically verified'}</span>`
+          );
+        }
+        if (receiptEpistemics.model_conditional) {
+          bits.push('<span class="trace-pill trace-warn">Model-conditional, not calibrated</span>');
+        }
+      }
       const sources = Array.isArray(grounding.sources) ? grounding.sources : [];
       const sourceLinks = sources.map(source => {
         const label = `[${escHtml(source.id || 'S?')}] ${escHtml(source.title || source.domain || 'source')}`;
@@ -2706,8 +2810,17 @@ HTML_TEMPLATE = r"""<!doctype html>
       renderRouteHealth({});
       renderPolicyLab({});
       addMsg('assistant', 'Session memory cleared. Omni V46 is ready for the next message.');
+      renderMemoryReview({ memory_records: [] });
       toast('ok', 'System memory purged');
     } catch(e) { toast('err', e.message); }
+  };
+
+  el('memoryReviewBtn').onclick = async () => {
+    try {
+      await refreshMemoryReview();
+    } catch (error) {
+      toast('err', error.message);
+    }
   };
 
   // ── Model init ────────────────────────────────────────────────────────
@@ -2750,8 +2863,17 @@ HTML_TEMPLATE = r"""<!doctype html>
       const policy = data && data.agent_trace ? data.agent_trace.auto_agent_policy : null;
       const budgetText = policy && policy.budget_profile ? `/${policy.budget_profile}` : '';
       const modeText = policy ? `${agentMode}${budgetText} -> ${policy.selected_agent_mode || 'off'}` : agentMode;
+      const backendStatus = st.active_backend_status || {};
+      const adapterAttestation = backendStatus.adapter_attestation || {};
+      let adapterTrustText = '';
+      if (backendStatus.backend === 'qwen_adapter') {
+        const activationKind = String(adapterAttestation.activation_kind || 'blocked');
+        const baseRevisionStatus = String(adapterAttestation.base_revision_status || 'unknown');
+        const trustLabel = activationKind === 'legacy' ? 'legacy compatibility' : activationKind;
+        adapterTrustText = `\nadapter trust: ${trustLabel} (${baseRevisionStatus})`;
+      }
       el('panelStatus').textContent =
-        `model: ${label || '-'}\ndevice: ${st.device || '-'}\nbenchmark: ${scoreText}\nmode: ${modeText}`;
+        `model: ${label || '-'}\ndevice: ${st.device || '-'}\nbenchmark: ${scoreText}\nmode: ${modeText}${adapterTrustText}`;
       el('activePill').textContent = String(label).toLowerCase().includes('v46') ? 'V46 Champion' : (label || 'Auto');
       const lowered = label.toLowerCase();
       const pillClass = lowered.includes('v46') ? ' v46' : (lowered.includes('v48') ? ' v48' : (lowered.includes('v47') ? ' v47' : ''));
@@ -2759,9 +2881,10 @@ HTML_TEMPLATE = r"""<!doctype html>
       const snap = el('modelSnapshot');
       if (snap) {
         const benchCount = selected.per_benchmark ? Object.keys(selected.per_benchmark).length : selected.benchmark_count;
+        const trustSummary = adapterTrustText ? `<br>${escHtml(adapterTrustText.trim())}` : '';
         snap.innerHTML = `<strong>${escHtml(label || 'Selected model')}</strong><br>` +
           `Benchmark: ${escHtml(scoreText)}${benchCount ? ` across ${benchCount} suites` : ''}<br>` +
-          `Source: ${escHtml(selected.selection_policy || selected.score_source || 'runtime catalog')}`;
+          `Source: ${escHtml(selected.selection_policy || selected.score_source || 'runtime catalog')}${trustSummary}`;
       }
     } catch(_) {}
   }
@@ -2912,6 +3035,36 @@ HTML_TEMPLATE = r"""<!doctype html>
 
 # ─── Flask routes ─────────────────────────────────────────────────────────────
 
+def _request_is_loopback() -> bool:
+    """Treat only the direct socket peer as local; never trust forwarding headers."""
+
+    remote_addr = str(request.remote_addr or "").strip()
+    try:
+        return ipaddress.ip_address(remote_addr).is_loopback
+    except ValueError:
+        return False
+
+
+def _memory_management_request_allowed() -> bool:
+    """Keep durable-memory inspection/mutation on the local same-origin UI."""
+
+    if not _request_is_loopback():
+        return False
+    origin = str(request.headers.get("Origin") or "").strip()
+    if origin:
+        try:
+            if urlsplit(origin).netloc.lower() != str(request.host or "").lower():
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+def _no_store_json(payload: Dict[str, Any], status: int = 200):
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return (response, status) if status != 200 else response
+
 @app.route("/")
 def index():
     return HTML_TEMPLATE
@@ -2920,6 +3073,72 @@ def index():
 def api_status():
     return jsonify({"status": manager.status()})
 
+
+@app.route("/api/memory", methods=["POST"])
+def api_memory():
+    if not _memory_management_request_allowed():
+        return _no_store_json(
+            {"ok": False, "error": "memory management is available only to the local same-origin UI"},
+            403,
+        )
+    data = request.get_json(silent=True) or {}
+    try:
+        session_id = str(data.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        snapshot = manager.session_memory_snapshot(session_id)
+        public_snapshot = {
+            key: snapshot[key]
+            for key in (
+                "session_id",
+                "memory_schema_version",
+                "memory_authority_schema_version",
+                "memory_authority_policy_version",
+                "memory_count",
+                "memory_eligible_count",
+                "memory_records",
+                "updated_at",
+            )
+            if key in snapshot
+        }
+        return _no_store_json({"ok": True, "memory": public_snapshot})
+    except ValueError as exc:
+        return _no_store_json({"ok": False, "error": str(exc)}, 400)
+    except Exception as exc:
+        logging.exception("Memory inspection request failed")
+        return _no_store_json({"ok": False, "error": str(exc)}, 500)
+
+
+@app.route("/api/memory/review", methods=["POST"])
+def api_memory_review():
+    if not _memory_management_request_allowed():
+        return _no_store_json(
+            {"ok": False, "error": "memory management is available only to the local same-origin UI"},
+            403,
+        )
+    data = request.get_json(silent=True) or {}
+    try:
+        session_id = str(data.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        memory_id = str(data.get("memory_id") or "").strip()
+        action = str(data.get("action") or "").strip().lower()
+        if not memory_id:
+            raise ValueError("memory_id is required")
+        if not action:
+            raise ValueError("action is required")
+        result = manager.review_session_memory(
+            session_id=session_id,
+            memory_id=memory_id,
+            action=action,
+        )
+        return _no_store_json(result)
+    except ValueError as exc:
+        return _no_store_json({"ok": False, "error": str(exc)}, 400)
+    except Exception as exc:
+        logging.exception("Memory review request failed")
+        return _no_store_json({"ok": False, "error": str(exc)}, 500)
+
 @app.route("/api/catalog")
 def api_catalog():
     from multimodel_catalog import models_to_json
@@ -2927,18 +3146,28 @@ def api_catalog():
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     try:
+        session_id = str(data.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        settings = dict(data.get("settings") or {})
+        if not _request_is_loopback():
+            # Remote/shared launches may perform normal chat, but must remain
+            # unable to retrieve from or write to durable conversation memory.
+            settings["memory_enabled"] = False
         result = manager.handle_prompt(
-            session_id=data.get("session_id", "default"),
+            session_id=session_id,
             prompt=data.get("message", ""),
             model_key=data.get("model_key", "auto"),
             action_mode=data.get("action_mode", "text"),
-            settings=data.get("settings", {})
+            settings=settings,
         )
         if hasattr(result, "to_dict"):
             return jsonify(result.to_dict())
         return jsonify(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         logging.exception("Chat request failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
@@ -3107,9 +3336,17 @@ def api_route_shadow_registry_status():
 
 @app.route("/api/clear", methods=["POST"])
 def api_clear():
-    data = request.json or {}
-    manager.clear(data.get("session_id", "default"))
-    return jsonify({"ok": True})
+    if not _memory_management_request_allowed():
+        return _no_store_json(
+            {"ok": False, "error": "memory management is available only to the local same-origin UI"},
+            403,
+        )
+    data = request.get_json(silent=True) or {}
+    session_id = str(data.get("session_id") or "").strip()
+    if not session_id:
+        return _no_store_json({"ok": False, "error": "session_id is required"}, 400)
+    manager.clear(session_id)
+    return _no_store_json({"ok": True})
 
 @app.route("/api/upload_image", methods=["POST"])
 def api_upload_image():

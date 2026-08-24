@@ -16,6 +16,11 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+from qwen_adapter_promotion import (
+    PROMOTION_FILENAME,
+    adapter_activation_kind,
+)
+
 try:
     import webview
 except ImportError:  # pragma: no cover - handled at runtime with a clear error
@@ -461,7 +466,7 @@ def load_json_if_exists(path: Path) -> Optional[dict]:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8").lstrip("\ufeff"))
     except Exception as exc:
         logging.warning("Failed to load JSON from %s: %s", path, exc)
         return None
@@ -685,9 +690,37 @@ def find_bundled_artifact_dir() -> Optional[Path]:
     if not meipass:
         return None
     candidate = Path(meipass) / "bundled_latest_artifact"
-    if (candidate / "adapter" / "adapter_config.json").exists():
-        return candidate.resolve()
-    return None
+    adapter = candidate / "adapter"
+    if not (
+        (adapter / "adapter_config.json").is_file()
+        and (adapter / "adapter_model.safetensors").is_file()
+    ):
+        return None
+    release_manifest = load_json_if_exists(candidate / "release_manifest.json") or {}
+    declared_kind = str(release_manifest.get("adapter_activation") or "").strip().lower()
+    artifact_name = str(release_manifest.get("artifact_name") or "").strip()
+    actual_kind = adapter_activation_kind(adapter, legacy_artifact_name=artifact_name)
+    if declared_kind and declared_kind not in {"legacy", "promoted"}:
+        logging.warning(
+            "Ignoring bundled adapter with unknown activation kind %r: %s",
+            declared_kind,
+            candidate,
+        )
+        return None
+    if declared_kind and declared_kind != actual_kind:
+        logging.warning(
+            "Ignoring bundled adapter whose declared activation kind %r did not validate: %s",
+            declared_kind,
+            candidate,
+        )
+        return None
+    if actual_kind is None:
+        logging.warning(
+            "Ignoring bundled adapter without valid promotion receipts or recognized legacy provenance: %s",
+            candidate,
+        )
+        return None
+    return candidate.resolve()
 
 
 def find_bundled_adapter_dir() -> Optional[Path]:
@@ -698,8 +731,17 @@ def find_bundled_adapter_dir() -> Optional[Path]:
     if not meipass:
         return None
     candidate = Path(meipass) / "bundled_latest_adapter"
-    if (candidate / "adapter_config.json").exists():
+    if (
+        (candidate / "adapter_config.json").is_file()
+        and (candidate / "adapter_model.safetensors").is_file()
+        and adapter_activation_kind(candidate) is not None
+    ):
         return candidate.resolve()
+    if (candidate / "adapter_config.json").exists():
+        logging.warning(
+            "Ignoring direct bundled adapter without validated promotion or recognized legacy provenance: %s",
+            candidate,
+        )
     return None
 
 
@@ -716,6 +758,9 @@ def find_bundled_base_model_dir() -> Optional[Path]:
 
 def score_adapter_dir(adapter_dir: Path) -> tuple[int, float]:
     parent = adapter_dir.parent
+    if adapter_activation_kind(adapter_dir) == "promoted":
+        manifest_file = parent / PROMOTION_FILENAME
+        return (3, manifest_file.stat().st_mtime)
     benchmark_file = parent / "benchmark_results.json"
     if benchmark_file.exists():
         return (2, benchmark_file.stat().st_mtime)
@@ -744,9 +789,13 @@ def resolve_gui_default_adapter_dir(project_root: Path) -> Optional[Path]:
         candidate = (project_root / candidate).resolve()
     cfg = candidate / "adapter_config.json"
     weights = candidate / "adapter_model.safetensors"
-    if cfg.exists() and weights.exists():
+    if cfg.exists() and weights.exists() and adapter_activation_kind(candidate) is not None:
         return candidate.resolve()
-    logging.warning("Ignoring invalid GUI default adapter pointer %s -> %s", pointer_path, candidate)
+    logging.warning(
+        "Ignoring unvalidated GUI default adapter pointer %s -> %s",
+        pointer_path,
+        candidate,
+    )
     return None
 
 
@@ -772,7 +821,28 @@ def find_latest_adapter_dir(project_root: Path) -> Path:
                 candidates[str(candidate.resolve())] = candidate.resolve()
     if not candidates:
         raise FileNotFoundError("Could not find any Qwen adapter directory under artifacts.")
-    return max(candidates.values(), key=score_adapter_dir)
+    activation_kinds = {
+        candidate: adapter_activation_kind(candidate)
+        for candidate in candidates.values()
+    }
+    promoted = [candidate for candidate, kind in activation_kinds.items() if kind == "promoted"]
+    if promoted:
+        return max(promoted, key=score_adapter_dir)
+    legacy = [candidate for candidate, kind in activation_kinds.items() if kind == "legacy"]
+    if legacy:
+        logging.warning(
+            "No content-addressed promoted Qwen adapter was found; using an explicitly "
+            "recognized legacy adapter."
+        )
+        return max(legacy, key=score_adapter_dir)
+    logging.warning(
+        "Ignoring %d unpromoted, revoked, candidate, or unrecognized Qwen adapter(s).",
+        len(candidates),
+    )
+    raise FileNotFoundError(
+        "Could not find a validated promoted Qwen adapter or an explicitly recognized "
+        "legacy adapter under artifacts."
+    )
 
 
 def resolve_adapter_dir(project_root: Path, explicit_adapter_dir: str) -> Path:

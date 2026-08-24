@@ -7175,6 +7175,16 @@ class ChampionNetExpertChoice(nn.Module):
         layers.append(base.layers[11])
         self.layers = nn.ModuleList(layers)
 
+    # A `def forward(self, x):` line was lost here at some point, leaving the
+    # body's `return x` stranded at the end of `__init__`. The class therefore
+    # raised `NameError: name 'x' is not defined` on construction and had no
+    # forward at all -- `build_model("champion_expert_choice")` could never
+    # return an object. It went unnoticed because the byte-parity gate compares
+    # `runtime_python/model_variants.py` against this file, so it reported the
+    # identical break as "current", and no test constructs this variant.
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
         return x
 
 
@@ -7555,7 +7565,12 @@ def build_model(
         )
         return ChampionNetMega(
             expansion_dim=expansion_dim,
-            extra_expansion_dim=extra_expansion_dim,
+            # `extra_dim` is computed three lines above and was then discarded:
+            # this passed the raw `extra_expansion_dim`, which defaults to None,
+            # so `build_model("megalarge")` with no explicit dims reached
+            # `torch.empty(out_dim, None)` and raised TypeError. Every sibling
+            # size -- ultralarge, xxxlarge -- passes the computed value.
+            extra_expansion_dim=extra_dim,
             third_expansion_dim=third_dim,
             fourth_expansion_dim=fourth_dim,
             fifth_expansion_dim=fifth_dim,

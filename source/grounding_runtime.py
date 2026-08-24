@@ -7,6 +7,7 @@ import json
 import math
 import re
 import sys
+import unicodedata
 from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
 from pathlib import Path
@@ -15,7 +16,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 GROUNDING_SCHEMA_VERSION = "supermix-grounding-v1"
-GROUNDING_RUNTIME_VERSION = "supermix-grounding-runtime-v1"
+GROUNDING_RUNTIME_VERSION = "supermix-grounding-runtime-v6"
+VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION = "supermix-verified-answer-receipt-v2"
 
 MAX_QUERY_CHARS = 4000
 MAX_EXTERNAL_QUERY_CHARS = 400
@@ -27,6 +29,7 @@ MAX_ARITHMETIC_DEPTH = 12
 MAX_ARITHMETIC_OPERATIONS = 32
 MAX_ARITHMETIC_EXPONENT = 12
 MAX_ARITHMETIC_RESULT_BITS = 4096
+MAX_REASONING_QUERY_CHARS = 2000
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_'’-]*", re.IGNORECASE)
@@ -72,6 +75,18 @@ _STRICT_EVIDENCE_ONLY_RE = re.compile(
 _ARITHMETIC_PREFIX_RE = re.compile(
     r"^\s*(?:what\s+is|calculate|compute|evaluate|work\s+out|solve(?:\s+the\s+expression)?)"
     r"\s*[:=]?\s*(?P<expression>.+?)\s*$",
+    re.IGNORECASE,
+)
+_ARITHMETIC_REQUEST_SUFFIX_RE = re.compile(
+    r"\s*(?:[?!.]\s*|\band\s+)(?:please\s+)?(?:"
+    r"explain\s+(?:(?:your|the)\s+)?(?:reasoning|working|steps)"
+    r"|show\s+(?:(?:your|the)\s+)?(?:work|working|steps)"
+    r"|(?:verify|check)\s+(?:(?:the|your)\s+)?(?:answer|result|calculation|work)"
+    r")\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+_VERIFY_RESULT_RE = re.compile(
+    r"\b(?:verify|check)\s+(?:(?:the|your)\s+)?(?:answer|result|calculation|work)\b",
     re.IGNORECASE,
 )
 _ARITHMETIC_ALLOWED_RE = re.compile(r"^[0-9eE\s+\-*/().%^]+$")
@@ -198,8 +213,371 @@ _SHOW_WORK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The reasoning engine is optional and can be supplied by a packaged sibling.
+# Recheck the narrow probability/prediction assumptions at this grounding
+# boundary so a stale or caller-replaced engine cannot acquire answer-rewrite
+# authority from an inapplicable computation.
+_REASONING_FAIR_DIE_RE = re.compile(
+    r"\b(?:a\s+)?(?:standard\s+fair\s+die|fair\s+(?:(?P<sides>\d{1,3})|six)[ -]sided\s+die)\b",
+    re.IGNORECASE,
+)
+_REASONING_PARITY_RE = re.compile(r"\b(?P<parity>odd|even)(?:\s+number)?\b", re.IGNORECASE)
+_REASONING_EQUIPROBABLE_RE = re.compile(
+    r"\b(?:equally\s+likely|equiprobable)\b|"
+    r"\buniform(?:ly)?\s+(?:at\s+)?random\b|"
+    r"\bfair\s+(?:experiment|selection|cases?|outcomes?)\b",
+    re.IGNORECASE,
+)
+_REASONING_UNEQUAL_PROBABILITY_RE = re.compile(
+    r"\b(?:unequal(?:ly)?|weighted|biased|unfair|non[- ]?uniform|"
+    r"different\s+(?:probabilities|rates)|not\s+(?:a\s+)?fair)\b|"
+    r"\b(?:not|isn't|aren't|without)\s+(?:equally\s+likely|equiprobable|"
+    r"uniform(?:ly)?(?:\s+(?:at\s+)?random)?)\b",
+    re.IGNORECASE,
+)
+_REASONING_UNSUPPORTED_PROBABILITY_EVENT_RE = re.compile(
+    r"\b(?:not|except|excluding|other\s+than)\b|"
+    r"\b(?:numbered|labelled|labeled)\b|\bfaces?\s*(?:are|=|:)",
+    re.IGNORECASE,
+)
+_REASONING_REPEATED_TRIAL_RE = re.compile(
+    r"\b(?:twice|thrice|again|another\s+(?:time|roll|flip|toss)|"
+    r"multiple\s+(?:times|rolls?|flips?|tosses?)|repeated(?:ly)?)\b|"
+    r"\b(?:[2-9]\d{0,3}|two|three|four|five|six|seven|eight|nine|ten)\s+"
+    r"(?:(?:coin\s+)?(?:flips?|tosses?)|(?:die\s+)?rolls?|"
+    r"(?:fair\s+)?(?:\d{1,3}[ -]sided\s+)?dice)\b|"
+    r"\b(?:roll(?:ed|ing)?|flip(?:ped|ping)?|toss(?:ed|ing)?)\b[^?.]{0,36}\b"
+    r"(?:[2-9]\d{0,3}|two|three|four|five|six|seven|eight|nine|ten)\s+times?\b|"
+    r"\b(?:both|each)\s+(?:of\s+the\s+)?(?:rolls?|flips?|tosses?)\b",
+    re.IGNORECASE,
+)
+_REASONING_ASSUMPTION_CLAUSE_RE = re.compile(
+    r"\b(?:assuming|assume|suppose(?:\s+that)?|under\s+the\s+assumption\s+that)\b"
+    r"(?P<body>[^.;?!]{1,240})",
+    re.IGNORECASE,
+)
+_REASONING_IID_RE = re.compile(
+    r"\b(?:i\s*\.?\s*i\s*\.?\s*d\s*\.?|independent\s+and\s+identically\s+distributed)\b",
+    re.IGNORECASE,
+)
+_REASONING_INDEPENDENCE_RE = re.compile(r"\bindependent(?:ly)?\b", re.IGNORECASE)
+_REASONING_STATIONARITY_RE = re.compile(
+    r"\b(?:same|constant|fixed|unchanged|stationary)\s+"
+    r"(?:(?:underlying|success|event)\s+){0,2}(?:probability|rate)\b|"
+    r"\b(?:probability|rate)\s+(?:is|remains|stays)\s+"
+    r"(?:the\s+)?(?:same|constant|fixed|unchanged|stationary)\b",
+    re.IGNORECASE,
+)
+_REASONING_NEGATED_ASSUMPTION_RE = re.compile(
+    r"\b(?:not|never|without|isn't|aren't|wasn't|weren't)\s+"
+    r"(?:(?:mutually|statistically)\s+)?(?:i\s*\.?\s*i\s*\.?\s*d\s*\.?|"
+    r"independent|identically\s+distributed|stationary|constant|fixed|unchanged|"
+    r"the\s+same)\b|"
+    r"\b(?:dependent|non[- ]?independent|non[- ]?stationary|non[- ]?iid)\b|"
+    r"\b(?:changing|varying|different|unknown)\s+(?:success\s+)?(?:probability|rate)\b|"
+    r"\b(?:probability|rate)\s+(?:is|may\s+be|can\s+be|could\s+be)?\s*"
+    r"(?:changing|varying|different|unknown)\b|"
+    r"\b(?:may|can|could)\s+change\b",
+    re.IGNORECASE,
+)
+_REASONING_NEXT_TRIAL_RE = re.compile(r"\bnext\s+(?:trial|outcome)\b", re.IGNORECASE)
+_REASONING_EMPIRICAL_COUNTS_RE = re.compile(
+    r"\b\d{1,10}\s+success(?:es)?\s+(?:in|out\s+of)\s+"
+    r"\d{1,10}\s+(?:bernoulli\s+)?trials?\b",
+    re.IGNORECASE,
+)
+_REASONING_REQUEST_CUE_RE = re.compile(
+    r"\b(?:what\s+(?:is|are)|what's|calculate|compute|derive|evaluate|find|solve|"
+    r"determine|work\s+out|convert|give(?:\s+me)?|provide|return|tell\s+me|show(?:\s+me)?)\b",
+    re.IGNORECASE,
+)
+_REASONING_NON_CALCULATION_RE = re.compile(
+    r"\b(?:word|term|phrase|definition|meaning|concept|conceptual|quote|quoted|"
+    r"text|string|occurrence)\b",
+    re.IGNORECASE,
+)
+_REASONING_NEGATED_REQUEST_RE = re.compile(
+    r"\b(?:do\s+not|don't|never|not|without)\b",
+    re.IGNORECASE,
+)
+_REASONING_REQUEST_CANCELLATION_RE = re.compile(
+    r"\b(?:do\s+not|don't|never)\s+"
+    r"(?:calculate|compute|solve|answer|evaluate|determine|work\s+out)\b",
+    re.IGNORECASE,
+)
+_REASONING_LATE_CORRECTION_RE = re.compile(
+    r"[.!?]\s*(?:actually\b|correction\b|no(?:\s|,)|rather\b|instead\b)",
+    re.IGNORECASE,
+)
+_REASONING_UNTRUSTED_PROBLEM_DATA_RE = re.compile(
+    r"\b(?:do\s+not|don't|never)\s+use\b|"
+    r"\bignore\s+(?:the\s+)?(?:previous|prior|quoted|following|example|data)\b|"
+    r"\b(?:quoted\s+)?(?:text|data|example)\s+(?:is|are)\s+untrusted\b|"
+    r"\bnot\s+(?:an?\s+)?instructions?\b",
+    re.IGNORECASE,
+)
+_REASONING_EXCLUDED_SETUP_RE = re.compile(
+    r"\b(?:ignore|discard|exclude|omit)\b|"
+    r"\b(?:do\s+not|don't|never)\s+(?:consider|include|use|rely\s+on)\b|"
+    r"\b(?:incorrect|invalid|untrusted|irrelevant|decoy|counterexample|fake|"
+    r"hypothetical|alleged|blockquote|code\s+example|quoted\s+example|markdown\s+quote)\b|"
+    r"\b(?:should|must)\s+not\s+count\b|"
+    r"\b(?:neither|nor|without|except|excluding|other\s+than)\b|"
+    r"\bset\s+aside\b|\bset\s+(?:it|them|these|those|the\s+values?)\s+aside\b|"
+    r"\bdo\s+not\s+take\s+into\s+account\b|"
+    r"\b(?:just|only)\s+an?\s+example\b|"
+    r"\b(?:for|as)\s+comparison\s+only\b",
+    re.IGNORECASE,
+)
+_REASONING_UNCONSUMED_ACTION_RE = re.compile(
+    r"\b(?:translate|summari[sz]e|write|compose|describe|define|definition|discuss|"
+    r"explain|list|create|draw|sing|haiku|poem|story|benefits?|useful|real[- ]world\s+use|"
+    r"recommend|compare|analy[sz]e|critique|proofread|suggest|format|generate)\b",
+    re.IGNORECASE,
+)
+_REASONING_COORDINATED_TAIL_RE = re.compile(
+    r"(?:\band\b|\balso\b|\bthen\b|;)\s*"
+    r"(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?P<next>[a-z]+|\d+)",
+    re.IGNORECASE,
+)
+_REASONING_SAFE_COORDINATED_TASK_WORDS = frozenset(
+    {
+        "acceleration", "area", "base", "current", "day", "days", "diameter",
+        "difference", "distance", "energy", "failure", "failures", "force",
+        "height", "hour", "hours", "january", "february", "march", "april",
+        "may", "june", "july", "august", "september", "october", "november",
+        "december", "length", "mass", "minute", "minutes", "outcome", "outcomes",
+        "perimeter", "probability", "radius", "rate", "resistance", "speed",
+        "success", "successes", "sum", "tax", "time", "total", "trial", "trials",
+        "value", "voltage", "volume", "width",
+    }
+)
+_REASONING_ALLOWED_ACTION_RE = re.compile(
+    r"\b(?:explain\s+(?:(?:your|the)\s+)?(?:reasoning|working|steps)|"
+    r"show\s+(?:(?:your|the)\s+)?(?:work|working|steps)|"
+    r"(?:verify|check)\s+(?:(?:the|your)\s+)?(?:answer|result|calculation|work))\b",
+    re.IGNORECASE,
+)
+_REASONING_AUTHORITATIVE_QUOTED_INPUT_RE = re.compile(
+    r"\b(?:use|treat)\s+(?:the|this)\s+(?:quoted|following)\s+"
+    r"(?:problem|text|example|data)\s+(?:as\s+)?(?:the\s+)?"
+    r"(?:authoritative|input|given\s+data)\b",
+    re.IGNORECASE,
+)
+_REASONING_QUOTED_SPAN_RE = re.compile(
+    r'''(?:"[^"\n]{0,2000}"|`[^`\n]{0,2000}`|'''
+    r'''\u201c[^\u201d\n]{0,2000}\u201d|\u2018[^\u2019\n]{0,2000}\u2019|'''
+    r'''\u00ab[^\u00bb\n]{0,2000}\u00bb|\u300c[^\u300d\n]{0,2000}\u300d|'''
+    r'''\u300e[^\u300f\n]{0,2000}\u300f|'''
+    r'''(?<![a-z0-9])'[^'\n]{0,2000}'(?![a-z0-9]))''',
+    re.IGNORECASE,
+)
+_REASONING_QUOTE_DELIMITER_RE = re.compile(
+    r'''["`\u201c\u201d\u2018\u00ab\u00bb\u300c\u300d\u300e\u300f]|'''
+    r'''(?<![a-z0-9])['\u2019]|['\u2019](?![a-z0-9])''',
+    re.IGNORECASE,
+)
+_REASONING_CLAUSE_RE = re.compile(r"[^.;?!\n]+")
+_REASONING_HORN_SHAPE_RE = re.compile(
+    r"^facts\s*:.*\brules\s*:.*\bquery\s*:",
+    re.IGNORECASE,
+)
+_REASONING_POSITIVE_NUMBER = r"(?:\d+(?:\.\d+)?)"
+_REASONING_BARE_IN_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s+in\b",
+    re.IGNORECASE,
+)
+_REASONING_MASS_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:kilograms?|kg|milligrams?|mg|grams?|g)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_VOLUME_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:cubic\s+meters?|m\s*\^?\s*3|m3|cubic\s+centimeters?|"
+    r"cm\s*\^?\s*3|cm3|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_ACCELERATION_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:m\s*/\s*s\s*(?:\^\s*2|2|\u00b2)|met(?:er|re)s?\s+per\s+second\s+squared)"
+    r"(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_SPEED_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:m\s*/\s*s|met(?:er|re)s?\s+per\s+second|km\s*/\s*h|kph|kmh|"
+    r"kilomet(?:er|re)s?\s+per\s+hour)(?!\s*(?:\^\s*2|2|\u00b2))(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_RESISTANCE_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:kiloohms?|kohms?|k\s*ohms?|ohms?)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_CURRENT_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:milliamperes?|milliamps?|ma|amperes?|amps?|a)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_VOLTAGE_QUANTITY_RE = re.compile(
+    rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}\s*"
+    r"(?:millivolts?|mv|volts?|v)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_REASONING_NEWTON_CONTEXT_RE = re.compile(
+    r"\b(?:net\s+force|newton(?:'s)?\s+second\s+law)\b|"
+    r"\bf\s*=\s*m\s*(?:\*|x)?\s*a\b",
+    re.IGNORECASE,
+)
+_REASONING_FORCE_CAVEAT_RE = re.compile(
+    r"\b(?:friction(?:al)?|applied\s+force|tension|drag|air\s+resistance|"
+    r"normal\s+force|weight|gravity|incline|slope|force\s+components?|"
+    r"multiple\s+forces?|several\s+forces?|two\s+forces?|three\s+forces?)\b",
+    re.IGNORECASE,
+)
+_REASONING_DENSITY_CAVEAT_RE = re.compile(
+    r"\b(?:mixture|layered|composite|porous|non[- ]?uniform|variable\s+density|"
+    r"relative\s+density|specific\s+gravity|buoyancy|multiple\s+(?:materials?|phases?))\b",
+    re.IGNORECASE,
+)
+_REASONING_KINETIC_CAVEAT_RE = re.compile(
+    r"\b(?:rotational|rolling|angular|relativistic|collision|system\s+of|"
+    r"multiple\s+objects?|several\s+objects?)\b",
+    re.IGNORECASE,
+)
+_REASONING_OHM_CONTEXT_RE = re.compile(
+    r"\bohm(?:'s)?\s+law\b|\bv\s*=\s*i\s*(?:\*|x)?\s*r\b|"
+    r"\bi\s*=\s*v\s*/\s*r\b|\br\s*=\s*v\s*/\s*i\b",
+    re.IGNORECASE,
+)
+_REASONING_SIMPLE_RESISTOR_RE = re.compile(
+    r"\b(?:(?:single|one|same)\s+(?:resistor|resistive\s+element|element)|"
+    r"a\s+[^.,;?]{0,32}\b(?:ohms?)\s+(?:resistor|element))\b",
+    re.IGNORECASE,
+)
+_REASONING_CIRCUIT_CAVEAT_RE = re.compile(
+    r"\b(?:branches?|series|parallel|network|multiple|multi[- ]component|"
+    r"equivalent\s+resistance|two\s+resistors?|three\s+resistors?|four\s+resistors?)\b",
+    re.IGNORECASE,
+)
+_REASONING_GEOMETRY_METHODS = frozenset(
+    {
+        "rectangle_area",
+        "rectangle_perimeter",
+        "triangle_area",
+        "circle_area",
+        "circle_circumference",
+        "pythagorean_hypotenuse",
+        "pythagorean_missing_leg",
+    }
+)
+_REASONING_PHYSICS_METHODS = frozenset(
+    {
+        "newtons_second_law_force",
+        "density_mass_over_volume",
+        "kinetic_energy",
+        "ohms_law_voltage",
+        "ohms_law_current",
+        "ohms_law_resistance",
+    }
+)
+_REASONING_SCIENCE_METHOD_TARGETS = {
+    "constant_acceleration.final_velocity": (
+        "constant_acceleration",
+        "final_velocity",
+    ),
+    "constant_acceleration.displacement": (
+        "constant_acceleration",
+        "displacement",
+    ),
+    "ideal_gas.pressure": ("ideal_gas", "pressure"),
+    "ideal_gas.volume": ("ideal_gas", "volume"),
+    "ideal_gas.temperature": ("ideal_gas", "temperature"),
+    "ideal_gas.amount": ("ideal_gas", "amount"),
+}
+_SCIENCE_PLAN_CHECK_KEYS = (
+    "registry_integrity",
+    "plan_integrity",
+    "input_bindings",
+    "dimensions",
+    "domain",
+    "substitution",
+)
+_SCIENCE_PLAN_AUTHORITY_KEYS = (
+    "controls_compute",
+    "controls_routes",
+    "controls_interaction_strategy",
+    "controls_tools",
+    "controls_permissions",
+    "controls_safety",
+)
+_SCIENCE_RECEIPT_AUTHORITY_KEYS = (
+    *_SCIENCE_PLAN_AUTHORITY_KEYS,
+    "controls_promotion",
+)
+
+_REASONING_RECEIPT_REASON_CATEGORIES = {
+    "query_too_long": "unsupported_or_ambiguous",
+    "empty_query": "not_applicable",
+    "ambiguous_or_superseded_request": "unsupported_or_ambiguous",
+    "untrusted_problem_data": "unsupported_or_ambiguous",
+    "multiple_calculation_requests": "unsupported_or_ambiguous",
+    "mixed_or_unconsumed_request": "unsupported_or_ambiguous",
+    "no_quantities": "not_applicable",
+    "no_applicable_solver": "unsupported_or_ambiguous",
+    "engine_unavailable": "engine_unavailable",
+    "engine_error": "engine_unavailable",
+    "engine_bad_result": "unrecognized_result",
+    "geometry_intent_not_established": "unsupported_or_ambiguous",
+    "physics_applicability_not_established": "unsupported_or_ambiguous",
+    "probability_assumptions_not_established": "assumptions_not_established",
+    "repeated_trials_not_single_trial": "assumptions_not_established",
+    "probability_event_not_established": "assumptions_not_established",
+    "finite_bernoulli_model_not_established": "assumptions_not_established",
+    "prediction_assumptions_not_established": "assumptions_not_established",
+    "science_plan_not_established": "assumptions_not_established",
+    "science_plan_result_mismatch": "verification_failed",
+    "solver_consensus_incomplete": "verification_failed",
+    "reasoning_result_mismatch": "verification_failed",
+    "high_stakes_override_suppressed": "high_stakes_suppressed",
+    "unverified_solution": "verification_failed",
+    "verified_non_overriding_estimate": "model_conditional",
+    "verified_conflict": "conflict",
+    "verified_solution": "verified",
+}
+_ARITHMETIC_RECEIPT_REASON_CATEGORIES = {
+    "not_explicit_arithmetic": "not_applicable",
+    "solved_exactly": "verified",
+    "invalid_syntax": "unsupported_or_ambiguous",
+    "arithmetic_error": "verification_failed",
+    "division_by_zero": "unsupported_or_ambiguous",
+    "exponent_too_large": "bounded_limit",
+    "expression_too_deep": "bounded_limit",
+    "fractional_exponent_not_supported": "unsupported_or_ambiguous",
+    "literal_too_large": "bounded_limit",
+    "non_finite_literal": "unsupported_or_ambiguous",
+    "result_too_large": "bounded_limit",
+    "too_many_nodes": "bounded_limit",
+    "too_many_operations": "bounded_limit",
+    "unsupported_literal": "unsupported_or_ambiguous",
+    "unsupported_operator": "unsupported_or_ambiguous",
+    "unsupported_syntax": "unsupported_or_ambiguous",
+}
+_RECEIPT_SELECTION_REASON_BY_GUARD = {
+    "explicit_arithmetic_exact": "exact_arithmetic",
+    "verified_reasoning_solution": "verified_reasoning",
+    "verified_model_conditional_estimate": "model_conditional_estimate",
+    "high_stakes_suppressed": "high_stakes_suppressed",
+    "strict_evidence_conflicting": "strict_evidence_precedence",
+    "strict_evidence_no_evidence": "strict_evidence_precedence",
+    "strict_evidence_insufficient": "strict_evidence_precedence",
+}
+
 _PROMPT_UNDERSTANDING_MODULE: Any = None
 _REASONING_MODULE: Any = None
+_TRUSTED_REASONING_MODULE: Any = None
+_TRUSTED_SCIENCE_PLAN_MODULE: Any = None
 
 
 def _load_prompt_understanding_module() -> Any:
@@ -247,6 +625,477 @@ def _load_reasoning_module() -> Any:
     return module
 
 
+def _reasoning_validator(name: str, query: Any, *args: Any) -> Any:
+    """Call a current sibling admission validator; absence fails closed."""
+
+    module = _load_reasoning_module()
+    validator = getattr(module, name, None) if module is not None else None
+    if not callable(validator):
+        return None
+    try:
+        return validator(query, *args)
+    except Exception:
+        return None
+
+
+def _load_trusted_reasoning_module() -> Any:
+    """Load the local reasoning implementation outside replaceable wrappers."""
+
+    global _TRUSTED_REASONING_MODULE
+    if _TRUSTED_REASONING_MODULE is not None:
+        return _TRUSTED_REASONING_MODULE
+    module_path = Path(__file__).with_name("reasoning_engine.py")
+    module_name = f"_supermix_{module_path.parent.name}_trusted_reasoning_engine"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(module_name, module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    _TRUSTED_REASONING_MODULE = module
+    return module
+
+
+def _load_trusted_science_plan_module() -> Any:
+    """Load the local closed-world science-plan implementation fail-closed."""
+
+    global _TRUSTED_SCIENCE_PLAN_MODULE
+    if _TRUSTED_SCIENCE_PLAN_MODULE is not None:
+        return _TRUSTED_SCIENCE_PLAN_MODULE
+    module_path = Path(__file__).with_name("science_plan.py")
+    module_name = f"_supermix_{module_path.parent.name}_trusted_science_plan"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(module_name, module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    _TRUSTED_SCIENCE_PLAN_MODULE = module
+    return module
+
+
+def _trusted_reasoning_result(query: Any) -> Optional[Dict[str, Any]]:
+    """Freshly recompute one prompt with the packaged canonical implementation."""
+
+    module = _load_trusted_reasoning_module()
+    solver = getattr(module, "solve_problem", None) if module is not None else None
+    if not callable(solver):
+        return None
+    try:
+        result = solver(str(query or ""), tier="auto")
+    except Exception:
+        return None
+    return dict(result) if isinstance(result, Mapping) else None
+
+
+def _science_plan_contract() -> Optional[Dict[str, str]]:
+    module = _load_trusted_science_plan_module()
+    if module is None:
+        return None
+    names = (
+        "SCIENCE_PLAN_SCHEMA_VERSION",
+        "SCIENCE_PLAN_ENGINE_VERSION",
+        "SCIENCE_PLAN_RECEIPT_SCHEMA_VERSION",
+        "SCIENCE_FORMULA_REGISTRY_VERSION",
+        "SCIENCE_FORMULA_REGISTRY_SHA256",
+    )
+    values = {name: getattr(module, name, None) for name in names}
+    if any(not isinstance(value, str) or not value for value in values.values()):
+        return None
+    registry_sha = values["SCIENCE_FORMULA_REGISTRY_SHA256"]
+    if re.fullmatch(r"[0-9a-f]{64}", registry_sha) is None:
+        return None
+    return values
+
+
+def _science_authority_is_false(value: Any, keys: Sequence[str]) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and all(value.get(key) is False for key in keys)
+    )
+
+
+def _science_count(value: Any, limit: int) -> Optional[int]:
+    if type(value) is not int or value < 0 or value > limit:
+        return None
+    return value
+
+
+def _science_hash(value: Any) -> str:
+    text = value if isinstance(value, str) else ""
+    return text if re.fullmatch(r"[0-9a-f]{64}", text) is not None else ""
+
+
+def _science_summary_from_claim(
+    diagnostics: Any,
+    receipt: Any,
+    expected_formula: str,
+) -> Optional[Dict[str, Any]]:
+    """Admit only the integrity-bound, prompt-free science-plan contract."""
+
+    if expected_formula not in _REASONING_SCIENCE_METHOD_TARGETS:
+        return None
+    if not isinstance(diagnostics, Mapping) or not isinstance(receipt, Mapping):
+        return None
+    contract = _science_plan_contract()
+    if contract is None:
+        return None
+    scenario, target = _REASONING_SCIENCE_METHOD_TARGETS[expected_formula]
+    if not (
+        diagnostics.get("schema_version") == contract["SCIENCE_PLAN_SCHEMA_VERSION"]
+        and diagnostics.get("engine_version") == contract["SCIENCE_PLAN_ENGINE_VERSION"]
+        and diagnostics.get("registry_version")
+        == contract["SCIENCE_FORMULA_REGISTRY_VERSION"]
+        and diagnostics.get("registry_sha256")
+        == contract["SCIENCE_FORMULA_REGISTRY_SHA256"]
+        and diagnostics.get("scenario") == scenario
+        and diagnostics.get("target") == target
+        and diagnostics.get("formula_id") == expected_formula
+        and diagnostics.get("reason") == "verified_science_plan"
+        and diagnostics.get("attempted") is True
+        and diagnostics.get("solved") is True
+        and diagnostics.get("override_allowed") is True
+        and diagnostics.get("verification_passed") is True
+        and diagnostics.get("model_conditional") is True
+        and diagnostics.get("assumptions_explicit") is True
+        and diagnostics.get("calibration_claimed") is False
+        and _science_authority_is_false(
+            diagnostics.get("authority"), _SCIENCE_PLAN_AUTHORITY_KEYS
+        )
+    ):
+        return None
+    quantities = _science_count(diagnostics.get("quantities"), 8)
+    steps = _science_count(diagnostics.get("steps"), 4)
+    checks = receipt.get("checks")
+    epistemics = receipt.get("epistemics")
+    formula_ids = receipt.get("formula_ids")
+    query_sha256 = _science_hash(receipt.get("query_sha256"))
+    plan_sha256 = _science_hash(receipt.get("plan_sha256"))
+    if not (
+        quantities is not None
+        and steps is not None
+        and receipt.get("schema_version")
+        == contract["SCIENCE_PLAN_RECEIPT_SCHEMA_VERSION"]
+        and receipt.get("decision") == "verified"
+        and receipt.get("scenario") == scenario
+        and receipt.get("target") == target
+        and isinstance(formula_ids, list)
+        and formula_ids == [expected_formula]
+        and receipt.get("registry_version")
+        == contract["SCIENCE_FORMULA_REGISTRY_VERSION"]
+        and receipt.get("registry_sha256")
+        == contract["SCIENCE_FORMULA_REGISTRY_SHA256"]
+        and bool(query_sha256)
+        and bool(plan_sha256)
+        and isinstance(checks, Mapping)
+        and set(checks) == set(_SCIENCE_PLAN_CHECK_KEYS)
+        and all(checks.get(key) is True for key in _SCIENCE_PLAN_CHECK_KEYS)
+        and isinstance(epistemics, Mapping)
+        and epistemics.get("model_conditional") is True
+        and epistemics.get("assumptions_explicit") is True
+        and epistemics.get("calibration_claimed") is False
+        and receipt.get("diagnostic_only") is True
+        and _science_authority_is_false(
+            receipt.get("authority"), _SCIENCE_PLAN_AUTHORITY_KEYS
+        )
+    ):
+        return None
+    return {
+        "present": True,
+        "schema_version": contract["SCIENCE_PLAN_SCHEMA_VERSION"],
+        "engine_version": contract["SCIENCE_PLAN_ENGINE_VERSION"],
+        "receipt_schema_version": contract["SCIENCE_PLAN_RECEIPT_SCHEMA_VERSION"],
+        "registry_version": contract["SCIENCE_FORMULA_REGISTRY_VERSION"],
+        "registry_sha256": contract["SCIENCE_FORMULA_REGISTRY_SHA256"],
+        "scenario": scenario,
+        "target": target,
+        "formula_id": expected_formula,
+        "query_sha256": query_sha256,
+        "plan_sha256": plan_sha256,
+        "checks": {key: True for key in _SCIENCE_PLAN_CHECK_KEYS},
+        "counts": {"quantities": quantities, "steps": steps},
+        "verification": {
+            "passed": True,
+            "independent": bool(diagnostics.get("verification_independent", False)),
+        },
+        "epistemics": {
+            "model_conditional": True,
+            "assumptions_explicit": True,
+            "calibration_claimed": False,
+        },
+        "diagnostic_only": True,
+        "authority": {key: False for key in _SCIENCE_RECEIPT_AUTHORITY_KEYS},
+    }
+
+
+def _trusted_science_summary(query: Any, expected_formula: str) -> Optional[Dict[str, Any]]:
+    """Reparse the complete raw prompt and execute its registry-bound plan."""
+
+    module = _load_trusted_science_plan_module()
+    parser = getattr(module, "parse_science_scenario", None) if module is not None else None
+    solver = getattr(module, "solve_science_scenario", None) if module is not None else None
+    diagnostics_fn = getattr(module, "science_plan_diagnostics", None) if module is not None else None
+    if not (callable(parser) and callable(solver) and callable(diagnostics_fn)):
+        return None
+    raw_query = str(query or "")
+    canonical_query = _canonical_science_query(raw_query)
+    try:
+        plan = parser(canonical_query)
+        result = solver(canonical_query)
+        diagnostics = diagnostics_fn(result)
+    except Exception:
+        return None
+    if not isinstance(plan, Mapping) or not isinstance(result, Mapping):
+        return None
+    summary = _science_summary_from_claim(
+        diagnostics,
+        result.get("receipt"),
+        expected_formula,
+    )
+    if summary is None:
+        return None
+    expected_assumption = (
+        "constant_acceleration"
+        if summary["scenario"] == "constant_acceleration"
+        else "ideal_gas"
+    )
+    steps = plan.get("steps")
+    if not (
+        plan.get("schema_version") == summary["schema_version"]
+        and plan.get("registry_version") == summary["registry_version"]
+        and plan.get("registry_sha256") == summary["registry_sha256"]
+        and plan.get("scenario") == summary["scenario"]
+        and plan.get("target") == summary["target"]
+        and plan.get("assumptions") == [expected_assumption]
+        and isinstance(steps, list)
+        and len(steps) == 1
+        and isinstance(steps[0], Mapping)
+        and steps[0].get("formula_id") == expected_formula
+        and plan.get("query_sha256") == summary["query_sha256"]
+        and plan.get("plan_sha256") == summary["plan_sha256"]
+        and summary["query_sha256"]
+        == hashlib.sha256(canonical_query.encode("utf-8")).hexdigest()
+    ):
+        return None
+    return summary
+
+
+def _science_summary_is_safe(value: Any, expected_formula: str) -> bool:
+    """Validate an already-sanitized summary before emitting it in a receipt."""
+
+    if not isinstance(value, Mapping):
+        return False
+    contract = _science_plan_contract()
+    if contract is None or expected_formula not in _REASONING_SCIENCE_METHOD_TARGETS:
+        return False
+    scenario, target = _REASONING_SCIENCE_METHOD_TARGETS[expected_formula]
+    checks = value.get("checks")
+    counts = value.get("counts")
+    verification = value.get("verification")
+    epistemics = value.get("epistemics")
+    expected_keys = {
+        "present",
+        "schema_version",
+        "engine_version",
+        "receipt_schema_version",
+        "registry_version",
+        "registry_sha256",
+        "scenario",
+        "target",
+        "formula_id",
+        "query_sha256",
+        "plan_sha256",
+        "checks",
+        "counts",
+        "verification",
+        "epistemics",
+        "diagnostic_only",
+        "authority",
+    }
+    return bool(
+        set(value) == expected_keys
+        and value.get("present") is True
+        and value.get("schema_version") == contract["SCIENCE_PLAN_SCHEMA_VERSION"]
+        and value.get("engine_version") == contract["SCIENCE_PLAN_ENGINE_VERSION"]
+        and value.get("receipt_schema_version")
+        == contract["SCIENCE_PLAN_RECEIPT_SCHEMA_VERSION"]
+        and value.get("registry_version")
+        == contract["SCIENCE_FORMULA_REGISTRY_VERSION"]
+        and value.get("registry_sha256")
+        == contract["SCIENCE_FORMULA_REGISTRY_SHA256"]
+        and value.get("scenario") == scenario
+        and value.get("target") == target
+        and value.get("formula_id") == expected_formula
+        and bool(_science_hash(value.get("query_sha256")))
+        and bool(_science_hash(value.get("plan_sha256")))
+        and isinstance(checks, Mapping)
+        and set(checks) == set(_SCIENCE_PLAN_CHECK_KEYS)
+        and all(checks.get(key) is True for key in _SCIENCE_PLAN_CHECK_KEYS)
+        and isinstance(counts, Mapping)
+        and set(counts) == {"quantities", "steps"}
+        and _science_count(counts.get("quantities"), 8) is not None
+        and _science_count(counts.get("steps"), 4) is not None
+        and isinstance(verification, Mapping)
+        and set(verification) == {"passed", "independent"}
+        and verification.get("passed") is True
+        and type(verification.get("independent")) is bool
+        and isinstance(epistemics, Mapping)
+        and epistemics
+        == {
+            "model_conditional": True,
+            "assumptions_explicit": True,
+            "calibration_claimed": False,
+        }
+        and value.get("diagnostic_only") is True
+        and _science_authority_is_false(
+            value.get("authority"), _SCIENCE_RECEIPT_AUTHORITY_KEYS
+        )
+    )
+
+
+def _empty_science_plan_receipt() -> Dict[str, Any]:
+    return {
+        "present": False,
+        "schema_version": "",
+        "engine_version": "",
+        "receipt_schema_version": "",
+        "registry_version": "",
+        "registry_sha256": "",
+        "scenario": "",
+        "target": "",
+        "formula_id": "",
+        "checks": {key: False for key in _SCIENCE_PLAN_CHECK_KEYS},
+        "counts": {"quantities": 0, "steps": 0},
+        "verification": {"passed": False, "independent": False},
+        "epistemics": {
+            "model_conditional": False,
+            "assumptions_explicit": False,
+            "calibration_claimed": False,
+        },
+        "diagnostic_only": True,
+        "authority": {key: False for key in _SCIENCE_RECEIPT_AUTHORITY_KEYS},
+    }
+
+
+def _science_plan_receipt_section(
+    reasoning: Mapping[str, Any],
+    problem_class: str,
+    method: str,
+) -> Dict[str, Any]:
+    if (
+        problem_class != "scientific_scenario"
+        or method not in _REASONING_SCIENCE_METHOD_TARGETS
+    ):
+        return _empty_science_plan_receipt()
+    value = reasoning.get("science_plan")
+    if not _science_summary_is_safe(value, method):
+        return _empty_science_plan_receipt()
+    assert isinstance(value, Mapping)
+    checks = value["checks"]
+    counts = value["counts"]
+    verification = value["verification"]
+    return {
+        "present": True,
+        "schema_version": str(value["schema_version"]),
+        "engine_version": str(value["engine_version"]),
+        "receipt_schema_version": str(value["receipt_schema_version"]),
+        "registry_version": str(value["registry_version"]),
+        "registry_sha256": str(value["registry_sha256"]),
+        "scenario": str(value["scenario"]),
+        "target": str(value["target"]),
+        "formula_id": method,
+        "checks": {key: bool(checks[key]) for key in _SCIENCE_PLAN_CHECK_KEYS},
+        "counts": {
+            "quantities": int(counts["quantities"]),
+            "steps": int(counts["steps"]),
+        },
+        "verification": {
+            "passed": bool(verification["passed"]),
+            "independent": bool(verification["independent"]),
+        },
+        "epistemics": {
+            "model_conditional": True,
+            "assumptions_explicit": True,
+            "calibration_claimed": False,
+        },
+        "diagnostic_only": True,
+        "authority": {key: False for key in _SCIENCE_RECEIPT_AUTHORITY_KEYS},
+    }
+
+
+def _reasoning_result_matches_trusted(
+    claimed: Mapping[str, Any],
+    trusted: Mapping[str, Any],
+) -> bool:
+    """Bind hard-override authority to a fresh method/class/answer recompute."""
+
+    trusted_answer = trusted.get("answer")
+    claimed_answer = claimed.get("answer")
+    if not isinstance(trusted_answer, Mapping) or not isinstance(claimed_answer, Mapping):
+        return False
+    return bool(
+        claimed.get("schema_version") == trusted.get("schema_version")
+        and claimed.get("engine_version") == trusted.get("engine_version")
+        and claimed.get("problem_class") == trusted.get("problem_class")
+        and claimed.get("method") == trusted.get("method")
+        and claimed_answer.get("exact") == trusted_answer.get("exact")
+        and claimed_answer.get("display") == trusted_answer.get("display")
+        and claimed_answer.get("unit") == trusted_answer.get("unit")
+        and trusted.get("solved") is True
+        and trusted.get("override_allowed") is True
+        and _reasoning_consensus_complete(trusted)
+    )
+
+
+def _public_reasoning_result(result: Mapping[str, Any]) -> Dict[str, Any]:
+    """Remove prompt-derived bindings from the externally returned diagnostics."""
+
+    published = dict(result)
+    for key in ("science_plan", "science_plan_receipt"):
+        value = published.get(key)
+        if not isinstance(value, Mapping):
+            continue
+        redacted = dict(value)
+        redacted.pop("query_sha256", None)
+        redacted.pop("plan_sha256", None)
+        published[key] = redacted
+    return published
+
+
+def _reasoning_estimate_matches_trusted(
+    claimed: Mapping[str, Any],
+    trusted: Mapping[str, Any],
+) -> bool:
+    """Bind a selected estimate to a fresh canonical non-overriding result."""
+
+    trusted_answer = trusted.get("answer")
+    claimed_answer = claimed.get("answer")
+    verification = trusted.get("verification")
+    return bool(
+        isinstance(trusted_answer, Mapping)
+        and isinstance(claimed_answer, Mapping)
+        and isinstance(verification, Mapping)
+        and claimed.get("schema_version") == trusted.get("schema_version")
+        and claimed.get("engine_version") == trusted.get("engine_version")
+        and claimed.get("problem_class") == trusted.get("problem_class") == "prediction"
+        and claimed.get("method") == trusted.get("method") == "empirical_bernoulli_plugin"
+        and claimed_answer.get("exact") == trusted_answer.get("exact")
+        and claimed_answer.get("display") == trusted_answer.get("display")
+        and claimed_answer.get("unit") == trusted_answer.get("unit")
+        and trusted.get("solved") is True
+        and trusted.get("override_allowed") is False
+        and verification.get("checked") is True
+        and verification.get("passed") is True
+        and _reasoning_consensus_complete(trusted)
+    )
+
+
 def solve_reasoned_problem(query: Any, tier: str = "auto") -> Dict[str, Any]:
     """Run the deliberate reasoning engine, degrading to an empty attempt."""
 
@@ -254,14 +1103,240 @@ def solve_reasoned_problem(query: Any, tier: str = "auto") -> Dict[str, Any]:
     if module is None:
         return {"attempted": False, "solved": False, "override_allowed": False, "reason": "engine_unavailable"}
     try:
-        result = module.solve_problem(_clean_text(query, MAX_QUERY_CHARS), tier=tier)
+        result = module.solve_problem(str(query or ""), tier=tier)
     except Exception:  # pragma: no cover - defensive: never break a chat turn
         return {"attempted": False, "solved": False, "override_allowed": False, "reason": "engine_error"}
-    return dict(result) if isinstance(result, Mapping) else {
+    cooked = dict(result) if isinstance(result, Mapping) else {
         "attempted": False,
         "solved": False,
         "override_allowed": False,
         "reason": "engine_bad_result",
+    }
+    return _ground_reasoning_result(query, cooked)
+
+
+def _trusted_reasoning_diagnostics(result: Any) -> Dict[str, Any]:
+    """Sanitize a result with the canonical, allowlisted diagnostics contract."""
+
+    module = _load_trusted_reasoning_module()
+    diagnostics_fn = getattr(module, "reasoning_diagnostics", None) if module is not None else None
+    if not callable(diagnostics_fn):
+        return {}
+    try:
+        diagnostics = diagnostics_fn(result if isinstance(result, Mapping) else None)
+    except Exception:
+        return {}
+    return dict(diagnostics) if isinstance(diagnostics, Mapping) else {}
+
+
+def _receipt_count(value: Any) -> int:
+    if type(value) is not int:
+        return 0
+    return max(0, min(64, value))
+
+
+def build_verified_answer_receipt(
+    reasoning_result: Any,
+    arithmetic_result: Any = None,
+    *,
+    response_guard_reason: Any = "",
+) -> Dict[str, Any]:
+    """Build prompt-free, answer-free diagnostics for a deterministic selection.
+
+    The receipt is observational metadata only. It never contains the prompt,
+    computed answer, expression, proof steps, or evidence, and every string
+    derived from a result is admitted through a fixed allowlist.
+    """
+
+    reasoning = reasoning_result if isinstance(reasoning_result, Mapping) else {}
+    arithmetic = arithmetic_result if isinstance(arithmetic_result, Mapping) else {}
+    diagnostics = _trusted_reasoning_diagnostics(reasoning)
+    raw_reason = str(reasoning.get("reason") or "")
+    arithmetic_reason = str(arithmetic.get("reason") or "")
+    guard_reason = str(response_guard_reason or "")
+    selection_reason = _RECEIPT_SELECTION_REASON_BY_GUARD.get(
+        guard_reason,
+        "not_selected",
+    )
+
+    reasoning_attempted = bool(diagnostics.get("attempted"))
+    reasoning_claimed_solved = bool(diagnostics.get("solved"))
+    problem_class = str(diagnostics.get("problem_class") or "")
+    method = str(diagnostics.get("method") or "")
+    recognized_reasoning_result = bool(problem_class and method)
+    reasoning_solved = bool(reasoning_claimed_solved and recognized_reasoning_result)
+    reasoning_verified = bool(
+        diagnostics.get("verified") and reasoning_solved
+    )
+    reasoning_signal = bool(
+        reasoning_attempted
+        or reasoning_solved
+        or raw_reason
+        not in {"", "empty_query", "no_quantities"}
+    )
+    arithmetic_attempted = bool(arithmetic.get("attempted"))
+    arithmetic_solved = bool(arithmetic.get("solved"))
+
+    if selection_reason == "exact_arithmetic" and arithmetic_solved:
+        kind = "exact_arithmetic"
+    elif selection_reason == "verified_reasoning" and reasoning_solved:
+        kind = "deliberate_reasoning"
+    elif reasoning_solved:
+        kind = "deliberate_reasoning"
+    elif arithmetic_solved:
+        kind = "exact_arithmetic"
+    elif reasoning_signal:
+        kind = "deliberate_reasoning"
+    elif arithmetic_attempted:
+        kind = "exact_arithmetic"
+    else:
+        kind = "none"
+
+    if kind == "exact_arithmetic":
+        attempted = arithmetic_attempted
+        solved = arithmetic_solved
+        verified = arithmetic_solved
+        independent = False
+        receipt_problem_class = "arithmetic"
+        receipt_method = "bounded_exact_arithmetic"
+        reason_code = (
+            arithmetic_reason
+            if arithmetic_reason in _ARITHMETIC_RECEIPT_REASON_CATEGORIES
+            else ""
+        )
+        reason_category = _ARITHMETIC_RECEIPT_REASON_CATEGORIES.get(
+            reason_code,
+            "unrecognized_result" if attempted else "not_applicable",
+        )
+        model_conditional = False
+        assumptions_explicit = False
+        conflicting = False
+        consensus_paths = 0
+        reasoning_schema_version = ""
+        reasoning_engine_version = ""
+    elif kind == "deliberate_reasoning":
+        attempted = reasoning_attempted
+        solved = reasoning_solved
+        verified = reasoning_verified
+        independent = bool(
+            verified and diagnostics.get("verification_independent")
+        )
+        receipt_problem_class = problem_class if recognized_reasoning_result else ""
+        receipt_method = method if recognized_reasoning_result else ""
+        reason_code = (
+            raw_reason if raw_reason in _REASONING_RECEIPT_REASON_CATEGORIES else ""
+        )
+        reason_category = _REASONING_RECEIPT_REASON_CATEGORIES.get(
+            reason_code,
+            "unrecognized_result" if reasoning_signal else "not_applicable",
+        )
+        model_conditional = bool(
+            recognized_reasoning_result and diagnostics.get("model_conditional")
+        )
+        assumptions_explicit = bool(
+            recognized_reasoning_result and diagnostics.get("assumptions_explicit")
+        )
+        conflicting = bool(
+            recognized_reasoning_result and diagnostics.get("conflicting")
+        )
+        consensus_paths = (
+            _receipt_count(diagnostics.get("paths"))
+            if recognized_reasoning_result
+            else 0
+        )
+        reasoning_schema_version = str(diagnostics.get("schema_version") or "")
+        reasoning_engine_version = str(diagnostics.get("engine_version") or "")
+    else:
+        attempted = False
+        solved = False
+        verified = False
+        independent = False
+        receipt_problem_class = ""
+        receipt_method = ""
+        reason_code = ""
+        reason_category = "not_applicable"
+        model_conditional = False
+        assumptions_explicit = False
+        conflicting = False
+        consensus_paths = 0
+        reasoning_schema_version = ""
+        reasoning_engine_version = ""
+
+    if selection_reason in {
+        "high_stakes_suppressed",
+        "strict_evidence_precedence",
+    }:
+        reason_category = selection_reason
+
+    selected = bool(
+        verified
+        and (
+            (selection_reason == "exact_arithmetic" and kind == "exact_arithmetic")
+            or (selection_reason == "verified_reasoning" and kind == "deliberate_reasoning")
+            or (
+                selection_reason == "model_conditional_estimate"
+                and kind == "deliberate_reasoning"
+                and model_conditional
+            )
+        )
+    )
+    if selected and selection_reason == "model_conditional_estimate":
+        decision = "verified_estimate_selected"
+    elif selected and verified:
+        decision = "verified_selected"
+    elif verified:
+        decision = "verified_not_selected"
+    elif solved:
+        decision = "unverified_solution"
+    elif attempted or reasoning_signal:
+        decision = "abstained"
+    else:
+        decision = "not_attempted"
+    science_plan = _science_plan_receipt_section(
+        reasoning,
+        receipt_problem_class,
+        receipt_method,
+    )
+
+    return {
+        "schema_version": VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION,
+        "runtime_version": GROUNDING_RUNTIME_VERSION,
+        "kind": kind,
+        "decision": decision,
+        "selection_reason": selection_reason,
+        "selected": selected,
+        "attempted": bool(attempted),
+        "solved": bool(solved),
+        "problem_class": receipt_problem_class,
+        "method": receipt_method,
+        "reason_code": reason_code,
+        "reason_category": reason_category,
+        "reasoning_schema_version": reasoning_schema_version,
+        "reasoning_engine_version": reasoning_engine_version,
+        "verification": {
+            "passed": bool(verified),
+            "independent": bool(independent),
+        },
+        "epistemics": {
+            "model_conditional": bool(model_conditional),
+            "assumptions_explicit": bool(assumptions_explicit),
+            "calibration_claimed": False,
+        },
+        "consensus": {
+            "conflicting": bool(conflicting),
+            "paths": consensus_paths,
+        },
+        "science_plan": science_plan,
+        "diagnostic_only": True,
+        "authority": {
+            "controls_compute": False,
+            "controls_routes": False,
+            "controls_interaction_strategy": False,
+            "controls_tools": False,
+            "controls_permissions": False,
+            "controls_safety": False,
+            "controls_promotion": False,
+        },
     }
 
 
@@ -303,9 +1378,32 @@ def _profile_bool(
     return any(bool(section.get(key)) for key in keys)
 
 
+def _profile_high_stakes(profile: Mapping[str, Any]) -> bool:
+    """Interpret only explicit high-stakes facets from the prompt profile."""
+
+    return _profile_bool(profile, "knowledge", "high_stakes") or _profile_bool(
+        profile,
+        "safety",
+        "high_stakes",
+        "personal_crisis_signal",
+        "urgent_health_signal",
+    )
+
+
 def _clean_text(value: Any, limit: int) -> str:
-    cooked = re.sub(r"\s+", " ", str(value or "")).strip()
+    cooked = re.sub(
+        r"\s+",
+        " ",
+        unicodedata.normalize("NFKC", str(value or "")),
+    ).strip()
     return cooked[: max(0, int(limit))]
+
+
+def _canonical_science_query(value: Any) -> str:
+    """Match the reasoning frame while retaining unit-significant superscripts."""
+
+    cooked = unicodedata.normalize("NFC", str(value or "")).strip()
+    return cooked[:MAX_REASONING_QUERY_CHARS]
 
 
 def _json_safe_float(value: Any, default: float = 0.0) -> float:
@@ -316,6 +1414,641 @@ def _json_safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError, OverflowError):
         return float(default)
     return cooked if math.isfinite(cooked) else float(default)
+
+
+def _reject_reasoning_result(
+    result: Mapping[str, Any],
+    reason: str,
+    *,
+    assumptions_explicit: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Remove rewrite authority from a result that fails a raw-prompt gate."""
+
+    guarded = dict(result)
+    guarded.update(
+        {
+            "attempted": bool(guarded.get("attempted", True)),
+            "solved": False,
+            "override_allowed": False,
+            "reason": str(reason),
+            "answer": {
+                "exact": "",
+                "display": "",
+                "approximation": "",
+                "approximate": False,
+                "unit": "",
+            },
+            "text": "",
+            "steps": [],
+        }
+    )
+    guarded["verification"] = {
+        "checked": True,
+        "passed": False,
+        "method": f"grounding_gate:{reason}",
+        "independent": True,
+    }
+    # A rejected caller-supplied result must not retain plan traces or receipt
+    # extensions. Empty mappings preserve the reasoning schema without echoing
+    # any untrusted nested content.
+    guarded["science_plan"] = {}
+    guarded["science_plan_receipt"] = {}
+    epistemics = dict(guarded.get("epistemics") or {})
+    epistemics.setdefault("model_conditional", False)
+    epistemics.setdefault("calibration_claimed", False)
+    if assumptions_explicit is not None:
+        epistemics["assumptions_explicit"] = bool(assumptions_explicit)
+    else:
+        epistemics.setdefault("assumptions_explicit", False)
+    guarded["epistemics"] = epistemics
+    return guarded
+
+
+def _positive_prediction_assumptions(query: Any) -> bool:
+    """Require one explicit, positive IID or independence+stationarity clause."""
+
+    text = re.sub(
+        r"\bi\s*\.\s*i\s*\.\s*d\s*\.?",
+        "iid",
+        _clean_text(query, MAX_QUERY_CHARS),
+        flags=re.IGNORECASE,
+    )
+    if _REASONING_NEGATED_ASSUMPTION_RE.search(text) is not None:
+        return False
+    clauses = [
+        match.group("body").strip()
+        for match in _REASONING_ASSUMPTION_CLAUSE_RE.finditer(text)
+    ]
+    if len(clauses) != 1:
+        return False
+    clause = clauses[0]
+    if _REASONING_NEGATED_ASSUMPTION_RE.search(clause) is not None:
+        return False
+    if _REASONING_IID_RE.search(clause) is not None:
+        return True
+    return (
+        _REASONING_INDEPENDENCE_RE.search(clause) is not None
+        and _REASONING_STATIONARITY_RE.search(clause) is not None
+    )
+
+
+def _is_empirical_prediction_result(query: Any, result: Mapping[str, Any]) -> bool:
+    method = str(result.get("method") or "")
+    if method == "empirical_bernoulli_plugin":
+        return True
+    return (
+        str(result.get("problem_class") or "") == "prediction"
+        and _REASONING_NEXT_TRIAL_RE.search(_clean_text(query, MAX_QUERY_CHARS)) is not None
+        and _REASONING_EMPIRICAL_COUNTS_RE.search(_clean_text(query, MAX_QUERY_CHARS)) is not None
+    )
+
+
+def _bounded_fraction_decimal(value: Fraction, places: int = 6) -> str:
+    with localcontext() as context:
+        context.prec = max(24, places + 12)
+        decimal = Decimal(value.numerator) / Decimal(value.denominator)
+    return format(decimal, f".{max(0, int(places))}f").rstrip("0").rstrip(".") or "0"
+
+
+def _correct_odd_sided_die_parity(
+    query: Any,
+    result: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Independently recount odd/even faces on one explicitly fair odd-sided die."""
+
+    text = _clean_text(query, MAX_QUERY_CHARS)
+    die_matches = list(_REASONING_FAIR_DIE_RE.finditer(text))
+    parity_matches = list(_REASONING_PARITY_RE.finditer(text))
+    if len(die_matches) != 1 or len(parity_matches) != 1:
+        return dict(result)
+    sides_token = die_matches[0].group("sides")
+    sides = int(sides_token) if sides_token is not None else 6
+    if sides < 3 or sides > 999 or sides % 2 == 0:
+        return dict(result)
+
+    parity = parity_matches[0].group("parity").lower()
+    favourable = (sides + 1) // 2 if parity == "odd" else sides // 2
+    value = Fraction(favourable, sides)
+    exact = str(value.numerator) if value.denominator == 1 else f"{value.numerator}/{value.denominator}"
+    terminating = _terminating_decimal(value)
+    display = terminating if terminating is not None else _bounded_fraction_decimal(value)
+    percent = _bounded_fraction_decimal(value * 100)
+
+    guarded = dict(result)
+    answer = dict(guarded.get("answer") or {})
+    answer.update(
+        {
+            "exact": exact,
+            "display": display,
+            "approximation": "" if terminating is not None else display,
+            "approximate": terminating is None,
+            "unit": "",
+        }
+    )
+    guarded["answer"] = answer
+    guarded["text"] = f"The probability is {exact} ({percent}%)."
+    guarded["steps"] = [
+        f"A fair {sides}-sided die has {sides} equiprobable faces.",
+        f"There are {favourable} {parity} faces from 1 through {sides}.",
+    ]
+    guarded["verification"] = {
+        "checked": True,
+        "passed": True,
+        "method": "grounding_odd_sided_die_face_recount",
+        "independent": True,
+    }
+    # Preserve a conflict or other denial from the reasoning engine. The
+    # recount corrects values; it does not manufacture override permission.
+    guarded["override_allowed"] = bool(guarded.get("override_allowed"))
+    if guarded["override_allowed"]:
+        guarded["reason"] = "verified_solution"
+    return guarded
+
+
+def _reasoning_request_window(text: str, target: str) -> str:
+    """Return a target request clause plus at most one adjacent setup clause."""
+
+    clauses = list(_REASONING_CLAUSE_RE.finditer(text))
+    target_re = re.compile(rf"\b(?:{target})\b", re.IGNORECASE)
+    for index, clause_match in enumerate(clauses):
+        clause = clause_match.group(0)
+        for cue in _REASONING_REQUEST_CUE_RE.finditer(clause):
+            target_match = target_re.search(clause, cue.end())
+            if target_match is None:
+                continue
+            intent = clause[: target_match.end()]
+            if (
+                _REASONING_NEGATED_REQUEST_RE.search(clause) is not None
+                or _REASONING_NON_CALCULATION_RE.search(intent) is not None
+            ):
+                continue
+            start = clauses[max(0, index - 1)].start()
+            return text[start : clause_match.end()].strip()
+    return ""
+
+
+def _reasoning_has_unconsumed_trailing_content(text: str) -> bool:
+    quoted_spans = [
+        (match.start(), match.end())
+        for match in _REASONING_QUOTED_SPAN_RE.finditer(text)
+    ]
+    request = next(
+        (
+            cue
+            for cue in _REASONING_REQUEST_CUE_RE.finditer(text)
+            if not any(start <= cue.start() < end for start, end in quoted_spans)
+        ),
+        None,
+    )
+    if request is None:
+        return False
+    boundary = next(
+        (
+            match.end()
+            for match in re.finditer(r"[;?!]|\.(?=\s|$)", text[request.end() :])
+            if not any(
+                start <= request.end() + match.start() < end
+                for start, end in quoted_spans
+            )
+        ),
+        None,
+    )
+    if boundary is None:
+        return False
+    absolute_boundary = request.end() + boundary
+    trailing = _REASONING_ALLOWED_ACTION_RE.sub(" ", text[absolute_boundary:])
+    trailing = re.sub(r"\b(?:and|please|then)\b", " ", trailing, flags=re.IGNORECASE)
+    return re.search(r"[a-z0-9]", trailing, re.IGNORECASE) is not None
+
+
+def _reasoning_has_unconsumed_action(text: str) -> bool:
+    if _REASONING_HORN_SHAPE_RE.search(text) is not None:
+        return False
+    action_text = _REASONING_ALLOWED_ACTION_RE.sub(" ", text)
+    if _REASONING_UNCONSUMED_ACTION_RE.search(action_text) is not None:
+        return True
+    request = _REASONING_REQUEST_CUE_RE.search(action_text)
+    if request is None:
+        return False
+    for match in _REASONING_COORDINATED_TAIL_RE.finditer(action_text):
+        if match.start() < request.start():
+            continue
+        following = match.group("next").lower()
+        if following.isdigit() or following in _REASONING_SAFE_COORDINATED_TASK_WORDS:
+            continue
+        return True
+    return False
+
+
+def _single_reasoning_quantity(pattern: re.Pattern[str], text: str) -> bool:
+    return len(list(pattern.finditer(text))) == 1
+
+
+def _has_labeled_geometry_measure(text: str, labels: str) -> bool:
+    unit = (
+        r"(?:kilometers?|kilometres?|km|meters?|metres?|m|centimeters?|centimetres?|cm|"
+        r"millimeters?|millimetres?|mm|miles?|mi|yards?|yd|feet|foot|ft|inches?|inch)"
+    )
+    connector = r"(?:\s+(?:is|are|of|equals?))?\s*(?:=|:)?\s*"
+    forward = re.compile(
+        rf"\b(?:{labels})\b{connector}{_REASONING_POSITIVE_NUMBER}"
+        rf"(?:\s*{unit})?(?![a-z0-9])",
+        re.IGNORECASE,
+    )
+    reverse = re.compile(
+        rf"(?<![a-z0-9.]){_REASONING_POSITIVE_NUMBER}(?:\s*{unit})?\s+"
+        rf"\b(?:{labels})\b",
+        re.IGNORECASE,
+    )
+    return forward.search(text) is not None or reverse.search(text) is not None
+
+
+def _geometry_intent_established(text: str, method: str) -> bool:
+    if method not in _REASONING_GEOMETRY_METHODS:
+        return True
+    # Bare ``in`` is ambiguous between an inch abbreviation and a
+    # preposition. Only the unambiguous words ``inch``/``inches`` are accepted
+    # for hard-override authority at this boundary.
+    if _REASONING_BARE_IN_RE.search(text) is not None:
+        return False
+
+    target_by_method = {
+        "rectangle_area": "area",
+        "rectangle_perimeter": "perimeter",
+        "triangle_area": "area",
+        "circle_area": "area",
+        "circle_circumference": "circumference",
+        "pythagorean_hypotenuse": "hypotenuse",
+        "pythagorean_missing_leg": r"missing\s+(?:leg|side)",
+    }
+    window = _reasoning_request_window(text, target_by_method[method])
+    if not window:
+        return False
+
+    shapes = {
+        shape
+        for shape in ("rectangle", "triangle", "circle")
+        if re.search(rf"\b{shape}\b", window, re.IGNORECASE) is not None
+    }
+    required_shape = {
+        "rectangle_area": "rectangle",
+        "rectangle_perimeter": "rectangle",
+        "triangle_area": "triangle",
+        "circle_area": "circle",
+        "circle_circumference": "circle",
+        "pythagorean_hypotenuse": "triangle",
+        "pythagorean_missing_leg": "triangle",
+    }[method]
+    if shapes != {required_shape}:
+        return False
+
+    if method in {"rectangle_area", "rectangle_perimeter"}:
+        return _has_labeled_geometry_measure(
+            window,
+            r"length|long",
+        ) and _has_labeled_geometry_measure(window, r"width|wide")
+    if method == "triangle_area":
+        return _has_labeled_geometry_measure(
+            window,
+            "base",
+        ) and _has_labeled_geometry_measure(window, r"height|high")
+    if method in {"circle_area", "circle_circumference"}:
+        radius = _has_labeled_geometry_measure(window, "radius")
+        diameter = _has_labeled_geometry_measure(window, "diameter")
+        return radius != diameter
+
+    if re.search(
+        r"\b(?:right(?:-angled)?\s+triangle|pythagorean)\b",
+        window,
+        re.IGNORECASE,
+    ) is None:
+        return False
+    if method == "pythagorean_hypotenuse":
+        unit = (
+            r"(?:kilometers?|kilometres?|km|meters?|metres?|m|centimeters?|"
+            r"centimetres?|cm|millimeters?|millimetres?|mm|miles?|mi|yards?|"
+            r"yd|feet|foot|ft|inches?|inch)"
+        )
+        return re.search(
+            rf"\b(?:legs?|leg\s+lengths?)\b[^.;?!]{{0,24}}"
+            rf"{_REASONING_POSITIVE_NUMBER}(?:\s*{unit})?\s*(?:and|,)\s*"
+            rf"{_REASONING_POSITIVE_NUMBER}(?:\s*{unit})?(?![a-z0-9])",
+            window,
+            re.IGNORECASE,
+        ) is not None
+    return _has_labeled_geometry_measure(
+        window,
+        "hypotenuse",
+    ) and _has_labeled_geometry_measure(window, r"known\s+leg|leg")
+
+
+def _physics_applicability_established(text: str, method: str) -> bool:
+    if method not in _REASONING_PHYSICS_METHODS:
+        return True
+
+    if method == "newtons_second_law_force":
+        window = _reasoning_request_window(text, r"net\s+force|force")
+        return bool(
+            window
+            and _REASONING_NEWTON_CONTEXT_RE.search(window) is not None
+            and _REASONING_FORCE_CAVEAT_RE.search(text) is None
+            and _single_reasoning_quantity(_REASONING_MASS_QUANTITY_RE, window)
+            and _single_reasoning_quantity(_REASONING_ACCELERATION_QUANTITY_RE, window)
+        )
+
+    if method == "density_mass_over_volume":
+        window = _reasoning_request_window(text, "density")
+        return bool(
+            window
+            and _REASONING_DENSITY_CAVEAT_RE.search(text) is None
+            and re.search(r"\b(?:object|material|substance|sample)\b", window, re.IGNORECASE)
+            is not None
+            and re.search(r"\bmass\b", window, re.IGNORECASE) is not None
+            and re.search(r"\bvolume\b", window, re.IGNORECASE) is not None
+            and _single_reasoning_quantity(_REASONING_MASS_QUANTITY_RE, window)
+            and _single_reasoning_quantity(_REASONING_VOLUME_QUANTITY_RE, window)
+        )
+
+    if method == "kinetic_energy":
+        window = _reasoning_request_window(text, r"kinetic\s+energy|ke")
+        return bool(
+            window
+            and _REASONING_KINETIC_CAVEAT_RE.search(text) is None
+            and re.search(r"\b(?:object|body|particle)\b", window, re.IGNORECASE)
+            is not None
+            and re.search(r"\b(?:moving|speed|velocity)\b", window, re.IGNORECASE)
+            is not None
+            and _single_reasoning_quantity(_REASONING_MASS_QUANTITY_RE, window)
+            and _single_reasoning_quantity(_REASONING_SPEED_QUANTITY_RE, window)
+        )
+
+    target = {
+        "ohms_law_voltage": "voltage",
+        "ohms_law_current": "current",
+        "ohms_law_resistance": "resistance",
+    }[method]
+    window = _reasoning_request_window(text, target)
+    if not (
+        window
+        and _REASONING_OHM_CONTEXT_RE.search(window) is not None
+        and _REASONING_SIMPLE_RESISTOR_RE.search(window) is not None
+        and _REASONING_CIRCUIT_CAVEAT_RE.search(text) is None
+    ):
+        return False
+    if method == "ohms_law_voltage":
+        return (
+            _single_reasoning_quantity(_REASONING_CURRENT_QUANTITY_RE, window)
+            and _single_reasoning_quantity(_REASONING_RESISTANCE_QUANTITY_RE, window)
+            and _REASONING_VOLTAGE_QUANTITY_RE.search(window) is None
+        )
+    if method == "ohms_law_current":
+        return (
+            _single_reasoning_quantity(_REASONING_VOLTAGE_QUANTITY_RE, window)
+            and _single_reasoning_quantity(_REASONING_RESISTANCE_QUANTITY_RE, window)
+            and _REASONING_CURRENT_QUANTITY_RE.search(window) is None
+        )
+    return (
+        _single_reasoning_quantity(_REASONING_VOLTAGE_QUANTITY_RE, window)
+        and _single_reasoning_quantity(_REASONING_CURRENT_QUANTITY_RE, window)
+        and _REASONING_RESISTANCE_QUANTITY_RE.search(window) is None
+    )
+
+
+def _reasoning_consensus_complete(result: Mapping[str, Any]) -> bool:
+    """Require verified, exhaustive consensus before granting hard override."""
+
+    if not bool(result.get("solved")):
+        return False
+    verification = result.get("verification")
+    consensus = result.get("consensus")
+    budget = result.get("budget")
+    if not all(isinstance(value, Mapping) for value in (verification, consensus, budget)):
+        return False
+    assert isinstance(verification, Mapping)
+    assert isinstance(consensus, Mapping)
+    assert isinstance(budget, Mapping)
+    if verification.get("checked") is not True or verification.get("passed") is not True:
+        return False
+    paths = consensus.get("paths")
+    agreeing = consensus.get("agreeing")
+    if (
+        type(paths) is not int
+        or type(agreeing) is not int
+        or paths < 1
+        or agreeing < 1
+        or agreeing > paths
+        or consensus.get("conflicting") is not False
+    ):
+        return False
+    solvers_run = budget.get("solvers_run")
+    solver_limit = budget.get("solver_limit")
+    solvers_considered = budget.get("solvers_considered")
+    return bool(
+        budget.get("tier") in {"fast", "deep"}
+        and budget.get("early_exit") is False
+        and budget.get("all_solvers_exhausted") is True
+        and type(solvers_run) is int
+        and type(solver_limit) is int
+        and type(solvers_considered) is int
+        and solver_limit >= 1
+        and solvers_run == solver_limit
+        and solvers_considered >= solver_limit
+    )
+
+
+def _ground_reasoning_result(query: Any, result: Mapping[str, Any]) -> Dict[str, Any]:
+    """Apply conservative raw-prompt gates to an optional reasoning result."""
+
+    guarded = dict(result)
+    method = str(guarded.get("method") or "")
+    raw_query = str(query or "")
+    text = _clean_text(raw_query, MAX_QUERY_CHARS)
+
+    if len(raw_query) > MAX_REASONING_QUERY_CHARS:
+        return _reject_reasoning_result(guarded, "query_too_long")
+    if (
+        _REASONING_REQUEST_CANCELLATION_RE.search(text) is not None
+        or _REASONING_LATE_CORRECTION_RE.search(text) is not None
+    ):
+        return _reject_reasoning_result(guarded, "ambiguous_or_superseded_request")
+    quoted_matches = list(_REASONING_QUOTED_SPAN_RE.finditer(text))
+    quoted_numeric_input = any(
+        _NUMBER_RE.search(match.group(0)) is not None for match in quoted_matches
+    )
+    quote_remainder = list(text)
+    for match in quoted_matches:
+        quote_remainder[match.start() : match.end()] = " " * (match.end() - match.start())
+    unmatched_quote_delimiter = (
+        _REASONING_QUOTE_DELIMITER_RE.search("".join(quote_remainder)) is not None
+    )
+    if (
+        _REASONING_UNTRUSTED_PROBLEM_DATA_RE.search(text) is not None
+        or _REASONING_EXCLUDED_SETUP_RE.search(text) is not None
+        or (
+            quoted_numeric_input
+            and _REASONING_AUTHORITATIVE_QUOTED_INPUT_RE.search(text) is None
+        )
+        or (unmatched_quote_delimiter and _NUMBER_RE.search(text) is not None)
+    ):
+        return _reject_reasoning_result(guarded, "untrusted_problem_data")
+    if (
+        _reasoning_has_unconsumed_action(text)
+        or _reasoning_has_unconsumed_trailing_content(text)
+    ):
+        return _reject_reasoning_result(guarded, "mixed_or_unconsumed_request")
+
+    trusted_science_summary: Optional[Dict[str, Any]] = None
+    if method in _REASONING_SCIENCE_METHOD_TARGETS:
+        claimed_science = _science_summary_from_claim(
+            guarded.get("science_plan"),
+            guarded.get("science_plan_receipt"),
+            method,
+        )
+        if claimed_science is None:
+            summarized = guarded.get("science_plan")
+            summarized_receipt = guarded.get("science_plan_receipt")
+            if (
+                summarized == summarized_receipt
+                and _science_summary_is_safe(summarized, method)
+            ):
+                assert isinstance(summarized, Mapping)
+                claimed_science = dict(summarized)
+        if claimed_science is None:
+            return _reject_reasoning_result(guarded, "science_plan_not_established")
+        trusted_science = _trusted_science_summary(raw_query, method)
+        if trusted_science is None or claimed_science != trusted_science:
+            return _reject_reasoning_result(guarded, "science_plan_result_mismatch")
+        trusted_science_summary = dict(trusted_science)
+        # Never retain caller-supplied plan objects, source spans, trace strings,
+        # or receipt extras. Only this allowlisted, recomputed summary crosses the
+        # grounding boundary and can later enter a verified-answer receipt.
+        guarded["science_plan"] = dict(trusted_science)
+        guarded["science_plan_receipt"] = dict(trusted_science)
+        epistemics = dict(guarded.get("epistemics") or {})
+        epistemics.update(
+            {
+                "model_conditional": True,
+                "assumptions_explicit": True,
+                "calibration_claimed": False,
+            }
+        )
+        guarded["epistemics"] = epistemics
+
+    if not _geometry_intent_established(text, method):
+        return _reject_reasoning_result(guarded, "geometry_intent_not_established")
+
+    if not _physics_applicability_established(text, method):
+        return _reject_reasoning_result(guarded, "physics_applicability_not_established")
+
+    if method == "explicit_favourable_over_total" and (
+        _REASONING_EQUIPROBABLE_RE.search(text) is None
+        or _REASONING_UNEQUAL_PROBABILITY_RE.search(text) is not None
+    ):
+        return _reject_reasoning_result(
+            guarded,
+            "probability_assumptions_not_established",
+        )
+
+    if method in {"fair_coin_single_toss", "fair_die_equiprobable_faces"}:
+        if _REASONING_REPEATED_TRIAL_RE.search(text) is not None:
+            return _reject_reasoning_result(guarded, "repeated_trials_not_single_trial")
+        if (
+            _REASONING_UNEQUAL_PROBABILITY_RE.search(text) is not None
+            or _REASONING_UNSUPPORTED_PROBABILITY_EVENT_RE.search(text) is not None
+            or _reasoning_validator(
+                "fair_probability_request_admissible",
+                raw_query,
+                method,
+            )
+            is not True
+        ):
+            return _reject_reasoning_result(
+                guarded,
+                "probability_event_not_established",
+            )
+
+    if method == "finite_binomial_event_probability":
+        scenario = _reasoning_validator(
+            "parse_finite_bernoulli_scenario",
+            raw_query,
+        )
+        if (
+            not isinstance(scenario, Mapping)
+            or scenario.get("schema") != "supermix-finite-bernoulli-scenario-v1"
+            or scenario.get("full_query_consumed") is not True
+        ):
+            return _reject_reasoning_result(
+                guarded,
+                "finite_bernoulli_model_not_established",
+                assumptions_explicit=False,
+            )
+        epistemics = dict(guarded.get("epistemics") or {})
+        epistemics.update(
+            {
+                "model_conditional": True,
+                "assumptions_explicit": True,
+                "calibration_claimed": False,
+            }
+        )
+        guarded["epistemics"] = epistemics
+
+    if _is_empirical_prediction_result(text, guarded):
+        if not _positive_prediction_assumptions(text):
+            return _reject_reasoning_result(
+                guarded,
+                "prediction_assumptions_not_established",
+                assumptions_explicit=False,
+            )
+        trusted = _trusted_reasoning_result(raw_query)
+        if trusted is None or not _reasoning_estimate_matches_trusted(guarded, trusted):
+            return _reject_reasoning_result(
+                guarded,
+                "reasoning_result_mismatch",
+            )
+        guarded = dict(trusted)
+        # An observed rate is a model-conditional estimate. Verification can
+        # check the arithmetic but cannot turn it into a hard next-trial fact.
+        guarded["override_allowed"] = False
+        if bool(guarded.get("solved")):
+            guarded["reason"] = "verified_non_overriding_estimate"
+        epistemics = dict(guarded.get("epistemics") or {})
+        epistemics.update(
+            {
+                "model_conditional": True,
+                "assumptions_explicit": True,
+                "calibration_claimed": False,
+            }
+        )
+        guarded["epistemics"] = epistemics
+        return guarded
+
+    if bool(guarded.get("override_allowed")) and not _reasoning_consensus_complete(guarded):
+        return _reject_reasoning_result(guarded, "solver_consensus_incomplete")
+    if bool(guarded.get("override_allowed")):
+        trusted = _trusted_reasoning_result(raw_query)
+        if trusted is None or not _reasoning_result_matches_trusted(guarded, trusted):
+            return _reject_reasoning_result(
+                guarded,
+                "reasoning_result_mismatch",
+            )
+        # The caller may control descriptive fields even when it copied the
+        # correct numeric answer. Publish only the freshly recomputed result.
+        guarded = dict(trusted)
+        method = str(guarded.get("method") or "")
+        if method in _REASONING_SCIENCE_METHOD_TARGETS:
+            if trusted_science_summary is None:
+                return _reject_reasoning_result(
+                    guarded,
+                    "science_plan_result_mismatch",
+                )
+            guarded["science_plan"] = dict(trusted_science_summary)
+            guarded["science_plan_receipt"] = dict(trusted_science_summary)
+
+    if method == "fair_die_equiprobable_faces":
+        guarded = _correct_odd_sided_die_parity(text, guarded)
+    if bool(guarded.get("override_allowed")) and not _reasoning_consensus_complete(guarded):
+        return _reject_reasoning_result(guarded, "solver_consensus_incomplete")
+    return guarded
 
 
 def _content_terms(value: Any) -> set[str]:
@@ -513,8 +2246,7 @@ def plan_grounding(
     )
     high_stakes = (
         bool(_HIGH_STAKES_RE.search(text))
-        or _profile_bool(profile, "knowledge", "high_stakes")
-        or _profile_bool(profile, "safety", "high_stakes")
+        or _profile_high_stakes(profile)
     )
     evidence_requested = _profile_bool(
         profile,
@@ -527,6 +2259,29 @@ def plan_grounding(
         "factual",
         "factual_request",
         "evidence_recommended",
+    )
+    reasoning_profile = (
+        dict(profile.get("reasoning") or {})
+        if isinstance(profile.get("reasoning"), Mapping)
+        else {}
+    )
+    response_contract = (
+        dict(profile.get("response_contract") or {})
+        if isinstance(profile.get("response_contract"), Mapping)
+        else {}
+    )
+    forbidden_capabilities = {
+        str(value)
+        for value in (response_contract.get("forbidden_capabilities") or ())
+    }
+    evidence_forbidden = "evidence_or_calibration" in forbidden_capabilities
+    scientific_request = bool(reasoning_profile.get("scientific"))
+    prediction_request = bool(reasoning_profile.get("predictive")) and (
+        "calibrated_prediction" not in forbidden_capabilities
+    )
+    mathematical_request = bool(reasoning_profile.get("mathematical"))
+    causal_request = bool(reasoning_profile.get("causal")) and (
+        "causal_reasoning" not in forbidden_capabilities
     )
     epistemic_risk = _interaction_epistemic_risk(interaction_plan)
     external = redact_external_query(text)
@@ -546,8 +2301,18 @@ def plan_grounding(
         reasons.append("high_stakes_factuality")
     if factual:
         reasons.append("factual_request")
+    if scientific_request:
+        reasons.append("scientific_reasoning")
+    if prediction_request:
+        reasons.append("prediction_requires_calibration")
+    if mathematical_request:
+        reasons.append("quantitative_reasoning")
+    if causal_request:
+        reasons.append("causal_reasoning")
     if epistemic_risk >= 0.65:
         reasons.append("interaction_epistemic_risk")
+    if evidence_forbidden:
+        reasons.append("evidence_capability_forbidden")
 
     evidence_recommended = bool(
         strict_only
@@ -556,6 +2321,10 @@ def plan_grounding(
         or evidence_requested
         or high_stakes
         or factual
+        or (
+            not evidence_forbidden
+            and (scientific_request or prediction_request or causal_request)
+        )
         or epistemic_risk >= 0.65
     ) and not bool(arithmetic.get("solved"))
     return {
@@ -576,6 +2345,16 @@ def plan_grounding(
             "reason": str(arithmetic.get("reason") or ""),
         },
         "reasoning_frame": _reasoning_frame(text),
+        "reasoning_domains": [
+            name
+            for name, enabled in (
+                ("mathematics", mathematical_request),
+                ("science", scientific_request),
+                ("prediction", prediction_request),
+                ("causal", causal_request),
+            )
+            if enabled
+        ],
         "epistemic_risk": round(epistemic_risk, 6),
         "max_evidence_items": 6 if evidence_recommended else 0,
         "external_query": external,
@@ -904,6 +2683,13 @@ def _extract_arithmetic_expression(query: Any) -> Optional[str]:
     match = _ARITHMETIC_PREFIX_RE.fullmatch(text)
     expression = match.group("expression") if match else text
     expression = expression.strip()
+    # A bounded explanation/verification request does not make an otherwise
+    # explicit expression ambiguous. Strip only this closed suffix allowlist;
+    # arbitrary prose, second calculations, code, and injected instructions
+    # continue through the character allowlist below and fail closed.
+    suffix = _ARITHMETIC_REQUEST_SUFFIX_RE.search(expression)
+    if suffix is not None:
+        expression = expression[: suffix.start()].rstrip()
     if expression.endswith("?") or expression.endswith("!"):
         expression = expression[:-1].rstrip()
     if expression.endswith(".") and expression.count(".") == 1:
@@ -1137,28 +2923,37 @@ def finalize_grounded_response(
     """Audit grounding and make only two conservative classes of override."""
 
     raw = str(response_text or "").strip()
+    profile = _resolve_prompt_profile(user_text, prompt_profile)
     plan = (
         dict(grounding_plan)
         if isinstance(grounding_plan, Mapping)
         else plan_grounding(
             user_text,
             interaction_plan=interaction_plan,
-            prompt_profile=prompt_profile,
+            prompt_profile=profile,
         )
     )
     bundle = _coerce_evidence_bundle(
         user_text,
         evidence_bundle,
         interaction_plan=interaction_plan,
-        prompt_profile=prompt_profile,
+        prompt_profile=profile,
         grounding_plan=plan,
     )
     diagnostics = evidence_diagnostics(user_text, bundle["evidence"], response_text=raw)
     arithmetic = solve_exact_arithmetic(user_text)
-    reasoning = solve_reasoned_problem(user_text)
+    reasoning = _ground_reasoning_result(user_text, solve_reasoned_problem(user_text))
     # The raw user wording is the authority for a strict-evidence override. A
     # caller-supplied or stale plan cannot invent permission to replace text.
     strict_only = bool(_STRICT_EVIDENCE_ONLY_RE.search(_clean_text(user_text, MAX_QUERY_CHARS)))
+    high_stakes = bool(
+        _HIGH_STAKES_RE.search(_clean_text(user_text, MAX_QUERY_CHARS))
+        or _profile_high_stakes(profile)
+    )
+    if high_stakes and bool(reasoning.get("override_allowed")):
+        reasoning = dict(reasoning)
+        reasoning["override_allowed"] = False
+        reasoning["reason"] = "high_stakes_override_suppressed"
 
     text = raw
     reason = "audit_only"
@@ -1181,18 +2976,49 @@ def finalize_grounded_response(
                 "directly support enough of the requested answer."
             )
             reason = "strict_evidence_insufficient"
-    elif bool(arithmetic.get("solved")):
-        text = f"The exact result is {arithmetic['display']}."
-        if arithmetic.get("approximation"):
-            text = (
-                f"The exact result is {arithmetic['display']} "
-                f"(approximately {arithmetic['approximation']})."
-            )
+    elif bool(arithmetic.get("solved")) and not high_stakes:
+        clean_user_text = _clean_text(user_text, MAX_QUERY_CHARS)
+        wants_steps = bool(_SHOW_WORK_RE.search(clean_user_text))
+        wants_verification = bool(_VERIFY_RESULT_RE.search(clean_user_text))
+        if wants_steps or wants_verification:
+            lead = "Using exact arithmetic" if wants_steps else "Verified with exact arithmetic"
+            text = f"{lead}: {arithmetic['expression']} = {arithmetic['display']}."
+            if arithmetic.get("approximation"):
+                text = text[:-1] + f" (approximately {arithmetic['approximation']})."
+        else:
+            text = f"The exact result is {arithmetic['display']}."
+            if arithmetic.get("approximation"):
+                text = (
+                    f"The exact result is {arithmetic['display']} "
+                    f"(approximately {arithmetic['approximation']})."
+                )
         reason = "explicit_arithmetic_exact"
-    elif bool(reasoning.get("override_allowed")):
+    elif (
+        not high_stakes
+        and _is_empirical_prediction_result(user_text, reasoning)
+        and reasoning.get("solved") is True
+        and reasoning.get("reason") == "verified_non_overriding_estimate"
+        and isinstance(reasoning.get("verification"), Mapping)
+        and reasoning["verification"].get("passed") is True
+    ):
+        module = _load_trusted_reasoning_module()
+        rendered = ""
+        if module is not None:
+            try:
+                rendered = str(module.render_reasoning_answer(reasoning, include_steps=False))
+            except Exception:  # pragma: no cover - defensive
+                rendered = ""
+        rendered = rendered.strip() or str(reasoning.get("text") or "").strip()
+        if rendered:
+            text = rendered
+            reason = "verified_model_conditional_estimate"
+    elif bool(reasoning.get("override_allowed")) and not high_stakes and not _is_empirical_prediction_result(
+        user_text,
+        reasoning,
+    ):
         # Only a solved problem whose own verification passed, with no
         # disagreement between applicable solvers, may replace the response.
-        module = _load_reasoning_module()
+        module = _load_trusted_reasoning_module()
         wants_steps = bool(_SHOW_WORK_RE.search(_clean_text(user_text, MAX_QUERY_CHARS)))
         rendered = ""
         if module is not None:
@@ -1205,6 +3031,18 @@ def finalize_grounded_response(
             text = rendered
             reason = "verified_reasoning_solution"
 
+    receipt_guard_reason = (
+        "high_stakes_suppressed"
+        if high_stakes
+        and reason == "audit_only"
+        and (bool(arithmetic.get("solved")) or bool(reasoning.get("solved")))
+        else reason
+    )
+    answer_receipt = build_verified_answer_receipt(
+        reasoning,
+        arithmetic,
+        response_guard_reason=receipt_guard_reason,
+    )
     return {
         "text": text,
         "changed": text != raw,
@@ -1212,7 +3050,8 @@ def finalize_grounded_response(
         "grounding": diagnostics,
         "citations": diagnostics["citation_audit"],
         "arithmetic": arithmetic,
-        "reasoning": reasoning,
+        "reasoning": _public_reasoning_result(reasoning),
+        "answer_receipt": answer_receipt,
         "authority": {
             "controls_compute": False,
             "controls_routes": False,
@@ -1224,7 +3063,9 @@ def finalize_grounded_response(
 __all__ = [
     "GROUNDING_RUNTIME_VERSION",
     "GROUNDING_SCHEMA_VERSION",
+    "VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION",
     "build_evidence_bundle",
+    "build_verified_answer_receipt",
     "evidence_diagnostics",
     "finalize_grounded_response",
     "normalize_evidence_rows",

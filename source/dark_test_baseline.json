@@ -1,0 +1,5 @@
+{
+  "dark_functions": 30,
+  "files_with_dark_functions": 20,
+  "note": "no new dark tests; lower this deliberately as they are fixed"
+}

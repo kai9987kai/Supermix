@@ -13,10 +13,35 @@ from qwen_supermix_pipeline import (
     _checkpoint_training_state_path,
     _build_explicit_resume_checkpoint,
     _merge_distillation_pairs,
+    _prune_checkpoint_dirs,
     _restore_checkpoint_training_state,
     _resolve_latest_resume_checkpoint,
     _save_checkpoint_training_state,
 )
+
+
+def test_prune_checkpoint_dirs_keeps_highest_steps(tmp_path: Path):
+    output_dir = tmp_path / "run"
+    for step in (8, 16, 24):
+        checkpoint_dir = output_dir / "checkpoints" / f"sft_step_{step:05d}"
+        adapter_dir = checkpoint_dir / "adapter"
+        adapter_dir.mkdir(parents=True)
+        (checkpoint_dir / "checkpoint_meta.json").write_text(
+            json.dumps(
+                {
+                    "stage": "sft",
+                    "sft_steps": step,
+                    "checkpoint_adapter_dir": str(adapter_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    _prune_checkpoint_dirs(output_dir, keep_last_checkpoints=2)
+
+    assert not (output_dir / "checkpoints" / "sft_step_00008").exists()
+    assert (output_dir / "checkpoints" / "sft_step_00016").exists()
+    assert (output_dir / "checkpoints" / "sft_step_00024").exists()
 
 
 def test_merge_distillation_pairs_adds_only_new_examples():

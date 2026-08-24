@@ -64,6 +64,21 @@ jobs:
             source/mimomix_decoding.py \
             source/mimomix_distill.py \
             source/mimomix_observatory.py \
+            source/mimomix_reasoner.py \
+            source/mimomix_reasoner_web_app.py \
+            source/reasoner_curriculum.py \
+            source/reasoner_chat.py \
+            source/benchmark_mimomix_reasoner.py \
+            source/benchmark_reasoner_chat.py \
+            source/run_v56_promotion_gate.py \
+            source/mimomix_text.py \
+            source/train_mimomix_talk.py \
+            source/mimomix_talk_web_app.py \
+            source/build_general_intelligence_curriculum.py \
+            source/build_general_intelligence_repair_curriculum.py \
+            source/qwen_adapter_promotion.py \
+            source/qwen_paired_evidence.py \
+            source/run_qwen_general_promotion_gate.py \
             source/generate_studio_runtime_manifest.py \
             source/multimodel_runtime.py \
             source/qwen_supermix_pipeline.py \
@@ -79,15 +94,62 @@ jobs:
       - name: Check Studio distribution contract
         run: python source/generate_studio_runtime_manifest.py --check
 
+      - name: Check for uncollectable test functions
+        run: python source/dark_test_audit.py --check
+
+      - name: Lint release-integrity surfaces
+        run: |
+          python -m ruff check \
+            source/generate_studio_runtime_manifest.py \
+            source/memory_authority.py \
+            source/multimodel_memory.py \
+            source/conversation_state.py \
+            source/conversation_directive.py \
+            source/grounding_runtime.py \
+            source/multimodel_runtime.py \
+            source/supermix_multimodel_web_app.py \
+            source/supermix_multimodel_desktop_app.py \
+            source/mimomix_reasoner.py \
+            source/mimomix_reasoner_web_app.py \
+            source/reasoner_curriculum.py \
+            source/reasoner_chat.py \
+            source/benchmark_mimomix_reasoner.py \
+            source/benchmark_reasoner_chat.py \
+            source/run_v56_promotion_gate.py \
+            source/mimomix_text.py \
+            source/train_mimomix_talk.py \
+            source/mimomix_talk_web_app.py \
+            runtime_python/memory_authority.py \
+            runtime_python/conversation_state.py \
+            runtime_python/grounding_runtime.py \
+            test_memory_authority.py \
+            test_multimodel_memory_tools.py \
+            test_conversation_state.py \
+            test_conversation_directive.py \
+            test_multimodel_grounding_hook.py \
+            test_qwen_grounding_runtime.py \
+            test_supermix_multimodel_web_app.py \
+            test_studio_runtime_manifest.py \
+            test_mimomix_reasoner.py \
+            test_mimomix_reasoner_web_app.py \
+            test_v56_promotion_gate.py \
+            test_reasoner_chat.py \
+            test_mimomix_text.py \
+            test_mimomix_talk_web_app.py
+
       - name: Run runtime and routing regression tests
         run: |
-          python -m pytest -q test_runtime_model_variants_parity.py test_runtime_compute_controls.py
+          python -m pytest -q test_runtime_model_variants_parity.py test_runtime_compute_controls.py test_model_variant_construction.py
           python -m pytest -q test_cognitive_leap_ultra_expert.py test_v51_materialize_demo.py
           python -m pytest -q test_route_policy_explorer.py test_route_policy_protocol.py test_route_policy_ledger.py test_route_policy_lab.py test_route_policy_shadow_registry.py test_route_policy_study_cli.py test_route_policy_protocol_cli.py test_route_policy_shadow_cli.py test_route_policy_shadow_web_status.py test_studio_runtime_manifest.py test_multimodel_memory_tools.py
           python -m pytest -q test_multimodel_runtime.py
           python -m pytest -q test_supermix_multimodel_web_app.py
           python -m pytest -q test_conversation_state.py test_conversation_style_memory.py test_conversation_directive.py test_qwen_conversation_routing.py test_multimodel_conversation_hook.py
           python -m pytest -q test_mimomix_core.py test_mimomix_decoding.py test_mimomix_distill.py test_mimomix_controller.py test_mimomix_observatory.py test_mimomix_api.py
+          python -m pytest -q test_mimomix_reasoner.py test_mimomix_reasoner_web_app.py test_v56_promotion_gate.py test_reasoner_chat.py
+          python -m pytest -q test_mimomix_text.py test_mimomix_talk_web_app.py
+          python -m pytest -q test_mimomix_eval_splits.py test_mimomix_unseen_sentence_tokens.py test_v58_receipt_provenance.py test_mechanism_causality.py test_dark_test_audit.py
+          python -m pytest -q test_v60_diverse_corpus.py test_reported_confidence_integrity.py test_compare_generalisation_runs.py test_v62_domain_corpus.py test_v63_training_state.py test_recall_index.py test_problem_solving_eval.py test_checkpoint_selection.py test_supermix_chat_server.py test_answer_check.py
           python -m pytest -q test_training_improvements.py
 
       - name: Freeze and smoke-test protocol console

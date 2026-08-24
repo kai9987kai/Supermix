@@ -40,6 +40,8 @@ bundle_manifest = os.environ.get(
 runtime_manifest = repo_root / "source" / "studio_runtime_manifest.json"
 
 datas = [(str(repo_root / "assets"), "assets")]
+datas += data_if_present(repo_root / "source" / "reasoning_engine.py", ".", required=True)
+datas += data_if_present(repo_root / "source" / "science_plan.py", ".", required=True)
 datas += data_if_present(models_stage, "bundled_models", required=True)
 datas += data_if_present(base_model_stage, "bundled_base_model", required=True)
 if benchmark_summary:

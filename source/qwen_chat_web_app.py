@@ -39,6 +39,10 @@ from prompt_understanding import (
     repair_response_constraints,
     render_prompt_contract,
 )
+from qwen_adapter_promotion import (
+    PROMOTION_FILENAME,
+    adapter_activation_kind,
+)
 
 
 DEFAULT_BASE_MODEL = (
@@ -966,11 +970,24 @@ HTML += r"""
         if (meta.grounding && typeof meta.grounding === "object") {
           const grounding = meta.grounding;
           const diagnostics = grounding.diagnostics || {};
-          [
+          const labels = [
             "evidence " + Number(diagnostics.evidence_count || 0),
             "grounding " + (diagnostics.sufficiency || "no_evidence"),
             "grounding guard " + ((grounding.response_guard || {}).reason || "audit_only"),
-          ].forEach((label) => {
+          ];
+          const receipt = grounding.answer_receipt || {};
+          if (receipt.kind && receipt.kind !== "none") {
+            const verification = receipt.verification || {};
+            const epistemics = receipt.epistemics || {};
+            labels.push("receipt " + (receipt.decision || "not_attempted"));
+            if (receipt.problem_class) labels.push("solver " + receipt.problem_class);
+            if (receipt.method) labels.push("method " + receipt.method);
+            if (verification.passed) {
+              labels.push(verification.independent ? "independently verified" : "deterministically verified");
+            }
+            if (epistemics.model_conditional) labels.push("model-conditional, not calibrated");
+          }
+          labels.forEach((label) => {
             const item = document.createElement("span");
             item.textContent = label;
             metaRow.appendChild(item);
@@ -1658,6 +1675,9 @@ def build_artifact_profile(adapter_dir: Path) -> Dict[str, Any]:
 
 def score_adapter_dir(adapter_dir: Path) -> Tuple[int, float]:
     parent = adapter_dir.parent
+    if adapter_activation_kind(adapter_dir) == "promoted":
+        manifest_file = parent / PROMOTION_FILENAME
+        return (3, manifest_file.stat().st_mtime)
     benchmark_file = parent / "benchmark_results.json"
     if benchmark_file.exists():
         return (2, benchmark_file.stat().st_mtime)
@@ -1686,9 +1706,13 @@ def resolve_gui_default_adapter_dir(project_root: Path) -> Optional[Path]:
         candidate = (project_root / candidate).resolve()
     cfg = candidate / "adapter_config.json"
     weights = candidate / "adapter_model.safetensors"
-    if cfg.exists() and weights.exists():
+    if cfg.exists() and weights.exists() and adapter_activation_kind(candidate) is not None:
         return candidate.resolve()
-    logging.warning("Ignoring invalid GUI default adapter pointer %s -> %s", pointer_path, candidate)
+    logging.warning(
+        "Ignoring unvalidated GUI default adapter pointer %s -> %s",
+        pointer_path,
+        candidate,
+    )
     return None
 
 
@@ -1703,7 +1727,28 @@ def find_latest_adapter_dir(project_root: Path) -> Path:
                 candidates[str(candidate.resolve())] = candidate.resolve()
     if not candidates:
         raise FileNotFoundError("Could not find any Qwen adapter directory under artifacts.")
-    return max(candidates.values(), key=score_adapter_dir)
+    activation_kinds = {
+        candidate: adapter_activation_kind(candidate)
+        for candidate in candidates.values()
+    }
+    promoted = [candidate for candidate, kind in activation_kinds.items() if kind == "promoted"]
+    if promoted:
+        return max(promoted, key=score_adapter_dir)
+    legacy = [candidate for candidate, kind in activation_kinds.items() if kind == "legacy"]
+    if legacy:
+        logging.warning(
+            "No content-addressed promoted Qwen adapter was found; using an explicitly "
+            "recognized legacy adapter."
+        )
+        return max(legacy, key=score_adapter_dir)
+    logging.warning(
+        "Ignoring %d unpromoted, revoked, candidate, or unrecognized Qwen adapter(s).",
+        len(candidates),
+    )
+    raise FileNotFoundError(
+        "Could not find a validated promoted Qwen adapter or an explicitly recognized "
+        "legacy adapter under artifacts."
+    )
 
 
 def resolve_adapter_dir(project_root: Path, explicit_adapter_dir: str) -> Path:
@@ -2221,6 +2266,9 @@ class Engine:
                     "changed": bool(grounding_guard.get("changed", False)),
                     "reason": str(grounding_guard.get("reason") or "audit_only"),
                 },
+                "answer_receipt": dict(
+                    grounding_guard.get("answer_receipt") or {}
+                ),
                 "authority": dict(grounding_guard.get("authority") or {}),
             }
         interaction_diag: Optional[Dict[str, Any]] = None

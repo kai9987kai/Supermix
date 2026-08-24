@@ -15,11 +15,12 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 
-PLANNER_VERSION = "supermix-plan-evaluate-v1"
+PLANNER_VERSION = "supermix-plan-evaluate-v4"
 
 _EMOTIONAL_RE = re.compile(
     r"\b(feel|feeling|sad|anxious|scared|afraid|upset|angry|lonely|hurt|grief|"
@@ -287,6 +288,190 @@ _STEP_RESPONSE_RE = re.compile(
     r"(?:^|\n)\s*(?:\d+[.)]|[-*])\s+|\b(first|second|third|next|finally)\b",
     re.I,
 )
+_ASSUMPTION_RESPONSE_RE = re.compile(
+    r"\b(assum(?:e|ed|ing|ption)|given that|conditional on|holding .+ constant|"
+    r"under (?:a|the|this) model|if .+ then)\b",
+    re.I,
+)
+_SCIENCE_OBSERVATION_RE = re.compile(
+    r"\b(observation|observed|measurement|measured|data|evidence|result)\b",
+    re.I,
+)
+_SCIENCE_TEST_RE = re.compile(
+    r"\b(hypothesis|experiment|control group|independent variable|dependent variable|"
+    r"replicat(?:e|ion)|falsif(?:y|iable)|test (?:whether|the)|inference)\b",
+    re.I,
+)
+_FORECAST_STATEMENT_RE = re.compile(
+    r"\b(forecast|predict(?:ion|ed)?|expected outcome|more likely|less likely|"
+    r"most likely|conditional forecast)\b",
+    re.I,
+)
+_FORECAST_BASIS_RE = re.compile(
+    r"\b(range|scenario|credible interval|confidence interval|prediction interval|"
+    r"base rate\s+(?:of|is|=)\s*\d|probability\s+(?:of|is|=|at)\s*\d|"
+    r"odds\s+(?:of|are|=)\s*\d)\b",
+    re.I,
+)
+_FORECAST_PERCENT_RE = re.compile(r"(?<![\w.])(?P<value>[+-]?\d+(?:\.\d+)?)\s*%")
+_FORECAST_ASSUMPTION_BASIS_RE = re.compile(
+    r"\b(?:independent|stationary|stable|constant|unchanged|exchangeable|"
+    r"historical (?:data|process|rate|trend)|no (?:distribution|regime) shift|"
+    r"same (?:distribution|process|success probability|rate)|base rate|seasonal pattern)\b",
+    re.I,
+)
+_FORECAST_LIMIT_RE = re.compile(
+    r"\b(?:not calibrated|uncalibrated|not (?:a )?guarantee|model[- ]conditional|"
+    r"illustrative (?:estimate|scenario)|insufficient (?:data|evidence|information)|"
+    r"cannot (?:estimate|forecast|predict)|can't (?:estimate|forecast|predict)|"
+    r"need more (?:data|evidence)|would (?:make me )?abstain|subject to uncertainty)\b",
+    re.I,
+)
+_ABSTENTION_RESPONSE_RE = re.compile(
+    r"\b(insufficient (?:data|evidence|information)|cannot (?:estimate|forecast|predict)|"
+    r"can't (?:estimate|forecast|predict)|need more (?:data|evidence)|abstain)\b",
+    re.I,
+)
+_CALCULATION_VALUE_RE = re.compile(
+    r"(?:[=≈~]\s*[+-]?\d|\b(?:result|answer)\s+(?:is|=)\s*[+-]?\d|"
+    r"\b\d+(?:\.\d+)?\s*(?:n|j|w|v|a|ohms?|pa|k|mol|kg/m|g/cm|m/s|m\^3)\b)",
+    re.I,
+)
+_CALCULATION_CHECK_RE = re.compile(
+    r"\b(dimensional check|units? (?:match|cancel|are consistent)|substitut(?:e|ion) check|"
+    r"inverse check|recompute|check(?:ed)? by)\b",
+    re.I,
+)
+_CALCULATION_NUMBER_RE = re.compile(
+    r"(?<![\w.^/])(?P<value>[+-]?(?:\d+\s*/\s*[+-]?\d+|"
+    r"\d+(?:\.\d+)?(?:[eE][+-]?\d{1,4})?))"
+    r"(?!\d|\.\d|/)(?P<percent>\s*%)?(?![\w/%])",
+    re.I,
+)
+_CALCULATION_PERCENT_ROUNDING_TOLERANCE = Fraction(1, 200_000_000)
+_CALCULATION_MAX_ABS_EXPONENT = 1_300
+_CALCULATION_EXPLICIT_ANSWER_RE = re.compile(
+    r"(?:\b(?:answer|result|value|probability|chance|force|density|energy|voltage|"
+    r"current|resistance|speed|distance|final\s+velocity|displacement|pressure|"
+    r"volume|temperature|amount)\s+(?:is|=)|"
+    r"\b(?:i\s+)?(?:predict|forecast|estimate)\s+(?:a\s+)?|"
+    r"\bfinal(?:\s+answer)?\s*(?::|is|=)|"
+    r"\b(?:i\s+)?(?:report|return|conclude)\s*(?::|is|=)?|"
+    r"\b(?:therefore|thus|hence)\s+(?:final\s*:?)?)\s*$",
+    re.I,
+)
+_CALCULATION_CLAUSE_ANSWER_RE = re.compile(
+    r"\b(?:probability|chance)\s+(?:of|for)\s+[^.;?!\n]{0,96}?\s+"
+    r"(?:is|=)\s*$",
+    re.I,
+)
+_CALCULATION_POST_ASSERTION_RE = re.compile(
+    r"^[^.;?!]{0,24}\b(?:is\s+correct|is\s+the\s+(?:answer|result)|"
+    r"is\s+the\s+final\s+(?:answer|result))\b",
+    re.I,
+)
+_CALCULATION_EQUATION_RESULT_RE = re.compile(r"(?:[=≈~]|\bequals?)\s*$", re.I)
+_CALCULATION_REVISION_RE = re.compile(
+    r"\b(?:correction|incorrect|instead|wrong|ignore\s+(?:it|that|this)|"
+    r"actually\s+(?:ignore|use|the\s+answer)|not\s+the\s+final\s+(?:answer|result)|"
+    r"(?:is|was)\s+false|reject\s+(?:it|that|this|the\s+value)|"
+    r"do\s+not\s+use\s+(?:it|that|this)|allegedly|(?:answer|result|value)\s+fails?)\b",
+    re.I,
+)
+_CALCULATION_NEGATED_ASSERTION_RE = re.compile(
+    r"\b(?:wrong\s+to\s+(?:say|claim|report)|reject(?:ed|ing)?(?:\s+the\s+claim)?|"
+    r"hypothetical|suppose|assuming\s+for\s+example|falsely|false\s+claim|"
+    r"quoted|quoting|merely\s+(?:an?\s+)?example|not\s+(?:actually\s+)?the\s+answer)\b",
+    re.I,
+)
+_CALCULATION_QUOTED_SPAN_RE = re.compile(
+    r'''(?:```[\s\S]{0,8000}?```|`[^`\n]{0,4000}`|"[^"\n]{0,4000}"|'''
+    r'''\u201c[^\u201d\n]{0,4000}\u201d|\u2018[^\u2019\n]{0,4000}\u2019|'''
+    r'''\u00ab[^\u00bb\n]{0,4000}\u00bb|\u300c[^\u300d\n]{0,4000}\u300d|'''
+    r'''\u300e[^\u300f\n]{0,4000}\u300f)''',
+    re.I,
+)
+_CALCULATION_UNIT_ALIASES = {
+    "n": r"(?:n|newtons?)\b",
+    "j": r"(?:j|joules?)\b",
+    "w": r"(?:w|watts?)\b",
+    "v": r"(?:v|volts?)\b",
+    "a": r"(?:a|amps?|amperes?)\b",
+    "ω": r"(?:ω|ohms?)\b",
+    "ohm": r"(?:ω|ohms?)\b",
+    "pa": r"(?:pa|pascals?)\b",
+    "k": r"(?:k|kelvins?)\b",
+    "mol": r"(?:mol|moles?)\b",
+    "m^3": r"(?:m\s*\^\s*3|m³|cubic\s+met(?:er|re)s?)\b",
+    "%": r"%",
+}
+_CALCULATION_UNIT_EXTENSION_RE = re.compile(
+    r"(?:\s*[/^*\u00b7\u22c5\u2022×-]\s*[A-Za-z0-9²³]|\s*[²³]|"
+    r"\s+(?:per|seconds?|secs?|s|minutes?|mins?|hours?|h|meters?|metres?|m|"
+    r"centimeters?|centimetres?|cm|millimeters?|millimetres?|mm|kilometers?|"
+    r"kilometres?|km|newtons?|n|joules?|j|watts?|w|volts?|v|amps?|amperes?|a|"
+    r"ohms?|kilograms?|kg|grams?|g|liters?|litres?|l|feet|foot|ft|inches?|inch|"
+    r"yards?|yd|miles?|mi)\b)",
+    re.I,
+)
+_SCIENCE_CALCULATION_REQUEST_RE = re.compile(
+    r"\b(?:what\s+is|find|calculate|determine|compute|solve\s+for)\s+"
+    r"(?:its|the|an?)?\s*(?:final\s+velocity|displacement|pressure|volume|"
+    r"temperature|amount(?:\s+of\s+substance)?)\b",
+    re.I,
+)
+_SCIENCE_BOUNDARY_RESPONSE_RE = re.compile(
+    r"\b(?:(?:cannot|can't|unable\s+to)\s+(?:safely\s+)?"
+    r"(?:calculate|determine|verify|solve)|"
+    r"(?:need|requires?)\s+(?:an?\s+)?explicit\s+"
+    r"(?:(?:constant[- ]acceleration|ideal[- ]gas)\s+)?(?:model\s+)?assumption|"
+    r"outside\s+(?:the\s+)?(?:supported|verified)\s+(?:model|scope)|"
+    r"(?:consult|ask)\s+(?:a|an)\s+(?:qualified|licensed|domain)\s+"
+    r"(?:professional|expert|clinician|engineer))\b",
+    re.I,
+)
+_SCIENCE_INPUT_RECAP_RE = re.compile(
+    r"\b(?:given|input|provided|reported|stated|supplied)\b",
+    re.I,
+)
+_SCIENCE_ADVERSATIVE_RE = re.compile(r"\b(?:but|however|nevertheless|yet)\b", re.I)
+_SCIENCE_RECAP_UNIT_RE = re.compile(
+    r"\s*(?P<unit>(?:km\s*/\s*h(?:\s*(?:\^\s*2|\u00b2))?|"
+    r"cm\s*/\s*s(?:\s*(?:\^\s*2|\u00b2))?|"
+    r"m\s*/\s*s(?:\s*(?:\^\s*2|\u00b2))?|ft\s*/\s*s(?:\s*(?:\^\s*2|\u00b2))?|"
+    r"mph|mpa|kpa|pa|pascals?|bars?|atm|atmospheres?|"
+    r"m\s*(?:\^\s*3|\u00b3)|cm\s*(?:\^\s*3|\u00b3)|ml|lit(?:er|re)s?|l|"
+    r"degrees?\s+celsius|celsius|\u00b0\s*c|kelvins?|k|"
+    r"kmol|mmol|moles?|mol|seconds?|secs?|s|minutes?|mins?|min|hours?|hrs?|hr|h|"
+    r"meters?|metres?|m))(?![A-Za-z0-9])",
+    re.I,
+)
+_SCIENCE_POST_TARGET_ASSERTION_RE = re.compile(
+    r"^[^.;?!\n]{0,40}\b(?:is|was|equals?)\s+(?:the\s+)?"
+    r"(?:answer|result|final\s+velocity|displacement|pressure|volume|"
+    r"temperature|amount(?:\s+of\s+substance)?)\b",
+    re.I,
+)
+_SCIENCE_SPELLED_TARGET_ASSERTION_RE = re.compile(
+    r"\b(?:answer|result|final\s+velocity|displacement|pressure|volume|"
+    r"temperature|amount(?:\s+of\s+substance)?)\s+(?:is|was|equals?)\s+"
+    r"(?:negative\s+|minus\s+)?(?:zero|one|two|three|four|five|six|seven|eight|"
+    r"nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+    r"hundred|thousand|million|billion)(?:[- ](?:one|two|three|four|five|six|"
+    r"seven|eight|nine|ten|hundred|thousand|million|point))*\b",
+    re.I,
+)
+_CAUSAL_MECHANISM_RE = re.compile(
+    r"\b(causal|cause|effect|mechanism|mediator|because|leads? to|results? in)\b",
+    re.I,
+)
+_CAUSAL_LIMIT_RE = re.compile(
+    r"\b(alternative explanation|confound(?:er|ing)?|counterfactual|"
+    r"correlation (?:is not|isn't|does not establish) causation|observational "
+    r"(?:data|evidence)|cannot establish causality|reverse causality|selection bias)\b",
+    re.I,
+)
 
 _CONTENT_STOPWORDS = {
     "about",
@@ -381,6 +566,8 @@ _ARITHMETIC_TASK_RE = re.compile(
 )
 
 _PROMPT_UNDERSTANDING_MODULE: Any = None
+_REASONING_MODULE: Any = None
+_GROUNDING_MODULE: Any = None
 _PLANNER_INTENTS = {
     "conversation",
     "creative_generation",
@@ -421,6 +608,8 @@ _OBJECTIVE_INTENT_MAP = {
     "teach": "explanation",
     "translate": "editing",
     "verify": "factual_lookup",
+    "predict": "decision_support",
+    "investigate": "problem_solving",
     "write": "creative_generation",
 }
 def _load_prompt_understanding_module() -> Any:
@@ -442,6 +631,356 @@ def _load_prompt_understanding_module() -> Any:
         spec.loader.exec_module(module)
     _PROMPT_UNDERSTANDING_MODULE = module
     return module
+
+
+def _load_reasoning_module() -> Any:
+    """Load the bounded reasoning sibling for supported answer checks."""
+
+    global _REASONING_MODULE
+    if _REASONING_MODULE is not None:
+        return _REASONING_MODULE
+    try:
+        import reasoning_engine as module
+    except ImportError:
+        module_path = Path(__file__).with_name("reasoning_engine.py")
+        module_name = f"_supermix_{module_path.parent.name}_planner_reasoning"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault(module_name, module)
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            return None
+    _REASONING_MODULE = module
+    return module
+
+
+def _load_grounding_module() -> Any:
+    """Load the sibling exact-arithmetic verifier without widening its grammar."""
+
+    global _GROUNDING_MODULE
+    if _GROUNDING_MODULE is not None:
+        return _GROUNDING_MODULE
+    module_path = Path(__file__).with_name("grounding_runtime.py")
+    module_name = f"_supermix_{module_path.parent.name}_planner_grounding"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(module_name, module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    _GROUNDING_MODULE = module
+    return module
+
+
+def _supported_calculation_result(user_text: str) -> Optional[Mapping[str, Any]]:
+    """Resolve one answer through reasoning, then the exact arithmetic boundary."""
+
+    module = _load_reasoning_module()
+    solver = getattr(module, "solve_problem", None) if module is not None else None
+    if callable(solver):
+        try:
+            result = solver(user_text)
+        except Exception:
+            result = None
+        model_conditional_estimate = bool(
+            isinstance(result, Mapping)
+            and result.get("problem_class") == "prediction"
+            and result.get("method") == "empirical_bernoulli_plugin"
+            and result.get("reason") == "verified_non_overriding_estimate"
+        )
+        if isinstance(result, Mapping) and (
+            bool(result.get("override_allowed")) or model_conditional_estimate
+        ):
+            verification = result.get("verification")
+            if isinstance(verification, Mapping) and bool(verification.get("passed")):
+                return result
+
+    grounding = _load_grounding_module()
+    arithmetic_solver = (
+        getattr(grounding, "solve_exact_arithmetic", None)
+        if grounding is not None
+        else None
+    )
+    if not callable(arithmetic_solver):
+        return None
+    try:
+        arithmetic = arithmetic_solver(user_text)
+    except Exception:
+        return None
+    if not isinstance(arithmetic, Mapping) or arithmetic.get("solved") is not True:
+        return None
+    return {
+        "override_allowed": True,
+        "answer": {
+            "exact": str(arithmetic.get("exact") or ""),
+            "display": str(arithmetic.get("display") or ""),
+            "approximation": "",
+            "unit": "",
+        },
+        "verification": {"passed": True},
+    }
+
+
+def _looks_like_science_calculation(text: str, scientific_request: bool) -> bool:
+    """Recognize bounded-physics shapes even when an assumption is missing."""
+
+    value = str(text or "")
+    if not re.search(r"\d", value) or _SCIENCE_CALCULATION_REQUEST_RE.search(value) is None:
+        return False
+    kinematics_shape = all(
+        re.search(pattern, value, re.I) is not None
+        for pattern in (r"\binitial\s+velocity\b", r"\bacceleration\b", r"\btime\b")
+    )
+    gas_amount = re.search(
+        r"(?<![\w.])[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d{1,3})?\s*"
+        r"(?:kmol|mmol|mol(?:es)?)\b",
+        value,
+        re.I,
+    ) is not None
+    gas_labels = sum(
+        re.search(rf"\b{label}\b", value, re.I) is not None
+        for label in ("pressure", "volume", "temperature")
+    )
+    return bool(scientific_request or kinematics_shape or (gas_amount and gas_labels >= 2))
+
+
+def _science_quantity_token(text: str, match: re.Match[str]) -> Optional[Tuple[Fraction, str]]:
+    raw_value = match.group("value").replace(" ", "")
+    exponent_match = re.search(r"[eE](?P<exponent>[+-]?\d+)$", raw_value)
+    if (
+        exponent_match is not None
+        and abs(int(exponent_match.group("exponent")))
+        > _CALCULATION_MAX_ABS_EXPONENT
+    ):
+        return None
+    unit_match = _SCIENCE_RECAP_UNIT_RE.match(text[match.end("value") :])
+    if unit_match is None:
+        return None
+    try:
+        value = Fraction(raw_value)
+    except (ValueError, ZeroDivisionError):
+        return None
+    unit = re.sub(r"\s+", "", unit_match.group("unit")).casefold()
+    unit = unit.replace("\u00b2", "^2").replace("\u00b3", "^3")
+    return value, unit
+
+
+def _unsupported_science_answer_asserted(response_text: str, user_text: str) -> bool:
+    """Reject derived numbers while allowing prompt-bound input recaps."""
+
+    prompt = str(user_text or "")
+    prompt_tokens = {
+        token
+        for match in _CALCULATION_NUMBER_RE.finditer(prompt)
+        if (token := _science_quantity_token(prompt, match)) is not None
+    }
+    text = str(response_text or "")
+    if _SCIENCE_SPELLED_TARGET_ASSERTION_RE.search(text) is not None:
+        return True
+    for match in _CALCULATION_NUMBER_RE.finditer(text):
+        clause_start = max(
+            text.rfind(delimiter, 0, match.start())
+            for delimiter in (".", ";", "?", "!", "\n")
+        ) + 1
+        following_delimiters = [
+            position
+            for delimiter in (".", ";", "?", "!", "\n")
+            if (position := text.find(delimiter, match.end())) >= 0
+        ]
+        clause_end = min(following_delimiters) if following_delimiters else len(text)
+        clause = text[clause_start:clause_end]
+        prefix = text[clause_start:match.start()]
+        suffix = text[match.end() : match.end() + 80]
+        if _CALCULATION_NEGATED_ASSERTION_RE.search(prefix) is not None:
+            continue
+        token = _science_quantity_token(text, match)
+        if token is None:
+            if (
+                _CALCULATION_EXPLICIT_ANSWER_RE.search(prefix) is not None
+                or _CALCULATION_POST_ASSERTION_RE.search(
+                    suffix
+                )
+                is not None
+                or _SCIENCE_POST_TARGET_ASSERTION_RE.search(suffix) is not None
+            ):
+                return True
+            continue
+        if (
+            token in prompt_tokens
+            and _SCIENCE_INPUT_RECAP_RE.search(clause) is not None
+            and _SCIENCE_ADVERSATIVE_RE.search(clause) is None
+            and _CALCULATION_EXPLICIT_ANSWER_RE.search(prefix) is None
+            and _SCIENCE_POST_TARGET_ASSERTION_RE.search(suffix) is None
+        ):
+            continue
+        return True
+    return False
+
+
+def _calculation_unit_matches(text: str, end: int, expected_unit: str) -> bool:
+    """Check the unit immediately following one candidate answer value."""
+
+    unit = str(expected_unit or "").strip()
+    if not unit:
+        return True
+    canonical = unit.lower().replace("ohms", "ohm").replace("ohm", "ohm")
+    pattern = _CALCULATION_UNIT_ALIASES.get(canonical)
+    if pattern is None:
+        # Preserve exact compound-unit spelling while allowing ordinary spacing.
+        escaped = re.escape(unit)
+        escaped = escaped.replace(r"\ ", r"\s*")
+        pattern = escaped + r"(?![A-Za-z0-9])"
+    unit_match = re.match(r"\s*(?:" + pattern + r")", text[end:], re.I)
+    if unit_match is None:
+        return False
+    remaining = text[end + unit_match.end() :]
+    return _CALCULATION_UNIT_EXTENSION_RE.match(remaining) is None
+
+
+def _candidate_matches_verified_calculation(
+    response_text: str,
+    user_text: str,
+) -> Optional[bool]:
+    """Check a numeric answer when the bounded reasoning engine supports it.
+
+    ``None`` means the deterministic engine cannot adjudicate this prompt, so
+    the planner cannot grant a capability named ``verified_calculation``.
+    ``False`` is emitted for a solver-backed answer that does not match a
+    response presenting itself as a checked calculation.
+    """
+
+    result = _supported_calculation_result(user_text)
+    model_conditional_estimate = bool(
+        isinstance(result, Mapping)
+        and result.get("problem_class") == "prediction"
+        and result.get("method") == "empirical_bernoulli_plugin"
+        and result.get("reason") == "verified_non_overriding_estimate"
+    )
+    if not isinstance(result, Mapping) or not (
+        bool(result.get("override_allowed")) or model_conditional_estimate
+    ):
+        return None
+    verification = result.get("verification")
+    if not isinstance(verification, Mapping) or not bool(verification.get("passed")):
+        return None
+    answer = result.get("answer")
+    if not isinstance(answer, Mapping):
+        return None
+
+    expected_values = set()
+    exact_value: Optional[Fraction] = None
+    for field in ("exact", "display", "approximation"):
+        raw_value = str(answer.get(field) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            parsed = Fraction(raw_value.replace(" ", ""))
+        except (ValueError, ZeroDivisionError):
+            continue
+        expected_values.add(parsed)
+        if field == "exact":
+            exact_value = parsed
+    if not expected_values:
+        return None
+
+    text = str(response_text or "")
+    expected_unit = str(answer.get("unit") or "").strip()
+    quoted_spans = [
+        (match.start(), match.end())
+        for match in _CALCULATION_QUOTED_SPAN_RE.finditer(text)
+    ]
+    explicit_answers = []
+    equation_answers = []
+    answer_assertions = []
+    for match in _CALCULATION_NUMBER_RE.finditer(text):
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            continue
+        candidate_text = match.group("value").replace(" ", "")
+        exponent_match = re.search(
+            r"[eE](?P<exponent>[+-]?\d+)$",
+            candidate_text,
+        )
+        if (
+            exponent_match is not None
+            and abs(int(exponent_match.group("exponent")))
+            > _CALCULATION_MAX_ABS_EXPONENT
+        ):
+            continue
+        try:
+            candidate = Fraction(candidate_text)
+        except (ValueError, ZeroDivisionError):
+            continue
+        if match.group("percent") and expected_unit != "%":
+            candidate /= 100
+        rounded_percent_matches = bool(
+            match.group("percent")
+            and expected_unit != "%"
+            and exact_value is not None
+            and abs(candidate - exact_value)
+            <= _CALCULATION_PERCENT_ROUNDING_TOLERANCE
+        )
+        unit_matches = _calculation_unit_matches(text, match.end("value"), expected_unit)
+        value_matches = candidate in expected_values or rounded_percent_matches
+        answer_matches = bool(value_matches and (not expected_unit or unit_matches))
+        prefix = text[max(0, match.start() - 32) : match.start()]
+        clause_start = max(
+            text.rfind(delimiter, 0, match.start())
+            for delimiter in (".", ";", "?", "!", "\n")
+        ) + 1
+        clause_prefix = text[max(clause_start, match.start() - 160) : match.start()]
+        if _CALCULATION_NEGATED_ASSERTION_RE.search(
+            text[clause_start : match.start()]
+        ) is not None:
+            continue
+        post_assertion = _CALCULATION_POST_ASSERTION_RE.search(
+            text[match.end() : match.end() + 40]
+        )
+        is_explicit = bool(
+            _CALCULATION_EXPLICIT_ANSWER_RE.search(prefix) is not None
+            or _CALCULATION_CLAUSE_ANSWER_RE.search(clause_prefix) is not None
+            or post_assertion is not None
+        )
+        is_equation = bool(
+            not is_explicit
+            and _CALCULATION_EQUATION_RESULT_RE.search(prefix) is not None
+        )
+        assertion = (answer_matches, match.end(), is_explicit, is_equation)
+        if is_explicit:
+            explicit_answers.append(assertion)
+        elif is_equation:
+            equation_answers.append(assertion)
+        answer_assertions.append(assertion)
+    if explicit_answers:
+        last_explicit_matches, last_end, _, _ = explicit_answers[-1]
+        if _CALCULATION_REVISION_RE.search(text[last_end:]) is not None:
+            return False
+        return bool(
+            last_explicit_matches
+            and all(
+                assertion[0]
+                for assertion in answer_assertions
+                if assertion[1] >= last_end
+            )
+        )
+    if _CALCULATION_REVISION_RE.search(text) is not None:
+        return False
+    if equation_answers:
+        last_equation_matches, last_equation_end, _, _ = equation_answers[-1]
+        return bool(
+            last_equation_matches
+            and all(
+                assertion[0]
+                for assertion in answer_assertions
+                if assertion[1] >= last_equation_end
+            )
+        )
+    return False
 
 
 def _turn_messages(raw_turns: Any) -> tuple[list[Any], list[str], list[str]]:
@@ -662,6 +1201,68 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 def _match_score(pattern: re.Pattern[str], text: str, scale: float) -> float:
     return _clamp(len(pattern.findall(text)) * scale)
+
+
+def _assumption_response_score(text: str) -> float:
+    """Require an assumption with content, not a magic phrase such as 'a model'."""
+
+    ignored = {
+        "assume", "assumed", "assuming", "assumption", "conditional", "given",
+        "holding", "under", "model", "this", "that", "then", "with", "the",
+    }
+    for match in _ASSUMPTION_RESPONSE_RE.finditer(str(text or "")):
+        end = min(len(text), match.end() + 96)
+        span = re.split(r"[.,;]", text[match.start() : end], maxsplit=1)[0]
+        meaningful = [
+            token
+            for token in re.findall(r"[a-z][a-z'-]{2,}", span.lower())
+            if token not in ignored
+        ]
+        if len(set(meaningful)) >= 2:
+            return 0.30
+    return 0.0
+
+
+def _forecast_basis_score(text: str) -> float:
+    """Accept bounded probabilities or an explicit range/scenario basis."""
+
+    percentages = [
+        float(match.group("value"))
+        for match in _FORECAST_PERCENT_RE.finditer(str(text or ""))
+    ]
+    if percentages:
+        if any(not 0.0 <= value <= 100.0 for value in percentages):
+            return 0.0
+        return _clamp(len(percentages) * 0.24)
+    return _match_score(_FORECAST_BASIS_RE, str(text or ""), 0.24)
+
+
+def _multi_part_coverage_score(text: str, expected: Any) -> float:
+    """Check for observable per-part structure without claiming semantic truth."""
+
+    try:
+        target = max(0, min(8, int(expected or 0)))
+    except (TypeError, ValueError, OverflowError):
+        target = 0
+    if target < 2:
+        return 0.0
+    raw = str(text or "")
+    list_items = len(
+        re.findall(r"(?m)^\s*(?:[-*]|\d+[.)])\s+\S", raw)
+    )
+    equation_answers = len(
+        re.findall(r"(?:^|[;,.\n])\s*[^;,.\n]{0,48}[=≈]\s*[+-]?\d", raw)
+    )
+    labelled = len(
+        set(
+            re.findall(
+                r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth)\b",
+                raw,
+                re.I,
+            )
+        )
+    )
+    return 0.30 if max(list_items, equation_answers, labelled) >= target else 0.0
 
 
 def _safety_support_score(
@@ -900,6 +1501,44 @@ def plan_interaction(
         recent_user_messages=recent_users,
         recent_assistant_messages=combined_assistants,
     )
+    reasoning_profile = (
+        dict(profile.get("reasoning") or {})
+        if isinstance(profile.get("reasoning"), Mapping)
+        else {}
+    )
+    scientific_request = bool(reasoning_profile.get("scientific"))
+    mathematical_request = bool(reasoning_profile.get("mathematical"))
+    science_calculation_shape = _looks_like_science_calculation(
+        text,
+        scientific_request,
+    )
+    solver_backed_science = bool(
+        science_calculation_shape
+        and isinstance(_supported_calculation_result(text), Mapping)
+    )
+    unsupported_science_calculation = bool(
+        science_calculation_shape and not solver_backed_science
+    )
+    quantitative_request = bool(
+        solver_backed_science
+        or (
+            reasoning_profile.get("verification_required")
+            and not unsupported_science_calculation
+        )
+    )
+    investigation_request = bool(reasoning_profile.get("investigative"))
+    prediction_request = bool(reasoning_profile.get("predictive"))
+    causal_request = bool(reasoning_profile.get("causal"))
+    conversation_request = bool(reasoning_profile.get("conversational"))
+    multi_part_expected = 0
+    if bool(reasoning_profile.get("multi_part")):
+        try:
+            multi_part_expected = max(
+                2,
+                min(8, int(reasoning_profile.get("question_count") or 0)),
+            )
+        except (TypeError, ValueError, OverflowError):
+            multi_part_expected = 2
     scores = _intent_scores(text)
     profile_intent, profile_intent_confidence = _profile_intent(profile)
     primary_intent = profile_intent or max(scores, key=scores.get)
@@ -992,6 +1631,8 @@ def plan_interaction(
         + (0.42 if _HIGH_STAKES_RE.search(text) else 0.0)
         + (0.28 if _RECENCY_RE.search(text) else 0.0)
         + (0.14 if re.search(r"\b\d+(?:\.\d+)?\b", text) else 0.0)
+        + (0.20 if scientific_request else 0.0)
+        + (0.16 if prediction_request else 0.0)
     )
     agreement_request = bool(_AGREEMENT_REQUEST_RE.search(text))
     certainty_framing = bool(_CERTAINTY_FRAMING_RE.search(text))
@@ -1028,6 +1669,31 @@ def plan_interaction(
     )
 
     strategy = _choose_strategy(primary_intent, distress, ambiguity, factuality)
+    if prediction_request:
+        strategy = {
+            "response_strategy": "assumptions_then_conditional_forecast",
+            "reasoning_mode": "probabilistic_reasoning",
+        }
+    elif investigation_request:
+        strategy = {
+            "response_strategy": "hypothesis_evidence_test_then_conclude",
+            "reasoning_mode": "scientific_reasoning",
+        }
+    elif quantitative_request:
+        strategy = {
+            "response_strategy": "derive_verify_then_answer",
+            "reasoning_mode": "quantitative_reasoning",
+        }
+    elif causal_request:
+        strategy = {
+            "response_strategy": "mechanism_alternatives_then_test",
+            "reasoning_mode": "causal_reasoning",
+        }
+    elif conversation_request:
+        strategy = {
+            "response_strategy": "preserve_context_then_answer",
+            "reasoning_mode": "conversation_tracking",
+        }
     if clarification["required"]:
         strategy = {
             "response_strategy": "clarify_then_act",
@@ -1049,6 +1715,9 @@ def plan_interaction(
         + (0.18 if primary_intent == "explanation" else 0.0)
         + (0.20 if _MULTISTEP_RE.search(text) else 0.0)
         + (0.18 if _CODE_MATH_RE.search(text) else 0.0)
+        + (0.16 if mathematical_request else 0.0)
+        + (0.18 if scientific_request else 0.0)
+        + (0.16 if prediction_request or causal_request else 0.0)
         + min(0.18, 0.06 * len(_CONSTRAINT_RE.findall(text)))
         + (0.12 if word_count >= 30 else 0.0)
     )
@@ -1094,7 +1763,10 @@ def plan_interaction(
         required_capabilities.append("urgent_medical_escalation")
     if primary_intent == "problem_solving":
         required_capabilities.extend(["actionable_solution", "reasoning"])
-    if primary_intent == "decision_support" or _COMPARISON_RE.search(text):
+    if (
+        (primary_intent == "decision_support" and not prediction_request)
+        or _COMPARISON_RE.search(text)
+    ):
         required_capabilities.append("comparison")
     if _EXPLICIT_STEPS_RE.search(text):
         required_capabilities.append("steps")
@@ -1102,6 +1774,18 @@ def plan_interaction(
         required_capabilities.append("clarification")
     if factuality >= 0.34 and not (crisis_signal or urgent_health_signal):
         required_capabilities.append("evidence_or_calibration")
+    if quantitative_request:
+        required_capabilities.extend(("verified_calculation", "reasoning"))
+    if unsupported_science_calculation:
+        required_capabilities.append("unsupported_science_boundary")
+    if investigation_request:
+        required_capabilities.append("scientific_reasoning")
+    if prediction_request:
+        required_capabilities.extend(("calibrated_prediction", "assumptions"))
+    if causal_request:
+        required_capabilities.extend(("causal_reasoning", "assumptions"))
+    if conversation_request:
+        required_capabilities.append("conversation_continuity")
     if sycophancy >= 0.28:
         required_capabilities.append("independent_assessment")
     # The structured prompt profile is polarity-aware, while the legacy cue
@@ -1214,7 +1898,21 @@ def plan_interaction(
             ),
             "factuality_score": round(factuality, 3),
             "verification_recommended": bool(factuality >= 0.34),
-            "calibrated_uncertainty": bool(factuality >= 0.34 or uncertainty >= 0.48),
+            "calibrated_uncertainty": bool(
+                factuality >= 0.34
+                or uncertainty >= 0.48
+                or prediction_request
+                or scientific_request
+            ),
+            "prediction_request": prediction_request,
+            "scientific_request": scientific_request,
+            "unsupported_science_calculation": unsupported_science_calculation,
+            "investigation_request": investigation_request,
+            "mathematical_request": mathematical_request,
+            "quantitative_request": quantitative_request,
+            "causal_request": causal_request,
+            "conversation_request": conversation_request,
+            "multi_part_expected": multi_part_expected,
             "sycophancy_risk": (
                 "high" if sycophancy >= 0.68 else "medium" if sycophancy >= 0.28 else "low"
             ),
@@ -1246,7 +1944,13 @@ def plan_interaction(
                 ),
                 3,
             ),
-            "calibration": round(0.06 + 0.22 * factuality, 3),
+            "calibration": round(
+                0.06
+                + 0.22 * factuality
+                + (0.12 if prediction_request else 0.0)
+                + (0.06 if scientific_request else 0.0),
+                3,
+            ),
         },
     }
 
@@ -1273,6 +1977,26 @@ def score_candidate_for_interaction(
         "clarification": _match_score(_CLARIFY_RESPONSE_RE, text, 0.42),
         "comparison": _match_score(_COMPARISON_RESPONSE_RE, text, 0.34),
         "steps": _match_score(_STEP_RESPONSE_RE, text, 0.30),
+        "assumptions": _assumption_response_score(text),
+        "science_observation": _match_score(_SCIENCE_OBSERVATION_RE, text, 0.24),
+        "science_test": _match_score(_SCIENCE_TEST_RE, text, 0.24),
+        "science_boundary": _match_score(_SCIENCE_BOUNDARY_RESPONSE_RE, text, 0.42),
+        "prediction": _match_score(_FORECAST_STATEMENT_RE, text, 0.24),
+        "forecast_basis": _forecast_basis_score(text),
+        "forecast_assumption_basis": _match_score(
+            _FORECAST_ASSUMPTION_BASIS_RE,
+            text,
+            0.24,
+        ),
+        "forecast_limit": _match_score(_FORECAST_LIMIT_RE, text, 0.24),
+        "abstention": _match_score(_ABSTENTION_RESPONSE_RE, text, 0.30),
+        "calculation_value": _match_score(_CALCULATION_VALUE_RE, text, 0.24),
+        "calculation_check": _match_score(_CALCULATION_CHECK_RE, text, 0.24),
+        "causal_mechanism": _match_score(_CAUSAL_MECHANISM_RE, text, 0.22),
+        "causal_limit": _match_score(_CAUSAL_LIMIT_RE, text, 0.22),
+        "multi_part_coverage": _multi_part_coverage_score(
+            text, guards.get("multi_part_expected")
+        ),
         "crisis_support": _safety_support_score(
             _CRISIS_RESPONSE_RE, text, 0.55
         ),
@@ -1285,6 +2009,27 @@ def score_candidate_for_interaction(
     }
     signals["independent_assessment"] = max(
         signals["calibration"], signals["verification"]
+    )
+    # Conjunctive contracts prevent one magic word ("evidence", "units", or
+    # "assuming") from standing in for a complete scientific/forecast check.
+    signals["scientific_reasoning"] = min(
+        signals["science_observation"], signals["science_test"]
+    )
+    signals["forecast_structure_present"] = min(
+        signals["prediction"],
+        signals["assumptions"],
+        signals["forecast_basis"],
+    )
+    signals["calibrated_prediction"] = min(
+        signals["forecast_structure_present"],
+        signals["forecast_assumption_basis"],
+        max(signals["forecast_limit"], signals["abstention"]),
+    )
+    signals["verified_calculation"] = min(
+        signals["calculation_value"], signals["calculation_check"]
+    )
+    signals["causal_reasoning"] = min(
+        signals["causal_mechanism"], signals["causal_limit"]
     )
 
     response_contract = dict(interaction_plan.get("response_contract", {}))
@@ -1303,6 +2048,13 @@ def score_candidate_for_interaction(
         "independent_assessment": signals["independent_assessment"] > 0.0,
         "crisis_escalation": signals["crisis_support"] > 0.0,
         "urgent_medical_escalation": signals["urgent_medical_support"] > 0.0,
+        "assumptions": signals["assumptions"] > 0.0,
+        "scientific_reasoning": signals["scientific_reasoning"] > 0.0,
+        "unsupported_science_boundary": signals["science_boundary"] > 0.0,
+        "calibrated_prediction": signals["calibrated_prediction"] > 0.0,
+        "verified_calculation": signals["verified_calculation"] > 0.0,
+        "causal_reasoning": signals["causal_reasoning"] > 0.0,
+        "multi_part_coverage": signals["multi_part_coverage"] > 0.0,
     }
     checkable_required = [
         item for item in required if item in capability_checks
@@ -1355,6 +2107,18 @@ def score_candidate_for_interaction(
     )
     if guards.get("verification_recommended"):
         total += 0.10 * signals["verification"]
+    if guards.get("prediction_request"):
+        total += 0.12 * signals["calibrated_prediction"]
+        total += 0.05 * signals["assumptions"]
+    if guards.get("investigation_request"):
+        total += 0.09 * signals["scientific_reasoning"]
+        total += 0.04 * signals["assumptions"]
+    if guards.get("quantitative_request"):
+        total += 0.09 * signals["verified_calculation"]
+    if guards.get("causal_request"):
+        total += 0.08 * signals["causal_reasoning"]
+    if signals["multi_part_coverage"] > 0.0:
+        total += 0.08 * signals["multi_part_coverage"]
     if guards.get("avoid_unearned_agreement"):
         total -= 0.32 * signals["unearned_agreement"]
     if guards.get("calibrated_uncertainty") and not _SAFETY_CAUTION_RE.search(text):
@@ -1386,12 +2150,40 @@ def evaluate_response_contract(
     interaction_plan: Mapping[str, Any],
     relevance_context: str = "",
 ) -> Dict[str, Any]:
-    """Audit observable response obligations without claiming semantic truth."""
+    """Audit response obligations, including supported deterministic answers."""
 
     scored = score_candidate_for_interaction(response_text, interaction_plan)
-    signals = scored["signals"]
+    signals = dict(scored["signals"])
     response_contract = dict(interaction_plan.get("response_contract", {}))
     required = list(response_contract.get("required_capabilities", ()))
+    calculation_match: Optional[bool] = None
+    supported_result = _supported_calculation_result(user_text)
+    empirical_estimate_check = bool(
+        isinstance(supported_result, Mapping)
+        and supported_result.get("problem_class") == "prediction"
+        and supported_result.get("method") == "empirical_bernoulli_plugin"
+    )
+    calculation_required = bool(
+        "verified_calculation" in required or empirical_estimate_check
+    )
+    if calculation_required:
+        calculation_match = _candidate_matches_verified_calculation(
+            response_text,
+            user_text,
+        )
+        if calculation_match is True:
+            if "verified_calculation" in required:
+                signals["verified_calculation"] = 1.0
+            # A matching answer here has been recomputed by the bounded local
+            # verifier.  Treat that deterministic check as evidence for the
+            # response contract instead of requiring a lexical magic word.
+            signals["verification"] = 1.0
+            if "actionable_solution" in required:
+                signals["actionability"] = 1.0
+        else:
+            signals["verified_calculation"] = 0.0
+            if empirical_estimate_check:
+                signals["calibrated_prediction"] = 0.0
     signal_for_capability = {
         "emotional_acknowledgement": "empathy",
         "actionable_solution": "actionability",
@@ -1402,6 +2194,13 @@ def evaluate_response_contract(
         "independent_assessment": "independent_assessment",
         "crisis_escalation": "crisis_support",
         "urgent_medical_escalation": "urgent_medical_support",
+        "assumptions": "assumptions",
+        "scientific_reasoning": "scientific_reasoning",
+        "unsupported_science_boundary": "science_boundary",
+        "calibrated_prediction": "calibrated_prediction",
+        "verified_calculation": "verified_calculation",
+        "causal_reasoning": "causal_reasoning",
+        "multi_part_coverage": "multi_part_coverage",
     }
     met = []
     missing = []
@@ -1422,6 +2221,19 @@ def evaluate_response_contract(
 
     guards = dict(interaction_plan.get("guards", {}))
     violations = []
+    if calculation_match is False:
+        violations.append(
+            "prediction_estimate_mismatch"
+            if empirical_estimate_check
+            else "calculation_mismatch"
+        )
+    elif calculation_match is None and calculation_required:
+        violations.append("calculation_not_verifiable")
+    if (
+        guards.get("unsupported_science_calculation")
+        and _unsupported_science_answer_asserted(response_text, user_text)
+    ):
+        violations.append("unsupported_science_answer_asserted")
     if (
         guards.get("avoid_unearned_agreement")
         and float(signals.get("unearned_agreement", 0.0)) > 0.0
@@ -1585,6 +2397,21 @@ def finalize_response_for_interaction(
             True,
             "dismissive_language_blocked",
         )
+    if guards.get("unsupported_science_calculation") and (
+        "unsupported_science_boundary" in initial.get("missing", ())
+        or "unsupported_science_answer_asserted" in initial.get("violations", ())
+    ):
+        fallback = (
+            "I can't safely verify a numeric result for this request with the bounded "
+            "scientific models because the required assumptions or authority are not "
+            "established. The next step is to provide an explicit supported model for "
+            "a non-high-stakes exercise, or consult a qualified domain professional."
+        )
+        return result(
+            fallback,
+            fallback != raw,
+            "unsupported_science_calculation_blocked",
+        )
     if _incompatible_arithmetic_template(
         raw,
         user_text,
@@ -1628,7 +2455,7 @@ def finalize_response_for_interaction(
             "deterministic_constraints_repaired",
         )
     # Lower-precision findings (missing empathy, topical continuity, unsupported
-    # certainty, and lexical relevance) remain audit/ranking signals in v1.
+    # certainty, and lexical relevance) remain audit/ranking signals in v2.
     # Rewriting on those heuristics would risk replacing semantically relevant
     # answers that happen to use synonyms absent from the lexical matcher.
     return result(

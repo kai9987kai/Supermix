@@ -1,0 +1,49 @@
+{
+  "config": {
+    "benchmark_type": "verified_reasoning_prepromotion",
+    "generated_at_utc": "2026-08-01T20:15:16.933952+00:00",
+    "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "adapter_dir": "",
+    "eval_source": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\output\\verifiable_reasoning_curriculum_v1\\verified_reasoning_eval.jsonl",
+    "eval_samples": 30,
+    "seed": 5201,
+    "eval_split_mode": "auto",
+    "max_length": 256,
+    "max_new_tokens": 48,
+    "max_records": 480,
+    "eval_size": 64,
+    "max_eval_samples": 30
+  },
+  "artifacts": {
+    "base_samples_jsonl": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\artifacts\\general_intelligence_v1\\baseline_verified_30\\base_samples.jsonl"
+  },
+  "sample_summary": {
+    "base_sample_count": 30
+  },
+  "base": {
+    "eval_samples": 30.0,
+    "eval_loss": 1.7300392905871074,
+    "perplexity": 5.64087553738599,
+    "token_f1": 0.14856472658257935,
+    "char_similarity": 0.23056426919838244,
+    "avg_gen_seconds": 10.331997911135355,
+    "avg_prompt_tokens": 76.86666666666666,
+    "avg_generated_tokens": 39.93333333333333,
+    "total_prompt_tokens": 2306.0,
+    "total_generated_tokens": 1198.0,
+    "eval_seconds": 375.75099325180054,
+    "generated_tokens_per_sec": 3.188281658638728,
+    "verified_samples": 30.0,
+    "verified_accuracy": 0.16666666666666666,
+    "verified_samples_family_constraint_logic_tables": 5.0,
+    "verified_accuracy_family_constraint_logic_tables": 0.2,
+    "verified_samples_family_evidence_in_prompt_qa": 5.0,
+    "verified_accuracy_family_evidence_in_prompt_qa": 0.8,
+    "verified_samples_family_multi_step_arithmetic": 4.0,
+    "verified_accuracy_family_multi_step_arithmetic": 0.0,
+    "verified_samples_family_ratios_probability": 6.0,
+    "verified_accuracy_family_ratios_probability": 0.0,
+    "verified_samples_family_sequences": 10.0,
+    "verified_accuracy_family_sequences": 0.0
+  }
+}

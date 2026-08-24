@@ -62,6 +62,22 @@ footer code{font:12px var(--mono);color:var(--violet)}
 
 <main>
 
+<!-- 0. live model ------------------------------------------------------- -->
+<section id="live-section">
+  <h2>Live model &mdash; measured</h2>
+  <p class="note"><strong>This is the only panel on this page that measures a model.</strong>
+  Every other panel is a slider-driven simulation of the v53 algorithms. This one reads a
+  running v56 reasoner over <code>/api/status</code> and <code>/api/telemetry</code>, so it
+  is blank unless this page is served by
+  <code>source/mimomix_reasoner_web_app.py</code>.</p>
+  <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <button id="live-refresh">Refresh</button>
+    <button id="live-eval">Measure held-out accuracy</button>
+    <span id="live-state" class="note" style="margin:0"></span>
+  </div>
+  <div id="live-stats"></div>
+</section>
+
 <!-- 1. hybrid attention ------------------------------------------------- -->
 <section>
   <h2>Hybrid attention &amp; KV cache</h2>
@@ -156,11 +172,18 @@ footer code{font:12px var(--mono);color:var(--violet)}
 </main>
 
 <footer>
-  <p><strong>What this is not.</strong> The panels are faithful re-implementations of the v53 algorithms, driven
-  by sliders and a seeded PRNG rather than by a trained checkpoint. They show how the <em>mechanisms</em> behave
-  under parameters you choose. They are not measurements of a model, they are not benchmark results, and no
-  number here is evidence that any checkpoint reasons well. For real numbers, run the Python suites:
-  <code>pytest test_mimomix_*.py</code>.</p>
+  <p><strong>What this is not.</strong> Every panel below &ldquo;Live model&rdquo; is a faithful
+  re-implementation of the v53 algorithms, driven by sliders and a seeded PRNG rather than by a trained
+  checkpoint. They show how the <em>mechanisms</em> behave under parameters you choose. They are not
+  measurements of a model, they are not benchmark results, and no number in them is evidence that any
+  checkpoint reasons well.</p>
+  <p><strong>What is measured.</strong> Only the &ldquo;Live model&rdquo; panel, and only when this page is
+  served by <code>source/mimomix_reasoner_web_app.py</code> with a real
+  <code>supermix-v56-reasoner-checkpoint-v1</code> loaded. Its numbers come from that checkpoint's own
+  forward passes. They describe one synthetic 4-step modular-arithmetic task and nothing else &mdash; not
+  language, not general reasoning, and not transfer to any other workload. For the full evidence chain run
+  <code>pytest test_mimomix_*.py</code> and
+  <code>python source/run_v56_promotion_gate.py</code>.</p>
 </footer>
 
 <script>
@@ -428,6 +451,88 @@ function renderEco(){
     [`${i}. ${p.name}`,`payoff ${fmt(payoffs[i])} → ${fmt(100*shares[i],1)}%`,i===winner?"ok":""]));
   store.set("eco",{fw,cw});
 }
+
+/* ---------- live model (the only measured panel) ----------
+   Served same-origin by source/mimomix_reasoner_web_app.py. Opened as a file://
+   page there is no server, and this panel says so rather than showing a number
+   it did not measure. */
+async function liveApi(path,body){
+  const opts=body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)};
+  const r=await fetch(path,opts);
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d&&d.error?d.error:("HTTP "+r.status));
+  return d;
+}
+function liveNote(text,cls){
+  const el=$("live-state"); el.textContent=text; el.className="note "+(cls||"");
+}
+async function refreshLive(){
+  const button=$("live-refresh"); button.disabled=true;
+  liveNote("reading…");
+  try{
+    const [status,telemetry]=await Promise.all([liveApi("/api/status"),liveApi("/api/telemetry")]);
+    const recorded=status.recorded_evaluation||{};
+    const reference=status.reference||{};
+    const rows=[
+      ["model",status.model],
+      ["checkpoint",String(status.checkpoint).split(/[\\/]/).pop()],
+      ["training protocol",recorded.protocol||"n/a"],
+      ["parameters",status.parameters.total.toLocaleString()+" ("+status.parameters.active_per_input.toLocaleString()+" active/input)"],
+      ["attention layout",(status.config.attention_layout||[]).map(k=>k==="global"?"G":"L").join("")+"  window "+status.config.sliding_window],
+      ["sparse MoE",status.config.use_moe?(status.config.n_routed_experts+" experts, top-"+status.config.moe_top_k):"disabled"],
+      ["latent states",status.config.n_states],
+      ["operator context",status.config.operator_context],
+      ["recorded held-out accuracy",fmt(recorded.accuracy,4),
+        recorded.accuracy>reference.v51_canonical_best_any_setting?"ok":"no"],
+      ["recorded NLL",fmt(recorded.nll,4)],
+      ["recorded ECE",fmt(recorded.ece,4)],
+      ["previous best on this task (v51)",fmt(reference.v51_canonical_eval_default,4)],
+      ["majority-class floor",fmt(reference.majority_class_floor,4)],
+      ["Bayes limit ignoring the start digit",fmt(reference.bayes_all_operations_without_start,4)]
+    ];
+    if(telemetry&&telemetry.mean_sink_mass!==undefined){
+      rows.push(["measured attention-sink mass",fmt(telemetry.mean_sink_mass,5)]);
+    }
+    if(telemetry&&telemetry.router_entropy){
+      telemetry.router_entropy.forEach((v,i)=>rows.push(["measured router entropy, MoE layer "+i,fmt(v,4)]));
+    }
+    if(telemetry&&telemetry.expert_load){
+      telemetry.expert_load.forEach((load,i)=>{
+        const starved=load.filter(v=>v===0).length;
+        rows.push(["measured starved experts, MoE layer "+i,String(starved),starved?"no":"ok"]);
+      });
+    }
+    stats($("live-stats"),rows);
+    liveNote("connected","ok");
+  }catch(e){
+    stats($("live-stats"),[["status","no v56 server on this origin"],["reason",e.message]]);
+    liveNote("offline — serve this page with mimomix_reasoner_web_app.py","no");
+  }finally{ button.disabled=false; }
+}
+async function measureLive(){
+  const button=$("live-eval"); button.disabled=true;
+  liveNote("measuring 1000 held-out samples…");
+  try{
+    const d=await liveApi("/api/evaluate",{seed:52,size:1000});
+    stats($("live-stats"),[
+      ["cohort",d.is_canonical_test_set?"canonical v51 held-out set (seed 52, n=1000)":("seed "+d.seed+", n="+d.size)],
+      ["measured accuracy",fmt(d.accuracy,4),d.accuracy>d.reference.v51_canonical_best_any_setting?"ok":"no"],
+      ["measured NLL",fmt(d.nll,4)],
+      ["measured Brier",fmt(d.brier,4)],
+      ["selective accuracy @50% coverage",fmt(d.selective_accuracy_at_50pct_coverage,4)],
+      ["majority-class floor, this cohort",fmt(d.majority_class_floor,4)],
+      ["previous best on this task (v51)",fmt(d.reference.v51_canonical_best_any_setting,4)],
+      ["Bayes limit ignoring the start digit",fmt(d.reference.bayes_all_operations_without_start,4)],
+      ["latency",fmt(d.latency_ms,1)+" ms for "+d.size+" samples"]
+    ]);
+    liveNote("measured just now on this checkpoint","ok");
+  }catch(e){
+    liveNote("measurement failed: "+e.message,"no");
+  }finally{ button.disabled=false; }
+}
+$("live-refresh").addEventListener("click",refreshLive);
+$("live-eval").addEventListener("click",measureLive);
+refreshLive();
 
 /* ---------- wiring ---------- */
 function bind(ids,fn){ids.forEach(id=>{const el=$(id);el.addEventListener("input",fn);});fn();}
