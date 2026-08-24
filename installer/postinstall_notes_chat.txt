@@ -1,0 +1,34 @@
+Supermix Chat 74.0.0
+====================
+
+The model is inside the application. Nothing is downloaded, and the app does
+not contact the network -- it starts a server on 127.0.0.1 (loopback only) on
+a free port chosen at launch, and shows it in a window.
+
+What it is good at
+------------------
+Arithmetic word problems, worked step by step. On a held-out benchmark of 500
+freshly generated problems it scores 0.894: multiplication and division near
+perfect, sequences and two-step questions ~0.98, percentages 0.75, averages
+0.59.
+
+Two things to know
+------------------
+1. TYPE NATURALLY. The model was trained on a specific phrasing ("What is
+   47 x 6?"), and answers a differently-worded question badly. The app
+   rewrites your question into that form before asking, and shows you what it
+   sent as "asked as: ...". You do not need to phrase anything specially.
+
+2. IT IS NOT A CHAT MODEL. It will answer "hello" fluently, but every
+   conversational reply is reproduced word-for-word from its training data.
+   Treat conversation as a demonstration, not a capability.
+
+Answers are checked
+-------------------
+For question shapes it recognises, the app independently re-derives the answer
+and labels the reply CORRECT or WRONG -- it will tell you when the model is
+wrong rather than letting confident-looking arithmetic pass. Anything it
+cannot verify is labelled NOT CHECKED, which never means correct.
+
+The model is 8.6M parameters and runs on the CPU. A reply takes well under a
+second.
