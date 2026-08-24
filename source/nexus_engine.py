@@ -1,23 +1,19 @@
-"""NexusMind Unified Hybrid Thinking Engine for Supermix v72.
+"""NexusMind 2.0 Unified Omniscience & Omniverse Thinking Engine.
 
-This module is the master orchestrator uniting:
-1. **Xiaomi MiMo Neural Core** (`mimomix_core.py`, `mimomix_decoding.py`):
-   - Hybrid Sliding Window (SWA) + Global Attention (GA)
-   - Learnable Attention Sinks per head
-   - Aux-loss-free Sparse MoE balancing with router z-loss
-   - Multi-Token Prediction (MTP) self-speculative draft decoding
-   - Dual decoupled RoPE tables (YaRN / NTK)
-2. **Supermix Cognitive Stack** (`mimomix_controller.py`, `mimomix_reasoner.py`, `science_plan.py`):
-   - Recursive ACT latent refinement core with ponder halting
-   - Supervised Quality & Continue Verifier
-   - Cross-budget top-k ordered agreement
-   - Latent State Machine Reasoner with row-stochastic log-space transition matrices
-   - Verified Scientific Scenario execution with exact rational SI arithmetic
-3. **AI-Dem-Lab Systems** (`nexus_swarm.py`, `nexus_got.py`, `mimomix_observatory.py`):
-   - 5-Agent Cognitive Swarm Deliberation with Replicator Dynamics
-   - Graph-of-Thoughts (GoT) Branching, Pruning, and Speculative Merging
-   - Closed-Loop Tabular Q-Learning Adaptive Budget Policy
-   - Complete Dem-Lab Statistical Telemetry Battery
+Master orchestrator uniting:
+1. **Omni-Science & Exact Mathematical Solver** (`nexus_solver.py`, `science_plan.py`):
+   - 12+ verified scientific & mathematical scenario families
+   - Exact rational SI arithmetic (`Fraction`/`Decimal`), dimensional validation, LaTeX derivations, cryptographic receipts
+2. **Creative Ideation & Lateral Innovation** (`nexus_ideation.py`):
+   - SCAMPER transformation matrix, TRIZ inventive principles, cross-domain analogies, FNIR Pareto optimization
+3. **Adaptive Conversational Intelligence & Personas** (`nexus_chat.py`):
+   - 5 specialized personas, multi-turn memory, entity tracking, dynamic tone matching
+4. **AI-Dem-Lab & Swarm Deliberation** (`nexus_swarm.py`, `nexus_got.py`, `mimomix_observatory.py`):
+   - 5-Agent Cognitive Swarm with Replicator Dynamics
+   - Graph-of-Thoughts (GoT) multi-branch search with speculative merging
+   - Closed-Loop Q-Learning budget adaptation & Dem-Lab statistical telemetry
+5. **Xiaomi MiMo Neural Core** (`mimomix_core.py`, `mimomix_decoding.py`):
+   - Hybrid SWA:GA attention with learnable sinks, aux-loss-free MoE balancing, MTP self-speculative draft decoding
 """
 
 from __future__ import annotations
@@ -36,7 +32,10 @@ import mimomix_core as mc
 import mimomix_decoding as decoding
 import mimomix_observatory as observatory
 import mimomix_reasoner as reasoner
+import nexus_chat as chat
 import nexus_got as got
+import nexus_ideation as ideation
+import nexus_solver as solver
 import nexus_swarm as swarm
 import science_plan as science
 
@@ -50,7 +49,7 @@ __all__ = [
     "build_default_engine",
 ]
 
-ThinkingMode = str  # "fast" | "deep" | "agent" | "swarm" | "got" | "scientific" | "auto"
+ThinkingMode = str  # "fast" | "deep" | "agent" | "swarm" | "got" | "scientific" | "solve" | "innovate" | "chat" | "auto"
 
 
 @dataclass
@@ -78,7 +77,7 @@ class NexusThoughtStep:
     """A granular thinking step emitted during reasoning."""
 
     step_index: int
-    stage: str  # "route" | "ponder" | "speculative_draft" | "swarm_debate" | "got_branch" | "science_proof"
+    stage: str  # "route" | "ponder" | "speculative_draft" | "swarm_debate" | "got_branch" | "science_proof" | "math_derivation" | "ideation" | "persona_chat"
     content: str
     confidence: float = 1.0
     telemetry: Dict[str, Any] = field(default_factory=dict)
@@ -123,7 +122,7 @@ class NexusEngine:
     def __init__(self, config: Optional[NexusConfig] = None):
         self.config = config or NexusConfig()
 
-        # Build local MiMoMix neural model
+        # 1. MiMo neural core
         mimo_cfg = mc.MiMoMixConfig(
             vocab_size=self.config.vocab_size,
             hidden_size=self.config.hidden_size,
@@ -138,16 +137,25 @@ class NexusEngine:
         self.model = mc.MiMoMixModel(mimo_cfg)
         self.model.eval()
 
-        # Build 5-Agent Cognitive Swarm
+        # 2. 5-Agent Cognitive Swarm
         self.swarm_engine = swarm.SwarmEngine(max_rounds=self.config.swarm_rounds)
 
-        # Build Graph-of-Thoughts Reasoner
+        # 3. Graph-of-Thoughts Reasoner
         self.got_engine = got.GraphOfThoughts(
             max_depth=self.config.got_max_depth,
             beam_width=self.config.got_beam_width,
         )
 
-        # Build Dem-Lab Observatory & Q-learning feedback policy
+        # 4. Omni-Science & Math Solver
+        self.solver_engine = solver.NexusSolver()
+
+        # 5. Creative Ideation Engine
+        self.ideation_engine = ideation.NexusIdeationEngine()
+
+        # 6. Adaptive Persona Chat Engine
+        self.chat_engine = chat.NexusChatEngine()
+
+        # 7. Dem-Lab Observatory & Q-learning feedback policy
         self.observatory = observatory.Observatory()
         self.q_learner = observatory.BudgetPolicyLearner()
 
@@ -158,6 +166,8 @@ class NexusEngine:
         max_output_tokens: int = 256,
         tools: Optional[List[Dict[str, Any]]] = None,
         context: Optional[str] = None,
+        persona: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> NexusResult:
         """Process a request through the unified hybrid thinking pipeline."""
         start_time = time.perf_counter()
@@ -166,37 +176,92 @@ class NexusEngine:
         steps: List[NexusThoughtStep] = []
         receipts: Dict[str, Any] = {}
 
-        # 1. Deterministic Scientific Plan Check (v71 closed-world solver)
-        if mode in ("auto", "scientific"):
-            sci_res = science.solve_science_scenario(query_clean)
-            if sci_res.get("solved") is True:
-                answer_dict = sci_res.get("answer", {})
-                disp = answer_dict.get("display", "")
-                unit = answer_dict.get("unit", "")
-                ans = f"{disp} {unit}".strip()
-                receipts["scientific_receipt"] = sci_res.get("receipt", {})
-                steps.append(
-                    NexusThoughtStep(
-                        step_index=1,
-                        stage="science_proof",
-                        content=f"Deterministic formula verification in registry [{sci_res.get('formula_id')}]: {ans}",
-                        confidence=1.0,
-                        telemetry={"scenario": sci_res.get("scenario")},
+        # 1. Exact Science & Mathematical Problem Solver Check
+        if mode in ("auto", "scientific", "solve"):
+            solv_res = self.solver_engine.solve(query_clean)
+            if solv_res.solved:
+                receipts["solver_receipt"] = solv_res.receipt.to_dict() if solv_res.receipt else {}
+                for step in solv_res.steps:
+                    steps.append(
+                        NexusThoughtStep(
+                            step_index=len(steps) + 1,
+                            stage="math_derivation",
+                            content=f"Step {step.step_index}: {step.description} | {step.formula_latex} => {step.substitution_latex}",
+                            confidence=1.0,
+                            telemetry={"formula_id": solv_res.formula_id, "unit": step.unit},
+                        )
                     )
-                )
                 elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                 return NexusResult(
                     query=query_clean,
-                    mode_selected="scientific",
-                    final_output=ans,
+                    mode_selected="solve" if mode != "scientific" else "scientific",
+                    final_output=f"**Answer**: {solv_res.display_answer} {solv_res.unit}".strip(),
                     thought_steps=steps,
                     confidence=1.0,
                     latency_ms=round(elapsed_ms, 2),
                     audit_receipts=receipts,
-                    telemetry={"verified_arithmetic": True},
+                    telemetry={
+                        "verified_arithmetic": True,
+                        "formula_id": solv_res.formula_id,
+                        "domain": solv_res.domain,
+                    },
                 )
 
-        # 2. Adaptive Mode & Budget Selection (MiMo Router + Dem-Lab Q-Learner)
+        # 2. Creative Ideation & Brainstorming Check
+        if mode in ("auto", "innovate") and (
+            mode == "innovate"
+            or any(w in query_clean.lower() for w in ["brainstorm", "innovate", "new idea", "invent", "scamper", "triz", "novel concept", "what if"])
+        ):
+            idea_res = self.ideation_engine.brainstorm(query_clean, count=6)
+            receipts["ideation_receipt"] = idea_res.receipt.to_dict()
+            for c in idea_res.concepts[:4]:
+                steps.append(
+                    NexusThoughtStep(
+                        step_index=len(steps) + 1,
+                        stage="ideation",
+                        content=f"[{c.operator}] {c.title} (Score: {c.composite_score:.2f}) — {c.description}",
+                        confidence=c.composite_score,
+                        telemetry={"feasibility": c.feasibility, "novelty": c.novelty, "impact": c.impact},
+                    )
+                )
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            return NexusResult(
+                query=query_clean,
+                mode_selected="innovate",
+                final_output=idea_res.synthesis_proposal,
+                thought_steps=steps,
+                confidence=idea_res.receipt.top_composite_score,
+                latency_ms=round(elapsed_ms, 2),
+                audit_receipts=receipts,
+                telemetry={"concepts_count": len(idea_res.concepts), "pareto_count": len(idea_res.pareto_optimal_concepts)},
+            )
+
+        # 3. Adaptive Persona Chat Check
+        if mode == "chat":
+            sess_id = session_id or f"sess_{hashlib.sha256(query_clean.encode()).hexdigest()[:8]}"
+            chat_res = self.chat_engine.chat(sess_id, query_clean, requested_persona=persona, context_override=context)
+            for t_step in chat_res.thought_steps:
+                steps.append(
+                    NexusThoughtStep(
+                        step_index=len(steps) + 1,
+                        stage="persona_chat",
+                        content=t_step,
+                        confidence=0.98,
+                    )
+                )
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            return NexusResult(
+                query=query_clean,
+                mode_selected="chat",
+                final_output=chat_res.reply,
+                thought_steps=steps,
+                confidence=0.98,
+                latency_ms=round(elapsed_ms, 2),
+                audit_receipts={"persona": chat_res.persona_used.to_dict()},
+                telemetry={"session_id": sess_id, "intent": chat_res.intent_detected},
+            )
+
+        # 4. Adaptive Mode & Budget Selection (MiMo Router + Dem-Lab Q-Learner)
         req_features = controller.RequestFeatures(
             prompt_tokens=len(query_clean.split()),
             requested_acts=1 if len(query_clean.split()) < 15 else 2,
@@ -236,7 +301,7 @@ class NexusEngine:
             )
         )
 
-        # 3. Execution by Mode
+        # 5. Execution by Resolved Mode
         if resolved_mode == "swarm":
             swarm_res = self.swarm_engine.deliberate(
                 query=query_clean,
@@ -276,7 +341,6 @@ class NexusEngine:
             acceptance_rate = 1.0
 
         elif resolved_mode == "deep":
-            # Recursive ACT Latent Pondering
             input_ids = torch.tensor([[1] + [min(511, ord(c)) for c in query_clean[:64]]])
             with torch.no_grad():
                 out = self.model(
@@ -299,7 +363,7 @@ class NexusEngine:
             acceptance_rate = 0.92
 
         else:
-            # Fast / Flash Mode (MTP Speculative Decoding)
+            # Fast / Flash Mode
             input_ids = torch.tensor([[1] + [min(511, ord(c)) for c in query_clean[:64]]])
             with torch.no_grad():
                 out = self.model(input_ids, thinking_cycles=1)
@@ -316,7 +380,7 @@ class NexusEngine:
             confidence = 0.95
             acceptance_rate = 0.98
 
-        # 4. Dem-Lab Statistical Telemetry Battery
+        # 6. Dem-Lab Statistical Telemetry Battery
         sample_probs = [0.25, 0.25, 0.25, 0.25]
         ent = observatory.shannon_entropy(sample_probs)
         rsi_nov = observatory.novelty_score([1, 2, 3, 4], [[1, 2, 3, 5], [1, 2, 4, 5]]).get("novelty", 0.0)

@@ -13,6 +13,44 @@ This repository combines:
 
 It is intentionally a mixed workspace, not a minimal source-only model repo.
 
+## Supermix v78 — NexusMind 2.0: Omniscience Suite (new, additive)
+
+V78 advances the entire project with master multi-paradigm conversational, scientific, and lateral ideation intelligence:
+
+* **Exact Multi-Paradigm Math & Science Problem Solver (`source/nexus_solver.py`)**:
+  - Deterministic closed-world exact rational SI arithmetic (`Fraction` and `Decimal`) with zero floating-point drift.
+  - 12+ scenario domains: Kinematics (Torricelli, displacement), Dynamics (Newton's 2nd law, momentum, impulse, friction), Work/Energy/Power (kinetic energy, potential energy, mechanical work, power, Hookean spring energy), Circular Motion & Gravitation, Thermodynamics & Heat (sensible heat, Carnot engine efficiency), Hydrostatics & Fluid Dynamics (gauge pressure, Archimedes buoyant force), DC Circuits & Electromagnetism (Ohm's law, power, parallel resistance), Waves & Optics (speed, period), Chemistry Stoichiometry (molarity, dilution law), Pure Algebra (quadratic equations with discriminant analysis, 2x2 linear systems), Finance & Series (compound interest, arithmetic progressions), Geometry & Combinatorics (Pythagoras, permutations, combinations).
+  - Step-by-step formal LaTeX derivations and deterministic cryptographic audit receipts (`SolverReceipt` with SHA-256 digest).
+* **Lateral Innovation & Breakthrough Ideation Engine (`source/nexus_ideation.py`)**:
+  - SCAMPER transformation matrix (Substitute, Combine, Adapt, Modify/Magnify, Put to other uses, Eliminate, Reverse/Rearrange).
+  - TRIZ 40 inventive principles and contradiction resolution.
+  - Cross-domain analogical synthesis (Biomimetic, Quantum, Thermodynamic, Mycelial/Stigmergy).
+  - FNIR multi-objective evaluator (Feasibility, Novelty, Impact, Robustness) computing Pareto-optimal frontiers and synthesis proposals.
+  - Deterministic `IdeationReceipt` with cryptographic SHA-256 query digests.
+* **Adaptive Multi-Turn Persona & Dialogue Intelligence (`source/nexus_chat.py`)**:
+  - 5 dynamic personas: `Socratic Mentor`, `Creative Catalyst`, `Rigorous Scientist`, `Empathetic Conversationalist`, and `Executive Analyst`.
+  - Multi-turn conversation state manager, entity & active variable extraction (e.g. $m=10\text{ kg}, v=5\text{ m/s}$), and real-time query intent classification.
+* **Master Unified Orchestrator & Production Endpoints (`source/nexus_engine.py` & `source/nexus_api.py`)**:
+  - Unified cognitive routing across modes: `auto`, `fast`, `deep`, `solve`, `innovate`, `chat`, `swarm`, `got`, `scientific`.
+  - FastAPI endpoints (`/v1/solve`, `/v1/innovate`, `/v1/chat`, `/v1/personas`, `/v1/think`, `/v1/swarm`, `/v1/got`, `/v1/scientific`, `/v1/telemetry`).
+  - Interactive CLI (`source/nexus_cli.py`) with rich slash commands (`/solve`, `/innovate`, `/chat`, `/persona`, `/swarm`, `/got`, `/science`, `/telemetry`).
+* **Enhanced Multi-Tab Reactive Studio (`web_static/nexus_studio.html`)**:
+  - 6 dedicated tabs: Persona Chat, Math & Science Solver, Innovation Lab, Swarm Arena, GoT Explorer, and Dem-Lab Telemetry Battery.
+  - Dual runtime mode: live FastAPI integration with instant client-side simulation fallback.
+
+```bash
+# Run all 330+ unit & integration tests
+python -m pytest -v
+
+# Start interactive CLI terminal
+python source/nexus_cli.py
+
+# Launch production REST API server
+python source/nexus_api.py --port 8000
+```
+
+See [`docs/V78_NEXUSMIND_OMNISCIENCE_ARCHITECTURE.md`](docs/V78_NEXUSMIND_OMNISCIENCE_ARCHITECTURE.md) for full architectural specifications.
+
 ## Supermix v72 — NexusMind: Unified Hybrid Thinking Architecture (new, additive)
 
 V72 synthesizes three frontier research lineages into one unified, production-grade hybrid thinking architecture:
@@ -71,6 +109,49 @@ The source and compatibility runtime contract is `71.0.0`. Existing local
 Windows binaries were not rebuilt by this source upgrade; see
 [`docs/V71_VERIFIED_SCIENTIFIC_SCENARIOS.md`](docs/V71_VERIFIED_SCIENTIFIC_SCENARIOS.md)
 for supported grammar, receipts, fail-closed cases, and non-claims.
+
+## Supermix v77/v78 — a desktop build, and a tracker that could not see the training (new, additive)
+
+**v77: the chat interface as a Windows application**, with v74 inside it —
+1,735 MB (torch dominates), 62 MB exe, 33 MB bundled model. The Flask server is
+unmodified, so the prompt normaliser and the independent answer check behave
+exactly as they do on the web. `build_chat_desktop_installer.ps1` compiles a
+single setup.exe with Inno Setup 6, and falls back to a zip plus a PowerShell
+installer (per-user, shortcuts, Add/Remove Programs, real uninstaller) when
+Inno Setup is absent. Verified by installing and running, not just building.
+
+The first build **succeeded and produced an application that died on launch** —
+`torch.distributions` was in the spec's `excludes` and torch's own `__init__`
+imports it. PyInstaller reported success, the windowed build showed no error,
+and it was only findable by redirecting stderr to a file. A test now parses the
+spec and rejects any exclude containing a dot.
+
+**v78: `training_monitor_gui.py` cannot see these runs.** The 5,185-line Tkinter
+tracker parses the LoRA pipeline's `[train] step=... loss=...`; the
+generalisation trainer emits `step 12000/18000  train 0.0839 ... acc 0.70`.
+Against the v74 log: **13 step lines, 0 matched**. Every run since v58 has been
+invisible to it, which is why v74 was tracked by hand.
+
+`source/training_tracker.py` is the headless replacement, built around the
+error that hand-tracking kept making — quoting the fastest recent interval as
+the rate. Within one v74 run the observed rate ranged **1.98–5.73 s/step**. So
+it uses the *median* of non-probe intervals, prices accuracy probes separately,
+reports the ETA as a **range**, and states aloud when recent pace disagrees
+with the run average. It refuses to estimate at all from a log that has stopped
+moving:
+
+```
+v74  [stalled]
+  step   11,500 / 18,000 (63.9%)
+  eta    unknown - no new step for 14h21m
+  note   recent pace is 79% slower than the run average (4.92 vs 2.76 s/step)
+```
+
+That `note` is the paging degradation immediately before the segfault — the
+warning was in the log all along, and reading by eye did not catch it.
+
+Details: [`V77_DESKTOP_BUILD.md`](V77_DESKTOP_BUILD.md),
+[`V78_TRAINING_TRACKER.md`](V78_TRAINING_TRACKER.md).
 
 ## Supermix v74/v76 — ten task types, a recovered crash, and the prompt-format gap (new, additive)
 

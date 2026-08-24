@@ -19,7 +19,7 @@ def test_api_service_think_fast():
     resp = svc.handle_think(req)
 
     assert isinstance(resp, api.ThinkResponse)
-    assert resp.model == "nexus-v72-flash"
+    assert resp.model == "nexus-v78-flash"
     assert resp.mode_selected == "fast"
     assert len(resp.thought_steps) >= 1
 
@@ -30,7 +30,7 @@ def test_api_service_think_deep():
     resp = svc.handle_think(req)
 
     assert isinstance(resp, api.ThinkResponse)
-    assert resp.model == "nexus-v72-pro"
+    assert resp.model == "nexus-v78-pro"
     assert resp.mode_selected == "deep"
 
 
