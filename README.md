@@ -13,47 +13,89 @@ This repository combines:
 
 It is intentionally a mixed workspace, not a minimal source-only model repo.
 
-## Supermix v78 — NexusMind 2.0: Omniscience Suite (new, additive)
+## Supermix v80 — experimental hybrid diagnostics
 
-V78 advances the entire project with master multi-paradigm conversational, scientific, and lateral ideation intelligence:
+V80 keeps three research lineages behind the same evidence boundary:
 
-* **Exact Multi-Paradigm Math & Science Problem Solver (`source/nexus_solver.py`)**:
-  - Deterministic closed-world exact rational SI arithmetic (`Fraction` and `Decimal`) with zero floating-point drift.
-  - 12+ scenario domains: Kinematics (Torricelli, displacement), Dynamics (Newton's 2nd law, momentum, impulse, friction), Work/Energy/Power (kinetic energy, potential energy, mechanical work, power, Hookean spring energy), Circular Motion & Gravitation, Thermodynamics & Heat (sensible heat, Carnot engine efficiency), Hydrostatics & Fluid Dynamics (gauge pressure, Archimedes buoyant force), DC Circuits & Electromagnetism (Ohm's law, power, parallel resistance), Waves & Optics (speed, period), Chemistry Stoichiometry (molarity, dilution law), Pure Algebra (quadratic equations with discriminant analysis, 2x2 linear systems), Finance & Series (compound interest, arithmetic progressions), Geometry & Combinatorics (Pythagoras, permutations, combinations).
-  - Step-by-step formal LaTeX derivations and deterministic cryptographic audit receipts (`SolverReceipt` with SHA-256 digest).
-* **Lateral Innovation & Breakthrough Ideation Engine (`source/nexus_ideation.py`)**:
-  - SCAMPER transformation matrix (Substitute, Combine, Adapt, Modify/Magnify, Put to other uses, Eliminate, Reverse/Rearrange).
-  - TRIZ 40 inventive principles and contradiction resolution.
-  - Cross-domain analogical synthesis (Biomimetic, Quantum, Thermodynamic, Mycelial/Stigmergy).
-  - FNIR multi-objective evaluator (Feasibility, Novelty, Impact, Robustness) computing Pareto-optimal frontiers and synthesis proposals.
-  - Deterministic `IdeationReceipt` with cryptographic SHA-256 query digests.
-* **Adaptive Multi-Turn Persona & Dialogue Intelligence (`source/nexus_chat.py`)**:
-  - 5 dynamic personas: `Socratic Mentor`, `Creative Catalyst`, `Rigorous Scientist`, `Empathetic Conversationalist`, and `Executive Analyst`.
-  - Multi-turn conversation state manager, entity & active variable extraction (e.g. $m=10\text{ kg}, v=5\text{ m/s}$), and real-time query intent classification.
-* **Master Unified Orchestrator & Production Endpoints (`source/nexus_engine.py` & `source/nexus_api.py`)**:
-  - Unified cognitive routing across modes: `auto`, `fast`, `deep`, `solve`, `innovate`, `chat`, `swarm`, `got`, `scientific`.
-  - FastAPI endpoints (`/v1/solve`, `/v1/innovate`, `/v1/chat`, `/v1/personas`, `/v1/think`, `/v1/swarm`, `/v1/got`, `/v1/scientific`, `/v1/telemetry`).
-  - Interactive CLI (`source/nexus_cli.py`) with rich slash commands (`/solve`, `/innovate`, `/chat`, `/persona`, `/swarm`, `/got`, `/science`, `/telemetry`).
-* **Enhanced Multi-Tab Reactive Studio (`web_static/nexus_studio.html`)**:
-  - 6 dedicated tabs: Persona Chat, Math & Science Solver, Innovation Lab, Swarm Arena, GoT Explorer, and Dem-Lab Telemetry Battery.
-  - Dual runtime mode: live FastAPI integration with instant client-side simulation fallback.
+- **MiMo architecture probe:** sparse MoE, hybrid local/global attention,
+  attention sinks, MTP heads, and bounded latent cycles are implemented as
+  newly initialized diagnostics. No Nexus text checkpoint is loaded, and no
+  cache-reduction or decoding-speed claim is made for this path.
+- **AI-Dem-Lab diagnostics:** explicit software sources (`crypto`, `seeded`,
+  `os_csprng_transform`, and `chaotic`), a synthetic numeric-sequence RSI
+  probe, a disconnected tabular Q-learning experiment, and deterministic
+  five-role swarm scaffolding. These are not live reasoning-quality signals,
+  quantum hardware, calibrated routing, or verified answers.
+- **Supermix grounding core:** fresh closed-world arithmetic and allowlisted
+  science recomputation remains the only answer-authority path. Checksums bind
+  audit metadata; they do not prove factual correctness by themselves.
+
+See [the bounded v80 architecture notes](docs/V80_UNIFIED_HYBRID_FRONTIER.md).
+
+## Supermix v78.1 — NexusMind evidence-first selective answering
+
+V78.1 replaces the earlier “omniscience” presentation with a machine-readable
+answer-admission boundary. Every Nexus result is now one of `answered`,
+`analysis_only`, or `abstained`, with a hash-checked `nexus-selective-answer-v1`
+receipt that states evidence class, claim scope, limitations, protocol, and
+authority bits. The receipt is audit metadata; it does not create evidence.
+
+Only a fresh call to `grounding_runtime.finalize_grounded_response` may return
+`answered`, and only for accepted exact arithmetic or an allowlisted scientific
+scenario. Negated, quoted, ambiguous, mixed-scope, incomplete, and unsupported
+requests fail closed even if the broader legacy pattern library finds a numeric
+candidate. Confidence `1.0` means deterministic agreement within that accepted
+closed-world parse; it is not empirical calibration or open-world certainty.
+
+The recognizable experimental surfaces remain, with honest boundaries:
+
+- `fast` and `deep` run the newly initialized MiMo core as telemetry-only
+  architecture probes. There is no loaded text-generation checkpoint, the
+  current probe consumes at most 64 characters, and it abstains.
+- `agent` reports declared tools but executes none; tool-call count remains zero.
+- persona chat, SCAMPER/TRIZ ideation, the five role templates, and the graph
+  scaffold return `analysis_only`. Their authored scores are labeled internal
+  priorities, never correctness confidence or measured benefit.
+- unverified outputs no longer train the Q-policy. The public feedback endpoint
+  is fail-closed until a separate verifier-backed outcome receipt exists.
+- the API honors swarm round and graph depth/beam bounds, and `/v1/models`
+  reports observed runtime limits instead of invented 262k/1M context windows.
+- the browser uses the correct `query` and `topic` payloads, escapes returned
+  text, requires evidence contracts, and displays explicit backend-unavailable
+  states. It no longer fabricates local answers, receipts, scores, or telemetry.
+
+This direction follows tool-integrated verification for small models, whole
+inference-system reporting for test-time scaling, and held-out calibration
+requirements for risk-controlled abstention. Semantic-entropy methods are a
+candidate future signal once Nexus has a real multi-generation model path; they
+are not simulated in v78.1. See
+[`docs/NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md`](docs/NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md)
+for the research mapping, contract, threat cases, and non-claims.
 
 ```bash
-# Run all 330+ unit & integration tests
-python -m pytest -v
+# Focused Nexus evidence and compatibility suite
+python -m pytest -q test_nexus_epistemics.py test_nexus_engine.py \
+  test_nexus_api.py test_nexus_swarm.py test_nexus_got.py \
+  test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py \
+  test_nexus_studio_contract.py
 
 # Start interactive CLI terminal
 python source/nexus_cli.py
 
-# Launch production REST API server
+# Launch the experimental REST API server
 python source/nexus_api.py --port 8000
+# Then open http://127.0.0.1:8000/studio
 ```
-
-See [`docs/V78_NEXUSMIND_OMNISCIENCE_ARCHITECTURE.md`](docs/V78_NEXUSMIND_OMNISCIENCE_ARCHITECTURE.md) for full architectural specifications.
 
 ## Supermix v72 — NexusMind: Unified Hybrid Thinking Architecture (new, additive)
 
-V72 synthesizes three frontier research lineages into one unified, production-grade hybrid thinking architecture:
+> Historical architecture description. The v78.1 evidence contract above
+> supersedes any “production-grade,” answer-confidence, context-window,
+> verification, or live-telemetry implication in this section. Swarm and GoT
+> defaults are deterministic analysis scaffolds; the neural core is not a
+> checkpoint-backed text generator.
+
+V72 originally assembled three experimental research lineages behind one interface:
 
 * **Xiaomi MiMo Frontier Architecture** (MiMo-V2-Flash & MiMo-V2.5-Pro): Hybrid Sliding-Window Attention (SWA:GA 5:1 ratio) reducing KV-cache footprint by ~6.2x, learnable attention sinks per head, auxiliary-loss-free sparse MoE load balancing with router z-loss, Multi-Token Prediction (MTP) self-speculative draft decoding, decoupled dual-base RoPE (YaRN/NTK context scaling up to 1M tokens), and unified Flash vs Pro routing.
 * **Supermix Cognition Stack** (v51–v71): Weight-tied recursive latent ACT refinement with ponder cost halting, supervised quality & continue verifier, cross-budget ordered top-k agreement with exact output reuse, v56 latent state machine with row-stochastic log-space transition matrices, v70 multi-domain sparse expert routing, and v71 deterministic closed-world scientific scenario solver with exact rational SI arithmetic and cryptographic answer receipts.
@@ -72,7 +114,9 @@ python source/nexus_cli.py
 python source/nexus_api.py --port 8000
 ```
 
-Open [`web_static/nexus_studio.html`](web_static/nexus_studio.html) in any browser for the live reactive studio with interactive visualizers for 5-Agent Swarm debate rounds, Graph-of-Thoughts tree graphs, MoE expert activation heatmaps, and Dem-Lab statistical gauges.
+Open [`web_static/nexus_studio.html`](web_static/nexus_studio.html) through the
+live API host for the experimental interface. If the backend is unavailable it
+shows an explicit unavailable state and generates no local substitute result.
 
 See [`docs/V72_NEXUSMIND_UNIFIED_ARCHITECTURE.md`](docs/V72_NEXUSMIND_UNIFIED_ARCHITECTURE.md) for complete mathematical specifications, formulas, and cryptographic receipt schemas.
 

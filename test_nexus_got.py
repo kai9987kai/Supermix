@@ -35,6 +35,11 @@ def test_got_tree_expansion_and_search():
     assert len(res.receipt.query_digest) == 64
     assert len(res.receipt.best_path_digest) == 64
     assert res.receipt.optimal_path_score > 0.0
+    assert res.receipt.authority_bits["has_answer_authority"] is False
+    assert res.receipt.score_semantics == "template_position_priority_not_correctness_or_optimality"
+    assert "no answer was generated or verified" in res.final_output.lower()
+    assert res.telemetry["answer_verified"] is False
+    assert res.to_dict()["answer_authority"] is False
 
 
 def test_got_prune_and_merge():

@@ -1,5 +1,16 @@
 # Supermix v78 / NexusMind 2.0 Omniscience Architecture
 
+> **Historical proposal; superseded by the v78.1 evidence contract.** This
+> document records the original design language and must not be read as current
+> capability evidence. The source tree does not demonstrate omniscience,
+> production readiness, a >96% live draft-acceptance rate, open-world
+> verification, calibrated swarm/GoT/FNIR confidence, a checkpoint-backed Nexus
+> text generator, or live browser fallback intelligence. Receipts are integrity
+> metadata, not factual authority. See
+> [`NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md`](NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md)
+> for the implemented admission boundary, runtime limits, regression evidence,
+> and non-claims.
+
 ## Executive Overview
 
 Supermix v78 (NexusMind 2.0 Omniscience Edition) represents a monumental leap in agentic cognitive systems, mathematical and scientific problem solving, lateral innovation engineering, and multi-persona conversational intelligence.
@@ -111,7 +122,9 @@ $$\text{FNIR Composite} = 0.25 \cdot \text{Feasibility} + 0.30 \cdot \text{Novel
 
 ### 4. Interactive Web Studio (`web_static/nexus_studio.html`)
 - **Multi-Tab Architecture**: Dedicated interactive panels for Chat, Solver, Innovation Lab, Swarm Arena, GoT Tree Explorer, and Dem-Lab Telemetry.
-- **Dual Runtime Mode**: Connects dynamically to the live FastAPI backend or falls back instantly to client-side deterministic simulation when standalone.
+- **Current v78.1 behavior**: Connects to the live FastAPI backend and fails
+  closed when it is unavailable. Client-side simulated answers, scores,
+  receipts, and telemetry were removed because they were not evidence.
 
 ---
 

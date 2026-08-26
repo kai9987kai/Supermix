@@ -17,11 +17,10 @@ Five specialized cognitive agents deliberate over reasoning tasks:
 
 Deliberation dynamics:
 * Agents engage in multi-round structured debate.
-* Replicator dynamics continuously update agent fitness weights based on
-  observed critique accuracy, alignment with ground truth / verified constraints,
-  and predictive stability.
-* Deterministic consensus fusion aggregates perspectives into a unified output
-  and publishes a complete cryptographic `SwarmReceipt`.
+* Replicator dynamics update template weights from authored contribution scores;
+  these are not observed accuracy, ground truth, or calibrated confidence.
+* Deterministic fusion publishes an audit receipt. The receipt authenticates the
+  process record only and grants no answer authority.
 """
 
 from __future__ import annotations
@@ -70,6 +69,9 @@ class AgentContribution:
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["role"] = self.role.value
+        data["template_priority"] = data.pop("confidence")
+        data["template_weight"] = data.pop("weight")
+        data["score_semantics"] = "authored_template_priority_not_correctness"
         return data
 
 
@@ -88,8 +90,9 @@ class DebateRound:
             "contributions": {
                 k: v.to_dict() for k, v in self.contributions.items()
             },
-            "inter_agent_consensus": self.inter_agent_consensus,
-            "active_weights": self.active_weights,
+            "internal_template_agreement": self.inter_agent_consensus,
+            "active_template_weights": self.active_weights,
+            "score_semantics": "template_agent_agreement_not_correctness",
         }
 
 
@@ -136,7 +139,9 @@ class SwarmDeliberationResult:
             "query": self.query,
             "consensus_output": self.consensus_output,
             "reasoning_synthesis": self.reasoning_synthesis,
-            "final_confidence": self.final_confidence,
+            "internal_consensus_score": self.final_confidence,
+            "score_semantics": "template_agent_agreement_not_correctness",
+            "answer_authority": False,
             "rounds": [r.to_dict() for r in self.rounds],
             "receipt": self.receipt.to_dict(),
             "flaws_rectified": self.flaws_rectified,
@@ -438,9 +443,16 @@ class SwarmEngine:
 
         # Build clean consensus text
         if initial_hypothesis:
-            consensus_output = initial_hypothesis
+            consensus_output = (
+                "Analysis-only supplied hypothesis; the swarm did not verify it:\n"
+                f"{initial_hypothesis}"
+            )
         else:
-            consensus_output = f"Verified consensus conclusion for '{query_clean}' with {len(rounds)} debate rounds."
+            consensus_output = (
+                "No substantive answer candidate was generated. The default swarm completed "
+                f"{len(rounds)} rounds of deterministic role-template critique for "
+                f"'{query_clean}'. Its agreement score is not verification."
+            )
 
         # Compute Shannon entropy over final agent weights
         entropy = 0.0
@@ -476,5 +488,8 @@ class SwarmEngine:
                 "final_entropy": round(entropy, 4),
                 "dominant_agent": max(weights.items(), key=lambda x: x[1])[0],
                 "active_weights": weights,
+                "answer_candidate_generated": bool(initial_hypothesis),
+                "answer_verified": False,
+                "score_semantics": "template_agent_agreement_not_correctness",
             },
         )

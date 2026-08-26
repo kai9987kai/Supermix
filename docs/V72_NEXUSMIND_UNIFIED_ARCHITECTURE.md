@@ -1,5 +1,14 @@
 # Supermix v72 — NexusMind Unified Hybrid Thinking Architecture
 
+> **Historical architecture proposal; superseded by the current evidence-first
+> contract.** “Production-grade,” context-window, live telemetry, adaptive
+> learning, verification, and performance language below describes the original
+> design intent, not confirmed current Nexus capability. The default neural path
+> has no loaded text-generation checkpoint; swarm and graph outputs are
+> deterministic analysis scaffolds; checksums are audit metadata rather than
+> factual authority. See
+> [`NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md`](NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md).
+
 ## Overview
 
 Supermix v72 ("NexusMind") is the grand synthesis of three previously disparate research lineages into one unified, CPU-runnable, production-grade hybrid thinking system:

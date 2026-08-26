@@ -1,12 +1,16 @@
 """NexusMind Graph-of-Thoughts (GoT) Reasoner.
 
 Implements structured Graph-of-Thoughts reasoning for Supermix v72 / NexusMind:
-* **Thought Nodes**: States containing partial reasoning steps, evidence, and scores.
+* **Thought Nodes**: States containing partial scaffold text and priority scores.
 * **Multi-Draft Branching**: Generates parallel candidate continuations at key decision points.
 * **Speculative Drafting**: Evaluates speculative candidates and branches before commitment.
 * **Pruning**: Dynamically removes low-scoring or contradictory thought paths.
 * **Node Merging**: Synthesizes complementary insights from disparate branches.
 * **Audit Receipt**: Emits deterministic `GoTReceipt` with graph topology digests.
+
+The default generator is a search-topology demonstration, not an answer
+generator. Positional scores rank scaffold nodes and are not correctness,
+optimality, evidence, or calibrated confidence.
 """
 
 from __future__ import annotations
@@ -58,6 +62,14 @@ class GoTReceipt:
     max_search_depth: int = 0
     optimal_path_score: float = 0.0
     search_strategy: str = "beam_prune_merge"
+    score_semantics: str = "template_position_priority_not_correctness_or_optimality"
+    authority_bits: Dict[str, bool] = field(
+        default_factory=lambda: {
+            "has_answer_authority": False,
+            "has_tool_authority": False,
+            "has_permission_override": False,
+        }
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -81,6 +93,8 @@ class GoTSearchResult:
             "final_output": self.final_output,
             "receipt": self.receipt.to_dict(),
             "nodes_count": len(self.all_nodes),
+            "answer_authority": False,
+            "score_semantics": "template_position_priority_not_correctness_or_optimality",
             "telemetry": self.telemetry,
         }
 
@@ -161,12 +175,12 @@ class GraphOfThoughts:
             elif d == 2:
                 candidates = [
                     f"Execute step-by-step arithmetic / logical deduction on [{node.step_text[:30]}]",
-                    f"Verify consistency against baseline rules and definitions",
+                    f"List consistency checks that a real verifier would need to execute",
                 ]
             else:
                 candidates = [
-                    f"Synthesize verified intermediate result into final answer",
-                    f"Cross-check final result against initial requirements",
+                    f"Outline a possible synthesis step without claiming an answer",
+                    f"List unresolved checks against the initial requirements",
                 ]
 
         for idx, cand_text in enumerate(candidates[: self.beam_width]):
@@ -202,6 +216,9 @@ class GraphOfThoughts:
         # Sort by score descending
         viable.sort(key=lambda n: n.score, reverse=True)
         top_two = viable[:2]
+        merged_depth = max(n.depth for n in top_two) + 1
+        if merged_depth > self.max_depth:
+            return None
         merged_text = (
             f"Merged Synthesis: [{top_two[0].step_text}] combined with [{top_two[1].step_text}]"
         )
@@ -211,7 +228,7 @@ class GraphOfThoughts:
         merged_node = self.add_node(
             step_text=merged_text,
             parent_id=top_two[0].node_id,
-            depth=max(n.depth for n in top_two) + 1,
+            depth=merged_depth,
             score=avg_score,
             branch_type="merged",
             metadata={"source_node_ids": [n.node_id for n in top_two]},
@@ -277,7 +294,10 @@ class GraphOfThoughts:
             curr = self.nodes.get(curr.parent_id) if curr.parent_id else None
         best_path.reverse()
 
-        final_output = best_leaf.step_text
+        final_output = (
+            "Analysis-only selected graph node; no answer was generated or verified:\n"
+            f"{best_leaf.step_text}"
+        )
 
         # Compute digests
         q_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
@@ -306,5 +326,8 @@ class GraphOfThoughts:
                 "nodes_merged": nodes_merged_total,
                 "optimal_score": best_leaf.score,
                 "path_length": len(best_path),
+                "answer_candidate_generated": bool(candidate_generator_fn),
+                "answer_verified": False,
+                "score_semantics": "template_position_priority_not_correctness_or_optimality",
             },
         )

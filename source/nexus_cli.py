@@ -1,24 +1,15 @@
-"""NexusMind 2.0 Interactive CLI Terminal.
+"""NexusMind experimental evidence-first CLI.
 
-Command-line interface for the Supermix v78 / NexusMind Omniscience System.
-Supports interactive multi-turn REPL, exact math/science derivations,
-creative innovation & TRIZ/SCAMPER brainstorming, dynamic persona chat,
-5-agent swarm debate transcripts, Graph-of-Thoughts tree search, and live
-Dem-Lab telemetry dashboards.
+Only fresh, strictly verified closed-world calculations are rendered as
+answers. Persona, ideation, swarm, and graph surfaces are labeled analysis
+only; the untrained neural core abstains and exposes architecture telemetry.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional
-
-from nexus_engine import NexusConfig, NexusEngine, build_default_engine
-import nexus_chat as chat
-import nexus_got as got
-import nexus_ideation as ideation
-import nexus_solver as solver
-import nexus_swarm as swarm
+from nexus_engine import NexusResult, build_default_engine
 
 
 def render_banner() -> None:
@@ -30,26 +21,57 @@ def render_banner() -> None:
  | . ` |/ _ \ \/ / | | / __| | |\/| | | '_ \ / _` |  / __/| | | |
  | |\  |  __/>  <| |_| \__ \ | |  | | | | | | (_| | |_____| |_| |
  |_| \_|\___/_/\_\\__,_|___/ |_|  |_|_|_| |_|\__,_|        \___/ 
-  Supermix v78 Omniscience & Omniverse Hybrid Intelligence Suite
-  [Xiaomi MiMo + Supermix + AI-Dem-Lab + Solver + Ideation + Chat]
+  Supermix v78 Experimental Evidence-First Interface
+  [Exact Verifier + Bounded Heuristics + Neural Telemetry]
 ===================================================================
 Commands:
-  /solve <math or science query>              : Run exact multi-step SI solver & derivation
-  /innovate <topic or problem>                : Run SCAMPER/TRIZ/FNIR creative ideation
+  /solve <math or science query>              : Run strict verifier-first calculation
+  /innovate <topic or problem>                : Run analysis-only concept ideation
   /persona <mentor|catalyst|scientist|empathetic|analyst> : Change active conversational persona
   /chat <message>                             : Chat with active persona and multi-turn memory
   /mode <auto|fast|deep|solve|innovate|chat|swarm|got|scientific> : Change general thinking mode
-  /swarm <query>                              : Run 5-agent cognitive swarm debate
-  /got <query>                                : Run Graph-of-Thoughts multi-branch tree search
-  /science <query>                            : Run closed-world verified physics/chemistry solver
-  /telemetry                                  : View live Dem-Lab statistical telemetry
+  /swarm <query>                              : Run analysis-only template debate
+  /got <query>                                : Run analysis-only graph scaffold
+  /science <query>                            : Run strict allowlisted science verifier
+  /telemetry                                  : View diagnostic/synthetic telemetry
   /help                                       : Show this help menu
   /exit                                       : Quit CLI
 """)
 
 
+def render_result(res: NexusResult, *, include_steps: bool = True) -> None:
+    """Render answer authority without treating internal scores as confidence."""
+
+    epistemic = res.epistemics or {}
+    decision = str(epistemic.get("decision") or "unavailable")
+    authority = bool(epistemic.get("answer_authority") is True)
+    if decision == "answered" and authority:
+        heading = "Verified Closed-World Answer"
+    elif decision == "analysis_only":
+        heading = "Analysis Only — Not a Verified Answer"
+    else:
+        heading = "Answer Withheld"
+
+    if include_steps and res.thought_steps:
+        print("--- Process Trace ---")
+        for step in res.thought_steps:
+            print(f"[{step.stage.upper()}] {step.content}")
+    print(f"\n--- {heading} ---")
+    print(res.final_output)
+    confidence_text = (
+        f"{res.confidence:.2f} deterministic in-scope"
+        if res.confidence is not None
+        else "unavailable"
+    )
+    print(
+        f"\n[Decision: {decision} | Correctness confidence: {confidence_text} | "
+        f"Answer authority: {str(authority).lower()} | Latency: {res.latency_ms:.1f}ms | "
+        f"Mode: {res.mode_selected}]"
+    )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="NexusMind 2.0 Omniscience CLI")
+    parser = argparse.ArgumentParser(description="NexusMind experimental evidence-first CLI")
     parser.add_argument("--query", "-q", type=str, help="Single-shot prompt to run")
     parser.add_argument(
         "--mode",
@@ -72,12 +94,7 @@ def main() -> None:
     if args.query:
         print(f"[*] Processing query in mode '{args.mode}': {args.query}\n")
         res = engine.process(query=args.query, mode=args.mode, persona=active_persona)
-        print("--- Thinking Chain ---")
-        for step in res.thought_steps:
-            print(f"[{step.stage.upper()}] {step.content}")
-        print("\n--- Final Answer ---")
-        print(res.final_output)
-        print(f"\n[Confidence: {res.confidence:.2f} | Latency: {res.latency_ms:.1f}ms | Mode: {res.mode_selected}]")
+        render_result(res)
         return
 
     render_banner()
@@ -127,78 +144,44 @@ def main() -> None:
         elif line.startswith("/solve"):
             parts = line.split(maxsplit=1)
             q = parts[1] if len(parts) > 1 else "acceleration with force 50 N, mass 10 kg"
-            print(f"[*] Executing Exact Solver on: '{q}'...\n")
-            res = engine.solver_engine.solve(q)
-            if res.solved:
-                print(f"Domain: {res.domain.upper()} | Scenario: {res.scenario} | Target: {res.target}")
-                print(f"Formula ID: {res.formula_id}\n")
-                print("Derivation Steps:")
-                for s in res.steps:
-                    print(f"  [{s.step_index}] {s.description}")
-                    print(f"      Formula:      {s.formula_latex}")
-                    print(f"      Substitution: {s.substitution_latex}")
-                    print(f"      Result:       {s.evaluated_value} {s.unit}")
-                print(f"\nFinal Result: {res.display_answer} {res.unit}")
-                if res.receipt:
-                    print(f"Receipt SHA-256: {res.receipt.receipt_sha256[:16]}...")
-            else:
-                print(f"[!] Solver could not match exact deterministic pattern: {res.explanation}")
+            print(f"[*] Running strict verifier-first solve on: '{q}'...\n")
+            render_result(engine.process(q, mode="solve"))
             continue
         elif line.startswith("/innovate"):
             parts = line.split(maxsplit=1)
             q = parts[1] if len(parts) > 1 else "decentralized AI memory routing"
-            print(f"[*] Executing Lateral Ideation & SCAMPER on: '{q}'...\n")
-            res = engine.ideation_engine.brainstorm(q)
-            print("Generated Concepts (Ranked by FNIR Score):")
-            for c in res.concepts:
-                pareto_flag = " [PARETO OPTIMAL]" if c.is_pareto_optimal else ""
-                print(f"  * [{c.operator}] {c.title} (Score: {c.composite_score:.2f}){pareto_flag}")
-                print(f"    Benefit: {c.target_benefit}")
-                print(f"    F={c.feasibility:.2f} | N={c.novelty:.2f} | I={c.impact:.2f} | R={c.robustness:.2f}\n")
-            print("--- Synthesis Proposal ---")
-            print(res.synthesis_proposal)
+            print(f"[*] Running analysis-only ideation on: '{q}'...\n")
+            render_result(engine.process(q, mode="innovate"))
             continue
         elif line.startswith("/chat"):
             parts = line.split(maxsplit=1)
             msg = parts[1] if len(parts) > 1 else "Hello!"
-            c_res = engine.chat_engine.chat(session_id, msg, requested_persona=active_persona)
-            print(f"\n[{c_res.persona_used.display_name}]:")
-            print(c_res.reply)
+            render_result(
+                engine.process(
+                    msg,
+                    mode="chat",
+                    persona=active_persona,
+                    session_id=session_id,
+                )
+            )
             continue
         elif line.startswith("/swarm"):
             parts = line.split(maxsplit=1)
             q = parts[1] if len(parts) > 1 else "Analyze strategic convergence under uncertainty"
-            print(f"[*] Launching 5-Agent Cognitive Swarm on: '{q}'...")
-            res = engine.swarm_engine.deliberate(query=q)
-            for r in res.rounds:
-                print(f"\n--- Debate Round {r.round_index} (Consensus: {r.inter_agent_consensus:.2f}) ---")
-                for agent_id, c in r.contributions.items():
-                    print(f"  [{agent_id.upper()} (w={c.weight:.2f})]: {c.perspective}")
-            print("\n--- Swarm Consensus Output ---")
-            print(res.consensus_output)
-            print(f"\n[Consensus Confidence: {res.final_confidence:.2f} | SHA-256: {res.receipt.receipt_sha256[:16]}...]")
+            print(f"[*] Running analysis-only swarm scaffold on: '{q}'...")
+            render_result(engine.process(q, mode="swarm"))
             continue
         elif line.startswith("/got"):
             parts = line.split(maxsplit=1)
             q = parts[1] if len(parts) > 1 else "Multi-step optimization with constrained latency"
-            print(f"[*] Executing Graph-of-Thoughts Search on: '{q}'...")
-            res = engine.got_engine.search(query=q)
-            print(f"\nNodes Explored: {len(res.all_nodes)} | Pruned: {res.receipt.nodes_pruned} | Merged: {res.receipt.nodes_merged}")
-            print("\n--- Optimal Thought Path ---")
-            for n in res.best_path_nodes:
-                print(f"  -> [{n.branch_type} depth={n.depth} score={n.score:.2f}]: {n.step_text}")
-            print("\n--- Final Synthesis Output ---")
-            print(res.final_output)
+            print(f"[*] Running analysis-only graph scaffold on: '{q}'...")
+            render_result(engine.process(q, mode="got"))
             continue
         elif line.startswith("/science"):
             parts = line.split(maxsplit=1)
             q = parts[1] if len(parts) > 1 else "final velocity with initial velocity 5 m/s, acceleration 2 m/s^2, time 3 s"
-            print(f"[*] Querying Closed-World Scientific Solver on: '{q}'...")
-            res = engine.solver_engine.solve(q)
-            if res.solved:
-                print(f"Formula: {res.formula_id} | Answer: {res.display_answer} {res.unit}")
-            else:
-                print(f"Could not verify: {res.explanation}")
+            print(f"[*] Running strict closed-world science verification on: '{q}'...")
+            render_result(engine.process(q, mode="scientific"))
             continue
         elif line.startswith("/telemetry"):
             tel = engine.process("ping", mode="fast").telemetry
@@ -209,11 +192,7 @@ def main() -> None:
 
         # Standard Query Execution
         res = engine.process(query=line, mode=current_mode, persona=active_persona, session_id=session_id)
-        print(f"\n--- Output [{res.mode_selected.upper()}] ---")
-        for step in res.thought_steps:
-            print(f"[{step.stage.upper()}] {step.content}")
-        print(f"\n{res.final_output}")
-        print(f"\n(Confidence: {res.confidence:.2f} | Latency: {res.latency_ms:.1f}ms)")
+        render_result(res)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ and conceptual synthesis:
    - Contradiction resolution, segmentation, asymmetry, dynamic adaptation, self-service feedback
 3. **Cross-Domain Analogical Synthesis**:
    - Transposes structural patterns across Biological, Physical/Thermodynamic, Computational, and Game-Theoretic domains
-4. **FNIR Multi-Objective Scoring**:
-   - Computes Feasibility, Novelty, Impact, and Robustness
+4. **FNIR Multi-Objective Prioritization**:
+   - Applies authored Feasibility, Novelty, Impact, and Robustness heuristics
    - Identifies Pareto-optimal frontier candidates and synthesizes unified breakthrough proposals
 5. **Cryptographic Ideation Receipt**:
    - Generates deterministic `IdeationReceipt` with concept digests
@@ -68,6 +68,7 @@ class IdeaConcept:
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["composite_score"] = round(self.composite_score, 4)
+        data["score_semantics"] = "authored_heuristic_priority_not_measurement"
         return data
 
 
@@ -83,6 +84,7 @@ class IdeationReceipt:
     top_composite_score: float = 0.0
     operators_applied: List[str] = field(default_factory=list)
     receipt_sha256: str = ""
+    receipt_is_authority: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -107,6 +109,9 @@ class IdeationResult:
             "pareto_optimal_concepts": [c.to_dict() for c in self.pareto_optimal_concepts],
             "synthesis_proposal": self.synthesis_proposal,
             "receipt": self.receipt.to_dict(),
+            "status": "analysis_only",
+            "answer_authority": False,
+            "score_semantics": "authored_fnir_priority_not_measurement_or_correctness",
         }
 
 
@@ -147,10 +152,10 @@ class NexusIdeationEngine:
 
         # 1. Apply SCAMPER operators
         scamper_ops = [
-            ("SCAMPER:Combine", "Hybrid Synthesis Fusion", f"Fuse {clean_topic} with autonomous feedback loops and distributed consensus.", "Continuous multi-modal cross-attention between disparate streams.", "Unlocks 10x higher flexibility and resilience by eliminating single-point assumptions.", 0.88, 0.92, 0.94, 0.85),
-            ("SCAMPER:Adapt", "Biomimetic Adaptive Scaling", f"Adapt immune-system memory matrices to dynamically defend and scale {clean_topic}.", "Affinity-based routing with self-reinforcing neural pathways.", "Enables sub-millisecond adaptation to previously unseen zero-day conditions.", 0.84, 0.95, 0.90, 0.89),
-            ("SCAMPER:Eliminate", "Zero-Friction Direct-Path", f"Eliminate intermediate serialization and buffering bottlenecks in {clean_topic}.", "Zero-copy tensor streaming with lock-free lockless ring queues.", "Dramatically reduces latency by 75% while slashing memory overhead.", 0.93, 0.82, 0.88, 0.91),
-            ("SCAMPER:Reverse", "Inverted Speculative Execution", f"Invert {clean_topic} workflow by pre-computing candidate solutions before full query arrival.", "Self-speculative draft trees with speculative verification.", "Near-instant perceived response time with 99% accuracy floor.", 0.86, 0.93, 0.92, 0.87),
+            ("SCAMPER:Combine", "Hybrid Synthesis Fusion", f"Explore fusing {clean_topic} with bounded feedback loops and distributed review.", "Prototype cross-stream coordination with explicit failure and rollback boundaries.", "Hypothesis: reduce single-point assumptions; measure flexibility, recovery time, and coordination cost.", 0.88, 0.92, 0.94, 0.85),
+            ("SCAMPER:Adapt", "Biomimetic Adaptive Scaling", f"Explore an immune-memory analogy for adapting and scaling {clean_topic}.", "Prototype affinity-based routing with bounded reinforcement and decay.", "Hypothesis: improve adaptation to novel conditions; benchmark latency, false routing, and stability.", 0.84, 0.95, 0.90, 0.89),
+            ("SCAMPER:Eliminate", "Direct-Path Data Flow", f"Test whether intermediate serialization or buffering can be reduced in {clean_topic}.", "Evaluate zero-copy streaming and bounded lock-free queues where platform semantics permit.", "Hypothesis: reduce latency or memory overhead; validate with profiling and concurrency stress tests.", 0.93, 0.82, 0.88, 0.91),
+            ("SCAMPER:Reverse", "Inverted Speculative Execution", f"Explore pre-computing bounded candidates before the full {clean_topic} request is available.", "Use draft trees only when a verifier can reject incorrect or stale candidates.", "Hypothesis: lower perceived latency without degrading verified quality; test acceptance and error rates.", 0.86, 0.93, 0.92, 0.87),
         ]
 
         for op, title, desc, mech, benefit, f_score, n_score, i_score, r_score in scamper_ops:
@@ -172,8 +177,8 @@ class NexusIdeationEngine:
 
         # 2. Apply TRIZ principles
         triz_ops = [
-            ("TRIZ:Segmentation", "Autonomous Micro-Kernel Mesh", f"Decompose {clean_topic} into sovereign, self-contained micro-engines with peer-to-peer gossip.", "Decentralized consensus with localized ponder halting.", "Fault-isolated modularity where failure of one node never halts the collective.", 0.90, 0.89, 0.93, 0.94),
-            ("TRIZ:Self-Service", "Closed-Loop Self-Healing Reflex", f"Equip {clean_topic} with autonomous meta-cognitive verifiers that actively fix inconsistencies.", "Replicator dynamics fitness tracking with automatic parameter annealing.", "Eliminates need for manual tuning or external supervision.", 0.89, 0.91, 0.95, 0.90),
+            ("TRIZ:Segmentation", "Bounded Micro-Kernel Mesh", f"Decompose {clean_topic} into isolated micro-engines with explicit peer-message contracts.", "Prototype localized stopping policies and fail-closed coordination.", "Hypothesis: contain component failures; validate partial-failure behavior and recovery limits.", 0.90, 0.89, 0.93, 0.94),
+            ("TRIZ:Self-Service", "Receipt-Gated Recovery Loop", f"Equip {clean_topic} with verifiers that can propose, check, and roll back bounded corrections.", "Track externally verified outcomes before any policy or parameter update.", "Hypothesis: reduce some manual recovery work while retaining review, audit, and override controls.", 0.89, 0.91, 0.95, 0.90),
         ]
 
         for op, title, desc, mech, benefit, f_score, n_score, i_score, r_score in triz_ops:
@@ -195,8 +200,8 @@ class NexusIdeationEngine:
 
         # 3. Apply Cross-Domain Analogical Mappings
         analogy_ops = [
-            ("Analogy:QuantumSuperposition", "Multi-Branch Superposition State", f"Maintain multi-hypothesis superposition across {clean_topic} until threshold evidence accumulates.", "Graph-of-Thoughts beam search with entropy-guided pruning.", "Prevents premature convergence on local sub-optimal solutions.", 0.82, 0.96, 0.96, 0.84),
-            ("Analogy:MycelialStigmergy", "Stigmergic Pheromone Memory Mesh", f"Coordinate distributed tasks in {clean_topic} via persistent state traces and decaying trail scores.", "Decaying frequency heatmaps with reinforcement backprop.", "Emergent collective intelligence with zero central bottleneck.", 0.87, 0.94, 0.91, 0.92),
+            ("Analogy:MultiBranch", "Multi-Branch Hypothesis Set", f"Maintain several bounded hypotheses for {clean_topic} until discriminating evidence is available.", "Compare candidates under a declared test protocol with pruning based on measured outcomes.", "Hypothesis: reduce premature convergence; compare against a single-candidate baseline at matched compute.", 0.82, 0.96, 0.96, 0.84),
+            ("Analogy:MycelialStigmergy", "Decaying Coordination Trace", f"Coordinate distributed tasks in {clean_topic} through inspectable, expiring state traces.", "Use decay, provenance, and bounded reinforcement for routing hints.", "Hypothesis: reduce central coordination pressure; measure bottlenecks, stale-state errors, and recovery.", 0.87, 0.94, 0.91, 0.92),
         ]
 
         for op, title, desc, mech, benefit, f_score, n_score, i_score, r_score in analogy_ops:
@@ -225,15 +230,18 @@ class NexusIdeationEngine:
         concepts.sort(key=lambda x: x.composite_score, reverse=True)
         pareto.sort(key=lambda x: x.composite_score, reverse=True)
 
-        # 5. Synthesize Breakthrough Hybrid Proposal
+        # 5. Synthesize a testable hybrid hypothesis. The ranking is static and
+        # must not be presented as empirical evidence.
         top_concepts = pareto[:3] if len(pareto) >= 3 else concepts[:3]
         synthesis = (
-            f"### Breakthrough Hybrid Synthesis for '{clean_topic}'\n\n"
-            f"By synthesizing the top Pareto-optimal innovations (**{top_concepts[0].title}** + **{top_concepts[1].title}** + **{top_concepts[2].title}**):\n\n"
-            f"1. **Core Architecture**: Deploy an {top_concepts[0].mechanism.lower()} to form the foundational substrate.\n"
-            f"2. **Operational Dynamics**: Integrate {top_concepts[1].mechanism.lower()} to maximize adaptive resilience.\n"
-            f"3. **Optimization & Quality**: Apply {top_concepts[2].mechanism.lower()} for guaranteed robustness and zero-friction execution.\n\n"
-            f"**Expected Outcome**: {top_concepts[0].target_benefit} Combined with {top_concepts[1].target_benefit}"
+            f"### Testable Hybrid Hypothesis for '{clean_topic}'\n\n"
+            "The authored FNIR rankings prioritize three concepts for investigation; they do not validate them: "
+            f"**{top_concepts[0].title}** + **{top_concepts[1].title}** + **{top_concepts[2].title}**.\n\n"
+            f"1. **Prototype boundary**: {top_concepts[0].mechanism}\n"
+            f"2. **Comparison mechanism**: {top_concepts[1].mechanism}\n"
+            f"3. **Safety and quality check**: {top_concepts[2].mechanism}\n\n"
+            "**Validation required**: define a baseline, matched-compute protocol, failure cases, rollback criteria, "
+            "and held-out outcome metrics before treating any projected benefit as established."
         )
 
         # 6. Emits Cryptographic Ideation Receipt

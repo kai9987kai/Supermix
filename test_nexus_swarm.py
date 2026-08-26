@@ -48,6 +48,11 @@ def test_swarm_deliberation_execution():
     assert len(res.receipt.query_digest) == 64
     assert len(res.receipt.consensus_digest) == 64
     assert res.receipt.authority_bits["has_open_world_authority"] is False
+    assert "verified consensus" not in res.consensus_output.lower()
+    assert "not verification" in res.consensus_output.lower()
+    assert res.telemetry["answer_verified"] is False
+    assert res.to_dict()["answer_authority"] is False
+    assert res.to_dict()["score_semantics"] == "template_agent_agreement_not_correctness"
 
 
 def test_swarm_deterministic_reproducibility():

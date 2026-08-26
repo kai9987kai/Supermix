@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NexusMind Studio v78 — Omniscience Edition</title>
+  <link rel="icon" href="data:,">
+  <title>NexusMind Studio v78 — Experimental Interface</title>
   <style>
     :root {
       --bg: #070b13;
@@ -30,8 +31,11 @@
     .brand-name{font-size:18px;font-weight:800;background:linear-gradient(130deg,var(--primary),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
     .badge{background:rgba(56,189,248,0.1);color:var(--primary);border:1px solid rgba(56,189,248,0.28);padding:3px 9px;border-radius:9999px;font-size:10px;font-weight:700;letter-spacing:.6px;}
     .header-status{display:flex;align-items:center;gap:18px;font-size:12px;color:var(--dim);}
-    .dot-live{width:8px;height:8px;border-radius:50%;background:var(--success);box-shadow:0 0 6px var(--success);animation:pulse 2s infinite;}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+    .dot-status{width:8px;height:8px;border-radius:50%;background:var(--warn);}
+    .authority-banner{background:rgba(251,191,36,0.08);border-bottom:1px solid rgba(251,191,36,0.28);color:#f8d98b;padding:8px 24px;font-size:11px;line-height:1.45;flex-shrink:0;}
+    .authority-banner strong{color:var(--warn);}
+    .unavailable{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.35);border-radius:10px;color:#fca5a5;padding:16px;font-size:12px;line-height:1.65;}
+    .analysis-note{background:rgba(129,140,248,0.08);border:1px solid rgba(129,140,248,0.25);border-radius:8px;color:#b9c1ff;padding:9px 11px;font-size:11px;line-height:1.55;}
 
     /* ── TABS ──────────────────────────────────────────── */
     .tab-bar{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;}
@@ -149,6 +153,20 @@
     .got-tag.merged{color:var(--success);}
     .got-tag.pruned{color:var(--danger);}
 
+    /* ── SIGNALS & ENTROPY LAB ───────────────────────────── */
+    #panel-signals{flex-direction:row;}
+    .signals-main{flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;}
+    .canvas-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;}
+    .canvas-title{font-size:12px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;display:flex;justify-content:space-between;align-items:center;}
+    canvas{width:100%;height:140px;border-radius:8px;background:var(--bg);border:1px solid var(--border);}
+
+    /* ── MIMO THINKING CONSOLE ───────────────────────────── */
+    #panel-think{flex-direction:row;}
+    .think-main{flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;}
+    .think-step-row{display:flex;flex-direction:column;gap:8px;}
+    .think-step-card{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.6;}
+    .think-stage-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--primary);margin-bottom:3px;}
+
     /* ── TELEMETRY PANEL ────────────────────────────────── */
     #panel-telem{padding:20px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;align-content:start;}
     .telem-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px;}
@@ -168,15 +186,20 @@
 <header>
   <div class="brand">
     <span class="brand-name">NexusMind Studio</span>
-    <span class="badge">v78 OMNISCIENCE</span>
+    <span class="badge">v80 UNIFIED HYBRID</span>
   </div>
   <div class="header-status">
     <span>Xiaomi MiMo + Supermix Cognition + AI-Dem-Lab</span>
-    <span id="engineStatus" style="display:flex;align-items:center;gap:6px;color:var(--success);font-weight:600;">
-      <span class="dot-live"></span>Engine Ready
+    <button class="btn" style="padding:4px 9px;font-size:11px;" onclick="toggleTheme()">&#x25D1; Theme</button>
+    <span id="engineStatus" style="display:flex;align-items:center;gap:6px;color:var(--warn);font-weight:600;">
+      <span class="dot-status"></span><span id="engineStatusText">Backend status: not checked</span>
     </span>
   </div>
 </header>
+
+<div class="authority-banner" id="authorityNotice">
+  <strong>Evidence boundary:</strong> only a fresh exact-verifier decision from the live backend is answer-authoritative for its supported closed-world calculation. Receipts are audit metadata, not authority. Persona chat, ideation, swarm, Graph-of-Thoughts, and telemetry are analysis-only and do not establish factual correctness.
+</div>
 
 <!-- ══ TABS ══════════════════════════════════════════════════ -->
 <div class="tab-bar">
@@ -185,6 +208,8 @@
   <div class="tab" onclick="switchTab('innovate',this)"><span class="tab-icon">&#x1F4A1;</span> Innovation Lab</div>
   <div class="tab" onclick="switchTab('swarm',this)"><span class="tab-icon">&#x1F41D;</span> Swarm Arena</div>
   <div class="tab" onclick="switchTab('got',this)"><span class="tab-icon">&#x1F332;</span> GoT Explorer</div>
+  <div class="tab" onclick="switchTab('signals',this)"><span class="tab-icon">&#x1F39B;&#xFE0F;</span> Signals &amp; Entropy Lab</div>
+  <div class="tab" onclick="switchTab('think',this)"><span class="tab-icon">&#x26A1;</span> MiMo Thinker</div>
   <div class="tab" onclick="switchTab('telem',this)"><span class="tab-icon">&#x1F4E1;</span> Dem-Lab Telemetry</div>
 </div>
 
@@ -222,8 +247,8 @@
         <div class="msg" style="max-width:100%;">
           <div class="msg-avatar">&#x1F91D;</div>
           <div>
-            <div class="msg-bubble">Hi there! I'm NexusMind v78 &mdash; a multi-paradigm AI with 5 specialist personas, exact math solving, creative ideation, and 5-agent deliberation. What's on your mind today?</div>
-            <div class="msg-meta">Empathetic Conversationalist &middot; v78 Omniscience</div>
+            <div class="msg-bubble">Welcome to the experimental NexusMind interface. Persona replies and heuristic analysis are not verified answers. Use the exact solver for a supported closed-world calculation, and check that the backend admits it as a fresh verified decision.</div>
+            <div class="msg-meta">Experimental interface &middot; analysis-only outside the verified solver</div>
           </div>
         </div>
       </div>
@@ -256,7 +281,7 @@
       </div>
     </div>
     <div class="solver-output" id="solverOutput">
-      <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:60px;">Enter a problem on the left and click <strong>Solve Exactly</strong> to see step-by-step derivations with cryptographic receipts.</div>
+      <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:60px;">Enter a supported closed-world problem and click <strong>Solve Exactly</strong>. A result is answer-authoritative only when the live backend returns an admitted verifier-first decision; its receipt remains audit metadata.</div>
     </div>
   </div>
 
@@ -277,6 +302,7 @@
         <div class="section-title">Synthesis Proposal</div>
         <div id="synthProposal" style="font-size:11px;color:var(--dim);line-height:1.7;background:#08111d;border-radius:7px;padding:10px;min-height:60px;">Run ideation to see the synthesized breakthrough proposal...</div>
       </div>
+      <div class="section"><div class="analysis-note">Analysis only. FNIR and Pareto values are heuristic rankings, not evidence, probability, or answer confidence.</div></div>
     </div>
     <div class="idea-grid" id="ideaGrid">
       <div style="color:var(--dim);font-size:13px;text-align:center;grid-column:1/-1;margin-top:60px;">Enter an innovation topic on the left and click <strong>Generate Innovations</strong>.</div>
@@ -296,8 +322,9 @@
         <button class="btn-primary" style="margin-top:10px;width:100%;" onclick="runSwarm()">&#x1F41D; Launch Swarm Debate</button>
       </div>
       <div class="section">
-        <div class="section-title">Agent Weights (Replicator Dynamics)</div>
+        <div class="section-title">Internal Template Weights (Not Confidence)</div>
         <div id="agentWeightBars" style="display:flex;flex-direction:column;gap:9px;"></div>
+        <div class="analysis-note" style="margin-top:12px;">Analysis only. Agent agreement is an internal heuristic and does not verify a conclusion.</div>
       </div>
     </div>
     <div class="main-area">
@@ -306,7 +333,7 @@
       </div>
     </div>
     <div class="right-panel" style="padding:16px;gap:14px;display:flex;flex-direction:column;">
-      <div class="section-title">Consensus Verdict</div>
+      <div class="section-title">Heuristic Synthesis (Analysis Only)</div>
       <div id="swarmVerdict" style="font-size:12px;color:var(--dim);line-height:1.7;background:#08111d;border-radius:8px;padding:12px;flex:1;">Waiting for swarm completion...</div>
     </div>
   </div>
@@ -337,13 +364,87 @@
       <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:60px;">Enter a search problem and click <strong>Explore Graph of Thoughts</strong>.</div>
     </div>
     <div class="right-panel" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-      <div class="section-title">Optimal Path</div>
+      <div class="section-title">Selected Template Path (Analysis Only)</div>
       <div id="gotOptimalPath" style="font-size:12px;color:var(--dim);line-height:1.7;background:#08111d;border-radius:8px;padding:12px;flex:1;">Waiting for tree search...</div>
+  <!-- ─── SIGNALS & ENTROPY LAB ────────────────────────── -->
+  <div class="tab-panel" id="panel-signals">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Entropy Source</div>
+        <select id="entropySourceSelect" onchange="runEntropyProbe()">
+          <option value="crypto">Browser Crypto (OS RNG)</option>
+          <option value="seeded">Deterministic Seeded PRNG</option>
+          <option value="os_csprng_transform">OS CSPRNG + Sine Transform (Software)</option>
+          <option value="chaotic">Chaotic Logistic Map (r=3.9999)</option>
+        </select>
+        <div style="margin-top:10px;">
+          <label>Sample Count</label>
+          <input type="number" id="entropyCount" value="16" min="4" max="64">
+        </div>
+        <button class="btn-primary" style="margin-top:10px;width:100%;" onclick="runEntropyProbe()">&#x1F39B;&#xFE0F; Sample Entropy Stream</button>
+      </div>
+      <div class="section">
+        <div class="section-title">Wolfram CA Rule</div>
+        <select id="caRuleSelect" onchange="runEntropyProbe()">
+          <option value="30">Rule 30 (Deterministic CA Visualization)</option>
+          <option value="90">Rule 90 (Sierpinski Fractal)</option>
+          <option value="110">Rule 110 (Turing-Complete)</option>
+          <option value="150">Rule 150 (Self-Similar)</option>
+        </select>
+      </div>
+    </div>
+    <div class="signals-main">
+      <div class="canvas-card">
+        <div class="canvas-title">
+          <span>Synthetic RSI Diagnostic (Not Reasoning Quality)</span>
+          <span id="rsiBadge" style="color:var(--primary);font-weight:700;">RSI: 50.0</span>
+        </div>
+        <canvas id="rsiChartCanvas"></canvas>
+      </div>
+      <div class="canvas-card">
+        <div class="canvas-title">
+          <span>Wolfram 1D Elementary Cellular Automata State Projection</span>
+          <span id="caRuleBadge" style="color:var(--accent);font-weight:700;">Rule 30</span>
+        </div>
+        <canvas id="caGridCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MIMO THINKING CONSOLE ────────────────────────── -->
+  <div class="tab-panel" id="panel-think">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">MiMo Think Prompt</div>
+        <textarea id="thinkPromptInput" rows="4" placeholder="Enter query for dynamic thinking routing..."></textarea>
+        <div style="margin-top:10px;">
+          <label>Mode</label>
+          <select id="thinkModeSelect">
+            <option value="auto">Auto Adaptive Router</option>
+            <option value="fast">Fast (Untrained Telemetry Probe)</option>
+            <option value="deep">Deep (Untrained Latent Probe)</option>
+            <option value="swarm">Swarm (5-Agent Arena)</option>
+            <option value="got">GoT (Graph-of-Thoughts)</option>
+            <option value="solve">Solve (Exact Verifier)</option>
+          </select>
+        </div>
+        <div style="margin-top:10px;">
+          <label>Thinking Budget (Cycles)</label>
+          <input type="range" id="thinkBudgetSlider" min="1" max="8" value="4" oninput="document.getElementById('thinkBudgetVal').innerText=this.value">
+          <span id="thinkBudgetVal" style="color:var(--primary);font-weight:700;font-size:12px;">4</span>
+        </div>
+        <button class="btn-primary" style="margin-top:10px;width:100%;" onclick="runThink()">&#x26A1; Dispatch Thinking</button>
+      </div>
+    </div>
+    <div class="think-main">
+      <div id="thinkOutputArea" style="display:flex;flex-direction:column;gap:12px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:60px;">Configure thinking parameters and click <strong>Dispatch Thinking</strong>.</div>
+      </div>
     </div>
   </div>
 
   <!-- ─── TELEMETRY PANEL ─────────────────────────────── -->
-  <div class="tab-panel" id="panel-telem"></div>
+  <div class="tab-panel" id="panel-telem"><div class="analysis-note" style="grid-column:1/-1;">Telemetry is backend-reported diagnostic/configuration data only. It is not evidence for an answer or a model-quality claim.</div></div>
 
 </div>
 
@@ -353,14 +454,15 @@
 /* ─── State ────────────────────────────────────────────── */
 var state = {
   chat: { persona:'empathetic_conversationalist', session:'studio_'+Date.now() },
+  requests: { solver:0, think:0 },
+  rsiHistory: [],
   swarm: { agents:[
     {id:'generator',icon:'\u26A1',name:'Generator',w:0.25},
     {id:'critic',icon:'\uD83E\uDDD0',name:'Critic',w:0.25},
     {id:'skeptic',icon:'\uD83E\uDD85',name:'Skeptic',w:0.20},
     {id:'archivist',icon:'\uD83D\uDCDA',name:'Archivist',w:0.15},
     {id:'anomaly',icon:'\uD83D\uDD0D',name:'Anomaly Hunter',w:0.15}
-  ]},
-  telem: {entropy:2.0,rsi:0.985,mtp:96.4,chsh:1.942,moe_sparse:0.72,budget_q:0.88}
+  ]}
 };
 
 var PERSONA_ICONS = {
@@ -372,6 +474,94 @@ var PERSONA_NAMES = {
   rigorous_scientist:'Rigorous Scientist',creative_catalyst:'Creative Catalyst',executive_analyst:'Executive Analyst'
 };
 
+var BACKEND_UNAVAILABLE = 'DEMO / BACKEND UNAVAILABLE';
+
+function setBackendStatus(available) {
+  var status = document.getElementById('engineStatus');
+  var dot = status.querySelector('.dot-status');
+  status.style.color = available ? 'var(--success)' : 'var(--danger)';
+  dot.style.background = available ? 'var(--success)' : 'var(--danger)';
+  document.getElementById('engineStatusText').textContent = available ?
+    'Live backend reached' : 'Backend unavailable';
+}
+
+function requireBackendJson(response) {
+  if (!response.ok) throw new Error('backend returned HTTP ' + response.status);
+  setBackendStatus(true);
+  return response.json();
+}
+
+function unavailableText(capability) {
+  setBackendStatus(false);
+  return BACKEND_UNAVAILABLE + ' — ' + capability +
+    ' requires the live NexusMind API. No result was generated locally. This view has no answer authority.';
+}
+
+function renderUnavailable(targetId, capability) {
+  var target = document.getElementById(targetId);
+  target.innerHTML = '';
+  var notice = document.createElement('div');
+  notice.className = 'unavailable';
+  notice.textContent = unavailableText(capability);
+  target.appendChild(notice);
+}
+
+function esc(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function analysisContractValid(result) {
+  return !!(result && result.status === 'analysis_only' &&
+    result.answer_authority === false && result.confidence == null &&
+    result.epistemics && result.epistemics.decision === 'analysis_only');
+}
+
+function verifiedContractValid(result) {
+  var epistemics = result && result.epistemics;
+  var verifier = epistemics && epistemics.verifier;
+  return !!(result && result.confidence === 1 && epistemics &&
+    epistemics.decision === 'answered' && epistemics.answer_authority === true &&
+    epistemics.evidence_class === 'verified_exact' && verifier &&
+    verifier.id === 'grounding_runtime.finalize_grounded_response' &&
+    verifier.passed === true && verifier.independent_recompute === true);
+}
+
+function nonAuthoritativeVerifierValid(epistemics) {
+  var verifier = epistemics && epistemics.verifier;
+  return !!(verifier && verifier.id === 'none' && verifier.passed === false &&
+    verifier.independent_recompute === false);
+}
+
+function thinkAnalysisContractValid(result) {
+  var epistemics = result && result.epistemics;
+  return !!(result && result.confidence == null && epistemics &&
+    epistemics.decision === 'analysis_only' && epistemics.answer_authority === false &&
+    (epistemics.evidence_class === 'deterministic_heuristic' ||
+      epistemics.evidence_class === 'template_deliberation') &&
+    nonAuthoritativeVerifierValid(epistemics));
+}
+
+function thinkAbstentionContractValid(result) {
+  var epistemics = result && result.epistemics;
+  return !!(result && result.confidence == null && epistemics &&
+    epistemics.decision === 'abstained' && epistemics.answer_authority === false &&
+    (epistemics.evidence_class === 'unverified_neural' ||
+      epistemics.evidence_class === 'no_applicable_verifier') &&
+    nonAuthoritativeVerifierValid(epistemics));
+}
+
+function classifyThinkResponse(result) {
+  if (verifiedContractValid(result)) return 'answered';
+  if (thinkAnalysisContractValid(result)) return 'analysis_only';
+  if (thinkAbstentionContractValid(result)) return 'abstained';
+  return 'invalid';
+}
+
 /* ─── Tab Switching ────────────────────────────────────── */
 function switchTab(id, el) {
   document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
@@ -379,6 +569,7 @@ function switchTab(id, el) {
   el.classList.add('active');
   document.getElementById('panel-'+id).classList.add('active');
   if (id==='telem') renderTelemetry();
+  if (id==='signals') runEntropyProbe();
 }
 
 /* ─── CHAT ─────────────────────────────────────────────── */
@@ -400,21 +591,24 @@ function sendChat() {
   var typingId = appendTyping();
   document.getElementById('chatIntentDisplay').textContent = 'Analyzing intent...';
 
-  // Try API first, fall back to local
   fetch('/v1/chat', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({session_id:state.chat.session,message:txt,persona:state.chat.persona})
-  }).then(function(res){ return res.ok ? res.json() : Promise.reject(); })
+  }).then(requireBackendJson)
     .then(function(result){ handleChatResult(result, typingId); })
-    .catch(function(){ handleChatResult(localChat(txt), typingId); });
+    .catch(function(){ handleChatUnavailable(typingId); });
 }
 
 function handleChatResult(result, typingId) {
   removeTyping(typingId);
+  if (!analysisContractValid(result)) {
+    appendMsg('ai', 'The backend response lacked the required analysis-only evidence contract, so it was withheld.', '\u26A0\uFE0F', 'Contract rejected · no answer authority');
+    return;
+  }
   var pt = (result.persona_used && result.persona_used.persona_type) || state.chat.persona;
   var icon = PERSONA_ICONS[pt] || '\uD83E\uDD16';
   var name = PERSONA_NAMES[pt] || 'NexusMind';
-  appendMsg('ai', result.reply, icon, name + ' \u00B7 ' + (result.intent_detected || 'general'));
+  appendMsg('ai', result.reply, icon, name + ' · analysis-only · no answer authority · ' + (result.intent_detected || 'general'));
   document.getElementById('chatIntentDisplay').textContent = result.intent_detected || '\u2014';
   if (result.extracted_entities && Object.keys(result.extracted_entities).length) {
     document.getElementById('chatVarsDisplay').textContent =
@@ -430,42 +624,20 @@ function handleChatResult(result, typingId) {
   }
 }
 
-function localChat(txt) {
-  var t = txt.toLowerCase(), intent = 'general_conversation', persona = state.chat.persona, reply;
-  if (/calculate|velocity|force|energy|kinetic|potential|momentum|pressure|voltage|current|resistance|quadratic|solve|integral/.test(t)) {
-    intent = 'math_science_solve'; persona = 'rigorous_scientist';
-    reply = '### Scientific & Mathematical Analysis\n\n**Query**: '+txt+'\n\nI\'ll apply exact rational SI arithmetic and dimensional analysis. Switch to the Math & Science Solver tab for step-by-step derivations with a cryptographic audit receipt.';
-  } else if (/brainstorm|innovat|invent|scamper|triz|creat|what if|reimagin/.test(t)) {
-    intent = 'brainstorm_innovate'; persona = 'creative_catalyst';
-    reply = '**Let\'s supercharge our thinking!**\n\nFor "'+txt+'", consider:\n\n* Quantum Inversion: Treat the problem as entropy-minimization across parallel states.\n* Biomimetic: How would a mycelial network navigate this trade-off?\n* Zero-Friction Flip: Solve backwards from the ideal end-state.\n\nSwitch to the Innovation Lab tab for full SCAMPER/TRIZ/FNIR analysis!';
-  } else if (/debate|critique|pros and cons|swarm|tradeoff|versus/.test(t)) {
-    intent = 'deep_deliberation'; persona = 'socratic_mentor';
-    reply = 'That\'s a fascinating topic for multi-perspective inquiry. Let\'s examine the foundational premises:\n\n1. Core Mechanism: What axiom governs this trade-off?\n2. Boundary Test: What invariant holds under extreme conditions?\n3. Inversion: What changes if we reverse the primary assumption?\n\nFor rigorous multi-agent deliberation, head to the Swarm Arena tab!';
-  } else if (/architecture|roadmap|executive|strategic|priority|roi|recommend/.test(t)) {
-    intent = 'executive_strategy'; persona = 'executive_analyst';
-    reply = '### Executive Synthesis\n\n| Dimension | Assessment | Impact |\n|:---|:---|:---|\n| Objective | Maximize quality vs latency | High |\n| Trade-off | Epistemic depth vs speed | Balanced |\n| Architecture | Multi-paradigm hybrid routing | Critical |\n\nNext Steps: (1) Activate targeted solver, (2) Deploy 5-agent swarm, (3) Benchmark against quality receipts.';
-  } else {
-    reply = 'I\'m really glad you brought that up! That\'s a great topic to explore together.\n\nThere are a few fascinating angles here \u2014 whether we dive into technical depth, brainstorm creative possibilities, or just explore the ideas. I\'m right here with you.\n\nWhere would you like to begin?';
-  }
-  return {
-    reply: reply, intent_detected: intent, persona_used: {persona_type: persona},
-    thought_steps: ['Detected intent: \''+intent+'\'', 'Selected persona: '+PERSONA_NAMES[persona], 'Generating contextual response...'],
-    extracted_entities: extractEntities(txt)
-  };
-}
-
-function extractEntities(txt) {
-  var ent = {}, re = /\b([A-Za-z_]+)\s*=\s*([0-9.]+(?:\s*[A-Za-z/^]+)?)/g, m;
-  while ((m = re.exec(txt)) !== null) ent[m[1]] = m[2];
-  return ent;
+function handleChatUnavailable(typingId) {
+  removeTyping(typingId);
+  appendMsg('ai', unavailableText('Persona chat'), '\u26A0\uFE0F',
+    'Backend unavailable · analysis-only · no answer authority');
+  document.getElementById('chatIntentDisplay').textContent = 'unavailable';
+  document.getElementById('chatThoughtSteps').innerHTML = '';
 }
 
 function appendMsg(role, text, icon, meta) {
   var box = document.getElementById('chatMessages');
   var wrap = document.createElement('div');
   wrap.className = 'msg' + (role==='user'?' user':'');
-  var rendered = text.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
-  wrap.innerHTML = '<div class="msg-avatar">'+icon+'</div><div><div class="msg-bubble">'+rendered+'</div><div class="msg-meta">'+meta+'</div></div>';
+  var rendered = esc(text).replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+  wrap.innerHTML = '<div class="msg-avatar">'+esc(icon)+'</div><div><div class="msg-bubble">'+rendered+'</div><div class="msg-meta">'+esc(meta)+'</div></div>';
   box.appendChild(wrap); box.scrollTop = box.scrollHeight;
 }
 
@@ -488,60 +660,49 @@ function runSolver() {
   var q = document.getElementById('solverInput').value.trim();
   if (!q) return;
   var out = document.getElementById('solverOutput');
+  var requestToken = ++state.requests.solver;
   out.innerHTML = '<div style="color:var(--dim);font-size:13px;">Solving...</div>';
 
   fetch('/v1/solve', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({problem:q})
-  }).then(function(r){ return r.ok ? r.json() : Promise.reject(); })
-    .then(function(data){ renderSolverResult(data); })
-    .catch(function(){ renderSolverResult(localSolve(q)); });
+    body: JSON.stringify({query:q})
+  }).then(requireBackendJson)
+    .then(function(data){
+      if (requestToken !== state.requests.solver) return;
+      renderSolverResult(data, q);
+    })
+    .catch(function(){
+      if (requestToken !== state.requests.solver) return;
+      renderUnavailable('solverOutput', 'Exact solving');
+    });
 }
 
-function localSolve(q) {
-  var t = q.toLowerCase();
-  var sha = ''; for(var i=0;i<64;i++) sha+='0123456789abcdef'[Math.floor(Math.random()*16)];
-  var steps=[], answer='?', unit='', target='unknown';
-  var mKE = /mass[^\d]*(\d+\.?\d*)[^\d]*kg.*vel[^\d]*(\d+\.?\d*)/i.exec(t);
-  if (mKE && /kinetic/.test(t)) {
-    var m=+mKE[1], v=+mKE[2], ke=0.5*m*v*v;
-    steps=[{step_index:1,description:'Apply kinetic energy formula',formula_latex:'E_k = 1/2 m v^2',substitution_latex:'E_k = 0.5 * '+m+' * '+v+'^2 = '+ke,evaluated_value:''+ke,unit:'J'}];
-    answer=''+ke; unit='J'; target='kinetic_energy';
-  }
-  var mF = /mass[^\d]*(\d+\.?\d*)[^\d]*kg.*accel[^\d]*(\d+\.?\d*)/i.exec(t);
-  if (mF && /force/.test(t)) {
-    var m2=+mF[1], a2=+mF[2], f=m2*a2;
-    steps=[{step_index:1,description:'Apply Newton Second Law',formula_latex:'F = m * a',substitution_latex:'F = '+m2+' * '+a2+' = '+f,evaluated_value:''+f,unit:'N'}];
-    answer=''+f; unit='N'; target='force';
-  }
-  var mV = /current[^\d]*(\d+\.?\d*)[^\d]*a.*resist[^\d]*(\d+\.?\d*)/i.exec(t);
-  if (mV && /volt/.test(t)) {
-    var cur=+mV[1], res=+mV[2], vol=cur*res;
-    steps=[{step_index:1,description:'Apply Ohm\'s Law',formula_latex:'V = I * R',substitution_latex:'V = '+cur+' * '+res+' = '+vol,evaluated_value:''+vol,unit:'V'}];
-    answer=''+vol; unit='V'; target='voltage';
-  }
-  return {solved:steps.length>0,target:target,domain:'physics',answer_value:+answer,display_answer:answer,unit:unit,formula_id:'exact',steps:steps,receipt:{receipt_sha256:sha}};
-}
-
-function renderSolverResult(result) {
+function renderSolverResult(result, submittedQuery) {
   var out = document.getElementById('solverOutput'); out.innerHTML = '';
-  if (!result.solved) {
-    out.innerHTML = '<div style="color:var(--danger);padding:20px;">Could not find a deterministic formula match. Try specifying units and variable names explicitly.</div>';
+  var decision = result.epistemics && result.epistemics.decision;
+  if (!result.solved || decision !== 'answered' || result.answer_authority !== true || !verifiedContractValid(result)) {
+    var notice = document.createElement('div'); notice.className = 'unavailable';
+    notice.textContent = result.output || 'No verified answer was admitted. Specify one unambiguous supported calculation with units and assumptions.';
+    out.appendChild(notice);
     return;
   }
+  var requestBinding = document.createElement('div');
+  requestBinding.style.cssText = 'font-size:11px;color:var(--dim);margin-bottom:8px;';
+  requestBinding.textContent = 'Verified for submitted request: ' + String(submittedQuery || '');
+  out.appendChild(requestBinding);
   var banner = document.createElement('div'); banner.className = 'answer-banner';
-  banner.innerHTML = '<div><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:4px;">'+(result.target||'RESULT').toUpperCase().replace(/_/g,' ')+'</div><div style="display:flex;align-items:baseline;gap:10px;"><span class="answer-value">'+result.display_answer+'</span><span class="answer-unit">'+result.unit+'</span></div><div style="font-size:11px;color:var(--dim);margin-top:6px;">Domain: '+result.domain+' | Formula: '+(result.formula_id||'exact')+'</div></div><div style="margin-left:auto;font-size:28px;">\u2713</div>';
+  banner.innerHTML = '<div><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:4px;">'+esc((result.target||'RESULT').toUpperCase().replace(/_/g,' '))+'</div><div style="display:flex;align-items:baseline;gap:10px;"><span class="answer-value">'+esc(result.display_answer)+'</span><span class="answer-unit">'+esc(result.unit)+'</span></div><div style="font-size:11px;color:var(--dim);margin-top:6px;">Domain: '+esc(result.domain)+' | Method: '+esc(result.formula_id||'exact')+' | deterministic in-scope only</div></div><div style="margin-left:auto;font-size:28px;">\u2713</div>';
   out.appendChild(banner);
   if (result.steps) {
     result.steps.forEach(function(s){
       var sc = document.createElement('div'); sc.className = 'step-card';
-      sc.innerHTML = '<div class="step-header"><span class="step-label">Step '+s.step_index+': '+s.description+'</span><span style="font-size:10px;color:var(--dim);">'+s.unit+'</span></div><div class="step-body">'+s.formula_latex+'<br><span style="color:var(--dim);">'+s.substitution_latex+'</span></div>';
+      sc.innerHTML = '<div class="step-header"><span class="step-label">Step '+esc(s.step_index)+': '+esc(s.description)+'</span><span style="font-size:10px;color:var(--dim);">'+esc(s.unit)+'</span></div><div class="step-body">'+esc(s.formula_latex)+'<br><span style="color:var(--dim);">'+esc(s.substitution_latex)+'</span></div>';
       out.appendChild(sc);
     });
   }
   if (result.receipt && result.receipt.receipt_sha256) {
     var rc = document.createElement('div'); rc.className = 'receipt-box';
-    rc.innerHTML = '<strong>\u2705 Cryptographic Audit Receipt</strong><br>SHA-256: '+result.receipt.receipt_sha256+'<br>Schema: nexus-solver-receipt-v2';
+    rc.innerHTML = '<strong>\u2705 Integrity receipt (audit metadata, not authority)</strong><br>SHA-256: '+esc(result.receipt.receipt_sha256)+'<br>Answer admission: fresh verifier-first recomputation';
     out.appendChild(rc);
   }
 }
@@ -555,46 +716,16 @@ function runIdeation() {
 
   fetch('/v1/innovate', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({query:q,count:count})
-  }).then(function(r){ return r.ok ? r.json() : Promise.reject(); })
+    body:JSON.stringify({topic:q,count:count})
+  }).then(requireBackendJson)
     .then(function(data){ renderIdeation(data); })
-    .catch(function(){ renderIdeation(localIdeate(q, count)); });
-}
-
-var SCAMPER_OPS = ['Substitute','Combine','Adapt','Modify','Put to other uses','Eliminate','Reverse'];
-var TRIZ_PRINCIPLES = ['Segmentation','Extraction','Local Quality','Asymmetry','Merging','Universality'];
-var ANALOGY_DOMAINS = ['Biomimetic','Quantum','Thermodynamic','Mycelial/Stigmergy'];
-function frand(seed,mn,mx){var x=Math.sin(seed)*10000;return mn+(x-Math.floor(x))*(mx-mn);}
-
-function localIdeate(q, count) {
-  var concepts = [], qHash = 0;
-  for(var i=0;i<q.length;i++) qHash += q.charCodeAt(i);
-  SCAMPER_OPS.slice(0,Math.min(3,count)).forEach(function(op,j){
-    concepts.push({concept_id:'scamper_'+j,title:op+': Reimagined '+q.split(' ').slice(0,3).join(' '),operator:'SCAMPER:'+op,
-      description:'Apply the '+op+' operator to radically transform the core mechanism.',
-      feasibility:frand(qHash+j*7,0.55,0.95),novelty:frand(qHash+j*11,0.6,0.98),impact:frand(qHash+j*13,0.5,0.95),robustness:frand(qHash+j*17,0.5,0.85),is_pareto_optimal:j===0});
-  });
-  TRIZ_PRINCIPLES.slice(0,Math.min(2,count-concepts.length)).forEach(function(p,j){
-    concepts.push({concept_id:'triz_'+j,title:'TRIZ '+p+': '+q.split(' ').slice(0,4).join(' '),operator:'TRIZ:'+p,
-      description:'Resolve contradictions using the '+p+' principle.',
-      feasibility:frand(qHash+j*19,0.5,0.9),novelty:frand(qHash+j*23,0.65,0.99),impact:frand(qHash+j*29,0.55,0.95),robustness:frand(qHash+j*31,0.45,0.85),is_pareto_optimal:j===1});
-  });
-  var ai=0;
-  while(concepts.length<count && ai<ANALOGY_DOMAINS.length){
-    var d=ANALOGY_DOMAINS[ai++];
-    concepts.push({concept_id:'analogy_'+ai,title:d+' Lens: '+q.split(' ').slice(0,3).join(' '),operator:'Analogical:'+d,
-      description:'Map structural patterns from '+d+' systems onto the target domain.',
-      feasibility:frand(qHash+ai*37,0.45,0.88),novelty:frand(qHash+ai*41,0.7,0.99),impact:frand(qHash+ai*43,0.6,0.97),robustness:frand(qHash+ai*47,0.5,0.85),is_pareto_optimal:ai===2});
-  }
-  return {query:q,concepts:concepts.slice(0,count),pareto_optimal_concepts:concepts.filter(function(c){return c.is_pareto_optimal;}),
-    synthesis_proposal:'Synthesis of top SCAMPER, TRIZ, and analogical operators for "'+q+'" reveals a convergent innovation opportunity: integrate boundary-condition substitution with self-organising feedback loops, resolving the core contradiction via Segmentation to achieve 40-60% improvement with near-term feasibility.',
-    receipt:{receipt_sha256:'a'.repeat(64),total_concepts_generated:concepts.length,pareto_concepts_count:concepts.filter(function(c){return c.is_pareto_optimal;}).length}
-  };
+    .catch(function(){ renderUnavailable('ideaGrid', 'Innovation analysis'); });
 }
 
 var FNIR_COLORS = ['#38bdf8','#818cf8','#34d399','#fbbf24'];
 function renderIdeation(result) {
   var grid = document.getElementById('ideaGrid'); grid.innerHTML = '';
+  if (!analysisContractValid(result)) { renderUnavailable('ideaGrid', 'Innovation response rejected: missing analysis-only contract'); return; }
   if (!result.concepts || !result.concepts.length) { grid.innerHTML = '<div style="color:var(--danger);grid-column:1/-1;text-align:center;">No concepts generated.</div>'; return; }
   result.concepts.forEach(function(c){
     var card = document.createElement('div');
@@ -605,7 +736,7 @@ function renderIdeation(result) {
     var fnirBars = [['Feasibility',c.feasibility,0],['Novelty',c.novelty,1],['Impact',c.impact,2],['Robustness',c.robustness,3]].map(function(arr){
       return '<div class="fnir-label-row"><span>'+arr[0]+'</span><span style="color:'+FNIR_COLORS[arr[2]]+';font-weight:700;">'+(arr[1]*100).toFixed(0)+'%</span></div><div class="fnir-bar"><div class="fnir-fill" style="width:'+(arr[1]*100)+'%;background:'+FNIR_COLORS[arr[2]]+';"></div></div>';
     }).join('');
-    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;"><span class="idea-operator '+opClass+'">'+c.operator+'</span>'+(c.is_pareto_optimal?'<span class="pareto-badge">\u2B50 PARETO</span>':'')+'</div><div class="idea-title">'+c.title+'</div><div class="idea-desc">'+c.description+'</div><div class="fnir-bar-row">'+fnirBars+'</div>';
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;"><span class="idea-operator '+opClass+'">'+esc(c.operator)+'</span>'+(c.is_pareto_optimal?'<span class="pareto-badge">HEURISTIC FRONTIER</span>':'')+'</div><div class="idea-title">'+esc(c.title)+'</div><div class="idea-desc">'+esc(c.description)+'</div><div class="fnir-bar-row">'+fnirBars+'</div>';
     grid.appendChild(card);
   });
   document.getElementById('synthProposal').textContent = result.synthesis_proposal || '\u2014';
@@ -638,40 +769,35 @@ function runSwarm() {
   fetch('/v1/swarm', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({query:q,max_rounds:maxRounds})
-  }).then(function(r){ return r.ok ? r.json() : Promise.reject(); })
+  }).then(requireBackendJson)
     .then(function(data){ renderSwarm(data); })
-    .catch(function(){ renderSwarm(localSwarm(q, maxRounds)); });
-}
-
-function localSwarm(q, rounds) {
-  var r = [], agents = state.swarm.agents.map(function(a){return Object.assign({},a);});
-  var roles = ['Proposed hypothesis.','Identified logical gap.','Challenged assumption.','Retrieved supporting evidence.','Flagged edge case.'];
-  for (var i=1; i<=rounds; i++) {
-    var contribs = agents.map(function(a,j){
-      return {agent:Object.assign({},a), contribution:'[Round '+i+'] '+a.name+': Analyzed the problem dimension. '+roles[j]};
+    .catch(function(){
+      renderUnavailable('swarmArena', 'Swarm analysis');
+      document.getElementById('swarmVerdict').textContent = unavailableText('Swarm analysis');
     });
-    agents[1].w = Math.min(0.45, agents[1].w + 0.04);
-    var total = agents.reduce(function(s,a){return s+a.w;},0);
-    agents.forEach(function(a){ a.w=a.w/total; updateSwarmWeight(a.id, a.w); });
-    r.push({round_number:i, contributions:contribs, consensus_score: 0.7+i*0.08});
-  }
-  return {rounds:r, consensus_output:'After '+rounds+' deliberation rounds, the 5-agent swarm reached consensus on "'+q+'": The optimal approach balances the generator\'s hypothesis with the critic\'s constraints, resolving boundary conditions raised by the skeptic. Anomaly screen: clear.',
-    receipt:{consensus_score: r[r.length-1].consensus_score}};
 }
 
 function renderSwarm(result) {
   var arena = document.getElementById('swarmArena'); arena.innerHTML = '';
+  if (!analysisContractValid(result)) { renderUnavailable('swarmArena', 'Swarm response rejected: missing analysis-only contract'); return; }
   if (!result.rounds || !result.rounds.length) { arena.innerHTML = '<div style="color:var(--danger);">Swarm failed.</div>'; return; }
   result.rounds.forEach(function(rnd){
     var rDiv = document.createElement('div'); rDiv.className = 'swarm-round';
-    rDiv.innerHTML = '<div class="swarm-round-header"><span>Round '+rnd.round_number+'</span><span style="color:var(--success);">Consensus: '+(rnd.consensus_score*100).toFixed(1)+'%</span></div>';
+    rDiv.innerHTML = '<div class="swarm-round-header"><span>Round '+esc(rnd.round_index)+'</span><span style="color:var(--warn);">Internal template agreement: '+(Number(rnd.internal_template_agreement||0)*100).toFixed(1)+'%</span></div>';
     var bubbles = document.createElement('div'); bubbles.className = 'agent-bubble-row';
-    rnd.contributions.forEach(function(c){
-      bubbles.innerHTML += '<div class="agent-bubble"><div class="agent-icon">'+c.agent.icon+'</div><div><div class="agent-weight-tag">'+c.agent.name+' (w='+c.agent.w.toFixed(3)+')</div><div class="agent-text">'+c.contribution+'</div></div></div>';
+    Object.keys(rnd.contributions||{}).forEach(function(agentId){
+      var c = rnd.contributions[agentId] || {};
+      var known = state.swarm.agents.find(function(a){return a.id===agentId;}) || {icon:'?',name:agentId};
+      var weight = Number(c.template_weight||0);
+      bubbles.innerHTML += '<div class="agent-bubble"><div class="agent-icon">'+esc(known.icon)+'</div><div><div class="agent-weight-tag">'+esc(known.name)+' (template w='+weight.toFixed(3)+')</div><div class="agent-text">'+esc(c.perspective||'No contribution')+'</div></div></div>';
+    });
+    Object.keys(rnd.active_template_weights||{}).forEach(function(agentId){
+      updateSwarmWeight(agentId, Number(rnd.active_template_weights[agentId]||0));
     });
     rDiv.appendChild(bubbles); arena.appendChild(rDiv);
   });
-  document.getElementById('swarmVerdict').textContent = result.consensus_output || '\u2014';
+  document.getElementById('swarmVerdict').textContent =
+    'ANALYSIS ONLY — NOT VERIFIED\n\n' + (result.consensus_output || 'No synthesis produced.');
 }
 
 /* ─── GOT ──────────────────────────────────────────────── */
@@ -685,102 +811,221 @@ function runGoT() {
   fetch('/v1/got', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({query:q,max_depth:depth})
-  }).then(function(r){ return r.ok ? r.json() : Promise.reject(); })
+  }).then(requireBackendJson)
     .then(function(data){ renderGoT(data); })
-    .catch(function(){ renderGoT(localGoT(q, depth)); });
-}
-
-function localGoT(q, depth) {
-  var qh = 0; for(var i=0;i<q.length;i++) qh+=q.charCodeAt(i);
-  function buildNode(label, type, score, d) {
-    var children = [];
-    if (d > 0) {
-      children.push(buildNode('Branch A: Decompose "'+label.substring(0,25)+'"', 'branch', frand(qh+d*2,0.6,0.95), d-1));
-      children.push(buildNode('Branch B: Extend "'+label.substring(0,25)+'"', d===depth?'pruned':'branch', frand(qh+d*3,0.3,0.6), d-1));
-    }
-    return {label:label, type:type, score:score, children:children};
-  }
-  var tree = buildNode('Root: '+q.substring(0,50), 'root', 1.0, Math.min(depth,2));
-  if (tree.children.length>=1 && tree.children[0].children.length>0) {
-    tree.children[0].children.push({label:'Merged synthesis of Branch A + B',type:'merged',score:0.93,children:[]});
-  }
-  return {tree:tree, optimal_path:'Root \u2192 Branch A \u2192 Merged Synthesis (score: 0.93)\n\nThis trajectory converges the primary decomposition with cross-branch synthesis for: "'+q+'"'};
+    .catch(function(){
+      renderUnavailable('gotTree', 'Graph analysis');
+      document.getElementById('gotOptimalPath').textContent = unavailableText('Graph analysis');
+    });
 }
 
 function renderGoT(result) {
   var container = document.getElementById('gotTree'); container.innerHTML = '';
-  if (!result.tree) { container.innerHTML = '<div style="color:var(--danger);">GoT search failed.</div>'; return; }
-  container.appendChild(buildGoTNode(result.tree));
-  document.getElementById('gotOptimalPath').textContent = result.optimal_path || '\u2014';
-}
-
-function buildGoTNode(node) {
-  var div = document.createElement('div');
-  div.className = 'got-node '+(node.type||'branch');
-  div.innerHTML = '<span class="got-score">\u2B50 '+(node.score||0).toFixed(2)+'</span><div class="got-tag '+node.type+'">'+(node.type||'branch').toUpperCase()+'</div><div>'+node.label+'</div>';
-  if (node.children && node.children.length) {
-    var ch = document.createElement('div'); ch.className = 'got-children';
-    node.children.forEach(function(c){ ch.appendChild(buildGoTNode(c)); });
-    div.appendChild(ch);
-  }
-  return div;
+  if (!analysisContractValid(result)) { renderUnavailable('gotTree', 'Graph response rejected: missing analysis-only contract'); return; }
+  var path = result.best_path_nodes || [];
+  if (!path.length) { container.innerHTML = '<div style="color:var(--danger);">No graph scaffold returned.</div>'; return; }
+  path.forEach(function(node){
+    var div = document.createElement('div');
+    var type = /^(root|draft|critique|merged|leaf)$/.test(node.branch_type||'') ? node.branch_type : 'draft';
+    div.className = 'got-node '+type;
+    div.innerHTML = '<span class="got-score">priority '+Number(node.score||0).toFixed(2)+'</span><div class="got-tag '+type+'">'+esc(type.toUpperCase())+'</div><div>'+esc(node.step_text)+'</div>';
+    container.appendChild(div);
+  });
+  document.getElementById('gotOptimalPath').textContent =
+    'ANALYSIS ONLY — SELECTED TEMPLATE PATH, NOT OPTIMALITY OR CORRECTNESS\n\n' +
+    (result.final_output || 'No synthesis produced.');
 }
 
 /* ─── TELEMETRY ────────────────────────────────────────── */
-var telemHistory = {entropy:[],rsi:[],mtp:[],chsh:[]};
-
 function renderTelemetry() {
-  var live = state.telem;
-  live.entropy = Math.max(1.5,Math.min(2.5,live.entropy+(Math.random()-0.5)*0.05));
-  live.rsi = Math.max(0.85,Math.min(1.0,live.rsi+(Math.random()-0.5)*0.01));
-  live.mtp = Math.max(88,Math.min(99.5,live.mtp+(Math.random()-0.5)*0.5));
-  live.chsh = Math.max(1.7,Math.min(1.99,live.chsh+(Math.random()-0.5)*0.03));
-  Object.assign(state.telem,live);
+  var panel = document.getElementById('panel-telem');
+  panel.innerHTML = '<div class="analysis-note" style="grid-column:1/-1;">Loading diagnostic data from the live backend...</div>';
+  fetch('/v1/telemetry').then(requireBackendJson)
+    .then(renderTelemetryData)
+    .catch(function(){ renderUnavailable('panel-telem', 'Diagnostic telemetry'); });
+}
 
-  ['entropy','rsi','mtp','chsh'].forEach(function(k){
-    telemHistory[k].push(state.telem[k]);
-    if(telemHistory[k].length>30) telemHistory[k].shift();
-  });
-
+function renderTelemetryData(data) {
   var panel = document.getElementById('panel-telem'); panel.innerHTML = '';
+  var note = document.createElement('div'); note.className = 'analysis-note';
+  note.style.gridColumn = '1/-1';
+  note.textContent = 'DIAGNOSTIC ONLY — configuration plus a fixed synthetic metric probe. No model quality, live acceptance, verification rate, or answer correctness is implied.';
+  panel.appendChild(note);
+  var synthetic = data.synthetic_metric_probe || {};
   var cards = [
-    {key:'entropy',label:'Shannon Entropy',fmt:function(v){return v.toFixed(3);},sub:'H(bits) \u2014 policy diversity',color:'var(--primary)'},
-    {key:'rsi',label:'RSI Stability',fmt:function(v){return v.toFixed(4);},sub:'Replicator stability index',color:'var(--accent)'},
-    {key:'mtp',label:'MTP Draft Accept %',fmt:function(v){return v.toFixed(1)+'%';},sub:'Multi-token prediction rate',color:'var(--success)'},
-    {key:'chsh',label:'CHSH Bound',fmt:function(v){return v.toFixed(3);},sub:'Quantum coherence limit \u22642.0',color:'var(--warn)'},
-    {label:'MoE Sparse Activation',fmt:function(){return(state.telem.moe_sparse*100).toFixed(1)+'%';},sub:'Active expert fraction',color:'var(--accent2)',noSpark:true},
-    {label:'Budget Q-Policy',fmt:function(){return(state.telem.budget_q*100).toFixed(1)+'%';},sub:'Q-learning allocation score',color:'var(--success)',noSpark:true},
-    {label:'Swarm Consensus',fmt:function(){return '94.8%';},sub:'Last swarm agreement rate',color:'var(--primary)',noSpark:true},
-    {label:'GoT Branch Depth',fmt:function(){return '3.4';},sub:'Avg tree depth explored',color:'var(--warn)',noSpark:true},
-    {label:'Persona Sessions',fmt:function(){return '5 active';},sub:'All 5 persona profiles warm',color:'var(--success)',noSpark:true},
-    {label:'Solver Receipts',fmt:function(){return '100%';},sub:'SHA-256 verified',color:'var(--success)',noSpark:true},
-    {label:'SCAMPER Operators',fmt:function(){return '7/7';},sub:'All transforms active',color:'var(--primary)',noSpark:true},
-    {label:'TRIZ Principles',fmt:function(){return '40 loaded';},sub:'Full contradiction matrix',color:'var(--accent)',noSpark:true}
+    ['Service', data.service || 'unknown', 'Backend-reported service identity'],
+    ['Configured experts', data.moe_experts, 'Architecture configuration, not active-expert evidence'],
+    ['Sliding window', data.sliding_window, 'Configured architecture tokens'],
+    ['Hybrid ratio', data.hybrid_ratio, 'Architecture configuration'],
+    ['Synthetic entropy', synthetic.baseline_entropy, 'Fixed [0.25, 0.25, 0.25, 0.25] probe'],
+    ['Synthetic CHSH value', synthetic.chsh_bell_value, 'Fixed diagnostic input; not model output'],
+    ['Live model input', synthetic.input_is_live_model_output === true ? 'yes' : 'no', 'Scope of synthetic probe'],
+    ['Answer authority', 'none', 'Telemetry cannot admit an answer']
   ];
-
-  cards.forEach(function(c){
+  cards.forEach(function(row){
     var card = document.createElement('div'); card.className = 'telem-card';
-    var val = c.key && !c.noSpark ? state.telem[c.key] : null;
-    var displayVal = c.fmt(val);
-    var sparkHtml = '';
-    if (!c.noSpark && telemHistory[c.key] && telemHistory[c.key].length>2) {
-      sparkHtml = '<svg class="sparkline" viewBox="0 0 120 36" preserveAspectRatio="none" width="100%" height="36">'+sparklinePath(telemHistory[c.key],c.color)+'</svg>';
-    }
-    card.innerHTML = '<div class="telem-title">'+c.label+'</div><div class="telem-value" style="color:'+c.color+';">'+displayVal+'</div><div class="telem-sub">'+c.sub+'</div>'+sparkHtml;
-    panel.appendChild(card);
+    var title = document.createElement('div'); title.className = 'telem-title'; title.textContent = row[0];
+    var value = document.createElement('div'); value.className = 'telem-value'; value.style.color = 'var(--primary)'; value.textContent = row[1] == null ? 'unavailable' : String(row[1]);
+    var sub = document.createElement('div'); sub.className = 'telem-sub'; sub.textContent = row[2];
+    card.appendChild(title); card.appendChild(value); card.appendChild(sub); panel.appendChild(card);
   });
 }
 
-function sparklinePath(data,color) {
-  if(data.length<2) return '';
-  var mn=Math.min.apply(null,data),mx=Math.max.apply(null,data),range=mx-mn||1;
-  var pts=data.map(function(v,i){return((i/(data.length-1))*120)+','+(36-(((v-mn)/range)*32+2));}).join(' ');
-  return '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>';
+/* ─── SIGNALS & ENTROPY LAB ────────────────────────────── */
+function runEntropyProbe() {
+  var src = document.getElementById('entropySourceSelect').value;
+  var count = +document.getElementById('entropyCount').value;
+  var rule = +document.getElementById('caRuleSelect').value;
+
+  fetch('/v1/entropy', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({source:src,count:count,rule:rule,ca_steps:16,ca_width:31})
+  }).then(requireBackendJson)
+    .then(function(data){
+      renderEntropyCa(data);
+      fetchSignals();
+    })
+    .catch(function(){
+      setBackendStatus(false);
+    });
+}
+
+function fetchSignals() {
+  fetch('/v1/signals').then(requireBackendJson)
+    .then(function(data){
+      if (data && data.rsi_diagnostic) {
+        document.getElementById('rsiBadge').textContent = 'Synthetic RSI: ' + data.rsi_diagnostic.rsi + ' (' + data.rsi_diagnostic.regime + ')';
+        state.rsiHistory.push(data.rsi_diagnostic.rsi);
+        if (state.rsiHistory.length > 30) state.rsiHistory.shift();
+        drawRsiChart();
+      }
+    }).catch(function(){});
+}
+
+function renderEntropyCa(data) {
+  document.getElementById('caRuleBadge').textContent = 'Rule ' + data.rule + ' (' + data.source + ')';
+  var canvas = document.getElementById('caGridCanvas');
+  var ctx = canvas.getContext('2d');
+  var grid = data.cellular_automata_grid || [];
+  if (!grid.length) return;
+
+  var rows = grid.length;
+  var cols = grid[0].length;
+  canvas.width = canvas.parentElement.clientWidth || 300;
+  canvas.height = 140;
+
+  var cellW = canvas.width / cols;
+  var cellH = canvas.height / rows;
+
+  ctx.fillStyle = '#070b13';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      if (grid[r][c] === 1) {
+        ctx.fillStyle = (r % 2 === 0) ? '#38bdf8' : '#818cf8';
+        ctx.fillRect(c * cellW, r * cellH, cellW - 0.5, cellH - 0.5);
+      }
+    }
+  }
+}
+
+function drawRsiChart() {
+  var canvas = document.getElementById('rsiChartCanvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  canvas.width = canvas.parentElement.clientWidth || 300;
+  canvas.height = 140;
+
+  ctx.fillStyle = '#070b13';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Guidelines (70 overbought, 30 oversold, 50 midline)
+  ctx.strokeStyle = '#1d2e47';
+  ctx.lineWidth = 1;
+  [30, 50, 70].forEach(function(lvl){
+    var y = canvas.height - (lvl / 100) * canvas.height;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  });
+
+  // Plot RSI line
+  var points = state.rsiHistory || [50, 52, 48, 55, 60, 58, 62, 54, 50, 48, 52, 55];
+  if (points.length < 2) return;
+  var stepX = canvas.width / (points.length - 1);
+
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach(function(pt, idx){
+    var x = idx * stepX;
+    var y = canvas.height - (pt / 100) * canvas.height;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+/* ─── MIMO THINKER ─────────────────────────────────────── */
+function runThink() {
+  var prompt = document.getElementById('thinkPromptInput').value.trim();
+  if (!prompt) return;
+  var mode = document.getElementById('thinkModeSelect').value;
+  var budget = +document.getElementById('thinkBudgetSlider').value;
+  var requestToken = ++state.requests.think;
+  var out = document.getElementById('thinkOutputArea');
+  out.innerHTML = '<div style="color:var(--dim);">Dispatching thinking pipeline...</div>';
+
+  fetch('/v1/think', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt:prompt,mode:mode,thinking_budget:budget})
+  }).then(requireBackendJson)
+    .then(function(data){
+      if (requestToken !== state.requests.think) return;
+      renderThinkResult(data);
+    })
+    .catch(function(){
+      if (requestToken !== state.requests.think) return;
+      renderUnavailable('thinkOutputArea', 'MiMo thinking pipeline');
+    });
+}
+
+function renderThinkResult(res) {
+  var out = document.getElementById('thinkOutputArea'); out.innerHTML = '';
+  var responseKind = classifyThinkResponse(res);
+  if (responseKind === 'invalid') {
+    var rejected = document.createElement('div');
+    rejected.className = 'unavailable';
+    rejected.textContent = 'RESPONSE REJECTED — the backend result did not satisfy an answered, analysis-only, or abstention evidence contract. No backend candidate was displayed.';
+    out.appendChild(rejected);
+    return;
+  }
+  var card = document.createElement('div'); card.className = 'step-card';
+  var verified = responseKind === 'answered';
+  var abstained = responseKind === 'abstained';
+  var statusBadge = verified ? '<span class="badge" style="background:rgba(52,211,153,0.1);color:var(--success);">Verified in scope (conf=' + esc(res.confidence) + ')</span>' : (abstained ? '<span class="badge" style="background:rgba(248,113,113,0.1);color:var(--danger);">Abstained / No Authority</span>' : '<span class="badge" style="background:rgba(129,140,248,0.1);color:var(--accent);">Analysis-only / No Authority</span>');
+  var publicOutput = abstained ? 'No verified answer was admitted for this request. The browser withheld the backend candidate and trace.' : res.output;
+  var publicModel = abstained ? 'Nexus evidence boundary' : res.model;
+  var publicMode = abstained ? 'abstained' : res.mode_selected;
+  var publicLatency = abstained ? '\u2014' : (esc(res.latency_ms) + 'ms');
+  card.innerHTML = '<div class="step-header"><div><strong>Model: ' + esc(publicModel) + '</strong> &middot; Mode: ' + esc(publicMode) + ' &middot; Latency: ' + publicLatency + '</div>' + statusBadge + '</div><div class="step-body">' + esc(publicOutput).replace(/\n/g,'<br>') + '</div>';
+  out.appendChild(card);
+
+  if (!abstained && res.thought_steps && res.thought_steps.length) {
+    var stepBox = document.createElement('div'); stepBox.className = 'think-step-row';
+    res.thought_steps.forEach(function(st){
+      var sc = document.createElement('div'); sc.className = 'think-step-card';
+      sc.innerHTML = '<div class="think-stage-tag">STAGE: ' + esc(st.stage) + '</div><div>' + esc(st.content) + '</div>';
+      stepBox.appendChild(sc);
+    });
+    out.appendChild(stepBox);
+  }
 }
 
 /* ─── INIT ─────────────────────────────────────────────── */
 initSwarmWeightBars();
-setInterval(function(){ if(document.getElementById('panel-telem').classList.contains('active')) renderTelemetry(); }, 4000);
 </script>
 </body>
 </html>

@@ -1,6 +1,12 @@
-"""NexusMind Omniscience & Exact Problem Solving Engine.
+"""NexusMind deterministic formula-pattern library.
 
-Master multi-paradigm mathematical and scientific problem solving engine:
+This module provides broad deterministic math/science parsing for development,
+audit, and bounded fixtures. A self-hashed `SolverReceipt` authenticates its
+parse/result record but does not independently prove that the complete request
+was consumed. User-facing answer authority belongs to the stricter fresh
+grounding gate in `grounding_runtime.finalize_grounded_response`.
+
+Available pattern families include:
 1. **12+ Scientific & Mathematical Scenario Domains**:
    - Kinematics & Motion
    - Dynamics & Newton's Laws
@@ -19,8 +25,9 @@ Master multi-paradigm mathematical and scientific problem solving engine:
    - Comprehensive unit conversions for metric & imperial units.
 3. **Formal LaTeX Derivations**:
    - Generates step-by-step mathematical proofs and substitutions.
-4. **Deterministic Cryptographic Verification**:
-   - Produces `SolverReceipt` with SHA-256 audit digest.
+4. **Deterministic integrity metadata**:
+   - Produces `SolverReceipt` with a SHA-256 audit digest; the receipt is not
+     factual, permission, safety, routing, activation, or promotion authority.
 """
 
 from __future__ import annotations

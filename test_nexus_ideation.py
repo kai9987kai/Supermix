@@ -81,6 +81,9 @@ def test_synthesis_proposal_non_empty():
     res = ni.generate_innovations("neuromorphic chip architecture")
     assert res.synthesis_proposal
     assert len(res.synthesis_proposal) > 50
+    assert "validation required" in res.synthesis_proposal.lower()
+    assert "guaranteed" not in res.synthesis_proposal.lower()
+    assert "40-60%" not in res.synthesis_proposal
 
 
 def test_operators_cover_multiple_families():
@@ -116,6 +119,21 @@ def test_to_dict_serializable():
     # Should be JSON-serializable
     json_str = json.dumps(d)
     assert len(json_str) > 100
+    assert d["status"] == "analysis_only"
+    assert d["answer_authority"] is False
+    assert d["score_semantics"] == "authored_fnir_priority_not_measurement_or_correctness"
+
+
+def test_projected_benefits_are_testable_hypotheses_not_fabricated_measurements():
+    res = ni.generate_innovations("selective reasoning runtime", count=8)
+    benefit_text = " ".join(c.target_benefit for c in res.concepts).lower()
+
+    assert "hypothesis:" in benefit_text
+    assert "10x" not in benefit_text
+    assert "99%" not in benefit_text
+    assert "75%" not in benefit_text
+    assert all(c.to_dict()["score_semantics"].endswith("not_measurement") for c in res.concepts)
+    assert res.receipt.receipt_is_authority is False
 
 
 def test_concept_is_pareto_flag_set():
