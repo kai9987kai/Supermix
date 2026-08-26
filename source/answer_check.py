@@ -172,6 +172,138 @@ def _sequence(question: str) -> Optional[Tuple[str, float]]:
     return ("sequence", values[-1] + steps.pop())
 
 
+# -- science shapes (v81) ---------------------------------------------------
+#
+# v80 answers physics correctly and the interface said NOT CHECKED for every
+# one of them, because these shapes were never taught to the checker. A model
+# whose strongest new capability cannot be verified live is the same gap v76
+# closed for multiplication, one domain over.
+#
+# Each reads the quantities by name and unit, so it matches the corpus's
+# phrasings without depending on any single one of them.
+
+def _quantity(question: str, names: str, unit: str) -> Optional[float]:
+    """Read `<name> <number> <unit>` in either order, as the corpus writes it."""
+
+    number = r"(-?\d+(?:\.\d+)?)"
+    # Both names and unit are alternations, so both must be grouped. Left
+    # bare, `(\d+)\s*m|metres?` parses as `(\d+)\s*m` OR `metres?` -- the
+    # second branch has no capture group, and match.group(1) is then None.
+    for pattern in (rf"(?:{names})\D{{0,24}}?{number}\s*(?:{unit})\b",
+                    rf"{number}\s*(?:{unit})\b\D{{0,24}}?(?:{names})"):
+        match = re.search(pattern, question, re.I)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+#: (task, words identifying the target, quantity A, quantity B)
+#: Division tasks are named in `_DIVISION_LAWS`; everything else multiplies.
+#: Units carry their spelled-out forms. The corpus writes "57 volts and 5
+#: amps" as readily as "57 V, 5 A", and a checker that only knew the symbols
+#: reported NOT CHECKED for a third of the questions the model answers.
+_MASS = r"kg|kilograms?"
+_FORCE = r"N|newtons?"
+_ANY = r"[a-z/^]*"
+
+_PRODUCT_LAWS = (
+    ("force", r"force",
+     (r"mass|body|block|object", _MASS), (r"accelerat\w*", r"m/s\^?2")),
+    ("momentum", r"momentum",
+     (r"mass|object|body", _MASS), (r"velocity|speed|moves|travelling|at", r"m/s")),
+    ("work", r"work",
+     (r"force", _FORCE), (r"distance|moves|through|over|acts", r"m|metres?")),
+    ("voltage", r"voltage|potential difference",
+     (r"current|flows|carrying|drives", r"A|amps?|amperes?"),
+     (r"resistance|ohm|through|across|resistor", r"ohms?")),
+    ("electrical_power", r"electrical power|power dissipated|power|used at",
+     (r"voltage|volts?|runs at|at", r"V|volts?"),
+     (r"current|drawing|amps?|and", r"A|amps?|amperes?")),
+    ("wave_speed", r"wave speed|speed of|its speed|speed at",
+     (r"frequency|at", r"Hz|hertz"), (r"wavelength|with", r"m|metres?")),
+    ("acceleration", r"acceleration|accelerat\w*",
+     (r"force|results from|from", _FORCE), (r"mass|body|object|on", _MASS)),
+    ("power", r"power",
+     (r"work|delivered|done", r"J|joules?"), (r"time|in|over", r"s|seconds?")),
+    ("molarity", r"molarity|concentration|molar",
+     (r"mol|moles|solute|of", r"mol|moles"),
+     (r"volume|litres?|liters?|dissolved|in", r"L|litres?|liters?")),
+)
+
+
+_DIVISION_LAWS = frozenset({"acceleration", "power", "molarity"})
+
+
+def _science(question: str) -> Optional[Tuple[str, float]]:
+    for task, target, (a_names, a_unit), (b_names, b_unit) in _PRODUCT_LAWS:
+        if not re.search(target, question, re.I):
+            continue
+        a = _quantity(question, a_names, a_unit)
+        b = _quantity(question, b_names, b_unit)
+        if a is None or b is None:
+            continue
+        if task in _DIVISION_LAWS:
+            if b == 0:
+                return None   # not checkable rather than an exception
+            return (task, a / b)
+        return (task, a * b)
+    return None
+
+
+def _kinetic_energy(question: str) -> Optional[Tuple[str, float]]:
+    if not re.search(r"kinetic energy", question, re.I):
+        return None
+    mass = _quantity(question, r"mass|body", r"kg")
+    velocity = _quantity(question, r"velocity|speed|moves|at", r"m/s")
+    if mass is None or velocity is None:
+        return None
+    return ("kinetic_energy", 0.5 * mass * velocity * velocity)
+
+
+def _combination_choose(question: str) -> Optional[Tuple[str, float]]:
+    """`n choose k`, however the corpus words it.
+
+    The corpus fixes k at 2 so the working can be shown, but this reads
+    whatever k is stated rather than assuming it -- an assumption here would
+    produce a confident wrong verdict on any other k.
+    """
+
+    if not re.search(r"combination|choose|chosen|taken", question, re.I):
+        return None
+    number = r"(\d+)"
+    for pattern in (rf"{number}\s*choose\s*{number}",
+                    rf"n\s*=\s*{number}\s*k\s*=\s*{number}",
+                    rf"of\s*{number}\s*things taken\s*{number}",
+                    rf"can\s*{number}\s*items? be chosen from\s*{number}"):
+        match = re.search(pattern, question, re.I)
+        if not match:
+            continue
+        a, b = int(match.group(1)), int(match.group(2))
+        n, k = (b, a) if a < b else (a, b)   # "2 chosen from 30" reverses them
+        if k > n:
+            return None
+        import math as _math
+
+        return ("combination", float(_math.comb(n, k)))
+    return None
+
+
+def _arithmetic_series(question: str) -> Optional[Tuple[str, float]]:
+    """Sum of the first n terms of an arithmetic progression."""
+
+    if not re.search(r"arithmetic (?:series|progression)", question, re.I):
+        return None
+    first = re.search(r"first term\s*(?:is\s*)?(-?\d+)", question, re.I)
+    difference = re.search(r"(?:common )?difference\s*(?:of\s*)?(-?\d+)", question, re.I)
+    terms = re.search(r"(?:sum of|first)\s*(\d+)\s*terms|(?:\bn\s*(\d+))", question, re.I)
+    if not (first and difference and terms):
+        return None
+    count = int(terms.group(1) or terms.group(2))
+    a, d = int(first.group(1)), int(difference.group(1))
+    last = a + (count - 1) * d
+    return ("arithmetic_series", float(count * (a + last) / 2))
+
+
 def _word_problem(question: str) -> Optional[Tuple[str, float]]:
     match = re.search(
         r"has\s+(\d+).*?get\s+(\d+)\s+more.*?give\s+away\s+(\d+)", question, re.I | re.S
@@ -191,8 +323,17 @@ def _word_problem(question: str) -> Optional[Tuple[str, float]]:
 #: * `_two_step` precedes `_percent` because it *contains* a percent question.
 #: * `_algebra` precedes `_multiplication` because `x` is both this corpus's
 #:   multiplication sign and its unknown.
+#: * `_kinetic_energy` and `_science` precede the bare-number parsers, because
+#:   a physics question carries two numbers and a naive `a x b` search would
+#:   seize on them without knowing which law applies. `_kinetic_energy` runs
+#:   first of the two: it names a mass and a velocity, which is also what
+#:   `momentum` matches on.
 PARSERS: Tuple[Callable[[str], Optional[Tuple[str, float]]], ...] = (
     _word_problem,
+    _combination_choose,
+    _arithmetic_series,
+    _kinetic_energy,
+    _science,
     _sequence,
     _average,
     _two_step,

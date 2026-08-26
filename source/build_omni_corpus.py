@@ -219,10 +219,15 @@ def _momentum(rng: random.Random) -> OmniProblem:
 
 
 def _kinetic_energy(rng: random.Random) -> OmniProblem:
-    mass = rng.randrange(2, 300, 2)
-    velocity = rng.randint(2, 150)
+    # Halve the mass *first*, so the only product is `squared x half_mass` --
+    # a two-digit by one-digit multiply, which is v74's proven shape. The
+    # previous ranges asked for `25 x 25 = 625` then `30 x 625 = 18750`, both
+    # in one step, and the task scored 0.00.
+    mass = rng.randrange(2, 20, 2)
+    velocity = rng.randint(2, 9)
     squared = velocity * velocity
-    answer = mass * squared // 2
+    half_mass = mass // 2
+    answer = half_mass * squared
     prompt = _pick(rng, [
         "A mass of {m} kg moves at velocity {v} m/s. Find the kinetic energy.",
         "mass {m} kg velocity {v} m/s kinetic energy",
@@ -230,8 +235,9 @@ def _kinetic_energy(rng: random.Random) -> OmniProblem:
         "Compute the kinetic energy for mass {m} kg and speed {v} m/s.",
     ], m=mass, v=velocity)
     response = (f"kinetic energy = half x mass x velocity squared, "
+                f"half of {mass} = {half_mass}, "
                 f"velocity squared = {velocity} x {velocity} = {squared}, "
-                f"{mass} x {squared} = {mass * squared}, half of {mass * squared} = {answer}, "
+                f"{decompose_product(squared, half_mass)}, "
                 f"the kinetic energy is {answer} joules, total {answer}")
     return OmniProblem("kinetic_energy", "physics", prompt, response, float(answer), "J",
                        f"mass {mass} kg velocity {velocity} m/s kinetic energy",
@@ -341,8 +347,12 @@ def _molarity(rng: random.Random) -> OmniProblem:
 
 
 def _combination(rng: random.Random) -> OmniProblem:
-    n = rng.randint(4, 40)
-    k = rng.randint(2, min(8, n - 1))
+    # k is fixed at 2 so the working can actually be shown: C(n,2) is
+    # n x (n-1) / 2. The previous version stated `7 choose 2 = 21` with no
+    # working at all, leaving the model to memorise the whole table, and it
+    # scored 0.00 on 976 rows.
+    n = rng.randint(4, 60)
+    k = 2
     answer = math.comb(n, k)
     prompt = _pick(rng, [
         "In how many ways can {k} items be chosen from {n}?",
@@ -350,7 +360,10 @@ def _combination(rng: random.Random) -> OmniProblem:
         "Find the number of combinations of {n} things taken {k} at a time.",
         "How many combinations are there of {n} choose {k}?",
     ], n=n, k=k)
-    response = (f"combinations = n choose k, {n} choose {k} = {answer}, "
+    product = n * (n - 1)
+    response = (f"combinations = n x (n - 1) / 2, {n} - 1 = {n - 1}, "
+                f"{decompose_product(n, n - 1)}, "
+                f"half of {product} = {answer}, "
                 f"there are {answer} ways, total {answer}")
     return OmniProblem("combination", "mathematics", prompt, response, float(answer), "",
                        f"n choose k n = {n} k = {k}", {"n": n, "k": k})
@@ -360,9 +373,14 @@ def _arithmetic_series(rng: random.Random) -> OmniProblem:
     # Bounded so the worked response fits the 128-token sequence length.
     # Turn-aligned packing DROPS a turn that does not fit, which would
     # silently bias this task toward its shortest problems.
-    first = rng.randint(1, 60)
-    difference = rng.randint(2, 30)
-    terms = rng.randint(4, 22)
+    # Every intermediate stays two-digit, and the term count is even so the
+    # halving happens on a small number before the only multiplication. The
+    # previous version emitted `5 x 228 = 1140` and `1140 / 2` in single
+    # steps and scored 0.00. Two-digit single-step additions are fine:
+    # `word_problem` does them and scored 0.87.
+    first = rng.randint(1, 20)
+    difference = rng.randint(2, 6)
+    terms = rng.randrange(4, 12, 2)
     last = first + (terms - 1) * difference
     answer = terms * (first + last) // 2
     prompt = _pick(rng, [
@@ -372,12 +390,17 @@ def _arithmetic_series(rng: random.Random) -> OmniProblem:
         "Find the sum of {n} terms of an arithmetic progression "
         "with first term {a} and difference {d}.",
     ], a=first, d=difference, n=terms)
+    span = (terms - 1) * difference
+    half_terms = terms // 2
+    ends = first + last
     response = (f"last term = first + (n - 1) x difference, "
-                f"{terms} - 1 = {terms - 1}, {terms - 1} x {difference} = {(terms - 1) * difference}, "
-                f"{first} + {(terms - 1) * difference} = {last}, "
-                f"sum = n x (first + last) / 2, {first} + {last} = {first + last}, "
-                f"{terms} x {first + last} = {terms * (first + last)}, "
-                f"{terms * (first + last)} / 2 = {answer}, total {answer}")
+                f"{terms} - 1 = {terms - 1}, "
+                # Both operands are single-digit here, so this needs no split.
+                f"{terms - 1} x {difference} = {span}, "
+                f"{first} + {span} = {last}, "
+                f"sum = half of n x (first + last), half of {terms} = {half_terms}, "
+                f"{first} + {last} = {ends}, "
+                f"{decompose_product(ends, half_terms)}, total {answer}")
     return OmniProblem("arithmetic_series", "mathematics", prompt, response, float(answer), "",
                        f"sum of arithmetic series first term {first} "
                        f"common difference {difference} n {terms}",
