@@ -103,6 +103,58 @@ def _number(value: float) -> str:
     return f"{round(value, 4):g}"
 
 
+def decompose_product(a: int, b: int) -> str:
+    """Show the working for `a x b`, by place value.
+
+    v79 learned the physics and failed the arithmetic. Measured on the
+    finished model, asking for the force from `mass x acceleration`:
+
+        single-digit operands   12/12 correct
+        two-digit                9/12
+        three-digit              1/12
+
+    The cause was this module's first version, which wrote
+    `167 x 11 = 1837` as a single step. v66 established that this model
+    cannot do multi-digit multiplication in one jump; v74's arithmetic
+    corpus never asks it to, splitting every product by place value -- and
+    it never uses an operand above 99.
+
+    Widening the parameter ranges (needed to stop duplicate prompts) made
+    that far worse, since products then reached 24,000 with no working
+    shown at all. Two separately-correct fixes interacting badly.
+
+    So the working is written out, with running sums, for operands of any
+    size:
+
+        167 x 11 -> "100 x 11 = 1100, 60 x 11 = 660, 7 x 11 = 77,
+                     1100 + 660 = 1760, 1760 + 77 = 1837"
+    """
+
+    digits = str(abs(a))
+    width = len(digits)
+    # Every digit position, including zeros. v74 writes `80 x 3 = 240,
+    # 0 x 3 = 0` rather than dropping the units term, so the shape is the
+    # same for every problem -- and that is the corpus that scored 0.93.
+    parts = [int(d) * 10 ** (width - 1 - i) for i, d in enumerate(digits)]
+    if a < 0:
+        parts = [-p for p in parts]
+
+    pieces = [f"{part} x {b} = {part * b}" for part in parts]
+    if len(parts) <= 2:
+        # v74's exact form: two partial products, then the total. It does not
+        # write the addition out, and the model learned to do it -- adding a
+        # running-sum step here would depart from the only format measured to
+        # work.
+        return ", ".join(pieces)
+
+    running = parts[0] * b
+    for part in parts[1:]:
+        nxt = running + part * b
+        pieces.append(f"{running} + {part * b} = {nxt}")
+        running = nxt
+    return ", ".join(pieces)
+
+
 def _pick(rng: random.Random, templates: List[str], **values) -> str:
     return rng.choice(templates).format(**{k: _number(v) if isinstance(v, (int, float))
                                            else v for k, v in values.items()})
@@ -115,8 +167,8 @@ def _pick(rng: random.Random, templates: List[str], **values) -> str:
 
 
 def _force(rng: random.Random) -> OmniProblem:
-    mass = rng.randint(2, 400)
-    accel = rng.randint(2, 60)
+    mass = rng.randint(11, 99)
+    accel = rng.randint(2, 9)
     answer = mass * accel
     prompt = _pick(rng, [
         "A body of mass {m} kg has an acceleration of {a} m/s^2. What is the force?",
@@ -125,7 +177,7 @@ def _force(rng: random.Random) -> OmniProblem:
         "What force acts on mass {m} kg with acceleration {a} m/s^2?",
         "Given mass {m} kg and acceleration {a} m/s^2, compute the force.",
     ], m=mass, a=accel)
-    response = (f"force = mass x acceleration, {mass} x {accel} = {answer}, "
+    response = (f"force = mass x acceleration, {decompose_product(mass, accel)}, "
                 f"the force is {answer} newtons, total {answer}")
     return OmniProblem("force", "physics", prompt, response, float(answer), "N",
                        f"mass {mass} kg acceleration {accel} m/s^2 find the force",
@@ -150,8 +202,8 @@ def _acceleration(rng: random.Random) -> OmniProblem:
 
 
 def _momentum(rng: random.Random) -> OmniProblem:
-    mass = rng.randint(2, 300)
-    velocity = rng.randint(2, 200)
+    mass = rng.randint(11, 99)
+    velocity = rng.randint(2, 9)
     answer = mass * velocity
     prompt = _pick(rng, [
         "A {m} kg object moves with velocity {v} m/s. What is its momentum?",
@@ -159,7 +211,7 @@ def _momentum(rng: random.Random) -> OmniProblem:
         "Find the momentum of a mass {m} kg travelling at velocity {v} m/s.",
         "What is the linear momentum for mass {m} kg and velocity {v} m/s?",
     ], m=mass, v=velocity)
-    response = (f"momentum = mass x velocity, {mass} x {velocity} = {answer}, "
+    response = (f"momentum = mass x velocity, {decompose_product(mass, velocity)}, "
                 f"the momentum is {answer} kilogram metres per second, total {answer}")
     return OmniProblem("momentum", "physics", prompt, response, float(answer), "kg*m/s",
                        f"mass {mass} kg velocity {velocity} m/s find momentum",
@@ -187,8 +239,8 @@ def _kinetic_energy(rng: random.Random) -> OmniProblem:
 
 
 def _work(rng: random.Random) -> OmniProblem:
-    force = rng.randint(2, 500)
-    distance = rng.randint(2, 200)
+    force = rng.randint(11, 99)
+    distance = rng.randint(2, 9)
     answer = force * distance
     prompt = _pick(rng, [
         "A force of {f} N moves an object {d} m. How much work is done?",
@@ -196,7 +248,7 @@ def _work(rng: random.Random) -> OmniProblem:
         "Find the work done by {f} N acting over {d} m.",
         "What work is done when a {f} N force acts through {d} m?",
     ], f=force, d=distance)
-    response = (f"work = force x distance, {force} x {distance} = {answer}, "
+    response = (f"work = force x distance, {decompose_product(force, distance)}, "
                 f"the work done is {answer} joules, total {answer}")
     return OmniProblem("work", "physics", prompt, response, float(answer), "J",
                        f"force {force} N distance {distance} m work done",
@@ -221,8 +273,8 @@ def _power(rng: random.Random) -> OmniProblem:
 
 
 def _voltage(rng: random.Random) -> OmniProblem:
-    current = rng.randint(2, 100)
-    resistance = rng.randint(2, 300)
+    current = rng.randint(11, 99)
+    resistance = rng.randint(2, 9)
     answer = current * resistance
     prompt = _pick(rng, [
         "A current of {i} A flows through {r} ohm. What is the voltage?",
@@ -230,7 +282,7 @@ def _voltage(rng: random.Random) -> OmniProblem:
         "Find the potential difference across {r} ohm carrying {i} A.",
         "What voltage drives {i} A through a {r} ohm resistor?",
     ], i=current, r=resistance)
-    response = (f"voltage = current x resistance, {current} x {resistance} = {answer}, "
+    response = (f"voltage = current x resistance, {decompose_product(current, resistance)}, "
                 f"the voltage is {answer} volts, total {answer}")
     return OmniProblem("voltage", "physics", prompt, response, float(answer), "V",
                        f"current {current} A resistance {resistance} ohm find voltage",
@@ -238,8 +290,8 @@ def _voltage(rng: random.Random) -> OmniProblem:
 
 
 def _electrical_power(rng: random.Random) -> OmniProblem:
-    voltage = rng.randint(2, 300)
-    current = rng.randint(2, 100)
+    voltage = rng.randint(11, 99)
+    current = rng.randint(2, 9)
     answer = voltage * current
     prompt = _pick(rng, [
         "A device runs at {v} V drawing {i} A. What is the electrical power?",
@@ -247,7 +299,7 @@ def _electrical_power(rng: random.Random) -> OmniProblem:
         "Find the power dissipated at {v} V and {i} A.",
         "What electrical power is used at {v} volts and {i} amps?",
     ], v=voltage, i=current)
-    response = (f"power = voltage x current, {voltage} x {current} = {answer}, "
+    response = (f"power = voltage x current, {decompose_product(voltage, current)}, "
                 f"the power is {answer} watts, total {answer}")
     return OmniProblem("electrical_power", "physics", prompt, response, float(answer), "W",
                        f"voltage {voltage} V current {current} A electrical power",
@@ -255,8 +307,8 @@ def _electrical_power(rng: random.Random) -> OmniProblem:
 
 
 def _wave_speed(rng: random.Random) -> OmniProblem:
-    frequency = rng.randint(2, 500)
-    wavelength = rng.randint(2, 100)
+    frequency = rng.randint(11, 99)
+    wavelength = rng.randint(2, 9)
     answer = frequency * wavelength
     prompt = _pick(rng, [
         "A wave has frequency {f} Hz and wavelength {w} m. What is its speed?",
@@ -264,7 +316,7 @@ def _wave_speed(rng: random.Random) -> OmniProblem:
         "Find the speed of a wave of frequency {f} Hz and wavelength {w} m.",
         "What is the wave speed at {f} Hz with a {w} m wavelength?",
     ], f=frequency, w=wavelength)
-    response = (f"wave speed = frequency x wavelength, {frequency} x {wavelength} = {answer}, "
+    response = (f"wave speed = frequency x wavelength, {decompose_product(frequency, wavelength)}, "
                 f"the wave speed is {answer} metres per second, total {answer}")
     return OmniProblem("wave_speed", "physics", prompt, response, float(answer), "m/s",
                        f"frequency {frequency} Hz wavelength {wavelength} m wave speed",
@@ -305,9 +357,12 @@ def _combination(rng: random.Random) -> OmniProblem:
 
 
 def _arithmetic_series(rng: random.Random) -> OmniProblem:
-    first = rng.randint(1, 120)
-    difference = rng.randint(2, 60)
-    terms = rng.randint(4, 40)
+    # Bounded so the worked response fits the 128-token sequence length.
+    # Turn-aligned packing DROPS a turn that does not fit, which would
+    # silently bias this task toward its shortest problems.
+    first = rng.randint(1, 60)
+    difference = rng.randint(2, 30)
+    terms = rng.randint(4, 22)
     last = first + (terms - 1) * difference
     answer = terms * (first + last) // 2
     prompt = _pick(rng, [
@@ -375,7 +430,8 @@ def extract_answer(text: str) -> Optional[float]:
     return float(matches[-1]) if matches else None
 
 
-def build(per_task: int, seed: int, tasks: Optional[List[str]] = None):
+def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
+          repeat: bool = True):
     """Generate, verify, and return (rows, report)."""
 
     rng = random.Random(seed)
@@ -384,11 +440,39 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None):
     counts: Dict[str, int] = {}
     dropped: Dict[str, int] = {}
     short: Dict[str, Dict[str, object]] = {}
+    distinct: Dict[str, int] = {}
 
     for name in chosen:
         generator = TASKS[name]
         made = 0
         seen = set()
+        if repeat:
+            # Repetition is how this model learns an algorithm.
+            #
+            # v74's multiplication task -- the one that scored 0.93 -- holds
+            # only **712 distinct operand pairs repeated 56x each** over
+            # 40,000 rows. The omni corpus was built the opposite way, 24,000
+            # combinations each appearing about 1.7 times, and that task
+            # scored 0.03.
+            #
+            # Uniqueness is the right goal for a *knowledge* corpus, where a
+            # repeated fact is memorised. It is the wrong goal for a
+            # *procedure*, where the benchmark draws unseen operands from the
+            # same space and the model has to learn the method. Distinct
+            # counts are still reported, so the repetition factor is visible
+            # rather than hidden.
+            for _ in range(per_task):
+                problem = generator(rng)
+                if not verify(problem) or extract_answer(problem.response) != problem.answer:
+                    dropped[name] = dropped.get(name, 0) + 1
+                    continue
+                seen.add(problem.prompt)
+                rows.append(problem.to_row())
+                made += 1
+            counts[name] = made
+            distinct[name] = len(seen)
+            continue
+
         # Stop when the generator stops producing prompts it has not already
         # produced. A task's parameter space is finite -- `combination` over
         # n<=40, k<=8 has only about a thousand distinct questions -- and
@@ -430,6 +514,9 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None):
         "dropped_failing_verification": dropped,
         "tasks": len(chosen),
         "short_of_requested": short,
+        "distinct_prompts": distinct,
+        "repetition": {k: round(counts[k] / v, 1)
+                       for k, v in distinct.items() if v},
         "verified_by": "nexus_solver.solve_problem",
         "tolerance": TOLERANCE,
     }
@@ -442,6 +529,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=79)
     parser.add_argument("--output", default="datasets/v79/v79_omni.jsonl")
     parser.add_argument("--report", default=None)
+    parser.add_argument("--unique", action="store_true",
+                        help=("emit only distinct prompts. Off by default: v74's "
+                              "multiplication task repeated 712 pairs 56x each and "
+                              "scored 0.93, while the diverse omni build scored 0.03"))
     parser.add_argument("--task", action="append", default=[],
                         help="restrict to these tasks; repeatable")
     return parser
@@ -449,7 +540,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    rows, report = build(args.per_task, args.seed, args.task or None)
+    rows, report = build(args.per_task, args.seed, args.task or None,
+                         repeat=not args.unique)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

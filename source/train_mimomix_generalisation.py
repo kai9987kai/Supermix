@@ -615,8 +615,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     for step in range(args.start_step + 1, args.steps + 1):
         model.train()
         pick = torch.randint(0, train_x.shape[0], (args.batch_size,), generator=generator)
-        batch_x = train_x[pick] if accelerated and args.resident_corpus else train_x[pick].to(device)
-        batch_y = train_y[pick] if accelerated and args.resident_corpus else train_y[pick].to(device)
+        # The packed corpus is stored in the narrowest integer type that holds
+        # the vocabulary (see `mimomix_text.compact_dtype`), which is what
+        # keeps a 900k-row corpus off the pagefile. Embedding lookup and
+        # cross_entropy both need int64, so the batch -- 16 x 128 values -- is
+        # widened here rather than the whole corpus being held wide.
+        batch_x = (train_x[pick] if accelerated and args.resident_corpus
+                   else train_x[pick].to(device)).long()
+        batch_y = (train_y[pick] if accelerated and args.resident_corpus
+                   else train_y[pick].to(device)).long()
 
         if autocast_dtype is not None:
             with torch.autocast(device_type=device.type, dtype=autocast_dtype):

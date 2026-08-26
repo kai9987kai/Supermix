@@ -186,8 +186,9 @@ def evaluate(
     total_loss = 0.0
     total_tokens = 0
     for index in range(0, inputs.shape[0], batch_size):
-        batch_x = inputs[index : index + batch_size]
-        batch_y = labels[index : index + batch_size]
+        # Widened per batch; the corpus itself is stored compactly.
+        batch_x = inputs[index : index + batch_size].long()
+        batch_y = labels[index : index + batch_size].long()
         out = model(batch_x, return_mtp=False)
         shift_logits = out.logits[:, :-1]
         shift_labels = batch_y[:, 1:]
@@ -229,7 +230,8 @@ def routing_report(
     totals = [torch.zeros(layer.n_routed) for layer in layers]
     counted = 0
     for index in range(0, min(inputs.shape[0], batch_size * batches), batch_size):
-        model(inputs[index : index + batch_size], return_mtp=False)
+        # Widened per batch; the corpus is stored in a compact integer type.
+        model(inputs[index : index + batch_size].long(), return_mtp=False)
         for position, layer in enumerate(layers):
             totals[position] += layer.last_expert_load.detach().cpu()
         counted += 1

@@ -209,7 +209,8 @@ def test_an_exhausted_task_is_reported_not_padded():
     punish.
     """
 
-    rows, report = omni.build(per_task=5000, seed=13, tasks=["combination"])
+    rows, report = omni.build(per_task=5000, seed=13, tasks=["combination"],
+                              repeat=False)
 
     assert "combination" in report["short_of_requested"]
     assert report["short_of_requested"]["combination"]["produced"] == len(rows)
@@ -217,16 +218,144 @@ def test_an_exhausted_task_is_reported_not_padded():
 
 
 def test_no_duplicate_prompts_within_a_task():
-    rows, _ = omni.build(per_task=5000, seed=14, tasks=["combination"])
+    rows, _ = omni.build(per_task=5000, seed=14, tasks=["combination"],
+                         repeat=False)
     prompts = [row["user"] for row in rows]
 
     assert len(prompts) == len(set(prompts))
 
 
 def test_a_task_with_room_is_not_reported_short():
-    _, report = omni.build(per_task=200, seed=15, tasks=["work"])
+    _, report = omni.build(per_task=200, seed=15, tasks=["work"], repeat=False)
 
     assert report["short_of_requested"] == {}
+
+
+def test_repetition_is_the_default_and_is_reported():
+    """v74's winning task repeats 712 pairs 56x; the factor must be visible."""
+
+    rows, report = omni.build(per_task=600, seed=16, tasks=["force"])
+
+    assert len(rows) == 600
+    assert report["distinct_prompts"]["force"] <= 600
+    assert report["repetition"]["force"] >= 1.0
+
+
+def test_unique_mode_still_available():
+    rows, _ = omni.build(per_task=300, seed=17, tasks=["force"], repeat=False)
+    prompts = [row["user"] for row in rows]
+
+    assert len(prompts) == len(set(prompts))
+
+
+# -- showing the working (v80) ----------------------------------------------
+#
+# v79 learned the physics and failed the arithmetic. Measured on the finished
+# model, asking for force from mass x acceleration:
+#
+#     single-digit operands   12/12 correct
+#     two-digit                9/12
+#     three-digit              1/12
+#
+# The first version of this module wrote `167 x 11 = 1837` in one step. v66
+# established the model cannot do that, and v74's arithmetic corpus never asks
+# it to -- it splits every product by place value and never uses an operand
+# above 99.
+
+MULTIPLICATIVE = ["force", "momentum", "work", "voltage",
+                  "electrical_power", "wave_speed"]
+
+
+def test_decomposition_matches_v74s_proven_format():
+    """Byte-identical to the corpus that scored 0.93 on multiplication.
+
+    v74 writes two partial products and goes straight to the total; it does
+    not write the addition out, and the model learned to do it. Departing
+    from the only format measured to work would be a guess.
+    """
+
+    assert omni.decompose_product(80, 3) == "80 x 3 = 240, 0 x 3 = 0"
+    assert omni.decompose_product(25, 7) == "20 x 7 = 140, 5 x 7 = 35"
+    assert omni.decompose_product(96, 2) == "90 x 2 = 180, 6 x 2 = 12"
+
+
+def test_decomposition_splits_by_place_value():
+    working = omni.decompose_product(167, 11)
+
+    assert "100 x 11 = 1100" in working
+    assert "60 x 11 = 660" in working
+    assert "7 x 11 = 77" in working
+
+
+def test_decomposition_shows_running_sums():
+    """Without these the model must hold partial products in its head."""
+
+    working = omni.decompose_product(167, 11)
+
+    assert "1100 + 660 = 1760" in working
+    assert "1760 + 77 = 1837" in working
+
+
+def test_a_single_digit_operand_needs_no_running_sum():
+    working = omni.decompose_product(7, 6)
+
+    assert working == "7 x 6 = 42"
+
+
+def test_zero_places_are_kept_for_a_uniform_shape():
+    """v74 keeps them, so every problem has the same number of steps.
+
+    An earlier version dropped zero terms as noise. v74 -- the corpus that
+    worked -- writes `0 x 3 = 0`, giving a two-digit problem exactly two
+    partial products every time.
+    """
+
+    assert omni.decompose_product(70, 7) == "70 x 7 = 490, 0 x 7 = 0"
+    assert "0 x 3 = 0" in omni.decompose_product(105, 3)
+
+
+@pytest.mark.parametrize("a,b", [(167, 11), (400, 60), (1234, 7)])
+def test_multi_part_decompositions_carry_a_running_sum(a, b):
+    """Three or more parts need the addition written out; two do not."""
+
+    assert omni.decompose_product(a, b).endswith(f"= {a * b}")
+
+
+@pytest.mark.parametrize("a,b", [(11, 2), (99, 9), (25, 7), (80, 3)])
+def test_two_digit_products_use_v74s_two_part_form(a, b):
+    working = omni.decompose_product(a, b)
+    terms = [piece.strip() for piece in working.split(",")]
+
+    assert len(terms) == 2, working
+    assert " + " not in working  # v74 writes no explicit addition step
+    tens, units = divmod(a, 10)
+    assert terms[0] == f"{tens * 10} x {b} = {tens * 10 * b}"
+    assert terms[1] == f"{units} x {b} = {units * b}"
+
+
+@pytest.mark.parametrize("task", MULTIPLICATIVE)
+def test_multiplicative_tasks_show_their_working(task):
+    """The v79 failure, pinned: no product may appear as a single step."""
+
+    for seed in range(8):
+        problem = _sample(task, seed)
+        operands = [v for v in problem.params.values() if isinstance(v, int)]
+        if not operands or max(operands) < 10:
+            continue  # single-digit products legitimately need no split
+        # A response that jumped straight to the answer would contain the
+        # answer exactly once before "total"; a decomposed one shows parts.
+        assert " x " in problem.response
+        assert problem.response.count("=") >= 2, problem.response
+
+
+@pytest.mark.parametrize("task", MULTIPLICATIVE)
+def test_decomposed_responses_still_verify(task):
+    """Showing the working must not change the answer."""
+
+    for seed in range(8):
+        problem = _sample(task, seed)
+        assert omni.verify(problem)
+        assert omni.extract_answer(problem.response) == problem.answer
 
 
 def test_every_generated_row_in_a_build_verifies():

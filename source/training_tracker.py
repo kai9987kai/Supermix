@@ -270,12 +270,44 @@ class Run:
     # -- state -------------------------------------------------------------
 
     @property
+    def expected_gap_seconds(self) -> Optional[float]:
+        """How long the next step line should take, at the observed rate."""
+
+        rate = self.working_rate
+        if rate is None or len(self.steps) < 2:
+            return None
+        spans = [later.step - earlier.step
+                 for earlier, later in zip(self.steps, self.steps[1:])
+                 if later.step > earlier.step]
+        if not spans:
+            return None
+        return statistics.median(spans) * rate
+
+    @property
+    def stall_threshold_seconds(self) -> float:
+        """Silence long enough to mean something is wrong, given this run's pace.
+
+        A fixed threshold is wrong, and was wrong in practice within hours of
+        being written: 45 minutes assumes ~3 s/step, but v79 degraded to
+        17 s/step under memory pressure, where a *healthy* gap between eval
+        lines is 2.4 hours. The tracker called a working run stalled.
+
+        So the threshold follows the run: three times the expected gap, floored
+        at the fixed value so a fast run still gets a sane minimum.
+        """
+
+        expected = self.expected_gap_seconds
+        if expected is None:
+            return float(STALL_AFTER_SECONDS)
+        return max(float(STALL_AFTER_SECONDS), 3.0 * expected)
+
+    @property
     def status(self) -> str:
         if self.finished:
             return "complete"
         if not self.steps:
             return "starting"
-        if self.log_age_seconds > STALL_AFTER_SECONDS:
+        if self.log_age_seconds > self.stall_threshold_seconds:
             return "stalled"
         return "running"
 

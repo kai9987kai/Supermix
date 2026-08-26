@@ -399,9 +399,37 @@ def build_training_tensors(
     usable = (len(stream_ids) // sequence_length) * sequence_length
     if usable == 0:
         raise ValueError("not enough tokens for a single sequence")
-    input_ids = torch.tensor(stream_ids[:usable], dtype=torch.long).view(-1, sequence_length)
-    labels = torch.tensor(stream_labels[:usable], dtype=torch.long).view(-1, sequence_length)
+    dtype = compact_dtype(tokenizer.vocab_size)
+    input_ids = torch.tensor(stream_ids[:usable], dtype=dtype).view(-1, sequence_length)
+    labels = torch.tensor(stream_labels[:usable], dtype=dtype).view(-1, sequence_length)
     return input_ids, labels
+
+
+#: Largest token id storable in int16, leaving room for the -100 ignore label.
+_INT16_LIMIT = 32000
+
+
+def compact_dtype(vocab_size: int) -> torch.dtype:
+    """The narrowest integer type that can hold this vocabulary.
+
+    The packed corpus is the single largest allocation a run makes, and it was
+    stored as int64 -- 8 bytes for a token id below 9,000. v79 held
+    866,748 x 128 x 2 tensors, so **1.78 GB** of the trainer's 4.44 GB
+    footprint, on a 15.6 GB machine that was already 25.6 GB committed. It
+    spent hours at 17 s/step against a 4 s/step norm, faulting its own corpus
+    back from the pagefile.
+
+    int16 holds every id in this repository's vocabularies (8,551 for v79,
+    16,384 at the `--max_vocab` ceiling) and the -100 ignore label, and cuts
+    that 1.78 GB to **0.44 GB**. int32 is the fallback for a vocabulary that
+    would not fit, which still halves it.
+
+    Batches are cast to long on the way into the model, which costs a copy of
+    16 x 128 values per step -- nothing against the pagefile traffic it
+    removes.
+    """
+
+    return torch.int16 if vocab_size < _INT16_LIMIT else torch.int32
 
 
 def _build_turn_aligned_tensors(
@@ -435,7 +463,8 @@ def _build_turn_aligned_tensors(
         raise ValueError(
             f"no turn fits in {sequence_length} tokens; raise sequence_length"
         )
+    dtype = compact_dtype(tokenizer.vocab_size)
     return (
-        torch.tensor(blocks, dtype=torch.long),
-        torch.tensor(block_labels, dtype=torch.long),
+        torch.tensor(blocks, dtype=dtype),
+        torch.tensor(block_labels, dtype=dtype),
     )

@@ -233,14 +233,14 @@ def test_a_stalled_run_is_not_reported_as_progressing(tmp_path):
     """
 
     path = _write(tmp_path, REAL_LOG)
-    run = tracker.parse_log(path, now=time.time() + tracker.STALL_AFTER_SECONDS + 60)
+    run = tracker.parse_log(path, now=time.time() + 6 * 3600)
 
     assert run.status == "stalled"
 
 
 def test_a_stalled_run_renders_without_an_eta(tmp_path):
     path = _write(tmp_path, REAL_LOG)
-    run = tracker.parse_log(path, now=time.time() + tracker.STALL_AFTER_SECONDS + 60)
+    run = tracker.parse_log(path, now=time.time() + 6 * 3600)
 
     rendered = tracker.render(run)
     assert "no new step for" in rendered
@@ -257,6 +257,61 @@ def test_the_stall_threshold_exceeds_a_normal_eval_gap():
     """500 steps at ~3 s/step is ~25 min; a healthy run must never trip it."""
 
     assert tracker.STALL_AFTER_SECONDS > 25 * 60
+
+
+SLOW_LOG = """step  1000/18000  train 0.71  dev 0.65  ppl 1.93  4560s
+step  1500/18000  train 0.61  dev 0.59  ppl 1.81  6275s
+step  2000/18000  train 0.55  dev 0.53  ppl 1.71  9481s
+step  2500/18000  train 0.49  dev 0.50  ppl 1.66  18042s
+"""
+
+
+def test_the_stall_threshold_follows_the_run_pace(tmp_path):
+    """A fixed threshold called a working run stalled, within hours of being
+    written.
+
+    v79 degraded to 17.12 s/step under memory pressure. At that pace a healthy
+    gap between eval lines is ~2.4 hours, and the fixed 45-minute threshold
+    reported a run that was demonstrably alive -- CPU climbing, 3.6 cores
+    busy -- as stalled.
+    """
+
+    run = tracker.parse_log(_write(tmp_path, SLOW_LOG))
+
+    assert run.stall_threshold_seconds > tracker.STALL_AFTER_SECONDS
+    assert run.expected_gap_seconds > 30 * 60
+
+
+def test_a_slow_run_silent_for_under_the_adaptive_threshold_is_running(tmp_path):
+    path = _write(tmp_path, SLOW_LOG)
+    run = tracker.parse_log(path, now=time.time() + 57 * 60)
+
+    assert run.status == "running"
+
+
+def test_a_slow_run_silent_for_far_too_long_is_still_caught(tmp_path):
+    """Adapting the threshold must not disable stall detection."""
+
+    path = _write(tmp_path, SLOW_LOG)
+    run = tracker.parse_log(path, now=time.time() + 10 * 3600)
+
+    assert run.status == "stalled"
+
+
+def test_a_fast_run_keeps_the_floor(tmp_path):
+    """A quick run must not get a threshold so tight it trips on noise."""
+
+    run = tracker.parse_log(_write(tmp_path, REAL_LOG))
+
+    assert run.stall_threshold_seconds >= tracker.STALL_AFTER_SECONDS
+
+
+def test_expected_gap_is_none_without_intervals(tmp_path):
+    one = "step 500/18000  train 1.0  dev 1.0  ppl 3.0  1200s\n"
+    run = tracker.parse_log(_write(tmp_path, one))
+
+    assert run.expected_gap_seconds is None
+    assert run.stall_threshold_seconds == float(tracker.STALL_AFTER_SECONDS)
 
 
 # -- discovery and output ---------------------------------------------------

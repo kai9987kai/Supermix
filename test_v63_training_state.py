@@ -457,3 +457,104 @@ def test_a_successful_write_replaces_the_checkpoint(tmp_path):
     payload = torch.load(path, map_location="cpu", weights_only=False)
     assert payload["extra"]["steps"] == 1000
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# -- compact corpus storage (v81) -------------------------------------------
+#
+# The packed corpus is the largest allocation a run makes, and it was stored as
+# int64 -- 8 bytes for a token id below 9,000. v79 held 866,748 x 128 x 2
+# tensors, so 1.78 GB of a 4.44 GB footprint, on a 15.6 GB machine already
+# 25.6 GB committed. It spent hours at 17 s/step, faulting its own corpus back
+# from the pagefile.
+
+
+def test_int16_is_chosen_for_these_vocabularies():
+    """8,551 for v79; 16,384 is the --max_vocab ceiling."""
+
+    assert text_utils.compact_dtype(8551) is torch.int16
+    assert text_utils.compact_dtype(16384) is torch.int16
+
+
+def test_int32_is_the_fallback_for_a_large_vocabulary():
+    """Never silently overflow: a big vocabulary still halves int64."""
+
+    assert text_utils.compact_dtype(50000) is torch.int32
+    assert text_utils.compact_dtype(text_utils._INT16_LIMIT) is torch.int32
+
+
+def test_the_limit_leaves_room_for_the_ignore_label():
+    """-100 must be representable alongside every token id."""
+
+    assert text_utils._INT16_LIMIT < 32767
+
+
+def test_packed_tensors_use_the_compact_dtype():
+    pairs = [("hello there", "general kenobi")] * 8
+    tokenizer = text_utils.WordTokenizer.build([u + " " + a for u, a in pairs])
+
+    inputs, labels = text_utils.build_training_tensors(pairs, tokenizer, 16)
+
+    assert inputs.dtype is text_utils.compact_dtype(tokenizer.vocab_size)
+    assert labels.dtype is inputs.dtype
+
+
+def test_turn_aligned_tensors_use_the_compact_dtype():
+    pairs = [("hello there", "general kenobi")] * 8
+    tokenizer = text_utils.WordTokenizer.build([u + " " + a for u, a in pairs])
+
+    inputs, labels = text_utils.build_training_tensors(
+        pairs, tokenizer, 16, turn_aligned=True
+    )
+
+    assert inputs.dtype is text_utils.compact_dtype(tokenizer.vocab_size)
+    assert labels.dtype is inputs.dtype
+
+
+def test_no_token_id_is_corrupted_by_the_narrower_type():
+    """The saving is worthless if an id wraps."""
+
+    pairs = [("hello there friend", "general kenobi indeed")] * 8
+    tokenizer = text_utils.WordTokenizer.build([u + " " + a for u, a in pairs])
+
+    inputs, labels = text_utils.build_training_tensors(pairs, tokenizer, 16)
+
+    assert int(inputs.max()) < tokenizer.vocab_size
+    assert int(inputs.min()) >= 0
+    # -100 is the ignore label and must survive intact.
+    assert int(labels.min()) in (-100, 0)
+
+
+def test_the_ignore_label_survives_the_narrower_type():
+    pairs = [("a question here", "an answer here")] * 8
+    tokenizer = text_utils.WordTokenizer.build([u + " " + a for u, a in pairs])
+
+    _, labels = text_utils.build_training_tensors(
+        pairs, tokenizer, 16, turn_aligned=True
+    )
+
+    assert (labels == -100).any(), "prompt masking must still be present"
+    assert int(labels.long().min()) == -100
+
+
+def test_widening_a_batch_reproduces_the_original_ids():
+    """What the trainer does per batch, pinned."""
+
+    pairs = [("hello there", "general kenobi")] * 8
+    tokenizer = text_utils.WordTokenizer.build([u + " " + a for u, a in pairs])
+    inputs, _ = text_utils.build_training_tensors(pairs, tokenizer, 16)
+
+    widened = inputs.long()
+
+    assert widened.dtype is torch.long
+    assert torch.equal(widened, inputs.to(torch.long))
+
+
+def test_the_saving_is_real():
+    """int64 -> int16 is a 4x reduction on the largest allocation."""
+
+    rows, seq = 866748, 128
+    wide = rows * seq * 8 * 2
+    narrow = rows * seq * 2 * 2
+
+    assert wide / narrow == 4.0
+    assert (wide - narrow) / 1e9 > 1.3  # over 1.3 GB reclaimed
