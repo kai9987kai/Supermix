@@ -84,7 +84,9 @@ def test_engine_scientific_mode_deterministic_execution():
 
     assert isinstance(res, engine.NexusResult)
     assert res.mode_selected in ("scientific", "solve")
-    assert res.confidence == 1.0
+    assert res.confidence is None
+    assert res.epistemics["confidence_kind"] == "deterministic_assurance_not_probability"
+    assert res.epistemics["bindings"]["surface"] == "engine"
     assert res.epistemics["decision"] == "answered"
     assert res.epistemics["answer_authority"] is True
     assert "verified_answer_receipt" in res.audit_receipts

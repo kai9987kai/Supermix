@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" href="data:,">
-  <title>NexusMind Studio v78 — Experimental Interface</title>
+  <title>NexusMind Studio v84 — Autonomous Epistemic & Multimodal Reasoning Frontier</title>
   <style>
     :root {
       --bg: #070b13;
@@ -168,7 +167,12 @@
     .think-stage-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--primary);margin-bottom:3px;}
 
     /* ── TELEMETRY PANEL ────────────────────────────────── */
-    #panel-telem{padding:20px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;align-content:start;}
+    #panel-telem{padding:20px;overflow-y:auto;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;align-content:start;}
+    #panel-telem.active{display:grid;}
+    #panel-risk{padding:20px;overflow-y:auto;}
+    #panel-risk.active{display:block;}
+    .risk-shell{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+    .risk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;}
     .telem-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px;}
     .telem-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);}
     .telem-value{font-size:26px;font-weight:800;}
@@ -178,6 +182,17 @@
     ::-webkit-scrollbar{width:5px;height:5px;}
     ::-webkit-scrollbar-track{background:transparent;}
     ::-webkit-scrollbar-thumb{background:#1e3048;border-radius:4px;}
+    @media (max-width:700px){
+      header{padding:0 12px;overflow:hidden;gap:8px;}
+      .brand{gap:6px;min-width:0;}
+      .brand-name{font-size:14px;}
+      .header-status{gap:8px;min-width:0;}
+      .header-status>span:first-child{display:none;}
+      .authority-banner{padding:8px 12px;}
+      .tab{padding:0 12px;}
+      #panel-risk{padding:12px;}
+      .risk-grid{grid-template-columns:minmax(0,1fr);}
+    }
   </style>
 </head>
 <body>
@@ -186,7 +201,7 @@
 <header>
   <div class="brand">
     <span class="brand-name">NexusMind Studio</span>
-    <span class="badge">v80 UNIFIED HYBRID</span>
+    <span class="badge">v82 VERIFY-OR-DEFER</span>
   </div>
   <div class="header-status">
     <span>Xiaomi MiMo + Supermix Cognition + AI-Dem-Lab</span>
@@ -198,7 +213,7 @@
 </header>
 
 <div class="authority-banner" id="authorityNotice">
-  <strong>Evidence boundary:</strong> only a fresh exact-verifier decision from the live backend is answer-authoritative for its supported closed-world calculation. Receipts are audit metadata, not authority. Persona chat, ideation, swarm, Graph-of-Thoughts, and telemetry are analysis-only and do not establish factual correctness.
+  <strong>Evidence boundary:</strong> supported closed-world calculations can become proof-carrying answers only after the renderer freshly revalidates every bound numeric claim. Ordinary persona chat, ideation, swarm, Graph-of-Thoughts, and telemetry remain analysis-only. Capsules and receipts are audit metadata, not signatures or probabilities.
 </div>
 
 <!-- ══ TABS ══════════════════════════════════════════════════ -->
@@ -210,7 +225,15 @@
   <div class="tab" onclick="switchTab('got',this)"><span class="tab-icon">&#x1F332;</span> GoT Explorer</div>
   <div class="tab" onclick="switchTab('signals',this)"><span class="tab-icon">&#x1F39B;&#xFE0F;</span> Signals &amp; Entropy Lab</div>
   <div class="tab" onclick="switchTab('think',this)"><span class="tab-icon">&#x26A1;</span> MiMo Thinker</div>
+  <div class="tab" onclick="switchTab('risk',this)"><span class="tab-icon">&#x1F6E1;&#xFE0F;</span> Verify-or-Defer</div>
   <div class="tab" onclick="switchTab('telem',this)"><span class="tab-icon">&#x1F4E1;</span> Dem-Lab Telemetry</div>
+  <div class="tab" onclick="switchTab('compare',this)"><span class="tab-icon">&#x2696;&#xFE0F;</span> Compare Bench</div>
+  <div class="tab" onclick="switchTab('bell',this)"><span class="tab-icon">&#x269B;&#xFE0F;</span> Quantum Bell</div>
+  <div class="tab" onclick="switchTab('resonance',this)"><span class="tab-icon">&#x1F300;</span> Semantic Resonance</div>
+  <div class="tab" onclick="switchTab('quantum-state',this)"><span class="tab-icon">&#x1F52C;</span> Quantum Density</div>
+  <div class="tab" onclick="switchTab('gliders',this)"><span class="tab-icon">&#x2694;&#xFE0F;</span> Soliton Collider</div>
+  <div class="tab" onclick="switchTab('trajectory',this)"><span class="tab-icon">&#x1F4CD;</span> Cognitive Trajectory</div>
+  <div class="tab" onclick="switchTab('speculative-tree',this)"><span class="tab-icon">&#x1F33F;</span> Speculative Tree</div>
 </div>
 
 <!-- ══ WORKSPACE ════════════════════════════════════════════ -->
@@ -247,8 +270,8 @@
         <div class="msg" style="max-width:100%;">
           <div class="msg-avatar">&#x1F91D;</div>
           <div>
-            <div class="msg-bubble">Welcome to the experimental NexusMind interface. Persona replies and heuristic analysis are not verified answers. Use the exact solver for a supported closed-world calculation, and check that the backend admits it as a fresh verified decision.</div>
-            <div class="msg-meta">Experimental interface &middot; analysis-only outside the verified solver</div>
+            <div class="msg-bubble">Welcome to the experimental NexusMind interface. Supported arithmetic and allowlisted science can now be answered here as proof-carrying turns; the browser revalidates them before display. All other persona replies remain analysis-only.</div>
+            <div class="msg-meta">Proof-carrying exact turns &middot; analysis-only otherwise</div>
           </div>
         </div>
       </div>
@@ -366,6 +389,9 @@
     <div class="right-panel" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
       <div class="section-title">Selected Template Path (Analysis Only)</div>
       <div id="gotOptimalPath" style="font-size:12px;color:var(--dim);line-height:1.7;background:#08111d;border-radius:8px;padding:12px;flex:1;">Waiting for tree search...</div>
+    </div>
+  </div>
+
   <!-- ─── SIGNALS & ENTROPY LAB ────────────────────────── -->
   <div class="tab-panel" id="panel-signals">
     <div class="sidebar">
@@ -420,7 +446,8 @@
         <div style="margin-top:10px;">
           <label>Mode</label>
           <select id="thinkModeSelect">
-            <option value="auto">Auto Adaptive Router</option>
+            <option value="auto">Auto Heuristic Router</option>
+            <option value="adaptive">Adaptive ACT Probe (Shadow Only)</option>
             <option value="fast">Fast (Untrained Telemetry Probe)</option>
             <option value="deep">Deep (Untrained Latent Probe)</option>
             <option value="swarm">Swarm (5-Agent Arena)</option>
@@ -446,6 +473,212 @@
   <!-- ─── TELEMETRY PANEL ─────────────────────────────── -->
   <div class="tab-panel" id="panel-telem"><div class="analysis-note" style="grid-column:1/-1;">Telemetry is backend-reported diagnostic/configuration data only. It is not evidence for an answer or a model-quality claim.</div></div>
 
+  <!-- ─── VERIFY-OR-DEFER RISK LAB ────────────────────── -->
+  <div class="tab-panel" id="panel-risk">
+    <div class="risk-shell">
+      <div class="analysis-note">Shadow-only finite-sample audit. It estimates selective risk on a frozen synthetic regression pack; it does not establish exchangeability with live traffic, publish a correctness probability, or authorize answers, routes, tools, deployment, activation, or promotion.</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <button class="btn-primary" onclick="runRiskAudit()">Run Frozen Risk Audit</button>
+        <span id="riskAuditStatus" style="font-size:12px;color:var(--dim);">Protocol metadata has not been loaded.</span>
+      </div>
+      <div class="risk-grid" id="riskAuditOutput"></div>
+    </div>
+  </div>
+
+  <!-- ─── COMPARE BENCH PANEL ──────────────────────────── -->
+  <div class="tab-panel" id="panel-compare">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Compare Bench Configuration</div>
+        <label>Query A</label>
+        <textarea id="compareQueryA" rows="3" placeholder="Enter first query..."></textarea>
+        <label style="margin-top:10px;">Query B (optional)</label>
+        <textarea id="compareQueryB" rows="3" placeholder="If empty, uses Query A for both"></textarea>
+        <label style="margin-top:10px;">Mode A</label>
+        <select id="compareModeA"><option value="auto">auto</option><option value="fast">fast</option><option value="deep">deep</option><option value="innovate">innovate</option></select>
+        <label style="margin-top:10px;">Mode B</label>
+        <select id="compareModeB"><option value="deep">deep</option><option value="auto">auto</option><option value="fast">fast</option><option value="innovate">innovate</option></select>
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runCompare()">&#x2696;&#xFE0F; Run Compare</button>
+      </div>
+      <div class="section">
+        <div class="section-title">Auto-Loop Controls</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn" id="autoLoopStart" onclick="autoLoopStart()">&#x25B6; Start</button>
+          <button class="btn" id="autoLoopStop" onclick="autoLoopStop()">&#x23F9; Stop</button>
+          <button class="btn" onclick="runCompare()">&#x1F504; Loop Once</button>
+        </div>
+        <label style="margin-top:10px;">Delay (ms)</label>
+        <input type="number" id="autoLoopDelay" value="2000" min="500" step="500">
+        <label style="margin-top:8px;">Max Iterations</label>
+        <input type="number" id="autoLoopMax" value="5" min="1" max="100">
+        <div id="autoLoopStatus" style="font-size:11px;color:var(--dim);margin-top:8px;">Idle</div>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">Compare Bench runs side-by-side mode/prompt execution with differential latency analysis, character n-gram Jensen-Shannon Divergence, and semantic distance.</div>
+      <div id="compareOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Configure queries and click <strong>Run Compare</strong>.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── QUANTUM BELL PANEL ───────────────────────────── -->
+  <div class="tab-panel" id="panel-bell">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">CHSH Bell Experiment</div>
+        <label>&theta;<sub>a</sub> (degrees)</label>
+        <input type="number" id="bellThetaA" value="0" step="0.5">
+        <label style="margin-top:8px;">&theta;<sub>a'</sub> (degrees)</label>
+        <input type="number" id="bellThetaAPrime" value="45" step="0.5">
+        <label style="margin-top:8px;">&theta;<sub>b</sub> (degrees)</label>
+        <input type="number" id="bellThetaB" value="22.5" step="0.5">
+        <label style="margin-top:8px;">&theta;<sub>b'</sub> (degrees)</label>
+        <input type="number" id="bellThetaBPrime" value="67.5" step="0.5">
+        <label style="margin-top:8px;">Shots</label>
+        <input type="number" id="bellShots" value="1000" min="100" max="10000" step="100">
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runBellExperiment()">&#x269B;&#xFE0F; Simulate CHSH</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">CHSH Bell Inequality sandbox: analytical quantum correlations E(a,b) = -cos(a-b) vs Monte-Carlo classical LHV simulation. S &#x2264; 2 (classical) vs S &#x2264; 2&#x221A;2 &#x2248; 2.83 (Tsirelson quantum bound).</div>
+      <div id="bellOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Set polarizer angles and click <strong>Simulate CHSH</strong>.</div>
+      </div>
+      <canvas id="bellCanvas" width="600" height="320" style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:none;"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── SEMANTIC RESONANCE PANEL ─────────────────────── -->
+  <div class="tab-panel" id="panel-resonance">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Archetype Resonance Mapper</div>
+        <label>Query</label>
+        <textarea id="resonanceQuery" rows="4" placeholder="Enter a query to map to cognitive archetype basins..."></textarea>
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runResonance()">&#x1F300; Map Resonance</button>
+      </div>
+      <div class="section">
+        <div class="section-title">Archetype Legend</div>
+        <div style="font-size:11px;line-height:1.8;color:var(--dim);">
+          <span style="color:#38bdf8;">&#x25C6; Logos</span> — logic, math, proof, formal reasoning<br>
+          <span style="color:#a78bfa;">&#x25C6; Mythos</span> — creativity, metaphor, imagination<br>
+          <span style="color:#34d399;">&#x25C6; Ethos</span> — verification, audit, safety, evidence<br>
+          <span style="color:#fbbf24;">&#x25C6; Telos</span> — goals, planning, agent, mission<br>
+          <span style="color:#f87171;">&#x25C6; Pathos</span> — emotion, empathy, persuasion
+        </div>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">5D cognitive archetype mapping with Dirichlet prior smoothing, pentagonal simplex projection, and mixture entropy analysis.</div>
+      <div id="resonanceOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Enter a query and click <strong>Map Resonance</strong>.</div>
+      </div>
+      <canvas id="resonanceCanvas" width="500" height="500" style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:none;"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── QUANTUM DENSITY & DECOHERENCE PANEL ──────────── -->
+  <div class="tab-panel" id="panel-quantum-state">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Werner State &amp; Noise Parameters</div>
+        <label>Entanglement Parameter <em>p</em> (0.0=mixed, 1.0=pure Bell)</label>
+        <input type="number" id="qsParamP" value="1.0" min="0" max="1" step="0.05">
+        <label style="margin-top:10px;">Noise Rate &lambda; (0.0 to 1.0)</label>
+        <input type="number" id="qsNoise" value="0.0" min="0" max="1" step="0.05">
+        <label style="margin-top:10px;">Decoherence Channel</label>
+        <select id="qsChannel">
+          <option value="depolarizing">Depolarizing Channel</option>
+          <option value="dephasing">Phase Damping (Dephasing)</option>
+          <option value="unitary">Unitary (No Noise)</option>
+        </select>
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runQuantumState()">&#x1F52C; Analyze Quantum State</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">Quantum density matrix &rho;, Von Neumann entropy S(&rho;) = -&sum; &lambda;<sub>i</sub> log<sub>2</sub>(&lambda;<sub>i</sub>), purity &gamma; = Tr(&rho;<sup>2</sup>), and concurrence under depolarizing and dephasing quantum noise channels.</div>
+      <div id="qsOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Adjust parameters and click <strong>Analyze Quantum State</strong>.</div>
+      </div>
+      <canvas id="quantumCanvas" width="600" height="260" style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:none;"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── RULE 110 SOLITON COLLIDER PANEL ──────────────── -->
+  <div class="tab-panel" id="panel-gliders">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Soliton Glider Configuration</div>
+        <label>Left Glider Type</label>
+        <select id="gliderLeft">
+          <option value="glider_A">Glider A (v = -1/3, period 3)</option>
+          <option value="glider_B">Glider B (v = -1/2, period 4)</option>
+          <option value="glider_E">Glider E (v = -1/2, period 4)</option>
+        </select>
+        <label style="margin-top:10px;">Right Glider Type</label>
+        <select id="gliderRight">
+          <option value="glider_C">Glider C (v = 0, stationary defect)</option>
+          <option value="glider_A">Glider A (v = -1/3)</option>
+        </select>
+        <label style="margin-top:10px;">Separation (cells)</label>
+        <input type="number" id="gliderSep" value="10" min="4" max="25">
+        <label style="margin-top:10px;">Steps</label>
+        <input type="number" id="gliderSteps" value="24" min="8" max="48">
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runGliders()">&#x2694;&#xFE0F; Simulate Soliton Collision</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">Rule 110 Elementary Cellular Automata Turing-complete soliton dynamics: propagating gliders interact on a 14-cell periodic ether to compute logical gate operations (annihilation NOT, deflection AND).</div>
+      <div id="gliderOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Configure solitons and click <strong>Simulate Soliton Collision</strong>.</div>
+      </div>
+      <canvas id="gliderCanvas" width="600" height="300" style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:none;"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── COGNITIVE TRAJECTORY PANEL ───────────────────── -->
+  <div class="tab-panel" id="panel-trajectory">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Multi-Step Thought Sequence</div>
+        <label>Reasoning Steps (one per line)</label>
+        <textarea id="trajectorySteps" rows="8" placeholder="Calculate the exact integral and solve the theorem&#10;Imagine a creative metaphor and hypothesize ideas&#10;Verify the audit evidence and inspect safety limits&#10;Plan agent mission tasks and execute goals"></textarea>
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runTrajectory()">&#x1F4CD; Trace Cognitive Trajectory</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">Kinematic trajectory tracking across the 5D cognitive simplex (Logos, Mythos, Ethos, Telos, Pathos) computing path length, cognitive velocities, turning curvatures, and net drift.</div>
+      <div id="trajectoryOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Enter multi-step thoughts and click <strong>Trace Cognitive Trajectory</strong>.</div>
+      </div>
+      <canvas id="trajectoryCanvas" width="500" height="500" style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:none;"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── SPECULATIVE TREE PANEL ───────────────────────── -->
+  <div class="tab-panel" id="panel-speculative-tree">
+    <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Speculative Tree-of-Thought Search</div>
+        <label>Query</label>
+        <textarea id="specTreeQuery" rows="4" placeholder="Enter problem or query to search with PRM and backtracking..."></textarea>
+        <label style="margin-top:10px;">Branching Factor</label>
+        <input type="number" id="specTreeBranching" value="3" min="2" max="4">
+        <label style="margin-top:10px;">Max Depth</label>
+        <input type="number" id="specTreeDepth" value="4" min="2" max="5">
+        <button class="btn-primary" style="margin-top:14px;width:100%;" onclick="runSpeculativeTree()">&#x1F33F; Run Speculative Search</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">MiMo speculative multi-token draft expansion guided by step-level Process Reward Modeling (PRM), Shannon entropy transition bounds, and automatic backtracking on verification anomaly.</div>
+      <div id="specTreeOutput" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Enter query and click <strong>Run Speculative Search</strong>.</div>
+      </div>
+      <canvas id="specTreeCanvas" width="650" height="320" style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:none;"></canvas>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -454,7 +687,7 @@
 /* ─── State ────────────────────────────────────────────── */
 var state = {
   chat: { persona:'empathetic_conversationalist', session:'studio_'+Date.now() },
-  requests: { solver:0, think:0 },
+  requests: { chat:0, solver:0, think:0 },
   rsiHistory: [],
   swarm: { agents:[
     {id:'generator',icon:'\u26A1',name:'Generator',w:0.25},
@@ -515,26 +748,109 @@ function esc(value) {
     .replace(/'/g, '&#39;');
 }
 
-function analysisContractValid(result) {
-  return !!(result && result.status === 'analysis_only' &&
-    result.answer_authority === false && result.confidence == null &&
-    result.epistemics && result.epistemics.decision === 'analysis_only');
+function newRequestNonce() {
+  if (!window.crypto || !window.crypto.getRandomValues) return '';
+  var bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(function(value){return value.toString(16).padStart(2,'0');}).join('');
 }
 
-function verifiedContractValid(result) {
+function analysisContractValid(result) {
+  var epistemics = result && result.epistemics;
+  return !!(result && result.status === 'analysis_only' &&
+    result.answer_authority === false && result.confidence == null &&
+    epistemics && epistemics.decision === 'analysis_only' &&
+    epistemics.answer_authority === false &&
+    (epistemics.evidence_class === 'deterministic_heuristic' ||
+      epistemics.evidence_class === 'template_deliberation') &&
+    nonAuthoritativeVerifierValid(epistemics));
+}
+
+function verifiedPublicOutput(result) {
+  if (!result) return '';
+  var output = typeof result.output === 'string' ? result.output : '';
+  var reply = typeof result.reply === 'string' ? result.reply : '';
+  if (output && reply && output !== reply) return '';
+  return output || reply;
+}
+
+function verifiedRenderedAnswer(result) {
+  var capsuleResult = result && result.proof_capsule && result.proof_capsule.result;
+  if (!capsuleResult || typeof capsuleResult.display_answer !== 'string' ||
+      !capsuleResult.display_answer || typeof capsuleResult.unit !== 'string') return '';
+  return 'Verified result: ' + capsuleResult.display_answer +
+    (capsuleResult.unit ? ' ' + capsuleResult.unit : '') + '.';
+}
+
+function verifiedContractValid(result, expectedSurface) {
   var epistemics = result && result.epistemics;
   var verifier = epistemics && epistemics.verifier;
-  return !!(result && result.confidence === 1 && epistemics &&
+  var bindings = epistemics && epistemics.bindings;
+  var capsule = result && result.proof_capsule;
+  var capsuleBindings = capsule && capsule.bindings;
+  var capsuleResult = capsule && capsule.result;
+  var independentChecker = capsule && capsule.independent_checker;
+  var independentWitnessValid = !!(capsuleResult && independentChecker &&
+    ((capsuleResult.problem_class === 'arithmetic' &&
+      independentChecker.checker_id === 'nexus-independent-arithmetic-checker-v1' &&
+      independentChecker.status === 'passed' &&
+      independentChecker.algorithmically_independent === true) ||
+     (capsuleResult.problem_class === 'scientific_scenario' &&
+      independentChecker.checker_id === 'nexus-independent-science-checker-v1' &&
+      independentChecker.status === 'passed' &&
+      independentChecker.algorithmically_independent === true)));
+  return !!(result && verifiedPublicOutput(result) && verifiedRenderedAnswer(result) &&
+    result.confidence == null && epistemics &&
     epistemics.decision === 'answered' && epistemics.answer_authority === true &&
+    epistemics.confidence_kind === 'deterministic_assurance_not_probability' &&
     epistemics.evidence_class === 'verified_exact' && verifier &&
     verifier.id === 'grounding_runtime.finalize_grounded_response' &&
-    verifier.passed === true && verifier.independent_recompute === true);
+    verifier.passed === true && verifier.fresh_recompute === true &&
+    verifier.algorithmically_independent === false && bindings &&
+    typeof bindings.request_sha256 === 'string' && bindings.request_sha256.length === 64 &&
+    typeof bindings.output_sha256 === 'string' && bindings.output_sha256.length === 64 &&
+    bindings.surface === expectedSurface &&
+    capsule && capsule.schema_version === 'nexus-proof-carrying-number-v2' &&
+    capsule.policy_version === 'renderer-fresh-revalidation-v2-independent-witness' &&
+    capsule.decision === 'claim_checked' && capsule.capsule_is_signature === false &&
+    capsuleBindings && capsuleBindings.surface === expectedSurface &&
+    independentWitnessValid &&
+    capsule.coverage && capsule.coverage.complete === true &&
+    capsule.coverage.unbound_numeric_span_count === 0);
 }
 
 function nonAuthoritativeVerifierValid(epistemics) {
   var verifier = epistemics && epistemics.verifier;
   return !!(verifier && verifier.id === 'none' && verifier.passed === false &&
-    verifier.independent_recompute === false);
+    verifier.fresh_recompute === false && verifier.algorithmically_independent === false);
+}
+
+function rendererRevalidate(result, submittedQuery, requestNonce, expectedSurface) {
+  var capsule = result && result.proof_capsule;
+  var capsuleResult = capsule && capsule.result;
+  var output = verifiedPublicOutput(result);
+  var displayAnswer = result && result.display_answer;
+  if (!displayAnswer && capsuleResult) displayAnswer = capsuleResult.display_answer;
+  if (!verifiedContractValid(result, expectedSurface) || !requestNonce || !output || !displayAnswer) {
+    return Promise.resolve(false);
+  }
+  return fetch('/v1/verify', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      query:submittedQuery,
+      output:output,
+      display_answer:displayAnswer,
+      surface:expectedSurface,
+      proof_capsule:capsule,
+      request_nonce:requestNonce
+    })
+  }).then(requireBackendJson).then(function(verdict){
+    return !!(verdict && verdict.verified === true &&
+      verdict.status === 'verified' &&
+      verdict.renderer_may_mark_numeric_claims_verified === true &&
+      verdict.confidence == null &&
+      verdict.capsule_sha256 === capsule.capsule_sha256);
+  }).catch(function(){ return false; });
 }
 
 function thinkAnalysisContractValid(result) {
@@ -556,7 +872,7 @@ function thinkAbstentionContractValid(result) {
 }
 
 function classifyThinkResponse(result) {
-  if (verifiedContractValid(result)) return 'answered';
+  if (verifiedContractValid(result, 'think')) return 'answered';
   if (thinkAnalysisContractValid(result)) return 'analysis_only';
   if (thinkAbstentionContractValid(result)) return 'abstained';
   return 'invalid';
@@ -569,7 +885,81 @@ function switchTab(id, el) {
   el.classList.add('active');
   document.getElementById('panel-'+id).classList.add('active');
   if (id==='telem') renderTelemetry();
+  if (id==='risk') loadRiskProtocol();
   if (id==='signals') runEntropyProbe();
+}
+
+/* ─── CALIBRATED VERIFY-OR-DEFER LAB ───────────────────── */
+function riskCard(label, value, tone) {
+  var card = document.createElement('div');
+  card.className = 'step-card';
+  var title = document.createElement('div');
+  title.className = 'step-header';
+  title.textContent = label;
+  var body = document.createElement('div');
+  body.className = 'step-body';
+  body.textContent = String(value == null ? '—' : value);
+  if (tone) body.style.color = tone;
+  card.appendChild(title);
+  card.appendChild(body);
+  return card;
+}
+
+function renderRiskProtocol(data) {
+  var out = document.getElementById('riskAuditOutput');
+  out.innerHTML = '';
+  var benchmark = data && data.benchmark || {};
+  var plan = data && data.plan || {};
+  var target = plan.target || {};
+  out.appendChild(riskCard('Protocol', (plan.protocol && plan.protocol.method) || 'Unavailable'));
+  out.appendChild(riskCard('Frozen cohort', String(benchmark.case_count || 0) + ' cases · ' + String(benchmark.answer_count || 0) + ' answer cases · ' + String(benchmark.adversarial_abstain_count || 0) + ' abstention cases'));
+  out.appendChild(riskCard('Target', 'risk ≤ ' + String(target.max_error_rate) + ' at α=' + String(target.alpha) + ' with ≥' + String(target.min_accepted) + ' accepted'));
+  out.appendChild(riskCard('Candidate grid', (plan.candidate_policies || []).map(function(p){ return p.policy_id; }).join(' · ') || 'Unavailable'));
+  out.appendChild(riskCard('Authority', 'NONE — shadow only', 'var(--warning)'));
+  document.getElementById('riskAuditStatus').textContent = 'Protocol loaded. Run the frozen audit to produce a conditional receipt.';
+}
+
+function loadRiskProtocol() {
+  fetch('/v1/risk-control').then(requireBackendJson).then(renderRiskProtocol).catch(function(){
+    document.getElementById('riskAuditStatus').textContent = 'Backend unavailable; no local risk result was generated.';
+    renderUnavailable('riskAuditOutput', 'Risk-control protocol');
+  });
+}
+
+function renderRiskAudit(data) {
+  var out = document.getElementById('riskAuditOutput');
+  out.innerHTML = '';
+  var receipt = data && data.receipt || {};
+  var selection = receipt.selection || {};
+  var cells = receipt.cells || [];
+  var selected = cells.find(function(cell){ return cell.policy_id === selection.policy_id; });
+  var summary = selected && selected.calibration || {};
+  out.appendChild(riskCard('Decision', selection.status || 'no_certified_policy', selection.status === 'certified_policy_selected' ? 'var(--success)' : 'var(--warning)'));
+  out.appendChild(riskCard('Selected policy', selection.policy_id || 'none'));
+  out.appendChild(riskCard('Accepted coverage', summary.coverage == null ? '—' : (Number(summary.coverage) * 100).toFixed(1) + '%'));
+  out.appendChild(riskCard('Observed errors', summary.errors == null ? '—' : String(summary.errors) + ' / ' + String(summary.accepted || 0)));
+  out.appendChild(riskCard('Exact CP upper bound', summary.risk_ucb == null ? '—' : Number(summary.risk_ucb).toFixed(4)));
+  out.appendChild(riskCard('Receipt', receipt.receipt_sha256 || 'unavailable'));
+  var note = document.createElement('div');
+  note.className = 'analysis-note';
+  note.textContent = 'Conditional finite-sample evidence over the frozen synthetic cohort only. Exchangeability is unestablished; this receipt cannot select a live route, activate a model, or grant answer authority.';
+  out.appendChild(note);
+  document.getElementById('riskAuditStatus').textContent = 'Audit complete · shadow receipt only · no runtime policy changed.';
+}
+
+function runRiskAudit() {
+  var status = document.getElementById('riskAuditStatus');
+  status.textContent = 'Running the frozen 128-case audit...';
+  var button = document.querySelector('#panel-risk .btn-primary');
+  if (button) button.disabled = true;
+  fetch('/v1/risk-control/audit', {method:'POST'})
+    .then(requireBackendJson)
+    .then(renderRiskAudit)
+    .catch(function(){
+      status.textContent = 'Audit unavailable; no local risk result was generated.';
+      renderUnavailable('riskAuditOutput', 'Frozen risk audit');
+    })
+    .then(function(){ if (button) button.disabled = false; });
 }
 
 /* ─── CHAT ─────────────────────────────────────────────── */
@@ -586,6 +976,8 @@ function chatKeydown(e) {
 function sendChat() {
   var txt = document.getElementById('chatInput').value.trim();
   if (!txt) return;
+  var requestToken = ++state.requests.chat;
+  var requestNonce = newRequestNonce();
   document.getElementById('chatInput').value = '';
   appendMsg('user', txt, '\uD83D\uDC64', 'You');
   var typingId = appendTyping();
@@ -593,13 +985,37 @@ function sendChat() {
 
   fetch('/v1/chat', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({session_id:state.chat.session,message:txt,persona:state.chat.persona})
+    body:JSON.stringify({
+      session_id:state.chat.session,
+      message:txt,
+      persona:state.chat.persona,
+      request_nonce:requestNonce
+    })
   }).then(requireBackendJson)
-    .then(function(result){ handleChatResult(result, typingId); })
-    .catch(function(){ handleChatUnavailable(typingId); });
+    .then(function(result){ handleChatResult(result, typingId, txt, requestNonce, requestToken); })
+    .catch(function(){ handleChatUnavailable(typingId, requestToken); });
 }
 
-function handleChatResult(result, typingId) {
+function handleChatResult(result, typingId, submittedQuery, requestNonce, requestToken) {
+  if (requestToken !== state.requests.chat) { removeTyping(typingId); return; }
+  if (verifiedContractValid(result, 'chat')) {
+    document.getElementById('chatIntentDisplay').textContent = 'Revalidating proof-carrying answer...';
+    rendererRevalidate(result, submittedQuery, requestNonce, 'chat').then(function(verified){
+      removeTyping(typingId);
+      if (requestToken !== state.requests.chat) return;
+      if (!verified) {
+        appendMsg('ai', 'The proof capsule or request binding failed fresh renderer revalidation, so the numeric answer was withheld.', '\u26A0\uFE0F', 'Contract rejected · no answer displayed');
+        document.getElementById('chatIntentDisplay').textContent = 'proof rejected';
+        return;
+      }
+      appendMsg('ai', verifiedRenderedAnswer(result), '\u2705', 'Nexus Verifier · proof-carrying numeric claims revalidated · no probability claim');
+      document.getElementById('chatIntentDisplay').textContent = 'verified closed-world';
+      var capsuleResult = result.proof_capsule.result || {};
+      document.getElementById('chatVarsDisplay').textContent = 'answer = '+String(capsuleResult.display_answer || '')+' '+String(capsuleResult.unit || '')+'\ncapsule = '+String(result.proof_capsule.capsule_sha256 || '');
+      document.getElementById('chatThoughtSteps').innerHTML = '';
+    });
+    return;
+  }
   removeTyping(typingId);
   if (!analysisContractValid(result)) {
     appendMsg('ai', 'The backend response lacked the required analysis-only evidence contract, so it was withheld.', '\u26A0\uFE0F', 'Contract rejected · no answer authority');
@@ -624,8 +1040,9 @@ function handleChatResult(result, typingId) {
   }
 }
 
-function handleChatUnavailable(typingId) {
+function handleChatUnavailable(typingId, requestToken) {
   removeTyping(typingId);
+  if (requestToken !== state.requests.chat) return;
   appendMsg('ai', unavailableText('Persona chat'), '\u26A0\uFE0F',
     'Backend unavailable · analysis-only · no answer authority');
   document.getElementById('chatIntentDisplay').textContent = 'unavailable';
@@ -661,15 +1078,16 @@ function runSolver() {
   if (!q) return;
   var out = document.getElementById('solverOutput');
   var requestToken = ++state.requests.solver;
+  var requestNonce = newRequestNonce();
   out.innerHTML = '<div style="color:var(--dim);font-size:13px;">Solving...</div>';
 
   fetch('/v1/solve', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({query:q})
+    body: JSON.stringify({query:q,request_nonce:requestNonce})
   }).then(requireBackendJson)
     .then(function(data){
       if (requestToken !== state.requests.solver) return;
-      renderSolverResult(data, q);
+      renderSolverResult(data, q, requestNonce, requestToken);
     })
     .catch(function(){
       if (requestToken !== state.requests.solver) return;
@@ -677,32 +1095,47 @@ function runSolver() {
     });
 }
 
-function renderSolverResult(result, submittedQuery) {
+function renderSolverResult(result, submittedQuery, requestNonce, requestToken) {
   var out = document.getElementById('solverOutput'); out.innerHTML = '';
   var decision = result.epistemics && result.epistemics.decision;
-  if (!result.solved || decision !== 'answered' || result.answer_authority !== true || !verifiedContractValid(result)) {
+  if (!result.solved || decision !== 'answered' || result.answer_authority !== true || !verifiedContractValid(result, 'solve')) {
     var notice = document.createElement('div'); notice.className = 'unavailable';
-    notice.textContent = result.output || 'No verified answer was admitted. Specify one unambiguous supported calculation with units and assumptions.';
+    notice.textContent = 'No verified answer was admitted. Specify one unambiguous supported calculation with units and assumptions. No backend candidate was displayed.';
     out.appendChild(notice);
     return;
   }
+  var pending = document.createElement('div'); pending.className = 'analysis-note';
+  pending.textContent = 'Answer candidate withheld while the renderer freshly revalidates its request-bound proof capsule...';
+  out.appendChild(pending);
+  rendererRevalidate(result, submittedQuery, requestNonce, 'solve').then(function(verified){
+    if (requestToken !== state.requests.solver) return;
+    out.innerHTML = '';
+    if (!verified) {
+      var rejected = document.createElement('div'); rejected.className = 'unavailable';
+      rejected.textContent = 'PROOF REJECTED — the answer candidate was not displayed because fresh renderer revalidation or request binding failed.';
+      out.appendChild(rejected);
+      return;
+    }
+    renderVerifiedSolverResult(result);
+  });
+}
+
+function renderVerifiedSolverResult(result) {
+  var out = document.getElementById('solverOutput');
+  var capsule = result.proof_capsule || {};
+  var capsuleResult = capsule.result || {};
+  var capsuleBindings = capsule.bindings || {};
   var requestBinding = document.createElement('div');
   requestBinding.style.cssText = 'font-size:11px;color:var(--dim);margin-bottom:8px;';
-  requestBinding.textContent = 'Verified for submitted request: ' + String(submittedQuery || '');
+  requestBinding.textContent = 'The submitted request and exact public output binding were freshly revalidated.';
   out.appendChild(requestBinding);
   var banner = document.createElement('div'); banner.className = 'answer-banner';
-  banner.innerHTML = '<div><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:4px;">'+esc((result.target||'RESULT').toUpperCase().replace(/_/g,' '))+'</div><div style="display:flex;align-items:baseline;gap:10px;"><span class="answer-value">'+esc(result.display_answer)+'</span><span class="answer-unit">'+esc(result.unit)+'</span></div><div style="font-size:11px;color:var(--dim);margin-top:6px;">Domain: '+esc(result.domain)+' | Method: '+esc(result.formula_id||'exact')+' | deterministic in-scope only</div></div><div style="margin-left:auto;font-size:28px;">\u2713</div>';
+  banner.innerHTML = '<div><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:4px;">VERIFIED RESULT</div><div style="display:flex;align-items:baseline;gap:10px;"><span class="answer-value">'+esc(capsuleResult.display_answer)+'</span><span class="answer-unit">'+esc(capsuleResult.unit)+'</span></div><div style="font-size:11px;color:var(--dim);margin-top:6px;">Class: '+esc(capsuleResult.problem_class)+' | Method: '+esc(capsuleResult.method)+' | deterministic in-scope only</div></div><div style="margin-left:auto;font-size:28px;">\u2713</div>';
   out.appendChild(banner);
-  if (result.steps) {
-    result.steps.forEach(function(s){
-      var sc = document.createElement('div'); sc.className = 'step-card';
-      sc.innerHTML = '<div class="step-header"><span class="step-label">Step '+esc(s.step_index)+': '+esc(s.description)+'</span><span style="font-size:10px;color:var(--dim);">'+esc(s.unit)+'</span></div><div class="step-body">'+esc(s.formula_latex)+'<br><span style="color:var(--dim);">'+esc(s.substitution_latex)+'</span></div>';
-      out.appendChild(sc);
-    });
-  }
-  if (result.receipt && result.receipt.receipt_sha256) {
+  if (capsule.capsule_sha256 && capsuleBindings.verifier_receipt_sha256) {
     var rc = document.createElement('div'); rc.className = 'receipt-box';
-    rc.innerHTML = '<strong>\u2705 Integrity receipt (audit metadata, not authority)</strong><br>SHA-256: '+esc(result.receipt.receipt_sha256)+'<br>Answer admission: fresh verifier-first recomputation';
+    var claimCount = capsule.coverage ? capsule.coverage.verified_numeric_span_count : 0;
+    rc.innerHTML = '<strong>\u2705 Renderer-revalidated proof capsule</strong><br>Capsule SHA-256: '+esc(capsule.capsule_sha256)+'<br>Bound numeric spans: '+esc(claimCount)+' / '+esc(claimCount)+'<br>Grounding receipt binding: '+esc(capsuleBindings.verifier_receipt_sha256)+'<br>Audit metadata only — not a signature or probability';
     out.appendChild(rc);
   }
 }
@@ -734,7 +1167,7 @@ function renderIdeation(result) {
     var opFamily = c.operator.split(':')[0];
     var opClass = {SCAMPER:'op-scamper',TRIZ:'op-triz',Analogical:'op-analogy'}[opFamily]||'';
     var fnirBars = [['Feasibility',c.feasibility,0],['Novelty',c.novelty,1],['Impact',c.impact,2],['Robustness',c.robustness,3]].map(function(arr){
-      return '<div class="fnir-label-row"><span>'+arr[0]+'</span><span style="color:'+FNIR_COLORS[arr[2]]+';font-weight:700;">'+(arr[1]*100).toFixed(0)+'%</span></div><div class="fnir-bar"><div class="fnir-fill" style="width:'+(arr[1]*100)+'%;background:'+FNIR_COLORS[arr[2]]+';"></div></div>';
+      return '<div class="fnir-label-row"><span>'+arr[0]+'</span><span style="color:'+FNIR_COLORS[arr[2]]+';font-weight:700;">'+Number(arr[1]).toFixed(2)+' priority</span></div><div class="fnir-bar"><div class="fnir-fill" style="width:'+(arr[1]*100)+'%;background:'+FNIR_COLORS[arr[2]]+';"></div></div>';
     }).join('');
     card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;"><span class="idea-operator '+opClass+'">'+esc(c.operator)+'</span>'+(c.is_pareto_optimal?'<span class="pareto-badge">HEURISTIC FRONTIER</span>':'')+'</div><div class="idea-title">'+esc(c.title)+'</div><div class="idea-desc">'+esc(c.description)+'</div><div class="fnir-bar-row">'+fnirBars+'</div>';
     grid.appendChild(card);
@@ -975,16 +1408,17 @@ function runThink() {
   var mode = document.getElementById('thinkModeSelect').value;
   var budget = +document.getElementById('thinkBudgetSlider').value;
   var requestToken = ++state.requests.think;
+  var requestNonce = newRequestNonce();
   var out = document.getElementById('thinkOutputArea');
   out.innerHTML = '<div style="color:var(--dim);">Dispatching thinking pipeline...</div>';
 
   fetch('/v1/think', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt:prompt,mode:mode,thinking_budget:budget})
+    body:JSON.stringify({prompt:prompt,mode:mode,thinking_budget:budget,request_nonce:requestNonce})
   }).then(requireBackendJson)
     .then(function(data){
       if (requestToken !== state.requests.think) return;
-      renderThinkResult(data);
+      renderThinkResult(data, prompt, requestNonce, requestToken);
     })
     .catch(function(){
       if (requestToken !== state.requests.think) return;
@@ -992,7 +1426,7 @@ function runThink() {
     });
 }
 
-function renderThinkResult(res) {
+function renderThinkResult(res, submittedQuery, requestNonce, requestToken) {
   var out = document.getElementById('thinkOutputArea'); out.innerHTML = '';
   var responseKind = classifyThinkResponse(res);
   if (responseKind === 'invalid') {
@@ -1002,18 +1436,39 @@ function renderThinkResult(res) {
     out.appendChild(rejected);
     return;
   }
+  if (responseKind === 'answered') {
+    var pending = document.createElement('div'); pending.className = 'analysis-note';
+    pending.textContent = 'Answer candidate withheld while its proof-carrying numeric claims are freshly revalidated...';
+    out.appendChild(pending);
+    rendererRevalidate(res, submittedQuery, requestNonce, 'think').then(function(verified){
+      if (requestToken !== state.requests.think) return;
+      if (!verified) {
+        out.innerHTML = '';
+        var rejected = document.createElement('div'); rejected.className = 'unavailable';
+        rejected.textContent = 'PROOF REJECTED — fresh renderer revalidation or request binding failed. No backend candidate was displayed.';
+        out.appendChild(rejected);
+        return;
+      }
+      renderThinkResultAfterVerification(res);
+    });
+    return;
+  }
+  renderThinkResultAfterVerification(res);
+}
+
+function renderThinkResultAfterVerification(res) {
+  var out = document.getElementById('thinkOutputArea'); out.innerHTML = '';
+  var responseKind = classifyThinkResponse(res);
   var card = document.createElement('div'); card.className = 'step-card';
   var verified = responseKind === 'answered';
   var abstained = responseKind === 'abstained';
-  var statusBadge = verified ? '<span class="badge" style="background:rgba(52,211,153,0.1);color:var(--success);">Verified in scope (conf=' + esc(res.confidence) + ')</span>' : (abstained ? '<span class="badge" style="background:rgba(248,113,113,0.1);color:var(--danger);">Abstained / No Authority</span>' : '<span class="badge" style="background:rgba(129,140,248,0.1);color:var(--accent);">Analysis-only / No Authority</span>');
-  var publicOutput = abstained ? 'No verified answer was admitted for this request. The browser withheld the backend candidate and trace.' : res.output;
-  var publicModel = abstained ? 'Nexus evidence boundary' : res.model;
-  var publicMode = abstained ? 'abstained' : res.mode_selected;
-  var publicLatency = abstained ? '\u2014' : (esc(res.latency_ms) + 'ms');
-  card.innerHTML = '<div class="step-header"><div><strong>Model: ' + esc(publicModel) + '</strong> &middot; Mode: ' + esc(publicMode) + ' &middot; Latency: ' + publicLatency + '</div>' + statusBadge + '</div><div class="step-body">' + esc(publicOutput).replace(/\n/g,'<br>') + '</div>';
+  var statusBadge = verified ? '<span class="badge" style="background:rgba(52,211,153,0.1);color:var(--success);">Proof revalidated · deterministic assurance</span>' : (abstained ? '<span class="badge" style="background:rgba(248,113,113,0.1);color:var(--danger);">Abstained / No Authority</span>' : '<span class="badge" style="background:rgba(129,140,248,0.1);color:var(--accent);">Analysis-only / No Authority</span>');
+  var publicOutput = verified ? verifiedRenderedAnswer(res) : (abstained ? 'No verified answer was admitted for this request. The browser withheld the backend candidate and trace.' : res.output);
+  var header = verified ? '<strong>Nexus exact verifier · closed-world result</strong>' : (abstained ? '<strong>Nexus evidence boundary · abstained</strong>' : '<strong>Model: ' + esc(res.model) + '</strong> &middot; Mode: ' + esc(res.mode_selected) + ' &middot; Latency: ' + esc(res.latency_ms) + 'ms');
+  card.innerHTML = '<div class="step-header"><div>' + header + '</div>' + statusBadge + '</div><div class="step-body">' + esc(publicOutput).replace(/\n/g,'<br>') + '</div>';
   out.appendChild(card);
 
-  if (!abstained && res.thought_steps && res.thought_steps.length) {
+  if (!verified && !abstained && res.thought_steps && res.thought_steps.length) {
     var stepBox = document.createElement('div'); stepBox.className = 'think-step-row';
     res.thought_steps.forEach(function(st){
       var sc = document.createElement('div'); sc.className = 'think-step-card';
@@ -1026,6 +1481,531 @@ function renderThinkResult(res) {
 
 /* ─── INIT ─────────────────────────────────────────────── */
 initSwarmWeightBars();
+
+/* ═══ COMPARE BENCH ═══════════════════════════════════════ */
+var _autoLoopTimer = null;
+var _autoLoopCount = 0;
+
+function runCompare() {
+  var qA = document.getElementById('compareQueryA').value.trim();
+  if (!qA) { alert('Query A is required'); return; }
+  var qB = document.getElementById('compareQueryB').value.trim() || null;
+  var mA = document.getElementById('compareModeA').value;
+  var mB = document.getElementById('compareModeB').value;
+  var out = document.getElementById('compareOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Running compare...</div>';
+  fetch('/v1/compare', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({query_a:qA, query_b:qB, mode_a:mA, mode_b:mB})
+  }).then(requireBackendJson).then(function(d) {
+    var jsdPct = (d.jensen_shannon_divergence * 100).toFixed(1);
+    var semPct = (d.semantic_distance * 100).toFixed(1);
+    out.innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
+        '<div class="stat-card"><div class="stat-card-title">Output A (' + esc(d.mode_a) + ')</div><div style="font-size:12px;line-height:1.6;">' + esc(d.output_a).substring(0,400) + '</div>' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--dim);">Latency: ' + d.latency_ms_a.toFixed(1) + 'ms (' + d.latency_class_a + ') · Tokens: ' + d.token_count_a + '</div></div>' +
+        '<div class="stat-card"><div class="stat-card-title">Output B (' + esc(d.mode_b) + ')</div><div style="font-size:12px;line-height:1.6;">' + esc(d.output_b).substring(0,400) + '</div>' +
+        '<div style="margin-top:8px;font-size:11px;color:var(--dim);">Latency: ' + d.latency_ms_b.toFixed(1) + 'ms (' + d.latency_class_b + ') · Tokens: ' + d.token_count_b + '</div></div>' +
+      '</div>' +
+      '<div class="stat-card" style="margin-top:12px;">' +
+        '<div class="stat-card-title">Divergence Metrics</div>' +
+        '<div style="display:flex;gap:30px;font-size:13px;">' +
+          '<div>JSD: <strong style="color:var(--primary);">' + jsdPct + '%</strong></div>' +
+          '<div>Semantic Distance: <strong style="color:var(--accent);">' + semPct + '%</strong></div>' +
+          '<div>Latency Δ: <strong style="color:var(--warn);">' + d.latency_delta_pct + '%</strong></div>' +
+          '<div>RSI A: ' + d.rsi_a.toFixed(1) + ' · RSI B: ' + d.rsi_b.toFixed(1) + '</div>' +
+        '</div>' +
+        '<div style="margin-top:8px;font-size:12px;color:var(--dim);">' + esc(d.summary_verdict) + '</div>' +
+      '</div>';
+  }).catch(function(e) { out.innerHTML = unavailableText('Compare Bench'); setBackendStatus(false); });
+}
+
+function autoLoopStart() {
+  autoLoopStop();
+  _autoLoopCount = 0;
+  var maxIter = parseInt(document.getElementById('autoLoopMax').value) || 5;
+  var delay = parseInt(document.getElementById('autoLoopDelay').value) || 2000;
+  document.getElementById('autoLoopStatus').textContent = 'Running... 0/' + maxIter;
+  function tick() {
+    if (_autoLoopCount >= maxIter) { autoLoopStop(); return; }
+    _autoLoopCount++;
+    document.getElementById('autoLoopStatus').textContent = 'Running... ' + _autoLoopCount + '/' + maxIter;
+    runCompare();
+    _autoLoopTimer = setTimeout(tick, delay);
+  }
+  tick();
+}
+
+function autoLoopStop() {
+  if (_autoLoopTimer) { clearTimeout(_autoLoopTimer); _autoLoopTimer = null; }
+  document.getElementById('autoLoopStatus').textContent = 'Stopped at iteration ' + _autoLoopCount;
+}
+
+/* ═══ QUANTUM BELL ════════════════════════════════════════ */
+function runBellExperiment() {
+  var tA = parseFloat(document.getElementById('bellThetaA').value);
+  var tAp = parseFloat(document.getElementById('bellThetaAPrime').value);
+  var tB = parseFloat(document.getElementById('bellThetaB').value);
+  var tBp = parseFloat(document.getElementById('bellThetaBPrime').value);
+  var shots = parseInt(document.getElementById('bellShots').value);
+  var out = document.getElementById('bellOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Simulating CHSH...</div>';
+  fetch('/v1/quantum/bell', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({theta_a:tA, theta_a_prime:tAp, theta_b:tB, theta_b_prime:tBp, shots:shots})
+  }).then(requireBackendJson).then(function(d) {
+    var violColor = d.violates_classical_bound ? 'var(--success)' : 'var(--dim)';
+    var violText = d.violates_classical_bound ? 'YES — Bell inequality violated!' : 'No violation (classical regime)';
+    out.innerHTML =
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">CHSH S-Values</div>' +
+        '<div style="display:flex;gap:30px;font-size:14px;">' +
+          '<div>S<sub>quantum</sub> = <strong style="color:var(--primary);">' + d.chsh_s_quantum.toFixed(4) + '</strong></div>' +
+          '<div>S<sub>classical</sub> = <strong style="color:var(--warn);">' + d.chsh_s_classical.toFixed(4) + '</strong></div>' +
+          '<div>Tsirelson Ratio = <strong>' + d.tsirelson_ratio.toFixed(4) + '</strong></div>' +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:13px;color:' + violColor + ';font-weight:700;">' + violText + '</div>' +
+        '<div style="margin-top:6px;font-size:11px;color:var(--dim);">Classical bound: S ≤ ' + d.classical_bound + ' · Tsirelson bound: S ≤ ' + d.tsirelson_bound.toFixed(4) + ' · Shots: ' + d.shots + '</div>' +
+      '</div>' +
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Quantum Correlations</div>' +
+        '<div style="display:flex;gap:20px;font-size:12px;">' +
+          Object.keys(d.quantum_correlations).map(function(k) {
+            return '<div>' + k + ': <strong>' + d.quantum_correlations[k].toFixed(4) + '</strong></div>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+    drawBellCanvas(d);
+  }).catch(function(e) { out.innerHTML = unavailableText('Quantum Bell'); setBackendStatus(false); });
+}
+
+function drawBellCanvas(d) {
+  var canvas = document.getElementById('bellCanvas');
+  canvas.style.display = 'block';
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw correlation curve E(θ) = -cos(θ) for quantum
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (var i = 0; i <= 360; i++) {
+    var x = (i / 360) * (W - 80) + 40;
+    var y = H / 2 - (-Math.cos(i * Math.PI / 180)) * (H / 2 - 30);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Classical bound lines at S=2
+  ctx.strokeStyle = 'rgba(251,191,36,0.5)'; ctx.lineWidth = 1; ctx.setLineDash([5,5]);
+  var yBound2 = H / 2 - (2 / 2.8284) * (H / 2 - 30);
+  ctx.beginPath(); ctx.moveTo(40, yBound2); ctx.lineTo(W - 40, yBound2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Labels
+  ctx.fillStyle = '#7a94b8'; ctx.font = '10px sans-serif';
+  ctx.fillText('0°', 40, H - 8);
+  ctx.fillText('180°', W / 2 - 10, H - 8);
+  ctx.fillText('360°', W - 60, H - 8);
+  ctx.fillStyle = '#38bdf8'; ctx.fillText('E(θ) = -cos(θ)', W - 140, 20);
+  ctx.fillStyle = '#fbbf24'; ctx.fillText('S = 2 bound', W - 140, 34);
+
+  // Plot actual experiment angles as dots
+  var angles = d.angles_deg || {};
+  ctx.fillStyle = '#f87171';
+  ['theta_a', 'theta_a_prime', 'theta_b', 'theta_b_prime'].forEach(function(k) {
+    if (angles[k] !== undefined) {
+      var deg = angles[k];
+      var ax = (((deg % 360) + 360) % 360 / 360) * (W - 80) + 40;
+      var ay = H / 2 - (-Math.cos(deg * Math.PI / 180)) * (H / 2 - 30);
+      ctx.beginPath(); ctx.arc(ax, ay, 5, 0, 2 * Math.PI); ctx.fill();
+    }
+  });
+}
+
+/* ═══ SEMANTIC RESONANCE ══════════════════════════════════ */
+function runResonance() {
+  var query = document.getElementById('resonanceQuery').value.trim();
+  if (!query) { alert('Query is required'); return; }
+  var out = document.getElementById('resonanceOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Mapping resonance...</div>';
+  fetch('/v1/resonance', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({query: query})
+  }).then(requireBackendJson).then(function(d) {
+    var archetypes = ['logos','mythos','ethos','telos','pathos'];
+    var colors = {'logos':'#38bdf8','mythos':'#a78bfa','ethos':'#34d399','telos':'#fbbf24','pathos':'#f87171'};
+    var barsHtml = archetypes.map(function(a) {
+      var pct = ((d.archetype_scores[a] || 0) * 100).toFixed(1);
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;">' +
+        '<span style="width:50px;color:' + colors[a] + ';font-weight:700;">' + a + '</span>' +
+        '<div style="flex:1;height:18px;background:var(--bg);border-radius:4px;overflow:hidden;">' +
+          '<div style="width:' + pct + '%;height:100%;background:' + colors[a] + ';border-radius:4px;transition:width .3s;"></div>' +
+        '</div>' +
+        '<span style="width:45px;text-align:right;">' + pct + '%</span></div>';
+    }).join('');
+    out.innerHTML =
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Dominant Archetype: <strong style="color:' + colors[d.dominant_archetype] + ';">' + d.dominant_archetype.toUpperCase() + '</strong></div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">' + barsHtml + '</div>' +
+        '<div style="margin-top:12px;display:flex;gap:24px;font-size:12px;color:var(--dim);">' +
+          '<div>Resonance Score: <strong>' + d.resonance_score.toFixed(4) + '</strong></div>' +
+          '<div>Mixture Entropy: <strong>' + d.mixture_entropy.toFixed(4) + '</strong></div>' +
+          '<div>2D Coords: (' + d.coordinates_2d[0].toFixed(3) + ', ' + d.coordinates_2d[1].toFixed(3) + ')</div>' +
+        '</div>' +
+      '</div>';
+    drawResonanceRadar(d, colors);
+  }).catch(function(e) { out.innerHTML = unavailableText('Semantic Resonance'); setBackendStatus(false); });
+}
+
+function drawResonanceRadar(d, colors) {
+  var canvas = document.getElementById('resonanceCanvas');
+  canvas.style.display = 'block';
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 40;
+  ctx.clearRect(0, 0, W, H);
+  var archetypes = ['logos','mythos','ethos','telos','pathos'];
+  var N = archetypes.length;
+
+  // Draw concentric rings
+  ctx.strokeStyle = 'rgba(122,148,184,0.15)'; ctx.lineWidth = 1;
+  for (var ring = 1; ring <= 5; ring++) {
+    ctx.beginPath();
+    for (var j = 0; j <= N; j++) {
+      var angle = (j % N) * (2 * Math.PI / N) - Math.PI / 2;
+      var r = R * (ring / 5);
+      var px = cx + r * Math.cos(angle);
+      var py = cy + r * Math.sin(angle);
+      j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.stroke();
+  }
+
+  // Draw spokes and labels
+  archetypes.forEach(function(a, i) {
+    var angle = i * (2 * Math.PI / N) - Math.PI / 2;
+    ctx.strokeStyle = 'rgba(122,148,184,0.25)';
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + R * Math.cos(angle), cy + R * Math.sin(angle));
+    ctx.stroke();
+    ctx.fillStyle = colors[a]; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+    var lx = cx + (R + 22) * Math.cos(angle);
+    var ly = cy + (R + 22) * Math.sin(angle);
+    ctx.fillText(a.toUpperCase(), lx, ly + 4);
+  });
+
+  // Draw filled polygon for scores
+  ctx.fillStyle = 'rgba(56,189,248,0.15)';
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  archetypes.forEach(function(a, i) {
+    var angle = i * (2 * Math.PI / N) - Math.PI / 2;
+    var val = d.archetype_scores[a] || 0;
+    var px = cx + R * val * Math.cos(angle);
+    var py = cy + R * val * Math.sin(angle);
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  });
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+
+  // Draw score dots
+  archetypes.forEach(function(a, i) {
+    var angle = i * (2 * Math.PI / N) - Math.PI / 2;
+    var val = d.archetype_scores[a] || 0;
+    var px = cx + R * val * Math.cos(angle);
+    var py = cy + R * val * Math.sin(angle);
+    ctx.fillStyle = colors[a];
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, 2 * Math.PI); ctx.fill();
+  });
+}
+
+/* ═══ QUANTUM DENSITY & DECOHERENCE ══════════════════════ */
+function runQuantumState() {
+  var p = parseFloat(document.getElementById('qsParamP').value);
+  var noise = parseFloat(document.getElementById('qsNoise').value);
+  var ch = document.getElementById('qsChannel').value;
+  var out = document.getElementById('qsOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Analyzing quantum state...</div>';
+  fetch('/v1/quantum/state', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({parameter_p:p, noise_rate:noise, channel_type:ch})
+  }).then(requireBackendJson).then(function(d) {
+    var entColor = d.is_entangled ? 'var(--success)' : 'var(--dim)';
+    var entText = d.is_entangled ? 'ENTANGLED' : 'SEPARABLE / MIXED';
+    var matrixHtml = '<table style="font-family:monospace;font-size:11px;border-collapse:collapse;margin-top:8px;">' +
+      d.density_matrix.map(function(row) {
+        return '<tr>' + row.map(function(cell) {
+          return '<td style="padding:4px 8px;border:1px solid var(--border);text-align:right;">' + cell.toFixed(4) + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</table>';
+    out.innerHTML =
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Quantum State &amp; Entanglement</div>' +
+        '<div style="display:flex;gap:26px;font-size:13px;flex-wrap:wrap;">' +
+          '<div>Von Neumann Entropy: <strong style="color:var(--primary);">' + d.von_neumann_entropy.toFixed(4) + '</strong> bits</div>' +
+          '<div>Purity: <strong style="color:var(--accent);">' + d.purity.toFixed(4) + '</strong></div>' +
+          '<div>Concurrence: <strong style="color:var(--warn);">' + d.concurrence.toFixed(4) + '</strong></div>' +
+          '<div>Status: <strong style="color:' + entColor + ';">' + entText + '</strong></div>' +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:11px;color:var(--dim);">Eigenvalues: [' + d.eigenvalues.map(function(x){return x.toFixed(4);}).join(', ') + ']</div>' +
+      '</div>' +
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Density Matrix &rho;</div>' +
+        matrixHtml +
+      '</div>';
+    drawQuantumCanvas(d);
+  }).catch(function(e) { out.innerHTML = unavailableText('Quantum State'); setBackendStatus(false); });
+}
+
+function drawQuantumCanvas(d) {
+  var canvas = document.getElementById('quantumCanvas');
+  canvas.style.display = 'block';
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  var sz = 40, ox = 50, oy = 40;
+  ctx.fillStyle = '#7a94b8'; ctx.font = '11px sans-serif';
+  ctx.fillText('Density Matrix Heatmap', ox, 24);
+  for (var r = 0; r < 4; r++) {
+    for (var c = 0; c < 4; c++) {
+      var val = Math.min(1.0, Math.max(0.0, d.density_matrix[r][c]));
+      ctx.fillStyle = 'rgba(56, 189, 248, ' + (0.1 + val * 0.9) + ')';
+      ctx.fillRect(ox + c * sz, oy + r * sz, sz - 2, sz - 2);
+      ctx.fillStyle = val > 0.3 ? '#070b13' : '#e8f1fc';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(val.toFixed(2), ox + c * sz + sz / 2, oy + r * sz + sz / 2 + 4);
+    }
+  }
+
+  var bx = 300, by = 40, bw = 240;
+  ctx.fillStyle = '#7a94b8'; ctx.textAlign = 'left'; ctx.font = '11px sans-serif';
+  ctx.fillText('Eigenvalue Spectrum & Entropy', bx, 24);
+  d.eigenvalues.forEach(function(ev, idx) {
+    var barH = 22;
+    var y = by + idx * 36;
+    ctx.fillStyle = 'rgba(129, 140, 248, 0.2)';
+    ctx.fillRect(bx, y, bw, barH);
+    ctx.fillStyle = '#818cf8';
+    ctx.fillRect(bx, y, bw * Math.min(1.0, ev), barH);
+    ctx.fillStyle = '#e8f1fc';
+    ctx.font = '11px monospace';
+    ctx.fillText('lambda ' + (idx + 1) + ' = ' + ev.toFixed(4), bx + 8, y + 15);
+  });
+}
+
+/* ═══ RULE 110 GLIDERS ════════════════════════════════════ */
+function runGliders() {
+  var gL = document.getElementById('gliderLeft').value;
+  var gR = document.getElementById('gliderRight').value;
+  var sep = parseInt(document.getElementById('gliderSep').value) || 10;
+  var steps = parseInt(document.getElementById('gliderSteps').value) || 24;
+  var out = document.getElementById('gliderOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Simulating Rule 110 solitons...</div>';
+  fetch('/v1/wolfram/gliders', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({glider_type_left:gL, glider_type_right:gR, separation:sep, steps:steps, width:40})
+  }).then(requireBackendJson).then(function(d) {
+    out.innerHTML =
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Collision Result: <strong style="color:var(--primary);">' + esc(d.logic_operation_analog) + '</strong></div>' +
+        '<div style="display:flex;gap:24px;font-size:12px;margin-top:6px;color:var(--dim);">' +
+          '<div>Rule: ' + d.rule + '</div>' +
+          '<div>Ether Period: ' + d.ether_period + '</div>' +
+          '<div>Steps: ' + d.steps + ' &times; Width: ' + d.width + '</div>' +
+          '<div>Collisions: ' + d.collision_events.length + '</div>' +
+        '</div>' +
+      '</div>';
+    drawGliderCanvas(d);
+  }).catch(function(e) { out.innerHTML = unavailableText('Rule 110 Gliders'); setBackendStatus(false); });
+}
+
+function drawGliderCanvas(d) {
+  var canvas = document.getElementById('gliderCanvas');
+  canvas.style.display = 'block';
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  var grid = d.grid || [];
+  var rows = grid.length;
+  var cols = rows > 0 ? grid[0].length : 1;
+  var cellW = W / cols;
+  var cellH = H / rows;
+
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      if (grid[r][c] === 1) {
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(c * cellW, r * cellH, Math.max(1, cellW - 0.5), Math.max(1, cellH - 0.5));
+      } else {
+        ctx.fillStyle = '#070b13';
+        ctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+      }
+    }
+  }
+}
+
+/* ═══ COGNITIVE TRAJECTORY ════════════════════════════════ */
+function runTrajectory() {
+  var raw = document.getElementById('trajectorySteps').value.trim();
+  var steps = raw ? raw.split('\n').map(function(s){return s.trim();}).filter(Boolean) : [];
+  if (!steps.length) { alert('Please enter at least one reasoning step.'); return; }
+  var out = document.getElementById('trajectoryOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Tracing cognitive flow...</div>';
+  fetch('/v1/resonance/trajectory', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({steps: steps})
+  }).then(requireBackendJson).then(function(d) {
+    out.innerHTML =
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Cognitive Trajectory Kinematics</div>' +
+        '<div style="display:flex;gap:24px;font-size:13px;flex-wrap:wrap;">' +
+          '<div>Path Length: <strong style="color:var(--primary);">' + d.total_path_length.toFixed(3) + '</strong></div>' +
+          '<div>Net Drift: <strong style="color:var(--accent);">' + d.net_cognitive_drift.toFixed(3) + '</strong></div>' +
+          '<div>Dispersion Entropy: <strong style="color:var(--warn);">' + d.trajectory_dispersion_entropy.toFixed(3) + '</strong></div>' +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:12px;color:var(--dim);">' + esc(d.summary) + '</div>' +
+      '</div>';
+    drawTrajectoryCanvas(d);
+  }).catch(function(e) { out.innerHTML = unavailableText('Cognitive Trajectory'); setBackendStatus(false); });
+}
+
+function drawTrajectoryCanvas(d) {
+  var canvas = document.getElementById('trajectoryCanvas');
+  canvas.style.display = 'block';
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 40;
+  ctx.clearRect(0, 0, W, H);
+
+  var archetypes = ['logos','mythos','ethos','telos','pathos'];
+  var colors = {'logos':'#38bdf8','mythos':'#a78bfa','ethos':'#34d399','telos':'#fbbf24','pathos':'#f87171'};
+  var N = 5;
+
+  ctx.strokeStyle = 'rgba(122,148,184,0.18)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (var j = 0; j <= N; j++) {
+    var ang = (j % N) * (2 * Math.PI / N) - Math.PI / 2;
+    var px = cx + R * Math.cos(ang);
+    var py = cy + R * Math.sin(ang);
+    j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
+  archetypes.forEach(function(a, i) {
+    var ang = i * (2 * Math.PI / N) - Math.PI / 2;
+    ctx.strokeStyle = 'rgba(122,148,184,0.2)';
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + R * Math.cos(ang), cy + R * Math.sin(ang)); ctx.stroke();
+    ctx.fillStyle = colors[a]; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(a.toUpperCase(), cx + (R + 18) * Math.cos(ang), cy + (R + 18) * Math.sin(ang) + 4);
+  });
+
+  var coords = d.coordinates_2d || [];
+  if (coords.length > 0) {
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    coords.forEach(function(pt, idx) {
+      var x = cx + pt[0] * R * 0.9;
+      var y = cy + pt[1] * R * 0.9;
+      idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    coords.forEach(function(pt, idx) {
+      var x = cx + pt[0] * R * 0.9;
+      var y = cy + pt[1] * R * 0.9;
+      ctx.fillStyle = idx === 0 ? '#34d399' : (idx === coords.length - 1 ? '#f87171' : '#38bdf8');
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = '#070b13'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(idx + 1, x, y + 3);
+    });
+  }
+}
+
+/* ═══ SPECULATIVE TREE SEARCH ═════════════════════════════ */
+function runSpeculativeTree() {
+  var q = document.getElementById('specTreeQuery').value.trim();
+  if (!q) { alert('Please enter a query.'); return; }
+  var br = parseInt(document.getElementById('specTreeBranching').value) || 3;
+  var dp = parseInt(document.getElementById('specTreeDepth').value) || 4;
+  var out = document.getElementById('specTreeOutput');
+  out.innerHTML = '<div style="color:var(--dim);text-align:center;">Exploring speculative tree with PRM...</div>';
+  fetch('/v1/speculative-tree', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({query: q, branching_factor: br, max_depth: dp})
+  }).then(requireBackendJson).then(function(d) {
+    out.innerHTML =
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Speculative Search Metrics</div>' +
+        '<div style="display:flex;gap:24px;font-size:13px;flex-wrap:wrap;">' +
+          '<div>Evaluated Nodes: <strong style="color:var(--primary);">' + d.total_nodes_evaluated + '</strong></div>' +
+          '<div>Backtracks Pruned: <strong style="color:var(--warn);">' + d.backtracks_count + '</strong></div>' +
+          '<div>PRM Mean Score: <strong style="color:var(--accent);">' + (d.prm_mean_score * 100).toFixed(1) + '%</strong></div>' +
+          '<div>Optimal Path Depth: <strong>' + d.optimal_path_node_ids.length + '</strong></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="stat-card">' +
+        '<div class="stat-card-title">Optimal Verified Reasoning Path</div>' +
+        '<pre style="white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--text);background:var(--bg);padding:10px;border-radius:6px;">' + esc(d.final_output) + '</pre>' +
+      '</div>';
+    drawSpecTreeCanvas(d);
+  }).catch(function(e) { out.innerHTML = unavailableText('Speculative Tree'); setBackendStatus(false); });
+}
+
+function drawSpecTreeCanvas(d) {
+  var canvas = document.getElementById('specTreeCanvas');
+  canvas.style.display = 'block';
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  var nodes = d.nodes || [];
+  var optSet = {};
+  (d.optimal_path_node_ids || []).forEach(function(nid){ optSet[nid] = true; });
+
+  var byDepth = {};
+  nodes.forEach(function(n) {
+    byDepth[n.depth] = byDepth[n.depth] || [];
+    byDepth[n.depth].push(n);
+  });
+
+  var maxD = Math.max.apply(null, Object.keys(byDepth).map(Number).concat([1]));
+  var nodeCoords = {};
+
+  Object.keys(byDepth).forEach(function(depStr) {
+    var dep = parseInt(depStr);
+    var list = byDepth[dep];
+    var x = 50 + (dep / Math.max(1, maxD)) * (W - 100);
+    list.forEach(function(n, i) {
+      var y = 30 + ((i + 1) / (list.length + 1)) * (H - 60);
+      nodeCoords[n.node_id] = {x: x, y: y, node: n};
+    });
+  });
+
+  nodes.forEach(function(n) {
+    if (n.parent_id && nodeCoords[n.parent_id] && nodeCoords[n.node_id]) {
+      var p = nodeCoords[n.parent_id];
+      var c = nodeCoords[n.node_id];
+      ctx.strokeStyle = (optSet[n.parent_id] && optSet[n.node_id]) ? '#38bdf8' : (n.is_pruned_backtracked ? 'rgba(248,113,113,0.3)' : 'rgba(122,148,184,0.3)');
+      ctx.lineWidth = (optSet[n.parent_id] && optSet[n.node_id]) ? 2.5 : 1;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(c.x, c.y); ctx.stroke();
+    }
+  });
+
+  nodes.forEach(function(n) {
+    var pt = nodeCoords[n.node_id];
+    if (!pt) return;
+    var rad = optSet[n.node_id] ? 7 : 5;
+    ctx.fillStyle = optSet[n.node_id] ? '#38bdf8' : (n.is_pruned_backtracked ? '#f87171' : '#818cf8');
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, rad, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = '#e8f1fc'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('PRM ' + Math.round(n.prm_score * 100), pt.x, pt.y - rad - 2);
+  });
+}
+
+
 </script>
 </body>
 </html>

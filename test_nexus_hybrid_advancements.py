@@ -201,7 +201,8 @@ def test_nexus_engine_process_solve_exact_remains_authoritative():
         mode="solve",
     )
     assert res.mode_selected in ("solve", "scientific")
-    assert res.confidence == 1.0
+    assert res.confidence is None
+    assert res.epistemics["confidence_kind"] == "deterministic_assurance_not_probability"
     assert res.epistemics["decision"] == "answered"
     assert res.epistemics["answer_authority"] is True
     assert "verified_answer_receipt" in res.audit_receipts

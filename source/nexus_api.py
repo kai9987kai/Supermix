@@ -7,16 +7,20 @@ never presented as calibrated probabilities of correctness.
 Service endpoints:
 * ``POST /v1/solve`` -- Strict verifier-first solve surface plus audit-only legacy solver details
 * ``POST /v1/innovate`` -- Heuristic SCAMPER/TRIZ ideation analysis
-* ``POST /v1/chat`` -- Multi-turn conversational chat with persona adaptation and memory
-* ``POST /v1/think`` -- Evidence-gated routing across the experimental subsystems
+* ``POST /v1/chat`` -- Proof-carrying exact turns or persona analysis with memory
+* ``POST /v1/think`` -- Evidence-gated routing across the experimental subsystems; ``stream=true`` enables proof-carrying SSE
+* ``POST /v1/verify`` -- Fresh renderer revalidation of a proof-carrying answer
 * ``POST /v1/swarm`` -- Bounded heuristic cognitive-swarm deliberation
 * ``POST /v1/got`` -- Bounded heuristic graph search
 * ``POST /v1/scientific`` -- Strict v71 closed-world deterministic solver
 * ``GET /v1/personas`` -- Available conversation personas catalog
 * ``GET /v1/telemetry`` -- Diagnostic configuration and synthetic metric probe
-* ``POST /v1/feedback`` -- Fail-closed compatibility endpoint (no unverified learning)
-* ``GET /v1/models`` -- Model Catalog and Routing Capabilities
-* ``GET /health`` -- Health and Readiness Probe
+ * ``POST /v1/feedback`` -- Fail-closed compatibility endpoint (no unverified learning)
+ * ``GET /v1/models`` -- Model Catalog and Routing Capabilities
+ * ``GET /v1/risk-control`` -- Frozen selective-risk protocol (shadow only)
+ * ``POST /v1/risk-control/audit`` -- Deterministic frozen arithmetic audit
+ * ``POST /v1/risk-control/evaluate`` -- Evaluate caller-supplied shadow records
+ * ``GET /health`` -- Health and Readiness Probe
 """
 
 import argparse
@@ -28,15 +32,22 @@ import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import grounding_runtime as grounding
 import mimomix_observatory as observatory
 import nexus_chat as chat
 import nexus_epistemics as epistemics
 import nexus_got as got
+import nexus_nonce_ledger as nonce_ledger
+import nexus_proof as proof
+import nexus_risk_control as risk_control
 import nexus_swarm as swarm
 from nexus_engine import NexusEngine, NexusResult, build_default_engine
+
+
+_VERIFY_NONCE_TTL_SECONDS = 15 * 60
+_VERIFY_NONCE_CACHE_SIZE = 4096
 
 
 __all__ = [
@@ -48,8 +59,31 @@ __all__ = [
     "SwarmRequest",
     "GoTRequest",
     "ScientificRequest",
+    "VerifyRequest",
     "FeedbackRequest",
     "EntropyRequest",
+    "BellRequest",
+    "BellResponse",
+    "ResonanceRequest",
+    "ResonanceResponse",
+    "CompareRequest",
+    "CompareResponse",
+    "QuantumStateRequest",
+    "QuantumStateResponse",
+    "GliderRequest",
+    "GliderResponse",
+    "TrajectoryRequest",
+    "TrajectoryResponse",
+    "SpeculativeTreeRequest",
+    "SpeculativeTreeResponse",
+    "SpeculativeDraftRequest",
+    "SpeculativeDraftResponse",
+    "MerminRequest",
+    "MerminResponse",
+    "ConwayRequest",
+    "ConwayResponse",
+    "ProofRepairRequest",
+    "ProofRepairResponse",
     "NexusApiService",
     "create_app",
     "main",
@@ -60,7 +94,7 @@ __all__ = [
 class ThinkRequest:
     messages: List[Dict[str, str]] = field(default_factory=list)
     prompt: Optional[str] = None
-    mode: str = "auto"  # "auto" | "fast" | "deep" | "agent" | "swarm" | "got" | "scientific" | "solve" | "innovate" | "chat"
+    mode: str = "auto"  # "auto" | "adaptive" | "fast" | "deep" | "agent" | "swarm" | "got" | "scientific" | "solve" | "innovate" | "chat"
     max_output_tokens: int = 256
     thinking_budget: int = 4
     tools: List[Dict[str, Any]] = field(default_factory=list)
@@ -69,6 +103,7 @@ class ThinkRequest:
     entropy_source: Optional[str] = "crypto"
     stream: bool = False
     response_format: Optional[Dict[str, Any]] = None
+    request_nonce: str = ""
 
 
 @dataclass
@@ -79,6 +114,278 @@ class EntropyRequest:
     rule: int = 30
     ca_steps: int = 16
     ca_width: int = 31
+
+
+@dataclass
+class BellRequest:
+    theta_a: float = 0.0
+    theta_a_prime: float = 45.0
+    theta_b: float = 22.5
+    theta_b_prime: float = 67.5
+    shots: int = 1000
+    seed: Optional[int] = 42
+
+
+@dataclass
+class BellResponse:
+    angles_deg: Dict[str, float]
+    shots: int
+    quantum_correlations: Dict[str, float]
+    classical_correlations: Dict[str, float]
+    chsh_s_quantum: float
+    chsh_s_classical: float
+    classical_bound: float
+    tsirelson_bound: float
+    violates_classical_bound: bool
+    tsirelson_ratio: float
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ResonanceRequest:
+    query: str = ""
+
+
+@dataclass
+class ResonanceResponse:
+    query: str
+    archetype_scores: Dict[str, float]
+    dominant_archetype: str
+    resonance_score: float
+    mixture_entropy: float
+    coordinates_2d: Tuple[float, float]
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CompareRequest:
+    query_a: str
+    query_b: Optional[str] = None
+    mode_a: str = "auto"
+    mode_b: str = "deep"
+    entropy_source_a: str = "crypto"
+    entropy_source_b: str = "seeded"
+
+
+@dataclass
+class CompareResponse:
+    query_a: str
+    query_b: str
+    mode_a: str
+    mode_b: str
+    output_a: str
+    output_b: str
+    latency_ms_a: float
+    latency_ms_b: float
+    latency_delta_pct: float
+    token_count_a: int
+    token_count_b: int
+    latency_class_a: str
+    latency_class_b: str
+    jensen_shannon_divergence: float
+    semantic_distance: float
+    rsi_a: float
+    rsi_b: float
+    summary_verdict: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class QuantumStateRequest:
+    parameter_p: float = 1.0
+    noise_rate: float = 0.0
+    channel_type: str = "depolarizing"  # "depolarizing" | "dephasing" | "unitary"
+
+
+@dataclass
+class QuantumStateResponse:
+    parameter_p: float
+    noise_rate: float
+    channel_type: str
+    density_matrix: List[List[float]]
+    eigenvalues: List[float]
+    von_neumann_entropy: float
+    purity: float
+    concurrence: float
+    is_entangled: bool
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GliderRequest:
+    glider_type_left: str = "glider_A"
+    glider_type_right: str = "glider_C"
+    separation: int = 10
+    steps: int = 24
+    width: int = 40
+
+
+@dataclass
+class GliderResponse:
+    rule: int
+    grid: List[List[int]]
+    steps: int
+    width: int
+    ether_period: int
+    gliders_identified: List[Dict[str, Any]]
+    collision_events: List[Dict[str, Any]]
+    logic_operation_analog: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TrajectoryRequest:
+    steps: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TrajectoryResponse:
+    steps: List[str]
+    coordinates_2d: List[Tuple[float, float]]
+    step_archetypes: List[str]
+    velocities: List[float]
+    curvatures: List[float]
+    total_path_length: float
+    net_cognitive_drift: float
+    trajectory_dispersion_entropy: float
+    summary: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SpeculativeTreeRequest:
+    query: str
+    branching_factor: int = 3
+    max_depth: int = 4
+
+
+@dataclass
+class SpeculativeTreeResponse:
+    query: str
+    nodes: List[Dict[str, Any]]
+    optimal_path_node_ids: List[str]
+    total_nodes_evaluated: int
+    backtracks_count: int
+    final_output: str
+    prm_mean_score: float
+    receipt: Dict[str, Any] = field(default_factory=dict)
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# v85 Request / Response dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SpeculativeDraftRequest:
+    prompt: str = "Explain quantum decoherence"
+    target_acceptance: float = 0.75
+    local_entropy: float = 0.5
+    steps: int = 4
+
+
+@dataclass
+class SpeculativeDraftResponse:
+    prompt: str
+    steps_executed: int
+    draft_lengths: List[int]
+    mean_draft_length: float
+    accepted_tokens: int
+    rejected_tokens: int
+    acceptance_rate: float
+    theoretical_speedup: float
+    emitted_sequence: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class MerminRequest:
+    state_type: str = "GHZ"  # "GHZ" | "W" | "separable"
+
+
+@dataclass
+class MerminResponse:
+    state_type: str
+    mermin_m3: float
+    classical_bound: float
+    quantum_maximum: float
+    violates_classical_bound: bool
+    observables: Dict[str, float]
+    state_fidelity: float
+    summary: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ConwayRequest:
+    pattern_name: str = "glider"
+    steps: int = 16
+    height: int = 24
+    width: int = 24
+
+
+@dataclass
+class ConwayResponse:
+    pattern_name: str
+    grid: List[List[int]]
+    steps: int
+    height: int
+    width: int
+    active_cells_trajectory: List[int]
+    spatial_block_entropy: float
+    morphological_complexity: float
+    detected_period: Optional[int]
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ProofRepairRequest:
+    assertions: List[str] = field(default_factory=lambda: ["A implies B", "B implies C"])
+
+
+@dataclass
+class ProofRepairResponse:
+    original_assertions: List[str]
+    satisfiable: bool
+    detected_contradictions: List[str]
+    repaired_assertions: List[str]
+    repair_operations_applied: List[str]
+    receipt: Dict[str, Any] = field(default_factory=dict)
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -93,6 +400,7 @@ class ThinkResponse:
     thought_steps: List[Dict[str, Any]] = field(default_factory=list)
     audit_receipts: Dict[str, Any] = field(default_factory=dict)
     telemetry: Dict[str, Any] = field(default_factory=dict)
+    proof_capsule: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -101,6 +409,7 @@ class ThinkResponse:
 @dataclass
 class SolveRequest:
     query: str
+    request_nonce: str = ""
 
 
 @dataclass
@@ -114,6 +423,7 @@ class ChatTurnRequest:
     session_id: str
     message: str
     persona: Optional[str] = None
+    request_nonce: str = ""
 
 
 @dataclass
@@ -133,6 +443,17 @@ class GoTRequest:
 @dataclass
 class ScientificRequest:
     query: str
+    request_nonce: str = ""
+
+
+@dataclass
+class VerifyRequest:
+    query: str
+    output: str
+    display_answer: str
+    surface: str
+    proof_capsule: Dict[str, Any] = field(default_factory=dict)
+    request_nonce: str = ""
 
 
 @dataclass
@@ -145,7 +466,7 @@ class FeedbackRequest:
 
 _HEURISTIC_MODES = frozenset({"innovate", "chat", "swarm", "got"})
 _EXACT_MODES = frozenset({"solve", "scientific"})
-_NEURAL_MODES = frozenset({"fast", "deep", "agent"})
+_NEURAL_MODES = frozenset({"fast", "deep", "adaptive", "agent"})
 _NEXUS_MODES = frozenset({"auto", *_EXACT_MODES, *_HEURISTIC_MODES, *_NEURAL_MODES})
 _NEURAL_INPUT_CHAR_LIMIT = 64
 _STUDIO_PATH = Path(__file__).resolve().parent.parent / "web_static" / "nexus_studio.html"
@@ -175,15 +496,42 @@ def _fresh_verified_grounding(
     if not epistemics.verify_grounded_answer_result(
         result,
         receipt_schema_version=grounding.VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION,
+        runtime_version=grounding.GROUNDING_RUNTIME_VERSION,
         require_science_plan=require_science_plan,
     ):
         return None
     return dict(result)
 
 
-def _verified_epistemics(grounded: Mapping[str, Any]) -> Dict[str, Any]:
+def _proof_capsule(
+    query: str,
+    grounded: Mapping[str, Any],
+    surface: str,
+    request_nonce: str = "",
+) -> Optional[Dict[str, Any]]:
+    return proof.build_proof_capsule(
+        query=query,
+        grounded=grounded,
+        receipt_schema_version=grounding.VERIFIED_ANSWER_RECEIPT_SCHEMA_VERSION,
+        runtime_version=grounding.GROUNDING_RUNTIME_VERSION,
+        surface=surface,
+        request_nonce=request_nonce,
+    )
+
+
+def _verified_epistemics(
+    grounded: Mapping[str, Any],
+    *,
+    query: str,
+    surface: str,
+    request_nonce: str = "",
+) -> Dict[str, Any]:
+    if not proof.valid_request_nonce(request_nonce):
+        raise ValueError("verified API answers require a valid request nonce")
     receipt = grounded.get("answer_receipt")
     receipt_sha256 = _canonical_sha256(receipt) if isinstance(receipt, Mapping) else ""
+    output_text = str(grounded.get("text") or "")
+    nonce_sha256 = proof.text_sha256(request_nonce)
     return epistemics.verified_exact_decision(
         reason=f"fresh_grounding_recompute:{grounded.get('reason', 'verified')}",
         claim_scope=(
@@ -191,7 +539,11 @@ def _verified_epistemics(grounded: Mapping[str, Any]) -> Dict[str, Any]:
             "within the verifier's bounded grammar."
         ),
         verifier_id="grounding_runtime.finalize_grounded_response",
+        request_sha256=proof.text_sha256(query),
+        output_sha256=proof.text_sha256(output_text),
         verifier_receipt_sha256=receipt_sha256,
+        request_nonce_sha256=nonce_sha256,
+        surface=surface,
         protocol={
             "fresh_recompute": True,
             "grounding_reason": grounded.get("reason", ""),
@@ -382,6 +734,109 @@ def _safe_abstention_telemetry(result: NexusResult) -> Dict[str, Any]:
             safe_entropy["mean_entropy_value"] = float(mean_value)
         public["entropy_telemetry"] = safe_entropy
 
+    compute = raw.get("compute_budget_report")
+    if (
+        isinstance(compute, Mapping)
+        and compute.get("mode") == "adaptive"
+        and compute.get("policy_evidence")
+        == "authored_shadow_heuristic_not_calibrated"
+        and compute.get("execution_authorized") is False
+        and compute.get("answer_authority") is False
+    ):
+        cycles = compute.get("applied_max_cycles", compute.get("allocated_cycles"))
+        executed = compute.get("executed_mechanisms")
+        if (
+            isinstance(cycles, int)
+            and not isinstance(cycles, bool)
+            and 1 <= cycles <= 64
+            and isinstance(executed, Mapping)
+            and executed.get("applied_max_cycles") == cycles
+            and executed.get("adaptive_thinking") is True
+        ):
+            observed_cycles = executed.get("observed_cycles")
+            if observed_cycles is not None and (
+                not isinstance(observed_cycles, int)
+                or isinstance(observed_cycles, bool)
+                or not 1 <= observed_cycles <= cycles
+            ):
+                observed_cycles = None
+            safe_executed: Dict[str, Any] = {
+                "requested_cycles": cycles,
+                "applied_max_cycles": cycles,
+                "observed_cycles": observed_cycles,
+                "exit_reason": str(executed.get("exit_reason", "unknown"))[:64],
+                "adaptive_thinking": True,
+                "differential_attention": executed.get("differential_attention") is True,
+                "mixture_of_depths": executed.get("mixture_of_depths") is True,
+                "multi_latent_attention": executed.get("multi_latent_attention") is True,
+            }
+            applied_ratio = executed.get("mod_capacity_ratio")
+            if (
+                isinstance(applied_ratio, (int, float))
+                and not isinstance(applied_ratio, bool)
+                and math.isfinite(float(applied_ratio))
+                and 0.0 < float(applied_ratio) <= 1.0
+            ):
+                safe_executed["mod_capacity_ratio"] = float(applied_ratio)
+            else:
+                safe_executed["mod_capacity_ratio"] = None
+
+            safe_compute: Dict[str, Any] = {
+                "mode": "adaptive",
+                "allocated_cycles": cycles,
+                "shadow_recommended_cycles": (
+                    compute.get("shadow_recommended_cycles")
+                    if isinstance(compute.get("shadow_recommended_cycles"), int)
+                    and not isinstance(compute.get("shadow_recommended_cycles"), bool)
+                    and 1 <= compute.get("shadow_recommended_cycles") <= 64
+                    else None
+                ),
+                "applied_max_cycles": cycles,
+                "budget_source": str(compute.get("budget_source", "unknown"))[:64],
+                "shadow_recommendation_applied": False,
+                "policy_evidence": "authored_shadow_heuristic_not_calibrated",
+                "execution_authorized": False,
+                "answer_authority": False,
+                "halting_policy_trained": False,
+                "policy_calibrated": False,
+                "executed_mechanisms": safe_executed,
+                "optional_mechanism_request_applied": (
+                    compute.get("optional_mechanism_request_applied") is True
+                ),
+                "report_scope": (
+                    "observed_single_forward_telemetry_not_quality_or_calibration"
+                ),
+            }
+            raw_census = compute.get("module_census")
+            safe_census: Dict[str, Any] = {}
+            if isinstance(raw_census, Mapping):
+                for name in (
+                    "differential_attention",
+                    "mixture_of_depths",
+                    "multi_latent_attention",
+                ):
+                    row = raw_census.get(name)
+                    if isinstance(row, Mapping):
+                        safe_census[name] = {
+                            "available": row.get("available") is True,
+                            "configured": row.get("configured") is True,
+                            "executed": row.get("executed") is True,
+                            "efficiency_validated": row.get("efficiency_validated") is True,
+                        }
+            safe_compute["module_census"] = safe_census
+            requested_ratio = compute.get("requested_mod_capacity_ratio")
+            if (
+                isinstance(requested_ratio, (int, float))
+                and not isinstance(requested_ratio, bool)
+                and math.isfinite(float(requested_ratio))
+                and 0.0 < float(requested_ratio) <= 1.0
+            ):
+                safe_compute["requested_mod_capacity_ratio"] = float(requested_ratio)
+            safe_compute["requested_differential_attention"] = (
+                compute.get("requested_differential_attention") is True
+            )
+            public["compute_budget_report"] = safe_compute
+
     public["engine_output_withheld_by_api_boundary"] = True
     return public
 
@@ -389,10 +844,62 @@ def _safe_abstention_telemetry(result: NexusResult) -> Dict[str, Any]:
 class NexusApiService:
     """Core framework-independent service handler for the NexusMind API."""
 
-    def __init__(self, engine: Optional[NexusEngine] = None):
+    def __init__(
+        self,
+        engine: Optional[NexusEngine] = None,
+        *,
+        verification_nonce_store: Optional[nonce_ledger.NonceLedger] = None,
+        verification_nonce_db: Optional[str | Path] = None,
+    ):
+        if verification_nonce_store is not None and verification_nonce_db is not None:
+            raise ValueError("choose verification_nonce_store or verification_nonce_db, not both")
         self.engine = engine or build_default_engine()
         self._trusted_local_engine = type(self.engine) is NexusEngine
         self._lock = threading.Lock()
+        self._verification_nonce_store = (
+            verification_nonce_store
+            if verification_nonce_store is not None
+            else (
+                nonce_ledger.SQLiteNonceLedger(
+                    verification_nonce_db,
+                    ttl_seconds=_VERIFY_NONCE_TTL_SECONDS,
+                    max_entries=_VERIFY_NONCE_CACHE_SIZE,
+                )
+                if verification_nonce_db is not None
+                else nonce_ledger.InMemoryNonceLedger(
+                    ttl_seconds=_VERIFY_NONCE_TTL_SECONDS,
+                    max_entries=_VERIFY_NONCE_CACHE_SIZE,
+                )
+            )
+        )
+
+    def _ensure_verification_nonce_store(self) -> nonce_ledger.NonceLedger:
+        """Lazily support contract-only ``__new__`` test services as well."""
+
+        store = getattr(self, "_verification_nonce_store", None)
+        if store is None:
+            store = nonce_ledger.InMemoryNonceLedger(
+                ttl_seconds=_VERIFY_NONCE_TTL_SECONDS,
+                max_entries=_VERIFY_NONCE_CACHE_SIZE,
+            )
+            self._verification_nonce_store = store
+        return store
+
+    def _verification_nonce_seen(self, nonce: str) -> bool:
+        """Return whether an eligible nonce was already accepted recently."""
+
+        if not nonce:
+            return False
+        key = proof.text_sha256(nonce)
+        return self._ensure_verification_nonce_store().seen(key)
+
+    def _remember_verification_nonce(self, nonce: str) -> bool:
+        """Atomically consume a successful nonce; return false on a race/replay."""
+
+        if not nonce:
+            return True
+        key = proof.text_sha256(nonce)
+        return self._ensure_verification_nonce_store().consume(key)
 
     def handle_think(self, req: ThinkRequest) -> ThinkResponse:
         api_started = time.perf_counter()
@@ -437,18 +944,29 @@ class NexusApiService:
         # answer is independently recomputed at the API boundary from the
         # submitted query, and exact modes never degrade into raw analysis.
         if decision == "answered" or selected_mode in _EXACT_MODES:
+            nonce_valid = proof.valid_request_nonce(req.request_nonce)
             grounded = _fresh_verified_grounding(
                 query,
                 require_science_plan=selected_mode == "scientific",
             )
-            if grounded is not None:
-                public_epistemics = _verified_epistemics(grounded)
+            capsule = (
+                _proof_capsule(query, grounded, "think", req.request_nonce)
+                if grounded is not None
+                else None
+            )
+            if grounded is not None and capsule is not None:
+                public_epistemics = _verified_epistemics(
+                    grounded,
+                    query=query,
+                    surface="think",
+                    request_nonce=req.request_nonce,
+                )
                 answer_receipt = dict(grounded.get("answer_receipt") or {})
                 return ThinkResponse(
                     model="nexus-exact-solver",
                     mode_selected=selected_mode,
                     output=str(grounded["text"]),
-                    confidence=1.0,
+                    confidence=None,
                     latency_ms=api_latency_ms(),
                     speculative_acceptance_rate=None,
                     epistemics=public_epistemics,
@@ -457,9 +975,9 @@ class NexusApiService:
                             "step_index": 1,
                             "stage": "api_verifier_recompute",
                             "content": "The API independently reran the strict closed-world verifier for this submitted query.",
-                            "confidence": 1.0,
+                            "confidence": None,
                             "telemetry": {
-                                "score_kind": "deterministic_in_scope",
+                                "assurance_kind": "deterministic_assurance_not_probability",
                                 "verifier_calls": 1,
                             },
                         }
@@ -470,13 +988,23 @@ class NexusApiService:
                         "api_fresh_recompute": True,
                         "grounding_reason": grounded.get("reason", ""),
                         "external_tool_calls_executed": 0,
+                        "assurance_kind": "deterministic_assurance_not_probability",
                     },
+                    proof_capsule=capsule,
                 )
 
             result_epistemics = _abstained_epistemics(
-                reason="api_fresh_reverification_failed",
+                reason=(
+                    "valid_request_nonce_required"
+                    if grounded is not None and not nonce_valid
+                    else "api_fresh_reverification_failed"
+                ),
                 limitations=(
-                    "The API independently reran the strict verifier and it did not admit the complete query.",
+                    (
+                        "The strict verifier admitted the query, but public answer authority requires a 16-128 character ASCII request nonce."
+                        if grounded is not None and not nonce_valid
+                        else "The API independently reran the strict verifier and it did not admit the complete query."
+                    ),
                     "The engine's candidate, confidence, trace, and receipts were withheld.",
                 ),
             )
@@ -542,9 +1070,68 @@ class NexusApiService:
             telemetry=_safe_abstention_telemetry(result),
         )
 
+    def handle_think_stream(self, req: ThinkRequest):
+        """Yield real-time JSON event dicts for Server-Sent Events streaming."""
+        prompt_text = req.prompt or (req.messages[-1]["content"] if req.messages else "")
+        yield {
+            "event": "start",
+            "stream_contract": "nexus-sse-proof-carrying-v1",
+            "mode": req.mode,
+            "prompt": prompt_text,
+            "timestamp": time.time(),
+        }
+
+        resp = self.handle_think(req)
+
+        for step in resp.thought_steps:
+            yield {
+                "event": "thinking_step",
+                "step_index": step.get("step_index", 1),
+                "stage": step.get("stage", "ponder"),
+                "content": step.get("content", ""),
+                "telemetry": step.get("telemetry", {}),
+            }
+
+        out_text = resp.output or ""
+        chunk_size = max(1, len(out_text) // 5) if len(out_text) > 10 else len(out_text)
+        chunks = [out_text[i : i + chunk_size] for i in range(0, len(out_text), chunk_size)]
+        if chunks:
+            for chunk_index, chunk in enumerate(chunks):
+                yield {
+                    "event": "token",
+                    "delta": chunk,
+                    "chunk_index": chunk_index,
+                    "chunk_count": len(chunks),
+                }
+
+        yield {
+            "event": "telemetry",
+            "model": resp.model,
+            "mode_selected": resp.mode_selected,
+            "confidence": resp.confidence,
+            "latency_ms": resp.latency_ms,
+            "epistemics": resp.epistemics,
+            "telemetry": resp.telemetry,
+            "audit_receipts": resp.audit_receipts,
+            "proof_capsule": resp.proof_capsule,
+        }
+
+        yield {
+            "event": "done",
+            "stream_contract": "nexus-sse-proof-carrying-v1",
+            "status": str(resp.epistemics.get("decision") or "abstained"),
+            "proof_capsule_sha256": str(resp.proof_capsule.get("capsule_sha256") or ""),
+        }
+
     def handle_solve(self, req: SolveRequest) -> Dict[str, Any]:
         query = str(req.query or "").strip()
+        nonce_valid = proof.valid_request_nonce(req.request_nonce)
         grounded = _fresh_verified_grounding(query)
+        capsule = (
+            _proof_capsule(query, grounded, "solve", req.request_nonce)
+            if grounded is not None
+            else None
+        )
         with self._lock:
             legacy = self.engine.solver_engine.solve(query)
 
@@ -558,11 +1145,20 @@ class NexusApiService:
         if legacy.solved and legacy.receipt is not None:
             legacy_audit["receipt_schema_version"] = legacy.receipt.schema_version
 
-        if grounded is None:
+        if grounded is None or capsule is None:
+            nonce_required = grounded is not None and not nonce_valid
             decision = _abstained_epistemics(
-                reason="strict_full_query_verifier_did_not_admit_answer",
+                reason=(
+                    "valid_request_nonce_required"
+                    if nonce_required
+                    else "strict_full_query_verifier_did_not_admit_answer"
+                ),
                 limitations=(
-                    "The complete request was unsupported, ambiguous, negated, mixed-scope, or missing required assumptions.",
+                    (
+                        "The calculation passed grounding, but public answer authority requires a 16-128 character ASCII request nonce."
+                        if nonce_required
+                        else "The complete request was unsupported, ambiguous, negated, mixed-scope, or missing required assumptions."
+                    ),
                     "A legacy formula-pattern match is retained only as audit metadata and its numeric candidate is withheld.",
                 ),
             )
@@ -571,7 +1167,10 @@ class NexusApiService:
                 "solved": False,
                 "answer_authority": False,
                 "output": (
-                    "No verified answer was admitted. Submit one unambiguous closed-world "
+                    "No verified answer was admitted. Supply a valid request nonce and "
+                    "resubmit this calculation."
+                    if nonce_required
+                    else "No verified answer was admitted. Submit one unambiguous closed-world "
                     "calculation with all required assumptions and units."
                 ),
                 "confidence": None,
@@ -631,9 +1230,16 @@ class NexusApiService:
             "display_answer": answer_row.get("display", ""),
             "unit": answer_row.get("unit", ""),
             "steps": step_rows,
-            "confidence": 1.0,
-            "epistemics": _verified_epistemics(grounded),
+            "confidence": None,
+            "assurance_kind": "deterministic_assurance_not_probability",
+            "epistemics": _verified_epistemics(
+                grounded,
+                query=query,
+                surface="solve",
+                request_nonce=req.request_nonce,
+            ),
             "receipt": receipt,
+            "proof_capsule": capsule,
             "audit": {
                 "verified_answer_receipt": answer_receipt,
                 "legacy_nexus_solver": legacy_audit,
@@ -671,6 +1277,63 @@ class NexusApiService:
         return payload
 
     def handle_chat(self, req: ChatTurnRequest) -> Dict[str, Any]:
+        query = str(req.message or "").strip()
+        nonce_valid = proof.valid_request_nonce(req.request_nonce)
+        grounded = _fresh_verified_grounding(query)
+        capsule = (
+            _proof_capsule(query, grounded, "chat", req.request_nonce)
+            if grounded is not None
+            else None
+        )
+        if grounded is not None and not nonce_valid:
+            message = (
+                "No verified answer was admitted. Public answer authority requires "
+                "a valid 16-128 character ASCII request nonce."
+            )
+            return {
+                "status": "abstained",
+                "answer_authority": False,
+                "confidence": None,
+                "reply": message,
+                "output": message,
+                "conversation_state_updated": False,
+                "epistemics": _abstained_epistemics(
+                    reason="valid_request_nonce_required",
+                    limitations=(
+                        "The strict grounder admitted the complete chat turn, but the request lacked an eligible freshness nonce.",
+                    ),
+                ),
+            }
+        if grounded is not None and capsule is not None:
+            result_row = dict(capsule.get("result") or {})
+            return {
+                "status": "answered",
+                "answer_authority": True,
+                "confidence": None,
+                "assurance_kind": "deterministic_assurance_not_probability",
+                "reply": str(grounded.get("text") or ""),
+                "output": str(grounded.get("text") or ""),
+                "display_answer": result_row.get("display_answer", ""),
+                "unit": result_row.get("unit", ""),
+                "intent_detected": "verified_closed_world",
+                "persona_used": {
+                    "persona_type": "verified_solver",
+                    "display_name": "Nexus Verifier",
+                },
+                "conversation_state_updated": False,
+                "thought_steps": [
+                    "The strict grounder admitted the complete chat turn.",
+                    "The numeric claim capsule must be revalidated before rendering.",
+                ],
+                "proof_capsule": capsule,
+                "epistemics": _verified_epistemics(
+                    grounded,
+                    query=query,
+                    surface="chat",
+                    request_nonce=req.request_nonce,
+                ),
+            }
+
         with self._lock:
             res = self.engine.chat_engine.chat(
                 session_id=req.session_id,
@@ -774,17 +1437,36 @@ class NexusApiService:
         return payload
 
     def handle_scientific(self, req: ScientificRequest) -> Dict[str, Any]:
+        nonce_valid = proof.valid_request_nonce(req.request_nonce)
         grounded = _fresh_verified_grounding(req.query, require_science_plan=True)
-        if grounded is None:
+        capsule = (
+            _proof_capsule(req.query, grounded, "scientific", req.request_nonce)
+            if grounded is not None
+            else None
+        )
+        if grounded is None or capsule is None:
+            nonce_required = grounded is not None and not nonce_valid
             return {
                 "status": "abstained",
-                "reason": "strict_science_verifier_did_not_admit_answer",
+                "reason": (
+                    "valid_request_nonce_required"
+                    if nonce_required
+                    else "strict_science_verifier_did_not_admit_answer"
+                ),
                 "answer_authority": False,
                 "confidence": None,
                 "epistemics": _abstained_epistemics(
-                    reason="strict_science_verifier_did_not_admit_answer",
+                    reason=(
+                        "valid_request_nonce_required"
+                        if nonce_required
+                        else "strict_science_verifier_did_not_admit_answer"
+                    ),
                     limitations=(
-                        "The query did not pass the allowlisted science-plan, dimensional, domain, and substitution checks.",
+                        (
+                            "The science query passed grounding, but public answer authority requires a valid 16-128 character ASCII request nonce."
+                            if nonce_required
+                            else "The query did not pass the allowlisted science-plan, dimensional, domain, and substitution checks."
+                        ),
                     ),
                 ),
             }
@@ -793,7 +1475,8 @@ class NexusApiService:
         return {
             "status": "answered",
             "answer_authority": True,
-            "confidence": 1.0,
+            "confidence": None,
+            "assurance_kind": "deterministic_assurance_not_probability",
             "output": grounded["text"],
             "result": {
                 "solved": True,
@@ -803,7 +1486,95 @@ class NexusApiService:
                 "science_plan": dict(reasoning_row.get("science_plan") or {}),
             },
             "receipt": answer_receipt,
-            "epistemics": _verified_epistemics(grounded),
+            "proof_capsule": capsule,
+            "epistemics": _verified_epistemics(
+                grounded,
+                query=req.query,
+                surface="scientific",
+                request_nonce=req.request_nonce,
+            ),
+        }
+
+    def handle_verify(self, req: VerifyRequest) -> Dict[str, Any]:
+        """Freshly revalidate a renderer capsule without echoing rejected claims."""
+
+        query = str(req.query or "")
+        output = str(req.output or "")
+        display_answer = str(req.display_answer or "")
+        request_nonce = str(req.request_nonce or "")
+        if not proof.valid_request_nonce(request_nonce):
+            return {
+                "status": "rejected",
+                "verified": False,
+                "reason": "valid_request_nonce_required",
+                "confidence": None,
+                "assurance_kind": "none",
+                "renderer_may_mark_numeric_claims_verified": False,
+                "fresh_verifier_calls": 0,
+                "capsule_sha256": "",
+            }
+        if self._verification_nonce_seen(request_nonce):
+            return {
+                "status": "rejected",
+                "verified": False,
+                "reason": "request_nonce_replayed",
+                "confidence": None,
+                "assurance_kind": "none",
+                "renderer_may_mark_numeric_claims_verified": False,
+                "fresh_verifier_calls": 0,
+                "capsule_sha256": "",
+            }
+        integrity_valid = proof.verify_proof_capsule_integrity(
+            req.proof_capsule,
+            query=query,
+            output_text=output,
+            display_answer=display_answer,
+            surface=req.surface,
+            request_nonce=request_nonce,
+        )
+        expected: Optional[Dict[str, Any]] = None
+        if integrity_valid:
+            grounded = _fresh_verified_grounding(
+                query,
+                require_science_plan=req.surface == "scientific",
+            )
+            if grounded is not None:
+                expected = _proof_capsule(query, grounded, req.surface, request_nonce)
+        verified = bool(
+            integrity_valid
+            and expected is not None
+            and dict(req.proof_capsule) == expected
+        )
+        replay_race = False
+        ledger_capacity_exhausted = False
+        if verified and request_nonce:
+            try:
+                replay_race = not self._remember_verification_nonce(request_nonce)
+            except nonce_ledger.NonceLedgerCapacityError:
+                ledger_capacity_exhausted = True
+            if replay_race or ledger_capacity_exhausted:
+                verified = False
+        return {
+            "status": "verified" if verified else "rejected",
+            "verified": verified,
+            "reason": (
+                "fresh_recompute_exact_capsule_match"
+                if verified
+                else "nonce_ledger_capacity_exhausted"
+                if ledger_capacity_exhausted
+                else "request_nonce_replayed"
+                if replay_race
+                else "capsule_or_request_binding_rejected"
+            ),
+            "confidence": None,
+            "assurance_kind": (
+                "deterministic_assurance_not_probability" if verified else "none"
+            ),
+            "renderer_may_mark_numeric_claims_verified": verified,
+            "fresh_verifier_calls": 1 if integrity_valid else 0,
+            "capsule_sha256": (
+                expected.get("capsule_sha256", "") if verified and expected else ""
+            ),
         }
 
     def handle_entropy(self, req: EntropyRequest) -> Dict[str, Any]:
@@ -814,7 +1585,7 @@ class NexusApiService:
                 count=req.count,
                 seed=req.seed,
             )
-            ca_grid = self.engine.entropy_engine.cellular_automata_step(
+            ca_analysis = self.engine.run_wolfram_analysis(
                 rule=req.rule,
                 steps=req.ca_steps,
                 width=req.ca_width,
@@ -830,9 +1601,75 @@ class NexusApiService:
             "mean": round(mean_val, 4),
             "variance": round(var_val, 4),
             "rule": req.rule,
-            "cellular_automata_grid": ca_grid,
+            "complexity_class": ca_analysis.complexity_class,
+            "langton_lambda": ca_analysis.langton_lambda,
+            "spatial_entropy": ca_analysis.spatial_entropy,
+            "active_density_mean": ca_analysis.active_density_mean,
+            "transition_table": ca_analysis.transition_table,
+            "cellular_automata_grid": ca_analysis.grid,
             "status": "computed",
         }
+
+    def handle_bell(self, req: BellRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_bell_experiment(
+                theta_a=req.theta_a,
+                theta_a_prime=req.theta_a_prime,
+                theta_b=req.theta_b,
+                theta_b_prime=req.theta_b_prime,
+                shots=req.shots,
+                seed=req.seed,
+            )
+        return res.to_dict()
+
+    def handle_resonance(self, req: ResonanceRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_semantic_resonance(req.query or "")
+        return res.to_dict()
+
+    def handle_compare(self, req: CompareRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_compare(
+                query_a=req.query_a,
+                query_b=req.query_b,
+                mode_a=req.mode_a,
+                mode_b=req.mode_b,
+                entropy_source_a=req.entropy_source_a,
+                entropy_source_b=req.entropy_source_b,
+            )
+        return res.to_dict()
+
+    def handle_quantum_state(self, req: QuantumStateRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_quantum_state_analysis(
+                parameter_p=req.parameter_p,
+                noise_rate=req.noise_rate,
+                channel_type=req.channel_type,
+            )
+        return res.to_dict()
+
+    def handle_gliders(self, req: GliderRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_glider_simulation(
+                glider_type_left=req.glider_type_left,
+                glider_type_right=req.glider_type_right,
+                separation=req.separation,
+                steps=req.steps,
+                width=req.width,
+            )
+        return res.to_dict()
+
+    def handle_trajectory(self, req: TrajectoryRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_cognitive_trajectory(req.steps or ["Initiation"])
+        return res.to_dict()
+
+    def handle_speculative_tree(self, req: SpeculativeTreeRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_speculative_tree_search(req.query or "")
+        return res.to_dict()
+
+
 
     def handle_signals(self) -> Dict[str, Any]:
         with self._lock:
@@ -846,7 +1683,7 @@ class NexusApiService:
                 }
             )
         return {
-            "service": "NexusMind Experimental Signals Diagnostics v80",
+            "service": "NexusMind Experimental Signals Diagnostics v82",
             "q_policy": q_summary,
             "q_policy_role": "disconnected_experiment_not_live_routing",
             "rsi_diagnostic": rsi_diag,
@@ -879,7 +1716,7 @@ class NexusApiService:
                 }
             )
         return {
-            "service": "NexusMind Experimental Evidence API v78.1",
+            "service": "NexusMind Experimental Evidence API v82",
             "status": "diagnostic_only",
             "answer_authority": False,
             "synthetic_metric_probe": {
@@ -931,10 +1768,135 @@ class NexusApiService:
                     "generator_ready": False,
                     "input_limit_characters": _NEURAL_INPUT_CHAR_LIMIT,
                     "configured_sliding_window_tokens": self.engine.config.sliding_window,
-                    "modes": ["fast", "deep", "agent"],
+                    "modes": ["fast", "deep", "adaptive", "agent"],
                 },
             ],
             "catalog_claim_scope": "runtime capabilities observed in this source tree",
+        }
+
+    def _risk_runtime_binding_sha256(self) -> str:
+        """Bind the shadow receipt to the exact local verifier/runtime sources."""
+
+        files = {
+            name: (Path(__file__).resolve().parent / name).read_bytes()
+            for name in (
+                "nexus_api.py",
+                "nexus_engine.py",
+                "nexus_proof.py",
+                "nexus_independent_checker.py",
+                "nexus_nonce_ledger.py",
+                "nexus_risk_control.py",
+                "grounding_runtime.py",
+            )
+        }
+        rows = [
+            {"name": name, "sha256": hashlib.sha256(data).hexdigest()}
+            for name, data in sorted(files.items())
+        ]
+        return hashlib.sha256(risk_control.canonical_json_bytes(rows)).hexdigest()
+
+    def handle_risk_protocol(self) -> Dict[str, Any]:
+        """Describe the precommitted risk lab without making a live decision."""
+
+        benchmark = risk_control.build_frozen_arithmetic_benchmark()
+        plan = risk_control.build_risk_control_plan(
+            regime="bonferroni_grid",
+            max_error_rate=0.10,
+            alpha=0.05,
+            min_accepted=48,
+            runtime_binding_sha256=self._risk_runtime_binding_sha256(),
+        )
+        return {
+            "status": "shadow_protocol_ready",
+            "scope": "offline_frozen_regression_only",
+            "selection_authorized": False,
+            "policy_applied": False,
+            "answer_authority": False,
+            "benchmark": benchmark["manifest"],
+            "plan": {
+                "schema_version": plan["schema_version"],
+                "protocol": plan["protocol"],
+                "target": plan["target"],
+                "candidate_policies": plan["candidate_policies"],
+                "bindings": plan["bindings"],
+                "plan_sha256": plan["plan_sha256"],
+            },
+            "regimes": sorted(risk_control.REGIMES),
+            "authority": plan["authority"],
+        }
+
+    def handle_risk_evaluate(
+        self,
+        plan: Mapping[str, Any],
+        records: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        """Evaluate shadow records and return a non-authoritative receipt."""
+
+        receipt = risk_control.calibrate_selective_risk(plan, records)
+        risk_control.validate_risk_control_receipt(receipt, plan=plan, records=records)
+        return {
+            "status": "shadow_evaluation_complete",
+            "scope": "offline_calibration_evidence_only",
+            "selection_authorized": False,
+            "policy_applied": False,
+            "answer_authority": False,
+            "receipt": receipt,
+        }
+
+    def handle_risk_audit(self) -> Dict[str, Any]:
+        """Run the frozen arithmetic/adversarial cohort through the exact gate."""
+
+        benchmark = risk_control.build_frozen_arithmetic_benchmark()
+        runtime_binding = self._risk_runtime_binding_sha256()
+        plan = risk_control.build_risk_control_plan(
+            regime="bonferroni_grid",
+            max_error_rate=0.10,
+            alpha=0.05,
+            min_accepted=48,
+            runtime_binding_sha256=runtime_binding,
+        )
+        records: List[Dict[str, Any]] = []
+        for case in benchmark["cases"]:
+            audit_nonce = "risk-" + hashlib.sha256(
+                str(case["case_id"]).encode("utf-8")
+            ).hexdigest()
+            result = self.handle_solve(
+                SolveRequest(query=str(case["prompt"]), request_nonce=audit_nonce)
+            )
+            prediction = (
+                result.get("display_answer")
+                if result.get("solved") is True and result.get("answer_authority") is True
+                else "abstain"
+            )
+            verified = risk_control.evaluate_frozen_answer(case, prediction)
+            score = 1.0 if verified["observed_label"] == "answer" else 0.0
+            for policy in risk_control.FIXED_CANDIDATE_POLICIES:
+                records.append(
+                    risk_control.construct_benchmark_shadow_record(
+                        case,
+                        split="cal",
+                        policy_id=policy.policy_id,
+                        score=score,
+                        prediction=prediction,
+                        cost=float(policy.nominal_cost_units),
+                    )
+                )
+        receipt = risk_control.calibrate_selective_risk(plan, records)
+        risk_control.validate_risk_control_receipt(receipt, plan=plan, records=records)
+        return {
+            "status": "shadow_audit_complete",
+            "scope": "frozen_synthetic_regression_only",
+            "selection_authorized": False,
+            "policy_applied": False,
+            "answer_authority": False,
+            "runtime_binding_sha256": runtime_binding,
+            "benchmark": benchmark["manifest"],
+            "plan": {
+                "schema_version": plan["schema_version"],
+                "target": plan["target"],
+                "plan_sha256": plan["plan_sha256"],
+            },
+            "receipt": receipt,
         }
 
 
@@ -944,8 +1906,7 @@ def create_app(service: Optional[NexusApiService] = None):
 
     try:
         from fastapi import FastAPI, HTTPException
-        from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import FileResponse
+        from fastapi.responses import FileResponse, StreamingResponse
         from pydantic import BaseModel, Field
 
         app = FastAPI(
@@ -954,15 +1915,7 @@ def create_app(service: Optional[NexusApiService] = None):
                 "Verifier-first closed-world answers plus explicitly bounded heuristic "
                 "analysis and neural architecture telemetry."
             ),
-            version="78.1.0",
-        )
-
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            version="82.0.0",
         )
 
         class PyThinkMessage(BaseModel):
@@ -979,6 +1932,8 @@ def create_app(service: Optional[NexusApiService] = None):
             persona: Optional[str] = None
             session_id: Optional[str] = None
             entropy_source: Optional[str] = "crypto"
+            request_nonce: str = ""
+            stream: bool = False
 
         class PyEntropyRequest(BaseModel):
             source: str = "crypto"
@@ -990,6 +1945,7 @@ def create_app(service: Optional[NexusApiService] = None):
 
         class PySolveRequest(BaseModel):
             query: str
+            request_nonce: str = ""
 
         class PyInnovateRequest(BaseModel):
             topic: str
@@ -999,6 +1955,7 @@ def create_app(service: Optional[NexusApiService] = None):
             session_id: str
             message: str
             persona: Optional[str] = None
+            request_nonce: str = ""
 
         class PySwarmRequest(BaseModel):
             query: str
@@ -1012,12 +1969,66 @@ def create_app(service: Optional[NexusApiService] = None):
 
         class PyScientificRequest(BaseModel):
             query: str
+            request_nonce: str = ""
+
+        class PyVerifyRequest(BaseModel):
+            query: str
+            output: str
+            display_answer: str
+            surface: str
+            proof_capsule: Dict[str, Any] = Field(default_factory=dict)
+            request_nonce: str = ""
 
         class PyFeedbackRequest(BaseModel):
             difficulty: float
             epistemic_risk: float
             budget_used: int
             reward: float
+
+        class PyRiskEvaluateRequest(BaseModel):
+            plan: Dict[str, Any]
+            records: List[Dict[str, Any]]
+
+        class PyBellRequest(BaseModel):
+            theta_a: float = 0.0
+            theta_a_prime: float = 45.0
+            theta_b: float = 22.5
+            theta_b_prime: float = 67.5
+            shots: int = 1000
+            seed: Optional[int] = 42
+
+        class PyResonanceRequest(BaseModel):
+            query: str = ""
+
+        class PyCompareRequest(BaseModel):
+            query_a: str
+            query_b: Optional[str] = None
+            mode_a: str = "auto"
+            mode_b: str = "deep"
+            entropy_source_a: str = "crypto"
+            entropy_source_b: str = "seeded"
+
+        class PyQuantumStateRequest(BaseModel):
+            parameter_p: float = 1.0
+            noise_rate: float = 0.0
+            channel_type: str = "depolarizing"
+
+        class PyGliderRequest(BaseModel):
+            glider_type_left: str = "glider_A"
+            glider_type_right: str = "glider_C"
+            separation: int = 10
+            steps: int = 24
+            width: int = 40
+
+        class PyTrajectoryRequest(BaseModel):
+            steps: List[str] = Field(default_factory=list)
+
+        class PySpeculativeTreeRequest(BaseModel):
+            query: str
+            branching_factor: int = 3
+            max_depth: int = 4
+
+
 
         @app.post("/v1/think")
         async def think_endpoint(req: PyThinkRequest):
@@ -1031,7 +2042,30 @@ def create_app(service: Optional[NexusApiService] = None):
                 persona=req.persona,
                 session_id=req.session_id,
                 entropy_source=req.entropy_source,
+                request_nonce=req.request_nonce,
+                stream=req.stream,
             )
+            if req.stream:
+                def sse_events():
+                    for event in svc.handle_think_stream(t_req):
+                        event_name = str(event.get("event") or "message")
+                        payload = json.dumps(
+                            event,
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        )
+                        yield f"event: {event_name}\ndata: {payload}\n\n"
+
+                return StreamingResponse(
+                    sse_events(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                        "X-Nexus-Stream-Contract": "nexus-sse-proof-carrying-v1",
+                    },
+                )
             resp = svc.handle_think(t_req)
             return resp.to_dict()
 
@@ -1047,13 +2081,78 @@ def create_app(service: Optional[NexusApiService] = None):
             )
             return svc.handle_entropy(e_req)
 
+        @app.post("/v1/quantum/bell")
+        async def bell_endpoint(req: PyBellRequest):
+            b_req = BellRequest(
+                theta_a=req.theta_a,
+                theta_a_prime=req.theta_a_prime,
+                theta_b=req.theta_b,
+                theta_b_prime=req.theta_b_prime,
+                shots=req.shots,
+                seed=req.seed,
+            )
+            return svc.handle_bell(b_req)
+
+        @app.post("/v1/resonance")
+        async def resonance_endpoint(req: PyResonanceRequest):
+            r_req = ResonanceRequest(query=req.query)
+            return svc.handle_resonance(r_req)
+
+        @app.post("/v1/compare")
+        async def compare_endpoint(req: PyCompareRequest):
+            cmp_req = CompareRequest(
+                query_a=req.query_a,
+                query_b=req.query_b,
+                mode_a=req.mode_a,
+                mode_b=req.mode_b,
+                entropy_source_a=req.entropy_source_a,
+                entropy_source_b=req.entropy_source_b,
+            )
+            return svc.handle_compare(cmp_req)
+
+        @app.post("/v1/quantum/state")
+        async def quantum_state_endpoint(req: PyQuantumStateRequest):
+            q_req = QuantumStateRequest(
+                parameter_p=req.parameter_p,
+                noise_rate=req.noise_rate,
+                channel_type=req.channel_type,
+            )
+            return svc.handle_quantum_state(q_req)
+
+        @app.post("/v1/wolfram/gliders")
+        async def gliders_endpoint(req: PyGliderRequest):
+            g_req = GliderRequest(
+                glider_type_left=req.glider_type_left,
+                glider_type_right=req.glider_type_right,
+                separation=req.separation,
+                steps=req.steps,
+                width=req.width,
+            )
+            return svc.handle_gliders(g_req)
+
+        @app.post("/v1/resonance/trajectory")
+        async def trajectory_endpoint(req: PyTrajectoryRequest):
+            t_req = TrajectoryRequest(steps=req.steps)
+            return svc.handle_trajectory(t_req)
+
+        @app.post("/v1/speculative-tree")
+        async def speculative_tree_endpoint(req: PySpeculativeTreeRequest):
+            st_req = SpeculativeTreeRequest(
+                query=req.query,
+                branching_factor=req.branching_factor,
+                max_depth=req.max_depth,
+            )
+            return svc.handle_speculative_tree(st_req)
+
+
+
         @app.get("/v1/signals")
         async def signals_endpoint():
             return svc.handle_signals()
 
         @app.post("/v1/solve")
         async def solve_endpoint(req: PySolveRequest):
-            s_req = SolveRequest(query=req.query)
+            s_req = SolveRequest(query=req.query, request_nonce=req.request_nonce)
             return svc.handle_solve(s_req)
 
         @app.post("/v1/innovate")
@@ -1063,7 +2162,12 @@ def create_app(service: Optional[NexusApiService] = None):
 
         @app.post("/v1/chat")
         async def chat_endpoint(req: PyChatRequest):
-            c_req = ChatTurnRequest(session_id=req.session_id, message=req.message, persona=req.persona)
+            c_req = ChatTurnRequest(
+                session_id=req.session_id,
+                message=req.message,
+                persona=req.persona,
+                request_nonce=req.request_nonce,
+            )
             return svc.handle_chat(c_req)
 
         @app.get("/v1/personas")
@@ -1082,8 +2186,20 @@ def create_app(service: Optional[NexusApiService] = None):
 
         @app.post("/v1/scientific")
         async def scientific_endpoint(req: PyScientificRequest):
-            s_req = ScientificRequest(query=req.query)
+            s_req = ScientificRequest(query=req.query, request_nonce=req.request_nonce)
             return svc.handle_scientific(s_req)
+
+        @app.post("/v1/verify")
+        async def verify_endpoint(req: PyVerifyRequest):
+            v_req = VerifyRequest(
+                query=req.query,
+                output=req.output,
+                display_answer=req.display_answer,
+                surface=req.surface,
+                proof_capsule=req.proof_capsule,
+                request_nonce=req.request_nonce,
+            )
+            return svc.handle_verify(v_req)
 
         @app.get("/v1/telemetry")
         async def telemetry_endpoint():
@@ -1103,12 +2219,37 @@ def create_app(service: Optional[NexusApiService] = None):
         async def models_endpoint():
             return svc.handle_models()
 
+        @app.get("/v1/risk-control")
+        async def risk_protocol_endpoint():
+            return svc.handle_risk_protocol()
+
+        @app.post("/v1/risk-control/audit")
+        async def risk_audit_endpoint():
+            return svc.handle_risk_audit()
+
+        @app.post("/v1/risk-control/evaluate")
+        async def risk_evaluate_endpoint(req: PyRiskEvaluateRequest):
+            try:
+                return svc.handle_risk_evaluate(req.plan, req.records)
+            except risk_control.RiskControlValidationError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         @app.get("/health")
         async def health_endpoint():
+            store = svc._ensure_verification_nonce_store()
             return {
                 "status": "ok",
-                "service": "NexusMind Experimental Evidence API v78.1",
+                "service": "NexusMind Experimental Evidence API v82",
                 "answer_policy": epistemics.SELECTIVE_ANSWER_POLICY_VERSION,
+                "verification_nonce_backend": (
+                    "sqlite_durable"
+                    if isinstance(store, nonce_ledger.SQLiteNonceLedger)
+                    else "in_memory_process_local"
+                ),
+                "verification_nonce_ttl_seconds": _VERIFY_NONCE_TTL_SECONDS,
+                "verification_nonce_max_entries": _VERIFY_NONCE_CACHE_SIZE,
+                "verification_nonce_required": True,
+                "independent_witness_required": True,
             }
 
         @app.get("/studio", include_in_schema=False)
@@ -1127,10 +2268,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run NexusMind Experimental Evidence API Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
+    parser.add_argument(
+        "--verification-nonce-db",
+        default=None,
+        help=(
+            "Optional SQLite path for cross-worker/restart nonce replay protection; "
+            "only SHA-256 nonce digests are stored"
+        ),
+    )
     args = parser.parse_args()
 
     import uvicorn
-    app = create_app()
+    app = create_app(NexusApiService(verification_nonce_db=args.verification_nonce_db))
     print(f"[*] Starting NexusMind Experimental Evidence API on http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
 

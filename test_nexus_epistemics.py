@@ -16,6 +16,27 @@ sys.path.insert(0, str(ROOT / "source"))
 import nexus_epistemics as epistemics
 
 
+_REQUEST_SHA = "1" * 64
+_OUTPUT_SHA = "2" * 64
+_VERIFIER_SHA = "3" * 64
+_NONCE_SHA = "4" * 64
+
+
+def _verified_fixture(**overrides):
+    values = {
+        "reason": "verified_test_fixture",
+        "claim_scope": "fixture arithmetic expression only",
+        "verifier_id": "grounding_runtime.finalize_grounded_response",
+        "request_sha256": _REQUEST_SHA,
+        "output_sha256": _OUTPUT_SHA,
+        "verifier_receipt_sha256": _VERIFIER_SHA,
+        "request_nonce_sha256": _NONCE_SHA,
+        "surface": "solve",
+    }
+    values.update(overrides)
+    return epistemics.verified_exact_decision(**values)
+
+
 def _rehash(receipt):
     payload = copy.deepcopy(receipt)
     payload.pop("receipt_sha256", None)
@@ -31,21 +52,20 @@ def _rehash(receipt):
 
 
 def test_verified_exact_receipt_is_bounded_and_self_consistent():
-    decision = epistemics.verified_exact_decision(
-        reason="verified_test_fixture",
-        claim_scope="fixture arithmetic expression only",
-        verifier_id="grounding_runtime.finalize_grounded_response",
+    decision = _verified_fixture(
         protocol={"candidate_count": 1, "verifier_calls": 1},
     )
     receipt = decision.to_dict()
 
     assert epistemics.verify_epistemic_receipt(receipt)
     assert receipt["decision"] == "answered"
-    assert receipt["correctness_confidence"] == 1.0
-    assert receipt["confidence_kind"] == "deterministic_in_scope"
+    assert receipt["correctness_confidence"] is None
+    assert receipt["confidence_kind"] == "deterministic_assurance_not_probability"
     assert receipt["calibrated"] is False
     assert receipt["receipt_is_authority"] is False
     assert receipt["authority"]["answers_within_claim_scope"] is True
+    assert receipt["bindings"]["request_sha256"] == _REQUEST_SHA
+    assert receipt["bindings"]["output_sha256"] == _OUTPUT_SHA
     assert all(
         receipt["authority"][key] is False
         for key in (
@@ -58,6 +78,26 @@ def test_verified_exact_receipt_is_bounded_and_self_consistent():
             "controls_model_promotion",
         )
     )
+
+
+def test_verified_exact_receipt_requires_a_nonce_digest_for_public_surfaces():
+    values = {
+        "reason": "missing_nonce_fixture",
+        "claim_scope": "fixture arithmetic expression only",
+        "verifier_id": "grounding_runtime.finalize_grounded_response",
+        "request_sha256": _REQUEST_SHA,
+        "output_sha256": _OUTPUT_SHA,
+        "verifier_receipt_sha256": _VERIFIER_SHA,
+        "surface": "solve",
+        "request_nonce_sha256": "",
+    }
+
+    with pytest.raises(ValueError, match="nonce binding"):
+        epistemics.verified_exact_decision(**values)
+
+    receipt = _verified_fixture().to_dict()
+    receipt["bindings"]["request_nonce_sha256"] = ""
+    assert epistemics.verify_epistemic_receipt(_rehash(receipt)) is False
 
 
 @pytest.mark.parametrize("factory", [epistemics.analysis_only_decision, epistemics.abstained_decision])
@@ -98,19 +138,26 @@ def test_receipt_tampering_fails_closed():
 
 
 def test_rehashed_answered_receipt_requires_the_allowlisted_passing_verifier():
-    receipt = epistemics.verified_exact_decision(
-        reason="verified_test_fixture",
-        claim_scope="fixture arithmetic expression only",
-        verifier_id="grounding_runtime.finalize_grounded_response",
-    ).to_dict()
+    receipt = _verified_fixture().to_dict()
 
     for verifier in (
-        {"id": "none", "passed": False, "independent_recompute": False},
-        {"id": "attacker.fake_verifier", "passed": True, "independent_recompute": True},
+        {
+            "id": "none",
+            "passed": False,
+            "fresh_recompute": False,
+            "algorithmically_independent": False,
+        },
+        {
+            "id": "attacker.fake_verifier",
+            "passed": True,
+            "fresh_recompute": True,
+            "algorithmically_independent": False,
+        },
         {
             "id": "grounding_runtime.finalize_grounded_response",
             "passed": False,
-            "independent_recompute": True,
+            "fresh_recompute": True,
+            "algorithmically_independent": False,
         },
     ):
         forged = copy.deepcopy(receipt)
@@ -150,7 +197,8 @@ def test_rehashed_non_authoritative_receipts_require_fail_closed_invariants():
     forged["verifier"] = {
         "id": "grounding_runtime.finalize_grounded_response",
         "passed": True,
-        "independent_recompute": True,
+        "fresh_recompute": True,
+        "algorithmically_independent": False,
     }
     forged_rows.append(forged)
     forged = copy.deepcopy(analysis)
@@ -163,8 +211,41 @@ def test_rehashed_non_authoritative_receipts_require_fail_closed_invariants():
     forged["internal_score"] = 0.9
     forged["internal_score_name"] = "hidden_score"
     forged_rows.append(forged)
+    forged = copy.deepcopy(abstained)
+    forged["internal_score_name"] = "orphaned_score_label"
+    forged_rows.append(forged)
+    forged = copy.deepcopy(abstained)
+    forged["limitations"] = ["valid", 7]
+    forged_rows.append(forged)
 
     assert all(
         epistemics.verify_epistemic_receipt(_rehash(row)) is False
         for row in forged_rows
     )
+
+
+@pytest.mark.parametrize("field", ["request_sha256", "output_sha256", "verifier_receipt_sha256"])
+def test_verified_receipt_rejects_detached_or_replayed_bindings(field):
+    receipt = _verified_fixture().to_dict()
+    forged = copy.deepcopy(receipt)
+    forged["bindings"][field] = "f" * 64
+
+    # The self-checksum can describe a different claim, but the relying
+    # consumer must match it to its own request/output context.
+    assert epistemics.verify_epistemic_receipt(_rehash(forged)) is True
+    assert epistemics.verify_epistemic_receipt_binding(
+        _rehash(forged),
+        request_sha256=_REQUEST_SHA,
+        output_sha256=_OUTPUT_SHA,
+        verifier_receipt_sha256=_VERIFIER_SHA,
+        request_nonce_sha256=_NONCE_SHA,
+        surface="solve",
+    ) is False
+
+
+def test_closed_schema_rejects_unknown_authority_or_verifier_fields_even_when_rehashed():
+    receipt = _verified_fixture().to_dict()
+    for section, key in (("authority", "controls_future"), ("verifier", "future_claim")):
+        forged = copy.deepcopy(receipt)
+        forged[section][key] = True
+        assert epistemics.verify_epistemic_receipt(_rehash(forged)) is False
