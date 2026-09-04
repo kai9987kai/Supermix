@@ -37,7 +37,13 @@ jobs:
       - name: Install focused test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest flask pillow matplotlib
+          python -m pip install pytest flask pillow matplotlib pyyaml
+          # ruff is invoked by the "Lint release-integrity surfaces" step below.
+          # fastapi/uvicorn/httpx back the real JSON POST /v1/verify route; without
+          # them test_nexus_api.py and test_nexus_proof.py skip their only
+          # end-to-end route test and test_nexus_hybrid_advancements.py fails to
+          # import at all (it imports starlette.testclient at module scope).
+          python -m pip install ruff fastapi uvicorn httpx
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install peft transformers
 
@@ -84,6 +90,30 @@ jobs:
             source/qwen_supermix_pipeline.py \
             source/supermix_multimodel_web_app.py \
             source/supermix_multimodel_desktop_app.py \
+            source/nexus_api.py \
+            source/nexus_chat.py \
+            source/nexus_cli.py \
+            source/nexus_engine.py \
+            source/nexus_epistemics.py \
+            source/nexus_got.py \
+            source/nexus_ideation.py \
+            source/nexus_independent_checker.py \
+            source/nexus_nonce_ledger.py \
+            source/nexus_proof.py \
+            source/nexus_risk_control.py \
+            source/nexus_solver.py \
+            source/nexus_swarm.py \
+            source/grounding_runtime.py \
+            source/supermix_chat_server.py \
+            source/supermix_chat_desktop_app.py \
+            source/answer_check.py \
+            source/prompt_normaliser.py \
+            source/eval_problem_solving.py \
+            source/build_omni_corpus.py \
+            source/build_scratchpad_math.py \
+            source/train_mimomix_generalisation.py \
+            source/train_supervised.py \
+            source/nexus_evidence_ledger.py \
             runtime_python/chat_app.py \
             runtime_python/chat_web_app.py \
             runtime_python/model_variants.py
@@ -119,6 +149,20 @@ jobs:
             source/mimomix_text.py \
             source/train_mimomix_talk.py \
             source/mimomix_talk_web_app.py \
+            source/mimomix_core.py \
+            source/mimomix_decoding.py \
+            source/nexus_api.py \
+            source/nexus_engine.py \
+            source/nexus_epistemics.py \
+            source/nexus_independent_checker.py \
+            source/nexus_nonce_ledger.py \
+            source/nexus_proof.py \
+            source/nexus_risk_control.py \
+            source/build_omni_corpus.py \
+            source/build_scratchpad_math.py \
+            source/eval_problem_solving.py \
+            source/train_mimomix_generalisation.py \
+            source/nexus_evidence_ledger.py \
             runtime_python/memory_authority.py \
             runtime_python/conversation_state.py \
             runtime_python/grounding_runtime.py \
@@ -150,7 +194,13 @@ jobs:
           python -m pytest -q test_mimomix_text.py test_mimomix_talk_web_app.py
           python -m pytest -q test_mimomix_eval_splits.py test_mimomix_unseen_sentence_tokens.py test_v58_receipt_provenance.py test_mechanism_causality.py test_dark_test_audit.py
           python -m pytest -q test_v60_diverse_corpus.py test_reported_confidence_integrity.py test_compare_generalisation_runs.py test_v62_domain_corpus.py test_v63_training_state.py test_recall_index.py test_problem_solving_eval.py test_checkpoint_selection.py test_supermix_chat_server.py test_answer_check.py
+          python -m pytest -q test_prompt_normaliser.py test_chat_desktop_packaging.py test_supermix_chat_desktop_app.py
           python -m pytest -q test_training_improvements.py
+          python -m pytest -q test_mimomix_v82.py test_corpus_v82.py test_eval_v82.py
+          python -m pytest -q test_mimomix_differential.py test_mimomix_mla.py test_mimomix_mod.py
+          python -m pytest -q test_mimomix_multimodal.py test_nexus_compare.py test_nexus_quantum_bell.py test_nexus_resonance.py test_nexus_studio_v83.py test_nexus_studio_v84.py test_nexus_v84_innovations.py
+          python -m pytest -q test_v85_release_contract.py
+          python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py test_nexus_engine.py test_nexus_api.py test_nexus_swarm.py test_nexus_got.py test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py test_nexus_studio_contract.py test_nexus_hybrid_advancements.py test_nexus_adaptive.py test_nexus_risk_control.py test_nexus_independent_checker.py test_nexus_nonce_ledger.py test_nexus_evidence_ledger.py
 
       - name: Freeze and smoke-test protocol console
         if: runner.os == 'Windows'

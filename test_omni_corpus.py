@@ -365,3 +365,30 @@ def test_every_generated_row_in_a_build_verifies():
     for task in ALL_TASKS:
         for _ in range(3):
             assert omni.verify(omni.TASKS[task](rng))
+
+
+# -- the v82 options must not disturb this corpus ---------------------------
+#
+# v80 is the only trained artifact this module has produced, and every option
+# added in v82 is an untested hypothesis. A default that moved would make the
+# next run incomparable with the one measurement in hand. `test_corpus_v82.py`
+# exercises the options themselves; these two keep the *absence* of them
+# pinned here, next to the tests that describe the shipped corpus.
+
+
+def test_the_shipped_row_still_has_exactly_four_fields():
+    """`--keep_canonical` adds a fifth; it must stay opt-in."""
+
+    rows, _ = omni.build(per_task=2, seed=6)
+
+    assert all(set(row) == {"user", "assistant", "domain", "task"} for row in rows)
+
+
+def test_naming_every_v82_option_at_its_default_changes_nothing():
+    baseline, _ = omni.build(per_task=20, seed=21, tasks=["combination", "force"])
+    explicit, _ = omni.build(per_task=20, seed=21, tasks=["combination", "force"],
+                             retry_rate=0.0, balanced_operands=False,
+                             priming_fraction=0.0, keep_canonical=False)
+
+    assert baseline == explicit
+    assert omni.COMBINATION_IN_ENVELOPE is False

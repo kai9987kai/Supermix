@@ -196,6 +196,86 @@ def test_too_little_text_is_refused(tokenizer: mt.WordTokenizer) -> None:
         mt.build_training_tensors([("hi", "ok")], tokenizer, sequence_length=4096)
 
 
+def test_turn_aligned_packing_no_longer_drops_turns_silently(
+    tokenizer: mt.WordTokenizer,
+) -> None:
+    """The docstring promised the receipt should record it; nothing returned it.
+
+    A dropped turn is always one of a task's longest, so an unreported drop
+    removes exactly a task's hardest rows -- which is how v67 lost its
+    six-value `average` problems and then scored 0% on them.
+    """
+
+    pairs = [("hello", "Sure.")] * 30 + [("why is my script failing?",
+                                          "Sure. Check the traceback first.")] * 10
+    stats: dict = {}
+    mt.build_training_tensors(pairs, tokenizer, sequence_length=8,
+                              turn_aligned=True, stats=stats)
+
+    assert stats["turns"] == 40
+    assert stats["dropped_over_length"] == 10
+    assert stats["dropped_fraction"] == 0.25
+
+
+def test_the_dropped_count_is_opt_in_and_changes_no_tensor(
+    tokenizer: mt.WordTokenizer,
+) -> None:
+    pairs = [("hello", "Sure.")] * 30
+    plain = mt.build_training_tensors(pairs, tokenizer, 16, turn_aligned=True)
+    measured = mt.build_training_tensors(pairs, tokenizer, 16, turn_aligned=True,
+                                         stats={})
+
+    assert torch.equal(plain[0], measured[0])
+    assert torch.equal(plain[1], measured[1])
+
+
+# ---------------------------------------------------------------------------
+# Reversed digits (v82, unmeasured)
+# ---------------------------------------------------------------------------
+#
+# Lee et al. 2023 (arXiv 2307.03381): a 10.6M NanoGPT reaches 100% on 3-digit
+# addition at ~2,500 samples with least-significant-digit-first numbers, and
+# never without. Off by default, and no Supermix run has trained under it.
+
+
+def test_reverse_digits_is_off_by_default(tokenizer: mt.WordTokenizer) -> None:
+    assert tokenizer.reverse_digits is False
+    assert "reverse_digits" not in tokenizer.to_dict()
+
+
+def test_reversed_digits_still_round_trip_exactly() -> None:
+    texts = SAMPLE_TEXTS + ["total 1234 and 007", "40 x 3 = 120, 7 x 3 = 21"]
+    reversed_tokenizer = mt.WordTokenizer.build(texts, digit_tokens=True,
+                                                reverse_digits=True)
+
+    mt.assert_roundtrip(reversed_tokenizer, texts)
+    for text in texts:
+        assert reversed_tokenizer.unknown_rate(text) == 0.0, text
+        assert reversed_tokenizer.decode(reversed_tokenizer.encode(text)) == text
+
+
+def test_reversed_digits_change_the_encoded_order() -> None:
+    """A no-op would round-trip perfectly and teach the model nothing new."""
+
+    reversed_tokenizer = mt.WordTokenizer.build(["124"], digit_tokens=True,
+                                                reverse_digits=True)
+
+    assert reversed_tokenizer._pieces("124") == ["4", "2", "1"]
+
+
+def test_the_setting_travels_with_the_checkpoint(tmp_path: Path) -> None:
+    """Reloaded under the other setting, every number mis-encodes silently."""
+
+    built = mt.WordTokenizer.build(["total 1234"], digit_tokens=True,
+                                   reverse_digits=True)
+    path = tmp_path / "vocab.json"
+    built.save(path)
+    restored = mt.WordTokenizer.load(path)
+
+    assert restored.reverse_digits is True and restored.digit_tokens is True
+    assert restored.encode("total 1234") == built.encode("total 1234")
+
+
 # ---------------------------------------------------------------------------
 # Corpus loading
 # ---------------------------------------------------------------------------

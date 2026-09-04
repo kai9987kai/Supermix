@@ -4,11 +4,20 @@
 
 V80 is an experimental integration layer, not a promoted language model. It
 combines architecture probes, deterministic analysis scaffolds, and the existing
-closed-world grounding runtime behind the v78.1 selective-answer contract.
+closed-world grounding runtime behind the v78.2 proof-carrying selective-answer
+contract.
 
 Only fresh, strictly accepted output from
 `grounding_runtime.finalize_grounded_response` can receive answer authority.
-Everything else is either `analysis_only` or `abstained`.
+Every orchestrated reasoning result is otherwise either `analysis_only` or
+`abstained`; diagnostic and health endpoints use their own non-answer schemas.
+
+V82 extends this boundary with a separate
+[`calibrated verify-or-defer lab`](NEXUS_CALIBRATED_VERIFY_OR_DEFER.md). Its
+finite-sample receipts are conditional offline evidence only. The adaptive
+mode reports shadow recommendations separately from the applied safe ACT cap;
+it does not claim that authored heuristics or untrained optional mechanisms are
+calibrated, efficient, or answer-producing.
 
 ## Runtime map
 
@@ -19,11 +28,12 @@ Client / Nexus Studio
 Nexus API admission boundary
    |                 |
    |                 +-- deterministic analysis scaffolds
-   |                     (ideation, chat, swarm, graph search)
+   |                     (persona chat, ideation, swarm, graph search)
    |
    +-- fresh grounding recomputation
    |      +-- exact arithmetic
    |      +-- allowlisted science/reasoning plans
+   |      +-- proof capsule + renderer revalidation
    |
    +-- untrained neural architecture diagnostics
           (fast/deep abstain; no text decoder)
@@ -63,10 +73,11 @@ The cellular-automata grid is a deterministic visualization and is not a
 cryptographic generator.
 
 The RSI component computes a descriptive statistic over caller-supplied numeric
-sequences. Nexus currently feeds it a synthetic step-count sine probe, while the
-signals endpoint feeds a constant `0.5` probe. Both responses state their input
-source and `is_live_reasoning_signal=false`; neither measures reasoning quality,
-novelty, or stability.
+sequences. Raw `NexusEngine.process` telemetry identifies its synthetic
+step-count sine probe, while `/v1/signals` identifies its constant `0.5` probe.
+Both records state `is_live_reasoning_signal=false`; `/v1/think` intentionally
+withholds that diagnostic. None measures reasoning quality, novelty, or
+stability.
 
 The v80 tabular Q-learning object is a disconnected experiment initialized from
 authored priors. It is reported for inspection but does not control the live
@@ -78,13 +89,21 @@ not update either routing policy.
 - Exact arithmetic and allowlisted science/reasoning outputs require a selected,
   solved, verification-passed `supermix-verified-answer-receipt-v2` that is
   consistent with the grounding reason, method, result data, and rendered text.
-- `confidence=1.0` means deterministic agreement only within that accepted
-  closed-world parse. It is not empirical calibration.
-- Ideation, persona chat, swarm, and graph search expose authored internal
-  priorities with `confidence=null` and no answer authority.
+- Answered outputs also require a closed `nexus-selective-answer-v2` receipt and
+  complete `nexus-proof-carrying-number-v2` span capsule bound to request,
+  output, grounding receipt, surface, and a mandatory valid nonce. The capsule
+  must include a passing independent witness; unsupported families defer.
+- `confidence=null` is deliberate. An accepted result reports
+  `deterministic_assurance_not_probability`; fresh checking reruns the same
+  implementation and is not empirical calibration or algorithmic independence.
+- Persona chat first offers eligible closed-world turns to the strict grounder.
+  Otherwise chat, ideation, swarm, and graph search expose authored internal
+  priorities with no answer authority.
 - Fast, deep, and agent modes abstain. Tool declarations are not executions.
 - SHA-256 receipts detect accidental or post-creation mutation of metadata.
   They are not signatures, evidence, permission, or proof of factual truth.
+- Nexus Studio withholds exact candidates until `POST /v1/verify` freshly
+  reconstructs and exactly matches the expected capsule.
 
 ## API surface
 
@@ -93,10 +112,11 @@ not update either routing policy.
 | `POST /v1/think` | Evidence-gated router; exact answers are recomputed again at the API boundary |
 | `POST /v1/solve` | Strict exact arithmetic or allowlisted reasoning |
 | `POST /v1/scientific` | Strict science-plan path |
+| `POST /v1/verify` | Fresh renderer revalidation and exact proof-capsule comparison |
 | `POST /v1/innovate` | Analysis-only authored concept scaffolds |
 | `POST /v1/swarm` | Analysis-only deterministic role templates |
 | `POST /v1/got` | Analysis-only deterministic graph scaffold |
-| `POST /v1/chat` | Analysis-only persona scaffold |
+| `POST /v1/chat` | Strict proof-carrying closed-world answer when eligible; otherwise analysis-only persona scaffold |
 | `POST /v1/entropy` | Software sampling plus deterministic CA visualization |
 | `GET /v1/signals` | Disconnected policy and synthetic RSI diagnostics |
 | `GET /v1/telemetry` | Configuration and explicitly synthetic metric probes |
@@ -109,7 +129,8 @@ not update either routing policy.
 Run the focused compatibility and evidence suite:
 
 ```powershell
-python -m pytest -q test_nexus_epistemics.py test_nexus_engine.py `
+python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py `
+  test_nexus_engine.py `
   test_nexus_api.py test_nexus_swarm.py test_nexus_got.py `
   test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py `
   test_nexus_studio_contract.py test_nexus_hybrid_advancements.py

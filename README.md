@@ -13,6 +13,171 @@ This repository combines:
 
 It is intentionally a mixed workspace, not a minimal source-only model repo.
 
+## Supermix v85 — making the next run measurable, and the ruler that moved
+
+V85 is the **training line** (v58–v81); v82–v84 above are the parallel NexusMind
+evidence line. Nothing in v85 was trained and no accuracy number moved because of
+it. It is a release about instruments, and it found two things.
+
+**The accuracy probe could not see the task it was scoring.** The mid-run probe
+capped generation at 64 tokens while every `arithmetic_series` reply is 81–84
+tokens long, so `--select_on accuracy` would have read 0.00 on that task whatever
+the model learned. The offline benchmark's 40-token default truncated more still:
+re-scoring v80 at 40 tokens gives 18 truncated replies against 0 at 96, and
+`wave_speed` alone moves 0.000 → 0.667 on the cap. The cap is now
+`--probe_max_new_tokens` (default 112), the offline default is 96, and the trainer
+prints a per-task budget warning — or refuses to start under `--strict`.
+
+**The benchmark had been asking easier questions.** Commit `c7041897` rewrote the
+three zero-scoring tasks, and because the benchmark draws from the same
+generators, it rewrote the exam too. On **unchanged v80 weights**:
+
+| task | `a5bd5bf2` (what v80 trained on) | `c7041897` (current) |
+|---|---|---|
+| `arithmetic_series` | 0.000 | **0.500** |
+| `kinetic_energy` | 0.167 | **0.833** |
+| `combination` | 0.000 | 0.000 |
+| `force` (control) | 0.917 | 1.000 |
+
+So a v80-versus-v85 comparison is only paired if both are scored against the same
+generator version. `eval_problem_solving.py` now records the seed, task list,
+generation cap and a generator fingerprint so pairing can be checked rather than
+assumed. `combination` reads 0.000 in every era and is the one that genuinely
+needs the retrain.
+
+**v80's regression against v74 is real; the cause is probably exposure.** The two had never
+been scored on the same problems: before v85 one RNG was shared across tasks in
+turn, and v74 was scored over 10 registered tasks against v80's 21. Re-scored on
+one identical problem list, v74 reads **0.874** and v80 **0.659**, a −0.215 gap.
+That is the measurement; it must not be differenced against the published −0.272,
+which came from two runs on different problems at an unrecorded cap.
+
+Both corpora hold exactly 40,000 rows per arithmetic task, but v80's added twelve
+science tasks while the step budget stayed at 18,000, so each arithmetic task fell
+from 8.06% to 4.39% of the corpus and v80 saw each one **54% as often**. That is
+arithmetic over corpus composition, and it is the leading explanation — but v80
+also added twelve tasks to a 15M-parameter model, and capacity interference
+degrades incumbent tasks at *constant* exposure, which no sampling weight would
+repair. The free test that would separate them (bimodal versus uniform damage)
+comes out **skewed, not bimodal** (Sarle 0.285), so at nine tasks it does not
+decide. Both are probably running.
+
+Two throughput results bear on the fix. Removing the MTP heads (`--n_mtp_layers 0`)
+is measured at 0.550× step time; keeping one depth did not resolve (0.845, spread
+0.303) and must not be quoted at 45%. And `--batch_size 32` gives **20% more
+sequences per hour** than v80's 16 — the opposite of a recommendation to shrink
+the batch, which measurement showed costs 12% *fewer* sequences per hour. No run
+has yet tested whether restoring exposure restores the score.
+
+**The memorisation control was measuring a corpus the model never trained on.**
+`eval_problem_solving.py --corpus` was hard-coded to a v62 dataset, so every
+receipt since v62 whose run used a different corpus published a meaningless
+`memorisation_gap` — v80's read −0.27, i.e. worse on its "own" rows than on
+unseen ones. The flag now has no default, checkpoints record the corpus they
+trained on, and a mismatch withholds the gap and names both files.
+
+**The prompt normaliser learned physics.** It covered only arithmetic, so two of
+v80's five natural-phrasing failures were physics questions it passed straight
+through. With eight science rules added, the same checkpoint on eighteen
+hand-typed questions goes from **10/18 to 14/18**, four fixed and none broken.
+Of the four still wrong, three were rewritten correctly and the model still
+missed them and the fourth was already in the trained form, so what remains is
+the capability gap the benchmark already reports rather than a phrasing gap.
+
+V85 also fixes four confirmed architecture bugs (the MLA rotary embedding was not
+a rotation, MLA broke speculative decoding, Mixture-of-Depths decoded differently
+than it trained, and weight init overwrote the thinking core's deliberate zeros),
+exposes 29 previously unreachable `MiMoMixConfig` fields on the trainer (15 of 51
+were reachable before, 52 of 64 now), and
+adds a dozen cited techniques behind default-off flags. All sixteen flags are
+verified to train without NaN at the v80 shape before anyone spends a run on one.
+The recursive thinking core is measured inert on a problem-solving checkpoint for
+the first time: identical 42/63 at 1, 2, 3 and 6 cycles.
+
+One cost result is worth acting on: the multi-token prediction heads are 7.7% of
+the parameters and **45% of step time** (0.550x measured with a paired,
+drift-controlled A/B), for a draft path whose acceptance length is 2.5 of 3.
+
+**This machine has been emulating x86 all along.** The hardware is ARM64; the
+Python and PyTorch are not. The interpreter's PE machine word is `0x8664`,
+`sysconfig.get_platform()` is `win-amd64`, and torch links Intel oneAPI MKL "for
+Intel 64 architecture applications" with AVX2, while `platform.machine()` returns
+`ARM64`. Every FLOP in an 11-hour run is binary-translated by Windows-on-Arm
+Prism. So the earlier "bf16 is 25-60x slower because this box is ARM64" was the
+wrong diagnosis: it is an x86 bf16 fallback under emulation, and the Snapdragon X
+core has native bf16 this stack never reaches. Native `win_arm64` wheels exist and
+are now the largest unexplored variable on the machine.
+
+See [`docs/V85_MEASURABLE_ARCHITECTURE.md`](docs/V85_MEASURABLE_ARCHITECTURE.md)
+for every measurement, the research map with citations, and what is not claimed,
+and [`docs/V86_PLAN.md`](docs/V86_PLAN.md) for the arms to run next with their
+acceptance criteria stated in advance. Receipts and reproduction scripts are in
+`output/v85_measurements/`.
+
+## Supermix v84 — Autonomous Epistemic & Multimodal Reasoning Frontier
+
+V84 pushes forward the synthesis of Xiaomi MiMo's multi-token speculative reasoning with AI-Dem-Lab's advanced quantum, cellular, and cognitive kinematic physics:
+- **Speculative Tree Search with Step-Level PRM (`nexus_engine.py`)**: Multi-token speculative drafting evaluated by Process Reward Modeling (PRM), tracking Shannon entropy transitions and dynamically backtracking when branches diverge or violate verification invariants. Exposes `POST /v1/speculative-tree`.
+- **Quantum Density Matrix & Decoherence Channels (`nexus_engine.py`)**: Formulates full 2-qubit bipartite Werner states $\rho(p)$, computing Von Neumann entropy $S(\rho)$, purity $\gamma$, and concurrence $\mathcal{C}(\rho)$ under depolarizing and phase-damping quantum noise channels. Exposes `POST /v1/quantum/state`.
+- **Wolfram Rule 110 Glider & Soliton Logic Engine (`nexus_engine.py`)**: Simulates soliton dynamics and glider collisions ($A, B, C, E, F$) on the 14-cell periodic ether background of Rule 110, implementing logical gate analogs (annihilation NOT, deflection AND) in the 1D computational universe. Exposes `POST /v1/wolfram/gliders`.
+- **Dynamic 5D Cognitive Trajectory Tracking (`nexus_engine.py`)**: Kinematic analysis of multi-step thought flow across 5 cognitive archetype basins (*Logos*, *Mythos*, *Ethos*, *Telos*, *Pathos*), calculating step velocities, turning curvatures, path length, and dispersion entropy. Exposes `POST /v1/resonance/trajectory`.
+- **NexusMind Studio v84 Single-Page Interface (`nexus_studio.html`)**: Interactive tabs and HTML5 Canvas visualizers for Quantum Density heatmap & eigenvalue spectrum, Rule 110 Glider spacetime diagram, 5D Cognitive Trajectory vector radar, and Speculative Tree branching graph.
+- **Epistemic Invariant Guarantee**: All new engines operate strictly under the `analysis_only` boundary (`answer_authority: false`). See [`docs/V84_AUTONOMOUS_EPISTEMIC_MULTIMODAL_FRONTIER.md`](docs/V84_AUTONOMOUS_EPISTEMIC_MULTIMODAL_FRONTIER.md).
+
+## Supermix v83 — Unified Hybrid Frontier (Xiaomi MiMo + AI-Dem-Lab + Supermix)
+
+
+V83 unifies Xiaomi MiMo's advanced 2026 architecture (sparse MoE, hybrid sliding window + global attention, multi-token prediction heads, and multimodal token projection) with AI-Dem-Lab's deep research sandboxes (Quantum Bell CHSH locality test, Wolfram computational universe complexity analyzer, 5D semantic resonance cognitive archetype mapping, Compare Bench with continuous auto-looping) into Supermix's verified evidence-first runtime.
+
+Key advancements in v83:
+- **Multimodal Token Projection (`mimomix_core.py`)**: `MultimodalProjectionHead` pre-normalizes via `RMSNorm` and projects continuous visual/audio feature embeddings into transformer sequence representations.
+- **Quantum Bell Sandbox (`nexus_engine.py`)**: Simulates the CHSH Bell inequality test, evaluating analytical quantum correlations violating local hidden variable limits ($S = 2\sqrt{2} \approx 2.8284 > 2.0$) against classical Monte Carlo bounds ($S \le 2.0$). Exposes `POST /v1/quantum/bell`.
+- **Wolfram Complexity Analyzer (`nexus_engine.py`)**: Quantifies ECA dynamics across Rules 0-255 using Langton's $\lambda$, active site density evolution, and spatial Shannon entropy, mapping to Wolfram Classes 1-4.
+- **Semantic Resonance Radar (`nexus_engine.py`)**: Maps queries into 5 cognitive archetype basins (`logos`, `mythos`, `ethos`, `telos`, `pathos`) with Dirichlet smoothing and pentagonal simplex projection. Exposes `POST /v1/resonance`.
+- **Compare Bench & Auto-Loop Engine (`nexus_engine.py`)**: Side-by-side mode/prompt execution with character 3-gram Jensen-Shannon Divergence (JSD), semantic distance, differential latency ($\Delta\%$), and continuous auto-looping. Exposes `POST /v1/compare`.
+- **NexusMind Studio v83 Single-Page Interface (`nexus_studio.html`)**: Interactive tabs and HTML5 Canvas visualizers for Compare Bench, Quantum Bell CHSH, and Semantic Resonance radar.
+- **Epistemic Invariant Preserved**: All exploratory sandboxes operate strictly under the `analysis_only` boundary; only `grounding_runtime.finalize_grounded_response` with valid SHA-256 nonces holds `answer_authority: true`. See [`docs/V83_NEXUS_MIMO_DEMLAB_HYBRID_FRONTIER.md`](docs/V83_NEXUS_MIMO_DEMLAB_HYBRID_FRONTIER.md).
+
+## Supermix v82 — calibrated verify-or-defer lab
+
+
+V82 adds a research-grounded, shadow-only reliability lab. A frozen 128-case
+arithmetic/adversarial cohort is evaluated across a precommitted `{1, 2, 4,
+8}` policy grid with exact one-sided Clopper–Pearson bounds and Bonferroni
+correction. Hash-bound receipts record the benchmark, runtime sources, policy
+matrix, coverage, and risk interval; explicit assumptions and authority bits
+remain false. The `/v1/risk-control` endpoints and Studio Verify-or-Defer tab
+expose this evidence for inspection, but never change routing, activation,
+promotion, or answer authority.
+
+The public adaptive mode is correspondingly honest: authored Q/RSI signals are
+reported as shadow recommendations, while only an explicit request or fixed
+safe default controls the applied ACT cap. Observed cycles and exit reasons are
+reported from the forward telemetry, and optional attention/MoD/MLA mechanisms
+are not claimed active unless observed. See
+[`docs/NEXUS_CALIBRATED_VERIFY_OR_DEFER.md`](docs/NEXUS_CALIBRATED_VERIFY_OR_DEFER.md).
+
+V82.1 hardens the presentation boundary across Chat, Solver, Scientific, Think,
+SSE, and `/v1/verify`: authoritative answers require a valid 16-128 character
+ASCII nonce, every proof capsule requires a passing independent witness, and
+the bounded in-memory/SQLite freshness ledgers fail closed at capacity without
+evicting live entries. `/health` exposes these policy flags for deployment
+inspection. The full repository suite remains the release gate; no model,
+adapter, active pointer, or promotion receipt is changed by this work.
+
+The next retrieval-facing layer is additive and shadow-only: the source-locked
+temporal evidence ledger records immutable server snapshots, opened spans,
+typed sentence provenance, freshness, conflicts, and explicit revisions without
+turning retrieved text into authority. Snapshot admission requires an immutable,
+ledger-bound server-fetch receipt. Its v2 claim manifest binds every generated
+sentence before attribution, rejects caller-asserted checker flags, and accepts
+inference verification only through an executed, allowlisted, ledger-bound
+checker receipt. Incomplete or unverified coverage defers, while SQLite trigger,
+foreign-key, content, turn, claim, output, and receipt integrity failures surface
+as degraded health. It remains local shadow telemetry—not a signed transparency
+log or answer-authority path. See
+[`docs/NEXUS_SOURCE_LOCKED_EVIDENCE_LEDGER.md`](docs/NEXUS_SOURCE_LOCKED_EVIDENCE_LEDGER.md).
+
 ## Supermix v80 — experimental hybrid diagnostics
 
 V80 keeps three research lineages behind the same evidence boundary:
@@ -27,57 +192,85 @@ V80 keeps three research lineages behind the same evidence boundary:
   five-role swarm scaffolding. These are not live reasoning-quality signals,
   quantum hardware, calibrated routing, or verified answers.
 - **Supermix grounding core:** fresh closed-world arithmetic and allowlisted
-  science recomputation remains the only answer-authority path. Checksums bind
-  audit metadata; they do not prove factual correctness by themselves.
+  science recomputation remains the only answer-authority path. V78.2 also
+  binds every displayed numeric span to the request, exact output, verifier
+  receipt, answer surface, and browser nonce, then requires a second live
+  verification before the Studio reveals it. Checksums are still not
+  signatures or factual proof.
 
 See [the bounded v80 architecture notes](docs/V80_UNIFIED_HYBRID_FRONTIER.md).
 
-## Supermix v78.1 — NexusMind evidence-first selective answering
+## Supermix v78.2 — proof-carrying conversation
 
-V78.1 replaces the earlier “omniscience” presentation with a machine-readable
-answer-admission boundary. Every Nexus result is now one of `answered`,
-`analysis_only`, or `abstained`, with a hash-checked `nexus-selective-answer-v1`
-receipt that states evidence class, claim scope, limitations, protocol, and
-authority bits. The receipt is audit metadata; it does not create evidence.
+V78.2 extends the v78.1 answer-admission boundary into the presentation layer.
+Every Nexus result remains exactly one of `answered`, `analysis_only`, or
+`abstained`, but authoritative results now carry a closed-schema
+`nexus-selective-answer-v2` receipt and a
+`nexus-proof-carrying-number-v2` capsule. Every authoritative capsule must carry
+a passing algorithmically independent witness; today those witnesses cover
+scoped arithmetic and allowlisted science, while unsupported grounded families
+defer instead of receiving server-only authority.
 
 Only a fresh call to `grounding_runtime.finalize_grounded_response` may return
 `answered`, and only for accepted exact arithmetic or an allowlisted scientific
-scenario. Negated, quoted, ambiguous, mixed-scope, incomplete, and unsupported
-requests fail closed even if the broader legacy pattern library finds a numeric
-candidate. Confidence `1.0` means deterministic agreement within that accepted
-closed-world parse; it is not empirical calibration or open-world certainty.
+scenario. Every numeric span in the public output must be classified as a
+derived answer, an input echo, a verified unit literal, or a verified derivation
+literal. An unrelated appended number, Unicode numeric confusable, stale
+runtime/schema, unknown field, changed query, changed display, changed output,
+changed answer surface, or changed request nonce fails closed.
 
-The recognizable experimental surfaces remain, with honest boundaries:
+The Studio generates a 128-bit request nonce and withholds an answer until
+`POST /v1/verify` repeats the strict grounding pass and exactly matches the
+entire expected capsule. A valid 16-128 character ASCII nonce is mandatory for
+every public exact answer and verification; missing or malformed nonces fail
+closed before verification. Accepted nonces are consumed in a bounded
+process-local freshness ledger to reject duplicate verification. Think
+also supports an SSE `stream=true` transport whose ordered chunks end with the
+same proof capsule and still require `/v1/verify`. Exact math and allowlisted
+science can therefore be answered directly in Chat, Solver, and Think;
+open-world persona chat remains
+`analysis_only`. Concurrent requests use per-surface sequence tokens so a stale
+response cannot overwrite a newer turn. A verified view is reconstructed from
+capsule-bound result fields in a fixed wrapper, so free-form candidate prose,
+reasoning steps, and telemetry do not inherit the verified badge.
 
-- `fast` and `deep` run the newly initialized MiMo core as telemetry-only
-  architecture probes. There is no loaded text-generation checkpoint, the
-  current probe consumes at most 64 characters, and it abstains.
-- `agent` reports declared tools but executes none; tool-call count remains zero.
-- persona chat, SCAMPER/TRIZ ideation, the five role templates, and the graph
-  scaffold return `analysis_only`. Their authored scores are labeled internal
-  priorities, never correctness confidence or measured benefit.
-- unverified outputs no longer train the Q-policy. The public feedback endpoint
-  is fail-closed until a separate verifier-backed outcome receipt exists.
-- the API honors swarm round and graph depth/beam bounds, and `/v1/models`
-  reports observed runtime limits instead of invented 262k/1M context windows.
-- the browser uses the correct `query` and `topic` payloads, escapes returned
-  text, requires evidence contracts, and displays explicit backend-unavailable
-  states. It no longer fabricates local answers, receipts, scores, or telemetry.
+For multi-worker or restart-spanning freshness, launch with
+`--verification-nonce-db path/to/nonces.sqlite` (or inject
+`verification_nonce_db` into `NexusApiService`). The opt-in SQLite ledger is
+WAL-backed and stores only nonce digests and timestamps; the default remains
+process-local and no prompts or answers are written. Both backends preserve all
+unexpired entries and reject new verification when full, so capacity pressure
+cannot silently make an accepted nonce reusable.
 
-This direction follows tool-integrated verification for small models, whole
-inference-system reporting for test-time scaling, and held-out calibration
-requirements for risk-controlled abstention. Semantic-entropy methods are a
-candidate future signal once Nexus has a real multi-generation model path; they
-are not simulated in v78.1. See
+The contract deliberately publishes `confidence=null`. A successful check is
+labeled `deterministic_assurance_not_probability`: it is same-implementation
+recomputation, not empirical calibration, algorithmic independence, a digital
+signature, or open-world factual certainty. All tool, permission, safety,
+memory, routing, activation, and promotion authority bits remain false.
+
+The other recognizable experimental surfaces remain bounded: fast/deep are
+newly initialized telemetry probes that abstain; agent executes no tools;
+SCAMPER/TRIZ, swarm, and graph outputs are analysis-only; and unverified output
+cannot update the public Q-policy. See
+[`docs/NEXUS_PROOF_CARRYING_CONVERSATION.md`](docs/NEXUS_PROOF_CARRYING_CONVERSATION.md)
+for the renderer protocol, threat cases, research mapping, and non-claims, and
 [`docs/NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md`](docs/NEXUS_EVIDENCE_FIRST_SELECTIVE_ANSWERING.md)
-for the research mapping, contract, threat cases, and non-claims.
+for the underlying admission boundary.
 
 ```bash
-# Focused Nexus evidence and compatibility suite
-python -m pytest -q test_nexus_epistemics.py test_nexus_engine.py \
+# Focused Nexus evidence, risk-control, and compatibility suite
+python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py test_nexus_engine.py \
   test_nexus_api.py test_nexus_swarm.py test_nexus_got.py \
   test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py \
-  test_nexus_studio_contract.py
+  test_nexus_studio_contract.py test_nexus_hybrid_advancements.py \
+  test_nexus_adaptive.py test_nexus_risk_control.py \
+  test_nexus_independent_checker.py test_nexus_nonce_ledger.py \
+  test_nexus_evidence_ledger.py \
+  test_nexus_compare.py test_nexus_quantum_bell.py \
+  test_nexus_resonance.py test_nexus_studio_v83.py \
+  test_nexus_studio_v84.py test_nexus_v84_innovations.py \
+  test_mimomix_multimodal.py \
+  test_mimomix_differential.py test_mimomix_mla.py test_mimomix_mod.py
 
 # Start interactive CLI terminal
 python source/nexus_cli.py
@@ -89,7 +282,7 @@ python source/nexus_api.py --port 8000
 
 ## Supermix v72 — NexusMind: Unified Hybrid Thinking Architecture (new, additive)
 
-> Historical architecture description. The v78.1 evidence contract above
+> Historical architecture description. The v78.2 evidence contract above
 > supersedes any “production-grade,” answer-confidence, context-window,
 > verification, or live-telemetry implication in this section. Swarm and GoT
 > defaults are deterministic analysis scaffolds; the neural core is not a
@@ -101,16 +294,16 @@ V72 originally assembled three experimental research lineages behind one interfa
 * **Supermix Cognition Stack** (v51–v71): Weight-tied recursive latent ACT refinement with ponder cost halting, supervised quality & continue verifier, cross-budget ordered top-k agreement with exact output reuse, v56 latent state machine with row-stochastic log-space transition matrices, v70 multi-domain sparse expert routing, and v71 deterministic closed-world scientific scenario solver with exact rational SI arithmetic and cryptographic answer receipts.
 * **AI-Dem-Lab Systems**: 5-Agent Cognitive Swarm (Generator, Critic, Skeptic, Archivist, Anomaly Hunter) with discrete replicator dynamics, Graph-of-Thoughts (GoT) multi-branch speculative search with prune-and-merge graph topology, closed-loop Tabular Q-Learning budget adaptation (`BudgetPolicyLearner`), and the complete Dem-Lab statistical telemetry battery (Shannon/min-entropy, chi-square uniformity p-values, runs & monobit tests, CHSH Bell inequality validation, and RSI momentum meters).
 
-### Running & Testing NexusMind
+### Historical v72 command examples
 
 ```bash
-# Run complete test suite (Swarm, GoT, Unified Engine, and API)
+# Run the original four-file v72 subset (not the current focused suite)
 python -m pytest test_nexus_swarm.py test_nexus_got.py test_nexus_engine.py test_nexus_api.py -v
 
 # Start interactive CLI terminal
 python source/nexus_cli.py
 
-# Launch production REST API server
+# Launch the experimental local REST API server
 python source/nexus_api.py --port 8000
 ```
 

@@ -108,6 +108,27 @@ def test_generation_is_deterministic_for_a_seed():
     assert first == second
 
 
+def test_the_pre_v82_shared_rng_draw_is_still_reachable():
+    """Old receipts stay checkable only while the old draw can be reproduced."""
+
+    first = [p.prompt for p in solving.generate_novel(20, seed=7, shared_rng=True)]
+    second = [p.prompt for p in solving.generate_novel(20, seed=7, shared_rng=True)]
+
+    assert first == second
+    assert first != [p.prompt for p in solving.generate_novel(20, seed=7)]
+
+
+def test_evaluate_defaults_to_the_measured_cap_not_the_legacy_one():
+    """The v65-v81 default of 40 truncated eleven of the corpus's task shapes."""
+
+    import inspect
+
+    default = inspect.signature(solving.evaluate).parameters["max_new_tokens"].default
+
+    assert default == solving.DEFAULT_MAX_NEW_TOKENS == 96
+    assert default != solving.LEGACY_MAX_NEW_TOKENS
+
+
 def test_different_seeds_give_different_problems():
     first = [p.prompt for p in solving.generate_novel(20, seed=7)]
     second = [p.prompt for p in solving.generate_novel(20, seed=8)]

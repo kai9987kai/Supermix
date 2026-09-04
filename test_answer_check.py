@@ -255,3 +255,184 @@ def test_every_advertised_shape_actually_parses():
 def test_conversation_is_still_not_checkable():
     for text in ("hello", "why is my script failing", "what is your name"):
         assert check.check(text, "anything") is None
+
+
+# -- the v79/v80 science shapes (v82) ---------------------------------------
+#
+# The science parsers shipped in v81 with no tests at all: `PARSERS` handled
+# twelve science and mathematics shapes while `supported_shapes()` still
+# advertised nine arithmetic ones, so nothing checked that the science laws
+# were even the right way up. `momentum = mass / velocity` would have passed
+# the whole suite.
+
+
+@pytest.mark.parametrize(
+    "question,task,expected",
+    [
+        # physics -- each is a phrasing `build_omni_corpus` actually emits
+        ("Given mass 25 kg and acceleration 4 m/s^2, compute the force.", "force", 100.0),
+        ("A 12 kg mass accelerates at 3 m/s^2. What is the force?", "force", 36.0),
+        ("force 10640 N mass 190 kg find acceleration", "acceleration", 56.0),
+        ("A force of 580 N acts on a mass of 116 kg. What is the acceleration?",
+         "acceleration", 5.0),
+        ("Find the acceleration produced by 580 N on 116 kg.", "acceleration", 5.0),
+        ("mass 98 kg velocity 3 m/s find momentum", "momentum", 294.0),
+        ("What is the kinetic energy of a 12 kg mass moving at 5 m/s?",
+         "kinetic_energy", 150.0),
+        ("Find the work done by 98 N acting over 2 m.", "work", 196.0),
+        ("force 30 N distance 4 m work done", "work", 120.0),
+        ("work 1860 J time 20 s power", "power", 93.0),
+        ("What power corresponds to 1860 joules in 20 seconds?", "power", 93.0),
+        ("A current of 5 A flows through a resistance of 57 ohms. What is the voltage?",
+         "voltage", 285.0),
+        ("A device runs at 12 V drawing 3 A. What is the electrical power?",
+         "electrical_power", 36.0),
+        ("A wave with frequency 40 Hz has wavelength 6 m. What is its speed?",
+         "wave_speed", 240.0),
+        # chemistry
+        ("What is the molarity of 4 mol of solute dissolved in 2 L?", "molarity", 2.0),
+        # mathematics
+        ("In how many ways can 2 items be chosen from 30?", "combination", 435.0),
+        ("An arithmetic series starts at 15 with common difference 4. "
+         "What is the sum of the first 8 terms?", "arithmetic_series", 232.0),
+        ("sum of arithmetic series first term 15 common difference 4 n 8",
+         "arithmetic_series", 232.0),
+    ],
+)
+def test_science_ground_truth_is_recomputed_from_the_question(question, task, expected):
+    parsed = check.parse_question(question)
+
+    assert parsed is not None, question
+    assert parsed[0] == task
+    assert parsed[1] == pytest.approx(expected)
+
+
+def test_kinetic_energy_is_not_read_as_momentum():
+    """Both name a mass and a velocity; only the wording separates them."""
+
+    assert check.parse_question(
+        "What is the kinetic energy of a 12 kg mass moving at 5 m/s?"
+    )[0] == "kinetic_energy"
+
+
+def test_acceleration_divides_rather_than_multiplies():
+    """A law the wrong way up would have passed every pre-v82 test."""
+
+    assert check.parse_question("force 100 N mass 4 kg find acceleration")[1] == 25.0
+
+
+def test_power_divides_rather_than_multiplies():
+    assert check.parse_question("work 100 J time 4 s power")[1] == 25.0
+
+
+def test_a_science_question_missing_a_quantity_is_not_checkable():
+    """Half a physics question must be NOT CHECKED, never a guessed verdict."""
+
+    assert check.parse_question("A force acts on a mass. What is the acceleration?") is None
+
+
+def test_a_wrong_science_reply_is_marked_wrong():
+    verdict = check.check("mass 98 kg velocity 3 m/s find momentum",
+                          "momentum = mass x velocity, total 291")
+
+    assert verdict is not None and not verdict.correct
+    assert verdict.expected == 294.0 and verdict.predicted == 291.0
+
+
+def test_a_correct_science_reply_is_marked_correct():
+    verdict = check.check(
+        "mass 98 kg velocity 3 m/s find momentum",
+        "momentum = mass x velocity, 90 x 3 = 270, 8 x 3 = 24, 270 + 24 = 294, total 294",
+    )
+
+    assert verdict is not None and verdict.correct
+
+
+def test_combination_reads_k_rather_than_assuming_two():
+    """The corpus fixes k=2; assuming it would be a confident wrong verdict."""
+
+    assert check.parse_question("10 choose 3")[1] == 120.0
+
+
+def test_combination_with_k_greater_than_n_is_not_checkable():
+    assert check.parse_question("30 choose 40") is None
+
+
+# -- the compound-expression trap (v82) -------------------------------------
+#
+# `answer_check` recomputes an answer from a *pattern*, not from a parse of the
+# question's meaning. "What is 2 + 3 * 4?" once matched the bare `A * B` search
+# and returned multiplication with expected 12.0, where precedence makes the
+# truth 14. That is the exact failure this module must never produce, and it is
+# also the reason it is not in `nexus_epistemics.ANSWER_VERIFIER_IDS`.
+
+
+def test_a_compound_expression_is_refused_rather_than_answered_wrongly():
+    assert check.parse_question("What is 2 + 3 * 4?") is None
+    assert check.check("What is 2 + 3 * 4?", "14") is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["What is 10 - 2 - 3?", "Compute 6 / 2 + 1", "8 x 2 x 3"],
+)
+def test_every_chained_expression_is_refused(question):
+    assert check.parse_question(question) is None
+
+
+def test_a_single_operator_expression_is_still_checked():
+    """The guard must not cost the nine shapes it was added to protect."""
+
+    assert check.parse_question("Solve this basic math problem: 617 + 288")[1] == 905.0
+    assert check.parse_question("Quick question: 70 / 5")[1] == 14.0
+    assert check.parse_question("What is 25 x 7?")[1] == 175.0
+
+
+def test_units_containing_a_slash_are_not_read_as_a_second_operator():
+    """`4 m/s^2` would break the guard if it counted non-numeric operators."""
+
+    assert check.parse_question(
+        "Given mass 25 kg and acceleration 4 m/s^2, compute the force."
+    ) == ("force", 100.0)
+
+
+def test_answer_check_is_not_on_the_verifier_allowlist():
+    """Documented, and pinned: this module may not certify an answer.
+
+    `nexus_epistemics` gates certification on an explicit allowlist. If
+    `answer_check` were ever added to it, the compound-expression trap above
+    would become a false CORRECT on a live reply.
+    """
+
+    epistemics = pytest.importorskip("nexus_epistemics")
+
+    assert not any("answer_check" in entry for entry in epistemics.ANSWER_VERIFIER_IDS)
+
+
+# -- the advertised shapes (v82) --------------------------------------------
+
+
+def test_supported_shapes_advertises_every_task_family():
+    """It listed nine of twenty-one until v82, under-selling the checker."""
+
+    shapes = check.supported_shapes()
+    tasks = {check.parse_question(shape)[0] for shape in shapes}
+
+    assert len(shapes) == 21
+    assert tasks == {
+        "arithmetic", "percent", "algebra_one_step", "word_problem", "average",
+        "multiplication", "division", "sequence", "two_step",
+        "force", "acceleration", "momentum", "kinetic_energy", "work", "power",
+        "voltage", "electrical_power", "wave_speed", "molarity",
+        "combination", "arithmetic_series",
+    }
+
+
+def test_advertised_shapes_match_the_benchmark_task_list():
+    """A shape family the benchmark scores but the interface cannot check."""
+
+    import eval_problem_solving as offline
+
+    advertised = {check.parse_question(shape)[0] for shape in check.supported_shapes()}
+
+    assert set(offline.GENERATORS) - advertised == set()

@@ -12,6 +12,7 @@ its way past. Most of these tests exist to pin that it does not.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -205,3 +206,128 @@ def test_the_original_is_always_retained_for_display():
     result = pn.normalise("what is 47 times 6")
 
     assert result.original == "what is 47 times 6"
+
+
+# ---------------------------------------------------------------------------
+# v85: science rules
+#
+# v80 answers 5 of 10 naturally-typed questions. Three of the five failures are
+# physics questions the normaliser had no rule for, because it only ever covered
+# arithmetic. These map the way a person writes a physics question onto the terse
+# labelled form `build_omni_corpus` generates.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text, rule, expected",
+    [
+        (
+            "If something weighs 25 kg and speeds up at 4 metres per second "
+            "squared, what force is that?",
+            "force",
+            "Given mass 25 kg and acceleration 4 m/s^2, compute the force.",
+        ),
+        (
+            "A 30 kg mass is pushed with 90 N. How fast does it accelerate?",
+            "acceleration",
+            "force 90 N mass 30 kg find acceleration",
+        ),
+        (
+            "how much momentum does a 14 kg trolley moving at 5 m/s have?",
+            "momentum",
+            "mass 14 kg velocity 5 m/s find momentum",
+        ),
+        (
+            "Work done pushing with 20 N over 7 metres?",
+            "work",
+            "force 20 N distance 7 m work done",
+        ),
+        (
+            "A 9 volt battery drives 3 amps. What's the power?",
+            "electrical_power",
+            "voltage 9 V current 3 A electrical power",
+        ),
+        (
+            "kinetic energy of a 10 kg body at 7 m/s",
+            "kinetic_energy",
+            "mass 10 kg velocity 7 m/s kinetic energy",
+        ),
+        (
+            "what voltage drives 3 A through a 5 ohm resistor",
+            "voltage",
+            "current 3 A resistance 5 ohm find voltage",
+        ),
+        (
+            "12 J of work in 4 s, what power?",
+            "power",
+            "work 12 J time 4 s power",
+        ),
+    ],
+)
+def test_science_questions_reach_the_trained_form(text, rule, expected):
+    result = pn.normalise(text)
+
+    assert result.rule == rule
+    assert result.prompt == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "What force do you feel in a lift?",
+        "Do you have the momentum to finish?",
+        "Tell me about power in politics.",
+        "The work was hard today.",
+        "I need 5 kg of flour.",
+    ],
+)
+def test_prose_without_the_needed_quantities_is_left_alone(text):
+    """A target word with no units is conversation, not a physics question.
+
+    The module's rule is that a wrong rewrite is worse than none, so a rule
+    fires only when every quantity the target needs is present and anchored to
+    its unit.
+    """
+
+    assert pn.normalise(text).rule is None
+
+
+def test_acceleration_units_are_not_read_as_a_velocity():
+    """`m/s^2` must be consumed before `m/s`, or force becomes momentum."""
+
+    result = pn.normalise("mass 12 kg accelerating at 3 m/s^2, find the force")
+
+    assert result.rule == "force"
+    assert "acceleration 3 m/s^2" in result.prompt
+
+
+def test_a_velocity_is_not_also_harvested_as_a_distance():
+    """Each number is consumed once, so `5 m/s` cannot also be a distance."""
+
+    result = pn.normalise("a 14 kg trolley at 5 m/s, what is its momentum?")
+
+    assert result.rule == "momentum"
+    assert result.prompt == "mass 14 kg velocity 5 m/s find momentum"
+
+
+def test_science_wins_over_the_binary_arithmetic_scan():
+    """`30 kg ... 90 N` would otherwise be harvested as an arithmetic pair."""
+
+    assert pn.normalise(
+        "A 30 kg mass is pushed with 90 N. How fast does it accelerate?"
+    ).rule == "acceleration"
+
+
+def test_a_science_target_missing_a_quantity_is_not_guessed_at():
+    """Naming the target is not enough; the normaliser never invents operands."""
+
+    assert pn.normalise("a 25 kg mass, what force is that?").rule is None
+
+
+def test_science_rewrites_never_alter_a_number():
+    """Presentation only: every number in the rewrite came from the input."""
+
+    text = "If something weighs 25 kg and speeds up at 4 m/s^2, what force?"
+    result = pn.normalise(text)
+
+    assert set(re.findall(r"\d+", result.prompt)) <= set(re.findall(r"\d+", text)) | {"2"}

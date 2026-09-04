@@ -47,16 +47,27 @@ import argparse
 import json
 import math
 import random
+import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 SOURCE_DIR = Path(__file__).resolve().parent
 if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
 
 from nexus_solver import solve_problem  # noqa: E402
+
+#: Sequence length every result in this line was produced at.
+#:
+#: v72 measured raising it from 128 to 160 as costing **24 accuracy points** on
+#: identical data, so the corpus fits the run rather than the run growing to fit
+#: the corpus. A format change is therefore a budget decision, and
+#: `token_budget_report` is what makes the budget visible before a run pays for
+#: it.
+DEFAULT_SEQUENCE_LENGTH = 128
 
 #: Relative tolerance when comparing a generated answer to the solver's.
 #: Exact-rational tasks agree to the bit; the constant-bearing ones (g, pi)
@@ -70,6 +81,27 @@ GRAVITY = 9.80665
 #: exhausted. Generous, because a near-full space still yields hits.
 EXHAUSTION_MISSES = 5000
 
+#: Whether `combination` keeps every intermediate inside the learned envelope.
+#:
+#: Off reproduces v80's corpus exactly. The current form multiplies `n` by
+#: `n - 1` with `n` up to 60, and `decompose_product` splits only its **first**
+#: operand -- so `60 x 59` is emitted as `60 x 59 = 3540, 0 x 59 = 0`, a
+#: two-digit by two-digit product in a single jump, followed by `half of 3540 =
+#: 1770`, a one-shot halving of a four-digit number. v81's rule is that every
+#: intermediate must stay inside two-digit-by-one-digit products; both of these
+#: are outside it, and the task scores 0.00.
+#:
+#: On, the even operand is halved *first* and `n` is capped at 19, so the only
+#: product is at most `19 x 9` -- byte-identical in shape to the
+#: `multiplication` task that scores 1.00.
+#:
+#: **This narrows the benchmark as well as the corpus**, because
+#: `eval_problem_solving` calls these same generators. A combination score
+#: measured with this on is NOT comparable with v80's 0.00, which was measured
+#: over n in 4..60. It is the same trade c7041897 already took for
+#: `kinetic_energy`, and it must be stated every time the number is quoted.
+COMBINATION_IN_ENVELOPE = False
+
 
 @dataclass
 class OmniProblem:
@@ -82,13 +114,29 @@ class OmniProblem:
     canonical: str
     params: Dict[str, float] = field(default_factory=dict)
 
-    def to_row(self) -> Dict[str, str]:
-        return {
+    def to_row(self, keep_canonical: bool = False) -> Dict[str, str]:
+        """The training row. ``keep_canonical`` adds the solver's own query.
+
+        Without it, a shipped row cannot be re-verified: the model-facing
+        prompt is one of several phrasings and `nexus_solver` parses only the
+        canonical form. Measured on the v80 corpus, the solver could re-verify
+        **1,256 of 3,000 sampled model-facing prompts (41.9%)**; the rest are
+        phrasings it does not parse. Carrying the canonical query makes a
+        solver-checked reward loop possible later and costs one short string
+        per row.
+
+        Off by default so the emitted corpus is byte-identical to v80's.
+        """
+
+        row = {
             "user": self.prompt,
             "assistant": self.response,
             "domain": self.domain,
             "task": self.task,
         }
+        if keep_canonical:
+            row["canonical"] = self.canonical
+        return row
 
 
 def _number(value: float) -> str:
@@ -351,7 +399,7 @@ def _combination(rng: random.Random) -> OmniProblem:
     # n x (n-1) / 2. The previous version stated `7 choose 2 = 21` with no
     # working at all, leaving the model to memorise the whole table, and it
     # scored 0.00 on 976 rows.
-    n = rng.randint(4, 60)
+    n = rng.randint(4, 19) if COMBINATION_IN_ENVELOPE else rng.randint(4, 60)
     k = 2
     answer = math.comb(n, k)
     prompt = _pick(rng, [
@@ -361,10 +409,22 @@ def _combination(rng: random.Random) -> OmniProblem:
         "How many combinations are there of {n} choose {k}?",
     ], n=n, k=k)
     product = n * (n - 1)
-    response = (f"combinations = n x (n - 1) / 2, {n} - 1 = {n - 1}, "
-                f"{decompose_product(n, n - 1)}, "
-                f"half of {product} = {answer}, "
-                f"there are {answer} ways, total {answer}")
+    if COMBINATION_IN_ENVELOPE:
+        # Halve before multiplying, not after. One of `n` and `n - 1` is
+        # always even, so the halving is exact, and it happens while the
+        # number is still two-digit instead of four.
+        even, odd = (n, n - 1) if n % 2 == 0 else (n - 1, n)
+        half = even // 2
+        assert odd * half == answer, f"combination decomposition broke for n={n}"
+        response = (f"combinations = n x (n - 1) / 2, {n} - 1 = {n - 1}, "
+                    f"half of {even} = {half}, "
+                    f"{decompose_product(odd, half)}, "
+                    f"there are {answer} ways, total {answer}")
+    else:
+        response = (f"combinations = n x (n - 1) / 2, {n} - 1 = {n - 1}, "
+                    f"{decompose_product(n, n - 1)}, "
+                    f"half of {product} = {answer}, "
+                    f"there are {answer} ways, total {answer}")
     return OmniProblem("combination", "mathematics", prompt, response, float(answer), "",
                        f"n choose k n = {n} k = {k}", {"n": n, "k": k})
 
@@ -447,28 +507,408 @@ def verify(problem: OmniProblem) -> bool:
 def extract_answer(text: str) -> Optional[float]:
     """The last number in a reply, matching the benchmark's rule."""
 
-    import re
-
     matches = re.findall(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
     return float(matches[-1]) if matches else None
 
 
+# -- the token budget (v82) -------------------------------------------------
+#
+# V67 lost its six-value `average` rows without anyone noticing: they were
+# longer than the block, turn-aligned packing dropped them, and the task then
+# scored 0% on exactly the sizes that had gone missing. Nothing reported the
+# loss. V72 then measured that growing the block from 128 to 160 costs 24
+# accuracy points, so "just make it longer" is not available either.
+#
+# A format change is therefore a budget decision, and this is the guard.
+
+
+def _budget_tokenizer(digit_tokens: bool = True):
+    """A tokenizer whose *segmentation* matches training's.
+
+    Length depends only on the regex, not on the vocabulary -- `encode` emits
+    exactly one id per regex match, `<unk>` included -- so an empty vocabulary
+    measures the same token counts the real one would, and this needs no
+    corpus pass and no checkpoint.
+    """
+
+    import mimomix_text  # local: pulls in torch, which the generators do not need
+
+    return mimomix_text.WordTokenizer([], digit_tokens=digit_tokens)
+
+
+def token_budget_report(
+    rows: Sequence[Dict[str, str]],
+    sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
+    digit_tokens: bool = True,
+) -> Dict[str, Any]:
+    """Per task: response length, turn length, and what packing would drop.
+
+    ``dropped_fraction`` is the share of rows whose full
+    ``<bos><user> ... <assistant> ... <eos>`` turn exceeds ``sequence_length``.
+    Those rows do not shorten -- they **disappear**, and they are always a
+    task's longest ones, so the model meets its hardest cases first at
+    evaluation.
+
+    Measured on the current generators with the v80 tokenizer settings
+    (digit_tokens on, sequence_length 128): `arithmetic_series` responses run
+    to a median of 81 tokens and a max of 84, `combination` 60/65,
+    `kinetic_energy` 54/56, and every other task is at or below 38.
+    """
+
+    tokenizer = _budget_tokenizer(digit_tokens)
+    per_task: Dict[str, List[Tuple[int, int]]] = {}
+    for row in rows:
+        response_tokens = len(tokenizer.pattern.findall(row["assistant"]))
+        turn_tokens = len(tokenizer.encode_turn(row["user"], row["assistant"])[0])
+        per_task.setdefault(row.get("task", "?"), []).append(
+            (response_tokens, turn_tokens)
+        )
+
+    tasks: Dict[str, Any] = {}
+    worst = 0.0
+    for name, pairs in sorted(per_task.items()):
+        responses = sorted(p[0] for p in pairs)
+        turns = sorted(p[1] for p in pairs)
+        count = len(responses)
+        index95 = min(count - 1, int(0.95 * count))
+        dropped = sum(1 for t in turns if t > sequence_length)
+        fraction = round(dropped / count, 6)
+        worst = max(worst, fraction)
+        tasks[name] = {
+            "rows": count,
+            "response_median": responses[count // 2],
+            "response_p95": responses[index95],
+            "response_max": responses[-1],
+            "turn_median": turns[count // 2],
+            "turn_p95": turns[index95],
+            "turn_max": turns[-1],
+            "dropped_by_turn_aligned_packing": dropped,
+            "dropped_fraction": fraction,
+        }
+
+    return {
+        "sequence_length": sequence_length,
+        "digit_tokens": digit_tokens,
+        "tasks": tasks,
+        "worst_dropped_fraction": round(worst, 6),
+        "note": (
+            "turn-aligned packing drops a turn longer than sequence_length "
+            "rather than truncating it; the dropped rows are a task's longest, "
+            "so any non-zero fraction here biases that task toward its easiest "
+            "instances"
+        ),
+    }
+
+
+# -- retry rows (v82) -------------------------------------------------------
+
+
+#: The word that marks a correction. One word, not a bracketed token: with
+#: digit-level tokenisation `[retry]` becomes four symbols the model has to
+#: learn to emit in order, and `<retry>` would collide with the special-token
+#: convention that `decode` strips.
+RETRY_MARKER = "no"
+
+#: A step of worked arithmetic: `30 x 3 = 90`.
+_STEP = re.compile(r"(-?\d+) ([-+x/]) (-?\d+) = (-?\d+)")
+
+
+def inject_retry(response: str, rng: random.Random) -> Optional[str]:
+    """Insert one wrong step, the marker, and the correct step.
+
+    ``30 x 3 = 90, 9 x 3 = 27, total 117`` becomes
+    ``30 x 3 = 80, no, 30 x 3 = 90, 9 x 3 = 27, total 117``.
+
+    Ye et al. 2024 ("Physics of Language Models 2.2", arXiv 2408.16293) report
+    iGSM-med accuracy rising from 78% at retry_rate 0 to about 86% at 0.2 and
+    94% at 0.5, and find masking the wrong tokens out of the loss unnecessary.
+    The hypothesis is that a model which has only ever seen correct chains has
+    no represented way to recover from its own first mistake.
+
+    **The wrong number is never last.** The benchmark extracts the last number
+    in the reply, so a retry in the final step would score every row wrong.
+    This only ever rewrites a step that is followed by more text, and returns
+    ``None`` when the response has no such step -- the caller keeps the
+    original rather than shipping something it has not checked.
+    """
+
+    candidates = [m for m in _STEP.finditer(response) if m.end() < len(response) - 1]
+    if not candidates:
+        return None
+    match = rng.choice(candidates)
+    left, operator, right, correct = match.groups()
+    value = int(correct)
+    offsets = [d for d in (-30, -20, -10, -9, -3, -2, -1, 1, 2, 3, 9, 10, 20, 30)
+               if value + d != value]
+    wrong = value + rng.choice(offsets)
+    if wrong == value:  # unreachable, but a silent no-op retry would be worse
+        return None
+    step = f"{left} {operator} {right} = "
+    return (
+        response[: match.start()]
+        + f"{step}{wrong}, {RETRY_MARKER}, {step}{correct}"
+        + response[match.end():]
+    )
+
+
+# -- balanced operands (v82) ------------------------------------------------
+
+
+def _carry_count(a: int, b: int, operator: str) -> int:
+    """Carries in ``a + b`` or borrows in ``a - b``, column by column.
+
+    Lee et al. 2023 Fig. 3 stratify by digit length **and** carry count, and
+    report that uniform random sampling "performs relatively poorly even for
+    2-digit addition" because the hard buckets are rare. Counting carries is
+    how a bucket gets identified.
+
+    Negative operands and non-additive operators return 0: a borrow is not
+    defined for them and guessing would put rows in the wrong bucket.
+    """
+
+    if operator not in "+-" or a < 0 or b < 0:
+        return 0
+    if operator == "-" and a < b:
+        return 0
+    carries = 0
+    borrow = 0
+    while a > 0 or b > 0:
+        digit_a, digit_b = a % 10, b % 10
+        if operator == "+":
+            borrow = 1 if digit_a + digit_b + borrow >= 10 else 0
+        else:
+            borrow = 1 if digit_a - borrow < digit_b else 0
+        carries += borrow
+        a //= 10
+        b //= 10
+    return carries
+
+
+def operand_bucket(problem: "OmniProblem") -> str:
+    """``d<digits>_c<carries>``: the stratum a row belongs to.
+
+    ``digits`` is the widest integer operand in the question, and ``carries``
+    counts every carry and borrow the worked response performs. Both are read
+    off the row itself, so the same function buckets every task without a
+    per-task table that could drift from the generators.
+    """
+
+    integers = [abs(int(v)) for v in problem.params.values()
+                if isinstance(v, (int, float)) and float(v).is_integer()]
+    digits = max((len(str(v)) for v in integers), default=1)
+    steps = list(_STEP.finditer(problem.response))
+    carries = sum(
+        _carry_count(int(m.group(1)), int(m.group(3)), m.group(2)) for m in steps
+    )
+
+    # The carry a v74-shaped product hides.
+    #
+    # `decompose_product` writes `40 x 3 = 120, 7 x 3 = 21` and stops -- the
+    # addition of the partial products is left for the model to do in its head,
+    # deliberately, because that is the form that scored 0.93. So for the
+    # multiplicative tasks the *only* carry in the problem is the one nobody
+    # writes down, and a bucketing that read the written steps alone would put
+    # every row in one bucket and balance nothing. `47 x 3` needs no carry;
+    # `47 x 9` (360 + 63) needs one.
+    products = [int(m.group(4)) for m in steps if m.group(2) == "x"]
+    if len(products) > 1 and not any(m.group(2) == "+" for m in steps):
+        running = products[0]
+        for value in products[1:]:
+            carries += _carry_count(running, value, "+")
+            running += value
+
+    return f"d{digits}_c{min(carries, 4)}"
+
+
+# -- train-set priming (v82) ------------------------------------------------
+
+
+class _HarderRandom:
+    """A random source whose every range reaches one notch further.
+
+    Jelassi et al. 2023 (arXiv 2306.15400) prime a training set with a few
+    dozen examples harder than the test range, so the test range stops being
+    the edge of the distribution and becomes its interior. V67 hit the same
+    thing from the other side: it generated 4-5 values against a benchmark
+    testing 4-6, and every six-value problem was out of distribution.
+
+    Wrapping the RNG rather than writing harder generators means the **format
+    is identical by construction** -- the same generator body runs, so a primed
+    row differs from an ordinary one only in its numbers. A widened row is
+    still solver-verified like any other, and one that cannot be verified is
+    dropped like any other.
+    """
+
+    def __init__(self, rng: random.Random, widen: float = 0.1):
+        self._rng = rng
+        self._widen = widen
+
+    def _extend(self, low: int, high: int) -> int:
+        return high + max(1, int(round((high - low) * self._widen)))
+
+    def randint(self, a: int, b: int) -> int:
+        return self._rng.randint(a, self._extend(a, b))
+
+    def randrange(self, start: int, stop: Optional[int] = None, step: int = 1) -> int:
+        if stop is None:
+            start, stop = 0, start
+        # Extend by whole steps, so a range of even numbers stays even.
+        extra = max(step, int(round((stop - start) * self._widen / step)) * step)
+        return self._rng.randrange(start, stop + extra, step)
+
+    def choice(self, seq):
+        return self._rng.choice(seq)
+
+    def random(self) -> float:
+        return self._rng.random()
+
+    def shuffle(self, seq) -> None:
+        self._rng.shuffle(seq)
+
+
+#: Attempts before a balanced build stops trying to fill its rare buckets.
+BALANCE_MISSES = 20000
+
+
+def _balanced_sample(name: str, per_task: int, draw):
+    """Rejection-sample so digit x carry buckets are as equal as they can be.
+
+    Two passes. The first draws ``per_task`` rows the ordinary way and records
+    the histogram the generator produces on its own -- that is the "before" the
+    report shows, and it is the distribution every corpus in this line has
+    trained on. The second refills from scratch with a per-bucket cap, so the
+    rare high-carry buckets are represented instead of being crowded out.
+
+    Buckets that the generator simply cannot produce enough of do not stall the
+    build: the miss budget runs out, the shortfall is reported, and
+    ``equalised`` says plainly whether the target was reached.
+    """
+
+    first_pass = []
+    for _ in range(per_task):
+        problem = draw(name)
+        if problem is not None:
+            first_pass.append(problem)
+    before = Counter(operand_bucket(p) for p in first_pass)
+    if not before:
+        return [], {}, {}, False
+
+    target = math.ceil(per_task / len(before))
+    kept: List["OmniProblem"] = []
+    after: Counter = Counter()
+    for problem in first_pass:
+        bucket = operand_bucket(problem)
+        if after[bucket] < target and len(kept) < per_task:
+            kept.append(problem)
+            after[bucket] += 1
+
+    misses = 0
+    while len(kept) < per_task and misses < BALANCE_MISSES:
+        problem = draw(name)
+        if problem is None:
+            misses += 1
+            continue
+        bucket = operand_bucket(problem)
+        if after[bucket] >= target:
+            misses += 1
+            continue
+        kept.append(problem)
+        after[bucket] += 1
+        misses = 0
+
+    equalised = len(kept) == per_task and len(set(after.values())) <= 2
+    return kept, dict(sorted(before.items())), dict(sorted(after.items())), equalised
+
+
 def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
-          repeat: bool = True):
-    """Generate, verify, and return (rows, report)."""
+          repeat: bool = True, retry_rate: float = 0.0,
+          balanced_operands: bool = False, priming_fraction: float = 0.0,
+          keep_canonical: bool = False,
+          sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
+          token_budget: bool = False):
+    """Generate, verify, and return (rows, report).
+
+    Every option added in v82 defaults to the value that reproduces the v80
+    corpus exactly, and each one is a hypothesis with a citation rather than a
+    measured improvement:
+
+    ``retry_rate``
+        Fraction of rows carrying one wrong step, the marker word, and the
+        correction (Ye et al. 2024).
+    ``balanced_operands``
+        Rejection-sample so digit-length x carry-count buckets are equal
+        (Lee et al. 2023 Fig. 3).
+    ``priming_fraction``
+        Fraction of rows drawn one notch beyond the benchmark's range, in the
+        identical format (Jelassi et al. 2023).
+    ``keep_canonical``
+        Ship the solver's own query alongside the row.
+    ``token_budget``
+        Add the per-task length table to the report.
+    """
 
     rng = random.Random(seed)
+    harder = _HarderRandom(rng)
     chosen = tasks or list(TASKS)
     rows: List[Dict[str, str]] = []
     counts: Dict[str, int] = {}
     dropped: Dict[str, int] = {}
     short: Dict[str, Dict[str, object]] = {}
     distinct: Dict[str, int] = {}
+    retried: Dict[str, int] = {}
+    primed: Dict[str, int] = {}
+    balance: Dict[str, Dict[str, object]] = {}
+
+    def draw(name: str):
+        """One verified problem, or None. Counts its own drops and priming."""
+
+        source = rng
+        if priming_fraction > 0 and rng.random() < priming_fraction:
+            source = harder
+            primed[name] = primed.get(name, 0) + 1
+        problem = TASKS[name](source)
+        if not verify(problem) or extract_answer(problem.response) != problem.answer:
+            dropped[name] = dropped.get(name, 0) + 1
+            if source is harder:
+                primed[name] -= 1
+            return None
+        return problem
+
+    def emit(name: str, problem: "OmniProblem") -> Dict[str, str]:
+        """Turn a verified problem into a row, optionally with a retry."""
+
+        row = problem.to_row(keep_canonical=keep_canonical)
+        if retry_rate > 0 and rng.random() < retry_rate:
+            candidate = inject_retry(row["assistant"], rng)
+            # The retry must not have moved the answer. A row whose last number
+            # changed would score every correct model as wrong, so it is simply
+            # left alone rather than shipped unverified.
+            if candidate is not None and extract_answer(candidate) == problem.answer:
+                row["assistant"] = candidate
+                retried[name] = retried.get(name, 0) + 1
+        return row
 
     for name in chosen:
-        generator = TASKS[name]
         made = 0
         seen = set()
+        if repeat and balanced_operands:
+            problems, before, after, reached = _balanced_sample(
+                name, per_task, draw
+            )
+            for problem in problems:
+                seen.add(problem.prompt)
+                rows.append(emit(name, problem))
+            counts[name] = len(problems)
+            distinct[name] = len(seen)
+            balance[name] = {
+                "buckets_before": before,
+                "buckets_after": after,
+                "equalised": reached,
+            }
+            if len(problems) < per_task:
+                short[name] = {"asked": per_task, "produced": len(problems),
+                               "reason": "balancing could not fill every bucket"}
+            continue
         if repeat:
             # Repetition is how this model learns an algorithm.
             #
@@ -485,12 +925,11 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
             # counts are still reported, so the repetition factor is visible
             # rather than hidden.
             for _ in range(per_task):
-                problem = generator(rng)
-                if not verify(problem) or extract_answer(problem.response) != problem.answer:
-                    dropped[name] = dropped.get(name, 0) + 1
+                problem = draw(name)
+                if problem is None:
                     continue
                 seen.add(problem.prompt)
-                rows.append(problem.to_row())
+                rows.append(emit(name, problem))
                 made += 1
             counts[name] = made
             distinct[name] = len(seen)
@@ -505,23 +944,19 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
         # reported instead of padded.
         misses = 0
         while made < per_task and misses < EXHAUSTION_MISSES:
-            problem = generator(rng)
+            # `draw` folds in verification and the answer-parses check: the
+            # response must parse to the right answer, or the benchmark will
+            # score a correct model as wrong.
+            problem = draw(name)
+            if problem is None:
+                misses += 1
+                continue
             key = problem.prompt
             if key in seen:
                 misses += 1
                 continue
-            if not verify(problem):
-                dropped[name] = dropped.get(name, 0) + 1
-                misses += 1
-                continue
-            # The response must also parse to the right answer, or the
-            # benchmark will score a correct model as wrong.
-            if extract_answer(problem.response) != problem.answer:
-                dropped[name] = dropped.get(name, 0) + 1
-                misses += 1
-                continue
             seen.add(key)
-            rows.append(problem.to_row())
+            rows.append(emit(name, problem))
             made += 1
             misses = 0
         counts[name] = made
@@ -542,7 +977,35 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
                        for k, v in distinct.items() if v},
         "verified_by": "nexus_solver.solve_problem",
         "tolerance": TOLERANCE,
+        "options": {
+            "repeat": repeat,
+            "retry_rate": retry_rate,
+            # What happened, not what was asked for. Balancing only runs on the
+            # repeating path, and a receipt that records a request as though it
+            # were an effect is how an experiment that never ran gets written up
+            # as a null result. The CLI refuses this pair outright; the library
+            # entry point is still reachable, so it reports the truth.
+            "balanced_operands": bool(balanced_operands and repeat),
+            "priming_fraction": priming_fraction,
+            "keep_canonical": keep_canonical,
+            "combination_in_envelope": COMBINATION_IN_ENVELOPE,
+        },
     }
+    if balanced_operands and not repeat:
+        report["balanced_operands_skipped"] = (
+            "requested, but operand balancing is implemented only for "
+            "repeat=True; the uniqueness path rejects draws on prompt novelty, "
+            "not bucket occupancy, so no rows were stratified"
+        )
+    if retry_rate > 0:
+        report["retry_rows"] = retried
+        report["retry_marker"] = RETRY_MARKER
+    if priming_fraction > 0:
+        report["priming_rows"] = primed
+    if balanced_operands:
+        report["operand_balance"] = balance
+    if token_budget:
+        report["token_budget"] = token_budget_report(rows, sequence_length)
     return rows, report
 
 
@@ -558,13 +1021,60 @@ def build_parser() -> argparse.ArgumentParser:
                               "scored 0.93, while the diverse omni build scored 0.03"))
     parser.add_argument("--task", action="append", default=[],
                         help="restrict to these tasks; repeatable")
+    parser.add_argument("--retry_rate", type=float, default=0.0,
+                        help=("fraction of rows carrying one wrong step, the "
+                              "marker word and the correction (Ye et al. 2024, "
+                              "arXiv 2408.16293). Hypothesis, unmeasured here"))
+    parser.add_argument("--priming_fraction", type=float, default=0.0,
+                        help=("fraction of rows drawn one notch beyond the "
+                              "benchmark's range in the identical format "
+                              "(Jelassi et al. 2023). Hypothesis, unmeasured here"))
+    parser.add_argument("--balanced_operands", action="store_true",
+                        help=("equalise digit-length x carry-count buckets by "
+                              "rejection sampling (Lee et al. 2023 Fig. 3). "
+                              "Hypothesis, unmeasured here"))
+    parser.add_argument("--keep_canonical", action="store_true",
+                        help="ship the solver's own query in each row")
+    parser.add_argument("--token_budget_report", action="store_true",
+                        help=("measure per-task response and turn lengths and "
+                              "what turn-aligned packing would drop"))
+    parser.add_argument("--sequence_length", type=int,
+                        default=DEFAULT_SEQUENCE_LENGTH,
+                        help="the block size the token budget is measured against")
+    parser.add_argument("--combination_in_envelope", action="store_true",
+                        help=("halve before multiplying and cap n at 19, so no "
+                              "intermediate leaves the two-digit-by-one-digit "
+                              "envelope. NARROWS THE BENCHMARK TOO -- scores are "
+                              "not comparable with v80's"))
     return parser
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    # Balancing is implemented only on the repeating path: the uniqueness loop
+    # rejects a draw on prompt novelty, not on bucket occupancy, so
+    # `--balanced_operands` was silently doing nothing under `--unique` while
+    # the report still recorded it as applied. An A/B of `--unique` against
+    # `--unique --balanced_operands` produced byte-identical corpora, so the
+    # arm would have measured an exact null by construction and the receipt
+    # would have said the flag was on. Refuse the pair rather than ship that.
+    if args.unique and args.balanced_operands:
+        parser.error(
+            "--balanced_operands is not implemented with --unique: balancing "
+            "stratifies repeated draws, and the uniqueness path never calls it. "
+            "Drop one of the two."
+        )
+    global COMBINATION_IN_ENVELOPE
+    COMBINATION_IN_ENVELOPE = bool(args.combination_in_envelope)
     rows, report = build(args.per_task, args.seed, args.task or None,
-                         repeat=not args.unique)
+                         repeat=not args.unique,
+                         retry_rate=args.retry_rate,
+                         balanced_operands=args.balanced_operands,
+                         priming_fraction=args.priming_fraction,
+                         keep_canonical=args.keep_canonical,
+                         sequence_length=args.sequence_length,
+                         token_budget=args.token_budget_report)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -582,6 +1092,16 @@ def main(argv=None) -> int:
         if report["dropped_failing_verification"].get(name):
             note = f"  ({report['dropped_failing_verification'][name]} dropped)"
         print(f"  {name:<20} {count:,}{note}")
+
+    budget = report.get("token_budget")
+    if budget:
+        print(f"\ntoken budget at sequence_length {budget['sequence_length']}")
+        print(f"  {'task':<20} {'resp med':>8} {'p95':>5} {'max':>5} "
+              f"{'turn max':>9} {'dropped':>8}")
+        for name, stats in budget["tasks"].items():
+            print(f"  {name:<20} {stats['response_median']:>8} "
+                  f"{stats['response_p95']:>5} {stats['response_max']:>5} "
+                  f"{stats['turn_max']:>9} {stats['dropped_fraction']:>8.4f}")
     return 0
 
 

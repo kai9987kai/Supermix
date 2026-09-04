@@ -58,6 +58,8 @@ __all__ = [
     "build_training_tensors",
     "load_chat_pairs",
     "load_chat_pairs_jsonl",
+    "reverse_digit_runs",
+    "turn_alignment_report",
 ]
 
 PAD, BOS, EOS, UNK, USER, ASSISTANT = 0, 1, 2, 3, 4, 5
@@ -84,11 +86,28 @@ TOKEN_PATTERN = re.compile(r"\s*[A-Za-z]+(?:'[A-Za-z]+)?|\s*\d+|\s*[^\sA-Za-z\d]
 #: the input byte for byte.
 DIGIT_TOKEN_PATTERN = re.compile(r"\s*[A-Za-z]+(?:'[A-Za-z]+)?|\s*\d|\s*[^\sA-Za-z\d]|\s+")
 
+#: A maximal run of digits, for the least-significant-digit-first option below.
+DIGIT_RUN_PATTERN = re.compile(r"\d+")
+
+
+def reverse_digit_runs(text: str) -> str:
+    """Reverse every maximal run of digits in ``text``.
+
+    ``"124 + 72 = 196"`` becomes ``"421 + 27 = 691"``. The transform is an
+    **involution** -- applying it twice restores the input -- which is what lets
+    :meth:`WordTokenizer.decode` undo it with the same function, and it never
+    changes how the tokenizer's regex segments the string, because a reversed
+    digit run is still a digit run of the same length.
+    """
+
+    return DIGIT_RUN_PATTERN.sub(lambda m: m.group(0)[::-1], text)
+
 
 class WordTokenizer:
     """Whitespace-preserving word tokenizer with a fixed vocabulary."""
 
-    def __init__(self, tokens: Sequence[str], digit_tokens: bool = False):
+    def __init__(self, tokens: Sequence[str], digit_tokens: bool = False,
+                 reverse_digits: bool = False):
         self.tokens: List[str] = list(SPECIAL_TOKENS) + [
             token for token in tokens if token not in SPECIAL_TOKENS
         ]
@@ -97,16 +116,42 @@ class WordTokenizer:
         #: because a tokenizer reloaded under the other setting would segment
         #: every number differently and silently mis-encode the vocabulary.
         self.digit_tokens = bool(digit_tokens)
+        #: Whether numbers are written least-significant digit first.
+        #:
+        #: Lee et al. 2023 (arXiv 2307.03381) report a NanoGPT of 10.6M
+        #: parameters reaching 100% on three-digit addition at roughly 2,500
+        #: training samples with reversed digits, and never reaching it without.
+        #: The reason offered is that addition is computed right to left, so a
+        #: left-to-right decoder writing "1" of "124" first must have already
+        #: resolved every carry it has not yet emitted.
+        #:
+        #: Doing it here rather than in the corpus builders means the builders,
+        #: `answer_check` and `eval_problem_solving` need no change at all: the
+        #: reversal is applied on the way in and undone on the way out, so every
+        #: string outside this class is in ordinary reading order.
+        #:
+        #: **Unmeasured in this repository.** No Supermix run has trained under
+        #: it. It travels with the checkpoint for the same reason
+        #: ``digit_tokens`` does -- a tokenizer reloaded under the other setting
+        #: would silently mis-encode every number in the corpus.
+        self.reverse_digits = bool(reverse_digits)
 
     @property
     def pattern(self):
         return DIGIT_TOKEN_PATTERN if self.digit_tokens else TOKEN_PATTERN
 
+    def _pieces(self, text: str) -> List[str]:
+        """Tokenize, applying the digit reversal first when it is enabled."""
+
+        if self.reverse_digits:
+            text = reverse_digit_runs(text)
+        return self.pattern.findall(text)
+
     # -- construction ------------------------------------------------------
 
     @classmethod
     def build(cls, texts: Iterable[str], max_vocab: int = 16384, min_count: int = 1,
-              digit_tokens: bool = False) -> "WordTokenizer":
+              digit_tokens: bool = False, reverse_digits: bool = False) -> "WordTokenizer":
         """Build a vocabulary, covering each word with and without leading space.
 
         Tokens carry their own leading whitespace, so ``"Got"`` and ``" Got"`` are
@@ -127,6 +172,11 @@ class WordTokenizer:
         pattern = DIGIT_TOKEN_PATTERN if digit_tokens else TOKEN_PATTERN
         counter: Counter = Counter()
         for text in texts:
+            # Count the *encoded* form, or a reversed-digit vocabulary would be
+            # built over strings the encoder never produces. With whole-number
+            # tokens that matters: "124" and "421" are different symbols.
+            if reverse_digits:
+                text = reverse_digit_runs(text)
             counter.update(pattern.findall(text))
 
         kept: List[str] = []
@@ -140,14 +190,23 @@ class WordTokenizer:
                     kept.append(variant)
             if len(kept) >= max_vocab:
                 break
-        return cls(kept[:max_vocab], digit_tokens=digit_tokens)
+        return cls(kept[:max_vocab], digit_tokens=digit_tokens,
+                   reverse_digits=reverse_digits)
 
     @property
     def vocab_size(self) -> int:
         return len(self.tokens)
 
     def to_dict(self) -> Dict[str, object]:
-        return {"tokens": self.tokens, "digit_tokens": self.digit_tokens}
+        payload: Dict[str, object] = {
+            "tokens": self.tokens,
+            "digit_tokens": self.digit_tokens,
+        }
+        # Written only when enabled, so a default-built tokenizer serialises
+        # byte-identically to every checkpoint saved before v82.
+        if self.reverse_digits:
+            payload["reverse_digits"] = True
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Dict[str, object]) -> "WordTokenizer":
@@ -157,6 +216,8 @@ class WordTokenizer:
         instance.index = {token: i for i, token in enumerate(tokens)}
         # Absent in every pre-v65 checkpoint, which all used whole-number tokens.
         instance.digit_tokens = bool(payload.get("digit_tokens", False))
+        # Absent in every pre-v82 checkpoint, which all wrote numbers forwards.
+        instance.reverse_digits = bool(payload.get("reverse_digits", False))
         return instance
 
     def save(self, path) -> None:
@@ -170,7 +231,7 @@ class WordTokenizer:
     # -- encoding ----------------------------------------------------------
 
     def encode(self, text: str) -> List[int]:
-        return [self.index.get(piece, UNK) for piece in self.pattern.findall(text)]
+        return [self.index.get(piece, UNK) for piece in self._pieces(text)]
 
     def decode(self, ids: Sequence[int]) -> str:
         out: List[str] = []
@@ -180,10 +241,16 @@ class WordTokenizer:
                 continue  # specials are structure, not text
             if 0 <= token_id < len(self.tokens):
                 out.append(self.tokens[token_id])
-        return "".join(out)
+        text = "".join(out)
+        if self.reverse_digits:
+            # The same involution that encode applied, undoing it. A partially
+            # generated number decodes as a partially reversed one, which is
+            # the honest rendering: the model has not written the rest yet.
+            text = reverse_digit_runs(text)
+        return text
 
     def unknown_rate(self, text: str) -> float:
-        pieces = self.pattern.findall(text)
+        pieces = self._pieces(text)
         if not pieces:
             return 0.0
         return sum(1 for piece in pieces if piece not in self.index) / len(pieces)
@@ -194,12 +261,14 @@ class WordTokenizer:
         total = 0
         unknown = 0
         for text in texts:
-            pieces = self.pattern.findall(text)
+            pieces = self._pieces(text)
             total += len(pieces)
             unknown += sum(1 for piece in pieces if piece not in self.index)
         return {
             "vocab_size": self.vocab_size,
             "special_tokens": len(SPECIAL_TOKENS),
+            "digit_tokens": self.digit_tokens,
+            "reverse_digits": self.reverse_digits,
             "sampled_tokens": total,
             "unknown_tokens": unknown,
             "coverage": round(1.0 - unknown / max(1, total), 6),
@@ -356,6 +425,7 @@ def build_training_tensors(
     sequence_length: int = 128,
     mask_prompt: bool = True,
     turn_aligned: bool = False,
+    stats: Optional[Dict[str, object]] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Pack turns into fixed-length `(input_ids, labels)` blocks.
 
@@ -380,10 +450,28 @@ def build_training_tensors(
     ``sequence_length``, so no supervised token is ever orphaned from its prompt.
     It costs padding compute and drops turns longer than the block, both of which
     the receipt should record.
+
+    Pass a dict as ``stats`` to find out how many turns were dropped. The
+    docstring above promised the receipt should record it and nothing ever
+    returned the number, so an over-length task could vanish from training with
+    no trace -- which is exactly how v67 lost its six-value ``average`` rows.
+    Leaving ``stats`` at ``None`` keeps the old two-value return and the old
+    behaviour untouched.
     """
 
     if turn_aligned:
-        return _build_turn_aligned_tensors(pairs, tokenizer, sequence_length, mask_prompt)
+        return _build_turn_aligned_tensors(
+            pairs, tokenizer, sequence_length, mask_prompt, stats
+        )
+
+    if stats is not None:
+        stats.update({
+            "packing": "stream",
+            "turns": len(pairs),
+            "dropped_over_length": 0,
+            "dropped_fraction": 0.0,
+            "note": "stream packing truncates the tail of the corpus, not whole turns",
+        })
 
     stream_ids: List[int] = []
     stream_labels: List[int] = []
@@ -437,19 +525,26 @@ def _build_turn_aligned_tensors(
     tokenizer: WordTokenizer,
     sequence_length: int,
     mask_prompt: bool,
+    stats: Optional[Dict[str, object]] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """One turn per block, padded, so every reply sees its own prompt.
 
     Turns that do not fit are dropped rather than truncated. A truncated reply
     would train the model to stop mid-sentence, and a truncated *prompt* would
     reintroduce the very conditioning gap this exists to close.
+
+    The drop is not neutral. It removes a task's *longest* rows, so a task whose
+    format is near the limit loses its hardest instances and the model meets
+    them for the first time at evaluation. ``stats`` carries the count out.
     """
 
     blocks: List[List[int]] = []
     block_labels: List[List[int]] = []
+    dropped = 0
     for user, assistant in pairs:
         ids, prompt_length = tokenizer.encode_turn(user, assistant)
         if len(ids) > sequence_length:
+            dropped += 1
             continue
         labels = list(ids)
         if mask_prompt:
@@ -458,6 +553,20 @@ def _build_turn_aligned_tensors(
         padding = sequence_length - len(ids)
         blocks.append(ids + [PAD] * padding)
         block_labels.append(labels + [-100] * padding)
+
+    if stats is not None:
+        stats.update({
+            "packing": "turn_aligned",
+            "turns": len(pairs),
+            "kept": len(blocks),
+            "dropped_over_length": dropped,
+            "dropped_fraction": round(dropped / max(1, len(pairs)), 6),
+            "sequence_length": sequence_length,
+            "note": (
+                "dropped turns are the longest ones, so a task near the limit "
+                "loses its hardest rows and meets them first at evaluation"
+            ),
+        })
 
     if not blocks:
         raise ValueError(
@@ -468,3 +577,31 @@ def _build_turn_aligned_tensors(
         torch.tensor(blocks, dtype=dtype),
         torch.tensor(block_labels, dtype=dtype),
     )
+
+
+def turn_alignment_report(
+    pairs: Sequence[Tuple[str, str]],
+    tokenizer: WordTokenizer,
+    sequence_length: int = 128,
+) -> Dict[str, object]:
+    """What turn-aligned packing would drop, without building the tensors.
+
+    Same rule as :func:`_build_turn_aligned_tensors` -- a turn longer than the
+    block is dropped -- so a corpus builder can be told the cost of a format
+    change before a run pays for it.
+    """
+
+    lengths = [len(tokenizer.encode_turn(user, assistant)[0]) for user, assistant in pairs]
+    if not lengths:
+        return {"turns": 0, "dropped_over_length": 0, "dropped_fraction": 0.0}
+    ordered = sorted(lengths)
+    dropped = sum(1 for length in ordered if length > sequence_length)
+    return {
+        "turns": len(ordered),
+        "sequence_length": sequence_length,
+        "median_turn_tokens": ordered[len(ordered) // 2],
+        "p95_turn_tokens": ordered[min(len(ordered) - 1, int(0.95 * len(ordered)))],
+        "max_turn_tokens": ordered[-1],
+        "dropped_over_length": dropped,
+        "dropped_fraction": round(dropped / len(ordered), 6),
+    }

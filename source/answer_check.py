@@ -9,14 +9,33 @@ This module applies it live, to whatever the user typed. It re-derives the truth
 from the question and compares, so the interface can say "wrong, the answer is
 905" instead of presenting confident arithmetic and leaving the reader to check.
 
-It recognises only the shapes the models were trained on -- nine of them, one
-per task in the v74 corpus. Anything else returns `None`, which the interface
-must render as *not checked* rather than as correct: an unrecognised question
-is not a passed one.
+It recognises only the shapes the models were trained on -- twenty-one of them
+as of v82, one per task in the v80 corpus: nine arithmetic shapes from v74 and
+twelve solver-verified science and mathematics shapes from v79/v80. Anything
+else returns `None`, which the interface must render as *not checked* rather
+than as correct: an unrecognised question is not a passed one.
 
 Multiplication, division, sequence and two-step were added for v74, which
 introduced those tasks. Before that a chat reply to "What is 47 x 6?" showed
 NOT CHECKED -- the model's strongest tasks were the ones nothing verified.
+
+**This module is not a verifier and must never be promoted to one.** It
+re-derives an expected answer from a *pattern* in the question, not from a
+parse of its meaning, so a question whose shape it half-recognises would get a
+confident wrong verdict. `nexus_epistemics.ANSWER_VERIFIER_IDS` is the
+allowlist of things permitted to certify an answer and it contains exactly one
+entry, `grounding_runtime.finalize_grounded_response`; `answer_check` is
+deliberately absent from it. The compound-expression trap in
+`_is_compound_expression` is the concrete reason: "What is 2 + 3 * 4?" once
+parsed as multiplication with expected 12.0 where the truth is 14, because a
+lone `A * B` search found `3 * 4` and never saw the `+`. That is now refused
+as NOT CHECKED, and `test_answer_check.py` pins it in both directions.
+
+v82 coverage, measured over 840 prompts drawn from `build_omni_corpus.TASKS`
+and `eval_problem_solving.GENERATORS` at seed 4242: 799/840 = 0.951 before the
+v82 widening, 840/840 = 1.000 after, with zero confident-wrong verdicts in
+either. Coverage is not accuracy of the *model*; it is only the fraction of
+questions this module is willing to judge at all.
 """
 
 from __future__ import annotations
@@ -78,9 +97,34 @@ def extract_answer(text: str) -> Optional[float]:
 # wrong verdict, which is worse than no verdict at all.
 
 
+#: An operator sitting between two numbers -- the only kind that makes an
+#: expression compound. `m/s`, `m/s^2` and `x + 14 = 39` do not match, because
+#: neither side of the operator is a digit in the first two and `_algebra`
+#: claims the third before these parsers run.
+#: The trailing operand is a lookahead, not a consumed group: without it
+#: `re.findall` over "2 + 3 * 4" consumes the `3` while matching `2 + 3` and
+#: then finds only one operator, which is the bug this guard exists to catch.
+_INFIX = re.compile(r"\d\s*[-+*/x]\s*(?=-?\d)", re.I)
+
+
+def _is_compound_expression(question: str) -> bool:
+    """True when the question chains two or more infix operators.
+
+    The bare `A op B` parsers below each find *one* operator and compute from
+    it. Given "What is 2 + 3 * 4?" the multiplication parser finds `3 * 4` and
+    returns 12.0, which is confidently wrong: precedence makes the answer 14.
+    Nothing in the corpus asks a compound question, so the correct response is
+    to refuse rather than to grow an expression evaluator here -- a partially
+    correct evaluator would produce exactly the confident wrong verdict this
+    module exists to avoid.
+    """
+
+    return len(_INFIX.findall(question)) >= 2
+
+
 def _binary(question: str) -> Optional[Tuple[str, float]]:
     match = re.search(r"(-?\d+)\s*([+-])\s*(-?\d+)", question)
-    if not match or "=" in question:
+    if not match or "=" in question or _is_compound_expression(question):
         return None
     left, op, right = int(match.group(1)), match.group(2), int(match.group(3))
     return ("arithmetic", float(left + right if op == "+" else left - right))
@@ -119,14 +163,14 @@ def _multiplication(question: str) -> Optional[Tuple[str, float]]:
     """
 
     match = re.search(r"(-?\d+(?:\.\d+)?)\s*[x*]\s*(-?\d+(?:\.\d+)?)", question, re.I)
-    if not match or "=" in question:
+    if not match or "=" in question or _is_compound_expression(question):
         return None
     return ("multiplication", float(match.group(1)) * float(match.group(2)))
 
 
 def _division(question: str) -> Optional[Tuple[str, float]]:
     match = re.search(r"(-?\d+(?:\.\d+)?)\s*/\s*(-?\d+(?:\.\d+)?)", question)
-    if not match or "=" in question:
+    if not match or "=" in question or _is_compound_expression(question):
         return None
     divisor = float(match.group(2))
     if divisor == 0:
@@ -211,8 +255,10 @@ _PRODUCT_LAWS = (
      (r"mass|body|block|object", _MASS), (r"accelerat\w*", r"m/s\^?2")),
     ("momentum", r"momentum",
      (r"mass|object|body", _MASS), (r"velocity|speed|moves|travelling|at", r"m/s")),
+    # v82: "Find the work done by 98 N acting over 2 m." names the force only
+    # as "by". Measured 32/40 before adding it, 40/40 after.
     ("work", r"work",
-     (r"force", _FORCE), (r"distance|moves|through|over|acts", r"m|metres?")),
+     (r"force|done by|by", _FORCE), (r"distance|moves|through|over|acts", r"m|metres?")),
     ("voltage", r"voltage|potential difference",
      (r"current|flows|carrying|drives", r"A|amps?|amperes?"),
      (r"resistance|ohm|through|across|resistor", r"ohms?")),
@@ -221,10 +267,14 @@ _PRODUCT_LAWS = (
      (r"current|drawing|amps?|and", r"A|amps?|amperes?")),
     ("wave_speed", r"wave speed|speed of|its speed|speed at",
      (r"frequency|at", r"Hz|hertz"), (r"wavelength|with", r"m|metres?")),
+    # v82: "produced by 580 N on 116 kg" names the force only as "by".
+    # Measured 35/40 before, 40/40 after.
     ("acceleration", r"acceleration|accelerat\w*",
-     (r"force|results from|from", _FORCE), (r"mass|body|object|on", _MASS)),
+     (r"force|results from|from|produced by|by", _FORCE), (r"mass|body|object|on", _MASS)),
+    # v82: "What power corresponds to 1860 joules in 20 seconds?" names the
+    # work only as "corresponds to". Measured 28/40 before, 40/40 after.
     ("power", r"power",
-     (r"work|delivered|done", r"J|joules?"), (r"time|in|over", r"s|seconds?")),
+     (r"work|corresponds to|delivered|done", r"J|joules?"), (r"time|in|over", r"s|seconds?")),
     ("molarity", r"molarity|concentration|molar",
      (r"mol|moles|solute|of", r"mol|moles"),
      (r"volume|litres?|liters?|dissolved|in", r"L|litres?|liters?")),
@@ -271,16 +321,26 @@ def _combination_choose(question: str) -> Optional[Tuple[str, float]]:
     if not re.search(r"combination|choose|chosen|taken", question, re.I):
         return None
     number = r"(\d+)"
-    for pattern in (rf"{number}\s*choose\s*{number}",
-                    rf"n\s*=\s*{number}\s*k\s*=\s*{number}",
-                    rf"of\s*{number}\s*things taken\s*{number}",
-                    rf"can\s*{number}\s*items? be chosen from\s*{number}"):
+    # (pattern, reversed) -- `reversed` says the phrasing states k before n.
+    # v82: this used to pick n = max(a, b) for *every* phrasing, so "30 choose
+    # 40" returned C(40, 30) = 847660528 where the truth is 0. A size heuristic
+    # cannot tell an impossible question from a reversed one; the word order
+    # can, and each of the corpus's four phrasings has a fixed order.
+    for pattern, reverse in (
+        (rf"{number}\s*choose\s*{number}", False),
+        (rf"n\s*=\s*{number}\s*k\s*=\s*{number}", False),
+        (rf"of\s*{number}\s*things taken\s*{number}", False),
+        (rf"can\s*{number}\s*items? be chosen from\s*{number}", True),
+    ):
         match = re.search(pattern, question, re.I)
         if not match:
             continue
         a, b = int(match.group(1)), int(match.group(2))
-        n, k = (b, a) if a < b else (a, b)   # "2 chosen from 30" reverses them
+        n, k = (b, a) if reverse else (a, b)
         if k > n:
+            # C(n, k) is 0 here, but a question asking to choose 40 from 30 is
+            # far more likely to be one this parser has misread than one whose
+            # answer is genuinely 0. NOT CHECKED is the honest verdict.
             return None
         import math as _math
 
@@ -293,7 +353,10 @@ def _arithmetic_series(question: str) -> Optional[Tuple[str, float]]:
 
     if not re.search(r"arithmetic (?:series|progression)", question, re.I):
         return None
-    first = re.search(r"first term\s*(?:is\s*)?(-?\d+)", question, re.I)
+    # v82: "An arithmetic series starts at 15 with common difference 4" never
+    # says "first term". Measured 24/40 before adding `starts at`, 40/40 after.
+    first = re.search(r"(?:first term|starts? at|beginning at)\s*(?:is\s*)?(-?\d+)",
+                      question, re.I)
     difference = re.search(r"(?:common )?difference\s*(?:of\s*)?(-?\d+)", question, re.I)
     terms = re.search(r"(?:sum of|first)\s*(\d+)\s*terms|(?:\bn\s*(\d+))", question, re.I)
     if not (first and difference and terms):
@@ -374,9 +437,18 @@ def check(question: str, reply: str) -> Optional[Check]:
 
 
 def supported_shapes() -> List[str]:
-    """The question forms this can verify, for the interface to advertise."""
+    """The question forms this can verify, for the interface to advertise.
+
+    Through v81 this listed only the nine arithmetic shapes while `PARSERS`
+    already handled twelve science and mathematics shapes, so the interface
+    under-advertised what it could check by more than half. Every entry here is
+    asserted parseable by `test_answer_check.py`, so the list cannot drift
+    ahead of the parsers again -- but note it can still drift *behind* them,
+    which is the harmless direction.
+    """
 
     return [
+        # arithmetic (v74)
         "Solve this basic math problem: 617 + 288",
         "What is 25% of 840?",
         "Solve for x: x + 14 = 39",
@@ -386,4 +458,20 @@ def supported_shapes() -> List[str]:
         "Quick question: 70 / 5",
         "What comes next in the sequence: 7, 17, 27, 37?",
         "What is 50% of 698, then add 28?",
+        # physics (v79/v80)
+        "Given mass 25 kg and acceleration 4 m/s^2, compute the force.",
+        "A force of 580 N acts on a mass of 116 kg. What is the acceleration?",
+        "mass 98 kg velocity 3 m/s find momentum",
+        "What is the kinetic energy of a 12 kg mass moving at 5 m/s?",
+        "Find the work done by 98 N acting over 2 m.",
+        "What power corresponds to 1860 joules in 20 seconds?",
+        "A current of 5 A flows through a resistance of 57 ohms. What is the voltage?",
+        "A device runs at 12 V drawing 3 A. What is the electrical power?",
+        "A wave with frequency 40 Hz has wavelength 6 m. What is its speed?",
+        # chemistry (v79/v80)
+        "What is the molarity of 4 mol of solute dissolved in 2 L?",
+        # mathematics (v80)
+        "In how many ways can 2 items be chosen from 30?",
+        "An arithmetic series starts at 15 with common difference 4. "
+        "What is the sum of the first 8 terms?",
     ]

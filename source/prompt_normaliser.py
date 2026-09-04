@@ -55,6 +55,51 @@ LEAD_IN = {
 
 NUMBER = r"-?\d+(?:\.\d+)?"
 
+#: Terse labelled forms taken verbatim from `build_omni_corpus`, one per science
+#: task. Each corpus task carries four or five phrasings; these are the ones that
+#: name every quantity explicitly, so a rewrite cannot be misread as a different
+#: task once the units are stripped.
+SCIENCE_LEAD_IN = {
+    "force": "Given mass {m} kg and acceleration {a} m/s^2, compute the force.",
+    "acceleration": "force {f} N mass {m} kg find acceleration",
+    "momentum": "mass {m} kg velocity {v} m/s find momentum",
+    "kinetic_energy": "mass {m} kg velocity {v} m/s kinetic energy",
+    "work": "force {f} N distance {d} m work done",
+    "electrical_power": "voltage {u} V current {i} A electrical power",
+    "voltage": "current {i} A resistance {r} ohm find voltage",
+    "power": "work {w} J time {t} s power",
+}
+
+#: Quantity patterns, ordered so the more specific unit wins. `m/s^2` must be
+#: tried before `m/s`, and both before a bare `m`, or an acceleration is read as
+#: a velocity and a velocity as a distance.
+QUANTITY_PATTERNS = (
+    ("a", rf"({NUMBER})\s*(?:m\s*/\s*s\s*(?:\^|\*\*)?\s*2|m/s²|"
+          rf"met(?:re|er)s?\s+per\s+second\s+squared)"),
+    ("v", rf"({NUMBER})\s*(?:m\s*/\s*s(?![\^²0-9])|met(?:re|er)s?\s+per\s+second(?!\s+squared))"),
+    ("m", rf"({NUMBER})\s*(?:kg\b|kilogram(?:me)?s?\b)"),
+    ("f", rf"({NUMBER})\s*(?:N\b|newtons?\b)"),
+    ("u", rf"({NUMBER})\s*(?:V\b|volts?\b)"),
+    ("i", rf"({NUMBER})\s*(?:A\b|amp(?:ere)?s?\b)"),
+    ("r", rf"({NUMBER})\s*(?:ohms?\b|Ω)"),
+    ("w", rf"({NUMBER})\s*(?:J\b|joules?\b)"),
+    ("t", rf"({NUMBER})\s*(?:s\b|seconds?\b)"),
+    ("d", rf"({NUMBER})\s*(?:m\b|met(?:re|er)s?\b)"),
+)
+
+#: What each task asks for, and what it needs to be answerable. A target whose
+#: quantities are not all present is left alone rather than guessed at.
+SCIENCE_TARGETS = (
+    ("kinetic_energy", r"kinetic\s+energ", ("m", "v")),
+    ("electrical_power", r"(?:electrical\s+power|power)", ("u", "i")),
+    ("power", r"power", ("w", "t")),
+    ("voltage", r"(?:voltage|potential\s+difference)", ("i", "r")),
+    ("momentum", r"momentum", ("m", "v")),
+    ("acceleration", r"accelerat", ("f", "m")),
+    ("work", r"work", ("f", "d")),
+    ("force", r"force", ("m", "a")),
+)
+
 
 @dataclass(frozen=True)
 class Normalised:
@@ -111,6 +156,48 @@ def _binary(text: str) -> Optional[Normalised]:
             continue
         a, b = match.group(1), match.group(2)
         return Normalised(LEAD_IN[task].format(a=a, b=b), task)
+    return None
+
+
+def _quantities(text: str) -> dict:
+    """Every quantity the text names by its unit, keyed by symbol.
+
+    A unit is consumed once matched, so a single number cannot be read as two
+    different quantities. `"7 m/s"` is a velocity and is then unavailable as a
+    distance, which is what stops `m/s` being harvested twice.
+    """
+
+    found: dict = {}
+    remaining = text
+    for symbol, pattern in QUANTITY_PATTERNS:
+        match = re.search(pattern, remaining, flags=re.IGNORECASE)
+        if match:
+            found[symbol] = match.group(1)
+            remaining = remaining[: match.start()] + " " + remaining[match.end():]
+    return found
+
+
+def _science(text: str) -> Optional[Normalised]:
+    """Rewrite a physics question into the terse labelled corpus form.
+
+    Deliberately conservative, for the reason the module docstring gives: a
+    wrong rewrite is worse than none. A rule fires only when the text names the
+    target *and* every quantity that target needs, each anchored to its unit.
+    "What force do you feel in a lift?" names a target and no quantities, so it
+    goes through untouched to ordinary conversation.
+    """
+
+    lowered = text.lower()
+    quantities = _quantities(text)
+    if not quantities:
+        return None
+    for task, target_pattern, required in SCIENCE_TARGETS:
+        if not re.search(target_pattern, lowered):
+            continue
+        if not all(symbol in quantities for symbol in required):
+            continue
+        values = {symbol: quantities[symbol] for symbol in required}
+        return Normalised(SCIENCE_LEAD_IN[task].format(**values), task)
     return None
 
 
@@ -178,6 +265,12 @@ def normalise(text: str) -> Normalised:
         return Normalised(
             f"Solve for x: x {operator} {operand} = {result}", "algebra_one_step", source
         )
+
+    # Science before the binary scan. "A 30 kg mass is pushed with 90 N" would
+    # otherwise be harvested as an arithmetic pair by the `A op B` search.
+    science = _science(source)
+    if science is not None:
+        return Normalised(science.prompt, science.rule, source)
 
     binary = _binary(source)
     if binary is not None:

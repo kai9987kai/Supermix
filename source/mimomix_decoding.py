@@ -127,8 +127,42 @@ class GenerationResult:
     telemetry: Dict[str, object] = field(default_factory=dict)
 
 
+def _sequence_axis(tensor: torch.Tensor) -> int:
+    """Which axis of a cache tensor is the time axis.
+
+    Not every layer caches the same rank. Grouped-query attention stores
+    ``(B, H, T, D)``; MLA stores its compressed latent as ``(B, T, latent)`` and
+    its decoupled rope keys as ``(B, 1, T, pe)``. A rank-4 tensor is
+    ``(B, H, T, D)`` so the time axis is 2; a rank-3 tensor is ``(B, T, D)`` so
+    it is 1.
+
+    Before v82 this function assumed rank 4 unconditionally and sliced axis 2 of
+    every tensor, which for an MLA latent cache trimmed the *latent* dimension
+    instead of time -- so ``speculative_generate`` on a ``use_mla`` model raised
+    a RuntimeError on the first rejected token. ``greedy_generate`` never trims
+    and was unaffected. The rank test here is deliberately structural, not an
+    ``isinstance(layer, MultiLatentAttention)`` special case, so any future
+    cache layout of either rank works.
+    """
+
+    if tensor.ndim == 4:
+        return 2
+    if tensor.ndim == 3:
+        return 1
+    raise ValueError(
+        f"cannot locate the time axis of a rank-{tensor.ndim} cache tensor "
+        f"with shape {tuple(tensor.shape)}"
+    )
+
+
 def trim_past(past: Optional[Sequence], drop: int) -> Optional[PastKV]:
-    """Remove the last ``drop`` cached positions from every layer."""
+    """Remove the last ``drop`` cached positions from every layer.
+
+    Each tensor is trimmed on its own time axis (see :func:`_sequence_axis`), so
+    a hybrid model whose layers cache different ranks -- MLA on the global
+    layers, grouped-query attention on the sliding-window ones -- trims
+    correctly throughout.
+    """
 
     if past is None or drop <= 0:
         return None if past is None else list(past)
@@ -137,10 +171,12 @@ def trim_past(past: Optional[Sequence], drop: int) -> Optional[PastKV]:
         if entry is None or entry[0].numel() == 0:
             trimmed.append(entry)
             continue
-        keys, values = entry
-        length = keys.shape[2]
-        keep = max(0, length - drop)
-        trimmed.append((keys[:, :, :keep], values[:, :, :keep]))
+        cut = []
+        for tensor in entry:
+            axis = _sequence_axis(tensor)
+            keep = max(0, tensor.shape[axis] - drop)
+            cut.append(tensor.narrow(axis, 0, keep))
+        trimmed.append((cut[0], cut[1]))
     return trimmed
 
 

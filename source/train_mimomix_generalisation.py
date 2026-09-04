@@ -66,14 +66,19 @@ import recall_index  # noqa: E402
 from device_utils import resolve_device  # noqa: E402
 from mimomix_core import MiMoMixModel  # noqa: E402
 from train_mimomix_talk import (  # noqa: E402
+    DEFAULT_PROBE_MAX_NEW_TOKENS,
     PROBE_PROMPTS,
     atomic_json,
     build_config,
     build_parser as build_talk_parser,
+    check_probe_token_budget,
     evaluate,
     generate_reply,
+    parameter_groups,
+    response_token_report,
     routing_report,
     save_talk_checkpoint,
+    tokenizer_options,
 )
 
 RECEIPT_SCHEMA = "supermix-v58-generalisation-benchmark-v1"
@@ -202,6 +207,25 @@ def load_initial_weights(
         "has_scheduler_state": "scheduler_state" in payload,
         "_optimiser_state": payload.get("optimiser_state"),
         "_scheduler_state": payload.get("scheduler_state"),
+        # Selection state (v82). Without it a resumed leg starts with
+        # best_score = +inf, so its *first* evaluation trivially "improves" and
+        # overwrites a better pre-crash checkpoint with a worse one. Absent on
+        # every checkpoint written before v82, in which case the caller falls
+        # back to the old cold start and says so in the receipt.
+        "_selection_state": {
+            key: extra.get(key)
+            for key in (
+                "best_score",
+                "best_step",
+                "best_dev_loss",
+                "best_dev_seen",
+                "best_probe_accuracy",
+                "best_probe_verbatim_rate",
+                "last_accuracy",
+                "batch_generator_state",
+            )
+            if extra.get(key) is not None
+        },
         "note": (
             "weights continued from a prior run; this checkpoint was not trained "
             "in a single leg and its step count is this leg only"
@@ -228,6 +252,25 @@ def restore_training_state(
 
     optimiser_state = provenance.pop("_optimiser_state", None)
     scheduler_state = provenance.pop("_scheduler_state", None)
+
+    # AdamW's state is keyed by the *position* of a parameter in the flattened
+    # param_groups, not by name. `--decay_mode no_norm_bias` reorders that list
+    # (all decayed tensors, then all undecayed ones), so restoring an
+    # `all`-mode checkpoint into a `no_norm_bias` optimiser would attach every
+    # moment to the wrong tensor and train something nobody could debug. The
+    # group shape is therefore checked rather than assumed.
+    if optimiser_state is not None:
+        saved_shape = [len(g["params"]) for g in optimiser_state.get("param_groups", [])]
+        live_shape = [len(g["params"]) for g in optimiser.state_dict()["param_groups"]]
+        if saved_shape != live_shape:
+            provenance["optimiser_skipped"] = (
+                f"checkpoint has parameter groups of size {saved_shape} against "
+                f"this run's {live_shape} -- almost certainly a different "
+                "--decay_mode. AdamW state is positional, so restoring it would "
+                "attach moments to the wrong tensors; the moments were dropped."
+            )
+            optimiser_state = None
+            scheduler_state = None
 
     if optimiser_state is not None:
         if scheduler_state is not None:
@@ -280,7 +323,9 @@ BALANCED_VERBATIM_WEIGHT = 0.5
 MIN_SELECTION_PROBLEMS = 100
 
 
-def probe_accuracy(model, tokenizer, problems) -> Optional[float]:
+def probe_accuracy(
+    model, tokenizer, problems, max_new_tokens: int = DEFAULT_PROBE_MAX_NEW_TOKENS
+) -> Optional[float]:
     """Exact-match accuracy on freshly generated problems, mid-run.
 
     Every run in this line has cost twelve to seventeen hours and reported
@@ -293,6 +338,14 @@ def probe_accuracy(model, tokenizer, problems) -> Optional[float]:
     problem is wrong regardless of how probable the training text was. It is
     sampled small and infrequently -- generation is slow on CPU -- so it is a
     signal for aborting and for selection, not a benchmark.
+
+    `max_new_tokens` was hardcoded to 64 until v82, which is CONFIRMED BUG E:
+    measured with the v80 tokenizer over the whole v80 corpus, seven tasks have
+    a *median* reply longer than that -- arithmetic_series 93, work 86,
+    wave_speed 84, momentum 83, force 78, electrical_power 76, kinetic_energy
+    76 -- and 100% of arithmetic_series replies exceed it. Those tasks read
+    0.00 no matter what the model had learned, and `--select_on accuracy` was
+    selecting against a signal that could not see them.
     """
 
     if not problems:
@@ -302,13 +355,59 @@ def probe_accuracy(model, tokenizer, problems) -> Optional[float]:
     correct = 0
     try:
         for problem in problems:
-            reply = generate_reply(model, tokenizer, problem.prompt, 64)
+            reply = generate_reply(model, tokenizer, problem.prompt, max_new_tokens)
             text = reply["reply"] if isinstance(reply, dict) else str(reply)
             if solving.is_correct(solving.extract_answer(text), problem.answer):
                 correct += 1
     finally:
         model.train(was_training)
     return correct / len(problems)
+
+
+def task_labelled_rows(
+    corpus_jsonl: Optional[str], samples: int = 6000
+) -> Optional[List[Dict[str, Any]]]:
+    """A cheap, deterministic, task-labelled sample of a JSONL corpus.
+
+    The packed `(user, assistant)` pairs the trainer works with have lost the
+    `task` field, and per-task is the only resolution at which the probe token
+    budget means anything -- an aggregate median of 30 hides that
+    arithmetic_series needs 93. So the file is sampled directly.
+
+    Sampling is by evenly spaced byte offsets rather than by reading the file:
+    the v80 corpus is 217 MB / 911,478 rows and JSON-parsing all of it at
+    startup would cost more than the check is worth. Offsets are fixed, so two
+    runs on the same file see the same rows.
+
+    Returns None when there is no JSONL corpus (the SQLite path), in which case
+    the caller falls back to the unlabelled pairs.
+    """
+
+    if not corpus_jsonl:
+        return None
+    path = Path(corpus_jsonl)
+    if not path.exists() or not str(path).lower().endswith((".jsonl", ".json")):
+        return None
+    size = path.stat().st_size
+    if size == 0:
+        return None
+    rows: List[Dict[str, Any]] = []
+    stride = max(1, size // max(1, samples))
+    with path.open("rb") as handle:
+        for offset in range(0, size, stride):
+            handle.seek(offset)
+            if offset:
+                handle.readline()  # discard the partial line
+            line = handle.readline()
+            if not line:
+                continue
+            try:
+                record = json.loads(line.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if isinstance(record, dict) and record.get("assistant"):
+                rows.append(record)
+    return rows or None
 
 
 def probe_verbatim_rate(model, tokenizer, recall) -> Optional[float]:
@@ -461,9 +560,21 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     tokenizer = text_utils.WordTokenizer.build(
         (field for pair in split.train for field in pair),
         max_vocab=args.max_vocab,
-        digit_tokens=getattr(args, "digit_tokens", False),
+        **tokenizer_options(args),
     )
     text_utils.assert_roundtrip(tokenizer, [a for _, a in split.dev[:200]])
+
+    # CONFIRMED BUG E's guard. Run before a single step is taken, because the
+    # whole point is that a truncated probe looks like a model that failed to
+    # learn, and the two are indistinguishable seventeen hours later.
+    probe_cap = int(getattr(args, "probe_max_new_tokens", DEFAULT_PROBE_MAX_NEW_TOKENS))
+    token_budget = check_probe_token_budget(
+        response_token_report(
+            task_labelled_rows(corpus_jsonl) or split.train, tokenizer
+        ),
+        probe_cap,
+        strict=bool(getattr(args, "strict", False)),
+    )
 
     turn_aligned = getattr(args, "turn_aligned_packing", False)
     train_x, train_y = text_utils.build_training_tensors(
@@ -473,7 +584,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         split.dev, tokenizer, args.sequence_length, turn_aligned=turn_aligned
     )
 
-    args.no_thinking_core = args.arm == "ablation"
+    # `--arm ablation` disables the thinking core; an explicit
+    # `--no_thinking_core` must not be silently *re-enabled* by `--arm full`,
+    # which is what the old straight assignment did. Both now mean off.
+    args.no_thinking_core = bool(args.no_thinking_core) or args.arm == "ablation"
     config = build_config(args, tokenizer.vocab_size)
     model = MiMoMixModel(config).to(device)
     parameters = model.parameter_report()
@@ -498,7 +612,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # Resolved before the loop so mid-run checkpoints have somewhere to go.
     output_dir = Path(args.output_dir)
 
-    optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    decay_groups = parameter_groups(model, args.weight_decay, args.decay_mode)
+    optimiser = torch.optim.AdamW(
+        [{k: v for k, v in g.items() if not k.startswith("_")} for g in decay_groups],
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
     # OneCycleLR splits training into a warmup phase of `pct_start * total_steps`
     # and a decay phase. When that product is <= 1 the two phase boundaries
     # coincide and `get_lr` divides by zero on the very first step, so every run
@@ -781,6 +900,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "tokenizer": tokenizer.vocabulary_report([a for _, a in split.dev]),
         "config": config.to_dict(),
         "parameters": parameters,
+        # Provenance, not decoration. `--compare` diffs this block to decide
+        # whether two arms are comparable, so a setting that is missing here is
+        # a setting that can differ silently between them. Everything below
+        # changes what a run measures.
         "hyperparameters": {
             "steps": args.steps,
             "batch_size": args.batch_size,
@@ -789,7 +912,28 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "weight_decay": args.weight_decay,
             "seed": args.seed,
             "split_seed": args.split_seed,
+            "eval_every": getattr(args, "eval_every", None),
+            "accuracy_every": getattr(args, "accuracy_every", None),
+            "accuracy_problems": getattr(args, "accuracy_problems", None),
+            "select_on": getattr(args, "select_on", None),
+            "turn_aligned_packing": bool(getattr(args, "turn_aligned_packing", False)),
+            "digit_tokens": bool(getattr(args, "digit_tokens", False)),
+            "reverse_digits": bool(getattr(args, "reverse_digits", False)),
+            "min_response_characters": getattr(args, "min_response_characters", None),
+            "max_vocab": getattr(args, "max_vocab", None),
+            "corpus_jsonl": str(corpus_jsonl) if corpus_jsonl else None,
+            "amp": getattr(args, "amp", None),
+            "decay_mode": getattr(args, "decay_mode", None),
+            "repeat_subset_fraction": getattr(args, "repeat_subset_fraction", None),
+            "repeat_subset_prob": getattr(args, "repeat_subset_prob", None),
+            "mtp_loss_weight_final": getattr(args, "mtp_loss_weight_final", None),
+            "mtp_weight_warmup_fraction": getattr(args, "mtp_weight_warmup_fraction", None),
+            # The v85 headline. A receipt that does not say what the probe could
+            # see cannot be read: a task truncated by the cap and a task the
+            # model never learned produce the same 0.00.
+            "probe_max_new_tokens": probe_cap,
         },
+        "probe_token_budget": token_budget,
         "device": str(device_info.get("resolved", device)),
         "train_seconds": train_seconds,
         "history": history,
@@ -856,6 +1000,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "steps": args.steps,
             "total_steps": args.steps,
             "start_step": args.start_step,
+            # The corpus travels with the weights. `eval_problem_solving`'s
+            # "seen" arm is only a memorisation control if its rows are rows
+            # this checkpoint trained on, and until v85 that arm defaulted to a
+            # hard-coded v62 path -- so every run after v62 compared itself
+            # against a corpus it had never seen and reported the difference as
+            # a memorisation gap. A checkpoint that carries its own corpus lets
+            # the benchmark check instead of assume.
+            "corpus_jsonl": str(corpus_jsonl) if corpus_jsonl else None,
+            "database": str(args.database) if getattr(args, "database", None) else None,
             "created_at": report["created_at"],
         },
         optimiser=optimiser,

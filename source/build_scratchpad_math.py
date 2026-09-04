@@ -51,6 +51,52 @@ RECEIPT_SCHEMA = "supermix-v66-scratchpad-math-v1"
 #: scored worst on, 33.3% and 58.3% against 91.7-100% for the decomposed tasks.
 DECOMPOSE_INNER = False
 
+#: Whether `average` writes its running total as explicit binary additions.
+#:
+#: Off reproduces the v66-v81 corpora exactly, including the v80 build. On
+#: replaces the one-shot chain
+#:
+#:     sum: 61 then 124 then 196 then 257, total 257, divide by 4, total 64.25
+#:
+#: with
+#:
+#:     61 + 63 = 124, 124 + 72 = 196, 196 + 61 = 257, total 257,
+#:     divide by 4, total 64.25
+#:
+#: The old form states each running total with **neither operand shown**, which
+#: is the fixed-dependency scratchpad Cho et al. and Lee et al. 2023 (arXiv
+#: 2307.03381, Fig. 8) identify as the failing design: the model must recompute
+#: `previous + next` internally and only writes the result. Lee et al. measure
+#: 100.0% against 89.9% between two scratchpads that differ only in whether the
+#: hard step's operands are written down.
+#:
+#: **Hypothesis, not a result.** `average` has scored 0.033 under the current
+#: format and nothing here has been trained. What *is* measured is the token
+#: cost, in the `--token_budget_report` table.
+AVERAGE_BINARY_STEPS = False
+
+#: Whether `algebra_one_step` resolves the sign in words and splits the arithmetic.
+#:
+#: Off reproduces the v66-v81 corpora exactly. On changes two things, both of
+#: which the observed failures point at:
+#:
+#: 1. **The sign is resolved in words.** `x + -12 = 22` becomes "add 12 to both
+#:    sides", not "subtract -12 from both sides". A model that has to carry a
+#:    negative through a subtraction has two chances to get the sign wrong; the
+#:    English form has none. Half of all rows have `b < 0` here.
+#: 2. **The arithmetic is decomposed by place value**, the way `subtraction`
+#:    and `multiplication` already are -- and `multiplication` is the one task
+#:    scoring 1.00. The observed failure is a borrow inside one jump:
+#:    `x + 29 = 34` produced "34 - 29 = 4" where the truth is 5.
+#:
+#: The split is tens-and-remainder rather than a column method, so it can never
+#: need a borrow: `30 - 20 = 10, 4 - 9 = -5, total 5`. A negative low part is
+#: correct and is exactly what the `subtraction` task already emits.
+#:
+#: **Hypothesis, not a result.** `algebra_one_step` scored 0.30 under the
+#: current format; nothing here has been trained.
+ALGEBRA_WORD_SIGN = False
+
 #: How the question can be phrased. Matching `build_english_math_dataset` keeps
 #: the prompt distribution familiar, so the only thing that changes is the answer.
 PROMPT_FORMS = (
@@ -68,6 +114,20 @@ def _split_place_value(value: int) -> Tuple[int, int]:
     if value < 0:
         hundreds = -hundreds
     return hundreds, value - hundreds
+
+
+def _split_tens(value: int) -> Tuple[int, int]:
+    """Return ``(tens_part, remainder)`` so the two sum back to ``value``.
+
+    The same trick as :func:`_split_place_value`, one order of magnitude down,
+    for the two-digit operands `algebra_one_step` works with. Splitting them at
+    hundreds would emit ``0 - 0 = 0`` on every row and decompose nothing.
+    """
+
+    tens = (abs(value) // 10) * 10
+    if value < 0:
+        tens = -tens
+    return tens, value - tens
 
 
 def _scratchpad_addition(rng: random.Random) -> Dict[str, Any]:
@@ -175,6 +235,37 @@ def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
             "raw_prompt": True,
         }
 
+    if AVERAGE_BINARY_STEPS:
+        # Every addition written as `a + b = c`, with both operands present.
+        #
+        # The terse form below states running totals only, so the model has to
+        # do each addition in its head and write nothing but the result. That
+        # is the fixed-dependency scratchpad the cited work identifies as the
+        # one that does not work, and `average` has scored 0.033 under it while
+        # `word_problem` -- which writes `a + b = c` in full -- scored 0.867 on
+        # the same model.
+        #
+        # The running total does leave the two-digit envelope: with six values
+        # of 5-99 it can reach 594, so the last steps are a three-digit plus a
+        # two-digit number. That is a real risk and it is not hidden here; the
+        # alternative is to also decompose each step by place value, which v73
+        # measured as *worse* at sequence length 128 (16.0% against 24.0%),
+        # because the rows then stop fitting.
+        steps: List[str] = []
+        accumulated = values[0]
+        for value in values[1:]:
+            nxt = accumulated + value
+            steps.append(f"{accumulated} + {value} = {nxt}")
+            accumulated = nxt
+        assert accumulated == total, "binary running sum disagreed with the total"
+        working = (
+            ", ".join(steps)
+            + f", total {total}, divide by {len(values)}, total {round(answer, 6)}"
+        )
+        return {"expression": f"Find the average (mean) of these numbers: {joined}",
+                "answer": answer, "working": working, "task": "average",
+                "raw_prompt": True}
+
     running: List[str] = []
     accumulated = 0
     for value in values:
@@ -243,7 +334,33 @@ def _scratchpad_algebra(rng: random.Random) -> Dict[str, Any]:
 
     x, b = rng.randint(-30, 30), rng.randint(-30, 30)
     right = x + b
-    working = f"subtract {b} from both sides, {right} - {b} = {x}, total {x}"
+    if ALGEBRA_WORD_SIGN:
+        # Resolve the sign in English, then decompose the arithmetic.
+        #
+        # `x + -12 = 22` is undone by *adding* 12, and saying so removes the
+        # double negative entirely rather than asking the model to evaluate
+        # `22 - -12`. The subtraction is then split tens-and-remainder, which
+        # is the shape `multiplication` uses and scores 1.00 with.
+        word, preposition, op = (
+            ("subtract", "from", "-") if b >= 0 else ("add", "to", "+")
+        )
+        magnitude = abs(b)
+        right_tens, right_rest = _split_tens(right)
+        magnitude_tens, magnitude_rest = _split_tens(magnitude)
+        if b >= 0:
+            high, low = right_tens - magnitude_tens, right_rest - magnitude_rest
+        else:
+            high, low = right_tens + magnitude_tens, right_rest + magnitude_rest
+        # The invariant the decomposition rests on. If it ever fails the corpus
+        # teaches wrong arithmetic, which is worse than teaching none.
+        assert high + low == x, f"decomposition broke for x + {b} = {right}"
+        working = (
+            f"{word} {magnitude} {preposition} both sides, "
+            f"{right_tens} {op} {magnitude_tens} = {high}, "
+            f"{right_rest} {op} {magnitude_rest} = {low}, total {x}"
+        )
+    else:
+        working = f"subtract {b} from both sides, {right} - {b} = {x}, total {x}"
     return {"expression": f"Solve for x: x + {b} = {right}", "answer": float(x),
             "working": working, "task": "algebra_one_step", "raw_prompt": True}
 
@@ -432,6 +549,11 @@ def write(rows: Sequence[Dict[str, Any]], output: Path) -> Dict[str, Any]:
         "tasks": dict(Counter(r["task"] for r in rows)),
         "median_words": words[len(words) // 2],
         "p95_words": words[int(0.95 * len(words))],
+        "format_flags": {
+            "decompose_inner": DECOMPOSE_INNER,
+            "average_binary_steps": AVERAGE_BINARY_STEPS,
+            "algebra_word_sign": ALGEBRA_WORD_SIGN,
+        },
         "non_claims": [
             "Showing working is not reasoning. The model may learn to imitate the "
             "steps without the steps constraining the final number.",
@@ -454,13 +576,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show working for the inner operations of average and percent",
     )
+    parser.add_argument(
+        "--average_binary_steps",
+        action="store_true",
+        help=("write the average's running total as explicit `a + b = c` steps "
+              "instead of bare running totals (hypothesis; unmeasured)"),
+    )
+    parser.add_argument(
+        "--algebra_word_sign",
+        action="store_true",
+        help=("resolve the algebra sign in words and split the arithmetic by "
+              "place value (hypothesis; unmeasured)"),
+    )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    global DECOMPOSE_INNER
+    global DECOMPOSE_INNER, AVERAGE_BINARY_STEPS, ALGEBRA_WORD_SIGN
     DECOMPOSE_INNER = bool(args.decompose_inner)
+    AVERAGE_BINARY_STEPS = bool(args.average_binary_steps)
+    ALGEBRA_WORD_SIGN = bool(args.algebra_word_sign)
     rows = build_rows(args.target, args.seed)
     receipt = write(rows, Path(args.output))
     print(json.dumps({k: v for k, v in receipt.items() if k != "non_claims"}, indent=2))

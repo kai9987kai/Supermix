@@ -42,7 +42,8 @@ transfer to it.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, asdict
+import warnings
+from dataclasses import dataclass, field, asdict, fields as dataclass_fields
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
@@ -56,11 +57,15 @@ __all__ = [
     "RMSNorm",
     "RotaryEmbedding",
     "HybridAttention",
+    "DifferentialHybridAttention",
+    "MultiLatentAttention",
+    "MixtureOfDepthsRouter",
     "DenseFeedForward",
     "SparseMoEFeedForward",
     "MiMoMixBlock",
     "MultiTokenPredictionModule",
     "RecursiveThinkingCore",
+    "MultimodalProjectionHead",
     "MiMoMixModel",
     "attention_layout",
     "build_mimomix",
@@ -120,6 +125,38 @@ class MiMoMixConfig:
     rope_scaling: str = "yarn"
     yarn_beta_fast: float = 32.0
     yarn_beta_slow: float = 1.0
+    #: Rotate only the leading ``rotary_dim`` components of each head and pass
+    #: the rest through unchanged ("partial RoPE"). ``None`` rotates the whole
+    #: head, which is what every checkpoint written before v82 did.
+    #:
+    #: Adoption evidence only, no isolated small-scale ablation: MiMo-V2-Flash
+    #: rotates 64 of 192, Qwen3-Next 64 of 256, and DeepSeek's MLA carries a
+    #: decoupled rope sub-vector for the same reason. Whether it helps *this*
+    #: model is untested -- treat it as a hypothesis for a future run.
+    rotary_dim: Optional[int] = None
+
+    # --- attention refinements (all default-off, all untested here) --------
+    #: RMSNorm on the per-head q and k *before* the rotary is applied, the
+    #: OLMo 2 (arXiv 2501.00656) / Gemma 3 / Qwen3 placement. The SmolLM-360M
+    #: controlled ablation (arXiv 2512.12167) reports final loss 6.334 without
+    #: vs 2.496 with at LR 1e-3. No Supermix run has measured it.
+    qk_norm: bool = False
+    #: Head-wise elementwise sigmoid gate on the SDPA output before ``o_proj``
+    #: (Qwen, NeurIPS 2025 oral, arXiv 2505.06708; 1.7B/400B tokens: avg PPL
+    #: 7.499 -> 7.404, first-token attention mass 46.7% -> 4.8%). The gate bias
+    #: starts at +4 with a zero weight, so a freshly enabled gate is a constant
+    #: 0.982 scaling -- near-identity, so switching it on does not destroy a
+    #: warm start. Unmeasured here.
+    attention_output_gate: bool = False
+    #: Which layer kinds get a learnable attention sink. ``"all"`` is today's
+    #: behaviour. ``"swa"`` matches MiMo-V2-Flash's released config
+    #: (add_swa_attention_sink_bias true, add_full_attention_sink_bias false).
+    attention_sink_kinds: str = "all"
+    #: Explicit tuple of layer indices that are global, overriding
+    #: ``hybrid_ratio`` in :func:`attention_layout` (Jet-Nemotron PostNAS,
+    #: arXiv 2508.15884, places global layers by search rather than uniformly).
+    #: ``None`` keeps the uniform interleave exactly as before.
+    global_layers: Optional[Tuple[int, ...]] = None
 
     # --- sparse MoE -------------------------------------------------------
     use_moe: bool = True
@@ -147,6 +184,13 @@ class MiMoMixConfig:
     router_balance_loss_coef: float = 1e-3
     router_score_function: str = "softmax"  # "softmax" | "sigmoid"
     norm_topk_prob: bool = True
+    #: Scope of the complementary balance loss. ``"batch"`` flattens ``(B, T)``
+    #: and is what every run up to and including v80 computed, despite the
+    #: docstring calling it sequence-level. ``"sequence"`` computes the load and
+    #: mean routing probability per sequence and averages over the batch, which
+    #: is the DeepSeek-V3 4.5.3 formulation. Default stays ``"batch"`` so v80
+    #: reproduces bit-for-bit.
+    moe_balance_scope: str = "batch"
 
     # --- multi-token prediction ------------------------------------------
     n_mtp_layers: int = 2
@@ -172,6 +216,59 @@ class MiMoMixConfig:
     ponder_loss_weight: float = 1e-2
     consistency_loss_weight: float = 1e-2
 
+    # --- differential attention (Microsoft ICLR 2025) ---------------------
+    use_differential_attention: bool = False
+    differential_lambda_init: float = 0.8
+    #: Apply the reference DIFF-Transformer per-head sublayer normalisation and
+    #: the ``(1 - lambda_init)`` rescale that this implementation omitted before
+    #: v82. Defaulting this to ``True`` is safe *because no trained checkpoint
+    #: in ``output/`` sets ``use_differential_attention``* -- verified by
+    #: loading every ``output/**/*.pt`` and inspecting its saved config; the
+    #: flag is absent or false in all of them. Unmeasured on this model.
+    differential_output_norm: bool = True
+    #: Signal:noise head allocation (GDA-style asymmetry). ``1`` is today's
+    #: symmetric behaviour: every head gets its own noise map. ``R > 1`` groups
+    #: ``R`` signal heads onto one shared noise map by averaging their noise
+    #: queries. This is an *approximation* of the published parameterisation
+    #: (which uses narrower dedicated noise projections); it was chosen so that
+    #: ``R == 1`` reproduces the current weights and KV-cache layout exactly.
+    #: Its benefit is unmeasured.
+    differential_noise_ratio: int = 1
+
+    # --- mixture-of-depths (Google DeepMind 2024) ------------------------
+    use_mod: bool = False
+    mod_capacity_ratio: float = 0.5
+    #: Train a per-token causal predictor of top-k membership (arXiv 2404.02258
+    #: sec. 3.5) and use it for selection whenever the block cannot see the
+    #: whole sequence -- which is every cached decode step. Without it the
+    #: per-call ``ceil(seq_len * ratio)`` capacity selects *every* token at
+    #: ``seq_len == 1``, so a cached decode takes a different path through the
+    #: block than the full forward did. Setting this to ``False`` restores that
+    #: (broken) pre-v82 behaviour.
+    mod_causal_predictor: bool = True
+    #: Weight of the predictor's BCE loss in the model's aux-loss total.
+    mod_predictor_loss_coef: float = 1e-2
+
+    # --- multi-latent attention (DeepSeek-V3 MLA) -------------------------
+    use_mla: bool = False
+    mla_latent_dim: int = 32
+    mla_pe_dim: int = 16
+    #: Use MLA only on the global layers, leaving SWA layers on plain grouped
+    #: query attention. Before v82 this was read through ``getattr`` with a
+    #: default of ``True`` but was not a field, so it could never be set; it is
+    #: now a real field with that same default.
+    mla_global_only: bool = True
+
+    # --- multimodal projection (Xiaomi MiMo-V2.5) -------------------------
+    use_multimodal: bool = False
+    multimodal_input_dim: int = 128
+
+
+    #: Config keys seen by :meth:`from_dict` that this build does not know.
+    #: Deliberately *not* annotated, so it is a plain class attribute and not a
+    #: dataclass field -- ``to_dict()`` must stay a pure round-trip.
+    unknown_keys = ()
+
     def __post_init__(self) -> None:
         if self.head_dim is None:
             if self.hidden_size % self.n_heads != 0:
@@ -181,6 +278,63 @@ class MiMoMixConfig:
             raise ValueError("n_heads must be a multiple of n_kv_heads")
         if self.head_dim % 2 != 0:
             raise ValueError("head_dim must be even for rotary embeddings")
+        if self.use_differential_attention and self.head_dim % 2 != 0:
+            raise ValueError("head_dim must be divisible by 2 for differential attention")
+        if self.use_mod and not (0.0 < self.mod_capacity_ratio <= 1.0):
+            raise ValueError("mod_capacity_ratio must be in (0, 1]")
+        if self.use_mla and self.mla_latent_dim <= 0:
+            raise ValueError("mla_latent_dim must be positive")
+        if self.use_mla and self.use_differential_attention:
+            # MiMoMixBlock has always picked differential first and silently
+            # dropped MLA. Say so instead of pretending both are active.
+            raise ValueError(
+                "use_differential_attention and use_mla are mutually exclusive: "
+                "MiMoMixBlock builds DifferentialHybridAttention first, so MLA "
+                "would be silently ignored. Pick one."
+            )
+        if self.use_mla:
+            if self.mla_pe_dim <= 0 or self.mla_pe_dim % 2 != 0:
+                raise ValueError("mla_pe_dim must be a positive even number")
+            if self.mla_pe_dim > int(self.head_dim):
+                raise ValueError(
+                    f"mla_pe_dim ({self.mla_pe_dim}) must be <= head_dim ({self.head_dim}); "
+                    "the decoupled rope sub-vector cannot be wider than the head"
+                )
+        if self.rotary_dim is not None:
+            rot = int(self.rotary_dim)
+            if rot <= 0 or rot % 2 != 0:
+                raise ValueError("rotary_dim must be a positive even number")
+            if rot > int(self.head_dim):
+                raise ValueError(
+                    f"rotary_dim ({rot}) must be <= head_dim ({self.head_dim})"
+                )
+            if self.rope_scaling == "ntk" and rot <= 2:
+                raise ValueError("rotary_dim must be > 2 when rope_scaling='ntk'")
+            self.rotary_dim = rot
+        if self.attention_sink_kinds not in {"all", "swa"}:
+            raise ValueError(
+                f"unknown attention_sink_kinds: {self.attention_sink_kinds!r} (expected 'all' or 'swa')"
+            )
+        if self.moe_balance_scope not in {"batch", "sequence"}:
+            raise ValueError(
+                f"unknown moe_balance_scope: {self.moe_balance_scope!r} (expected 'batch' or 'sequence')"
+            )
+        if int(self.differential_noise_ratio) < 1:
+            raise ValueError("differential_noise_ratio must be >= 1")
+        if self.use_differential_attention and int(self.differential_noise_ratio) > 1:
+            ratio = int(self.differential_noise_ratio)
+            if self.n_heads % ratio != 0:
+                raise ValueError(
+                    f"differential_noise_ratio ({ratio}) must divide n_heads ({self.n_heads})"
+                )
+        if self.global_layers is not None:
+            indices = tuple(sorted({int(i) for i in self.global_layers}))
+            for index in indices:
+                if not (0 <= index < int(self.n_layers)):
+                    raise ValueError(
+                        f"global_layers index {index} out of range for n_layers={self.n_layers}"
+                    )
+            self.global_layers = indices
         if self.rope_scaling not in {"none", "ntk", "yarn"}:
             raise ValueError(f"unknown rope_scaling: {self.rope_scaling!r}")
         if self.router_score_function not in {"softmax", "sigmoid"}:
@@ -201,15 +355,72 @@ class MiMoMixConfig:
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
 
+    @classmethod
+    def field_names(cls) -> Tuple[str, ...]:
+        return tuple(f.name for f in dataclass_fields(cls))
 
-def attention_layout(n_layers: int, hybrid_ratio: int, final_layer_global: bool = True) -> Tuple[str, ...]:
+    @classmethod
+    def from_dict(
+        cls, payload: Dict[str, object], warn: bool = True
+    ) -> "MiMoMixConfig":
+        """Build a config from a saved payload, *reporting* unknown keys.
+
+        ``MiMoMixConfig(**payload["config"])`` raises ``TypeError`` the moment a
+        checkpoint carries a field this build does not know about, which makes
+        every checkpoint written by a newer trainer unloadable by older-but-
+        otherwise-compatible code. This accepts them instead: unknown keys are
+        dropped, recorded on the returned object as ``unknown_keys`` (a plain
+        attribute, not a dataclass field, so ``to_dict`` is unaffected), and --
+        unless ``warn=False`` -- emitted once as a ``UserWarning``.
+
+        Dropping a key is not free: if the unknown key was a *structural* knob
+        the resulting model will have a different shape and the ``state_dict``
+        load will fail loudly. That is the intended failure mode -- loud, not
+        silent.
+        """
+
+        known = set(cls.field_names())
+        accepted = {k: v for k, v in payload.items() if k in known}
+        unknown = tuple(sorted(k for k in payload if k not in known))
+        if "global_layers" in accepted and accepted["global_layers"] is not None:
+            accepted["global_layers"] = tuple(int(i) for i in accepted["global_layers"])  # type: ignore[arg-type]
+        config = cls(**accepted)  # type: ignore[arg-type]
+        config.unknown_keys = unknown
+        if unknown and warn:
+            warnings.warn(
+                "MiMoMixConfig.from_dict ignored unknown config keys: "
+                + ", ".join(unknown),
+                UserWarning,
+                stacklevel=2,
+            )
+        return config
+
+
+def attention_layout(
+    n_layers: int,
+    hybrid_ratio: int,
+    final_layer_global: bool = True,
+    global_layers: Optional[Sequence[int]] = None,
+) -> Tuple[str, ...]:
     """Return ``("swa", "swa", ..., "global")`` for each layer index.
 
     With ``hybrid_ratio == r`` every ``r``-th layer is global, giving the
     ``r:1`` local:global interleave MiMo describes. ``hybrid_ratio == 0``
     means "all global" (a plain dense-attention model).
+
+    ``global_layers`` overrides the ratio entirely with an explicit set of
+    global layer indices -- the placement-by-search idea from Jet-Nemotron
+    PostNAS (arXiv 2508.15884), where *which* layers are global mattered as
+    much as how many. ``final_layer_global`` is still honoured on top of it.
+    Passing ``None`` (the default) leaves the ratio behaviour untouched.
     """
 
+    if global_layers is not None:
+        chosen = {int(i) for i in global_layers}
+        layout = ["global" if i in chosen else "swa" for i in range(n_layers)]
+        if final_layer_global and layout:
+            layout[-1] = "global"
+        return tuple(layout)
     if hybrid_ratio <= 0:
         return tuple("global" for _ in range(n_layers))
     layout: List[str] = []
@@ -276,13 +487,36 @@ class RotaryEmbedding(nn.Module):
         band in between. YaRN additionally scales attention logits by
         ``0.1 * ln(s) + 1`` to compensate for the entropy change; that factor is
         exposed as :attr:`attention_scaling` and applied by the attention layer.
+
+    **Partial RoPE.** The table is built over ``rotary_dim`` components, not
+    necessarily the whole head. ``rotary_dim=None`` falls back to
+    ``config.rotary_dim`` and then to ``head_dim``, which is the full rotation
+    every pre-v82 checkpoint used. :func:`apply_rotary` rotates exactly the
+    leading ``cos.shape[-1]`` components of ``x`` and passes the tail through,
+    so a table narrower than the head is a *correct partial rotation* rather
+    than a slice of a wider table. Slicing a wider table is not a rotation at
+    all: ``cat([freqs, freqs])`` pairs component ``i`` with component
+    ``i + head_dim/2``, so truncating to ``d`` re-pairs ``i`` with ``i + d/2``,
+    which carries a different frequency. That was the pre-v82 MLA bug.
     """
 
-    def __init__(self, config: MiMoMixConfig, kind: str = "global"):
+    def __init__(
+        self,
+        config: MiMoMixConfig,
+        kind: str = "global",
+        rotary_dim: Optional[int] = None,
+    ):
         super().__init__()
         self.config = config
         self.kind = kind
-        dim = int(config.head_dim)
+        self.head_dim = int(config.head_dim)
+        requested = rotary_dim if rotary_dim is not None else getattr(config, "rotary_dim", None)
+        dim = self.head_dim if requested is None else int(requested)
+        if dim <= 0 or dim % 2 != 0 or dim > self.head_dim:
+            raise ValueError(
+                f"rotary_dim must be a positive even number <= head_dim ({self.head_dim}), got {dim}"
+            )
+        self.rotary_dim = dim
         if kind == "swa" and config.rope_local_theta is not None:
             base = float(config.rope_local_theta)
         else:
@@ -317,7 +551,7 @@ class RotaryEmbedding(nn.Module):
         self.effective_base = float(base)
 
     def forward(self, positions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """``positions`` is ``(T,)`` -> ``(cos, sin)`` each ``(T, head_dim)``."""
+        """``positions`` is ``(T,)`` -> ``(cos, sin)`` each ``(T, rotary_dim)``."""
 
         freqs = positions.float().unsqueeze(-1) * self.inv_freq.unsqueeze(0)
         emb = torch.cat([freqs, freqs], dim=-1)
@@ -331,16 +565,93 @@ def _rotate_half(x: torch.Tensor) -> torch.Tensor:
 
 
 def apply_rotary(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """``x`` is ``(B, H, T, D)``; ``cos``/``sin`` are ``(T, D)``."""
+    """``x`` is ``(B, H, T, D)``; ``cos``/``sin`` are ``(T, R)`` with ``R <= D``.
 
+    The leading ``R`` components of ``x`` are rotated as a proper 2-D rotation
+    (component ``i`` paired with ``i + R/2``, both carrying frequency ``i``);
+    the remaining ``D - R`` components are passed through untouched. When
+    ``R == D`` this is exactly the full rotation, so every pre-v82 call site is
+    unchanged bit-for-bit.
+
+    Passing a ``cos`` that was *sliced* from a wider table is still wrong and
+    always was -- the pairing no longer matches the frequency. Build a table of
+    the width you intend to rotate.
+    """
+
+    rot = cos.shape[-1]
+    width = x.shape[-1]
+    if rot > width:
+        raise ValueError(f"rotary table width {rot} exceeds the head width {width}")
     cos = cos.to(x.dtype).unsqueeze(0).unsqueeze(0)
     sin = sin.to(x.dtype).unsqueeze(0).unsqueeze(0)
-    return x * cos + _rotate_half(x) * sin
+    if rot == width:
+        return x * cos + _rotate_half(x) * sin
+    x_rot, x_pass = x[..., :rot], x[..., rot:]
+    rotated = x_rot * cos + _rotate_half(x_rot) * sin
+    return torch.cat([rotated, x_pass], dim=-1)
 
 
 # ---------------------------------------------------------------------------
 # Hybrid attention
 # ---------------------------------------------------------------------------
+
+
+def _sink_enabled(config: MiMoMixConfig, kind: str) -> bool:
+    """Whether this layer kind carries a learnable attention-sink logit.
+
+    ``attention_sink_kinds="all"`` (the default, and every pre-v82 checkpoint)
+    gives every layer a sink. ``"swa"`` gives it to the local layers only,
+    which is MiMo-V2-Flash's released configuration
+    (``add_swa_attention_sink_bias`` true, ``add_full_attention_sink_bias``
+    false). Their 32B W=128 ablation reports MMLU 54.9 without a sink, 58.3
+    with the SWA-only sink and 57.3 all-global; none of that transfers to this
+    model and nothing here has been measured.
+    """
+
+    if not bool(config.attention_sink):
+        return False
+    kinds = str(getattr(config, "attention_sink_kinds", "all"))
+    if kinds == "swa":
+        return kind == "swa"
+    return True
+
+
+class AttentionOutputGate(nn.Module):
+    """Head-wise elementwise sigmoid gate applied before ``o_proj``.
+
+    ``out <- out * sigmoid(W_g x)`` with ``W_g`` producing one scalar per
+    (head, head-dim) slot from the *block input*, the SDPA-output placement
+    from Qwen's gated-attention study (NeurIPS 2025 oral, arXiv 2505.06708).
+    Their 1.7B/400B-token run reports average PPL 7.499 -> 7.404 and attention
+    mass on the first token falling 46.7% -> 4.8%.
+
+    The weight starts at zero and the bias at ``+4``, so a freshly enabled gate
+    is the constant ``sigmoid(4) = 0.982`` -- near-identity, which is what lets
+    the flag be switched on over a warm start without destroying it. That init
+    is restored by :meth:`reset_special_parameters` after the model's global
+    ``_init_weights`` sweep, which would otherwise overwrite it.
+
+    No Supermix run has measured this. It is a hypothesis for a future run.
+    """
+
+    def __init__(self, hidden_size: int, n_heads: int, head_dim: int, bias_init: float = 4.0):
+        super().__init__()
+        self.n_heads = int(n_heads)
+        self.head_dim = int(head_dim)
+        self.bias_init = float(bias_init)
+        self.proj = nn.Linear(hidden_size, self.n_heads * self.head_dim, bias=True)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        nn.init.zeros_(self.proj.weight)
+        nn.init.constant_(self.proj.bias, self.bias_init)
+
+    def forward(self, attn_out: torch.Tensor, block_input: torch.Tensor) -> torch.Tensor:
+        """``attn_out`` and ``block_input`` are both ``(B, T, n_heads*head_dim)``-
+        and ``(B, T, hidden)``-shaped respectively."""
+
+        gate = torch.sigmoid(self.proj(block_input))
+        return attn_out * gate.to(attn_out.dtype)
 
 
 class HybridAttention(nn.Module):
@@ -356,6 +667,11 @@ class HybridAttention(nn.Module):
     head can therefore emit a near-zero output instead of being forced to
     normalise over real tokens -- the standard fix for the "attention sink"
     pathology that otherwise pins mass on position 0.
+
+    ``attention_sink_kinds="swa"`` restricts the sink to the local layers,
+    matching MiMo-V2-Flash's released config. ``config.qk_norm`` and
+    ``config.attention_output_gate`` add the OLMo 2 / Qwen refinements; both are
+    default-off and neither has been measured on this model.
     """
 
     def __init__(self, config: MiMoMixConfig, layer_index: int, kind: str):
@@ -381,7 +697,19 @@ class HybridAttention(nn.Module):
         self.o_proj = nn.Linear(self.n_heads * self.head_dim, config.hidden_size, bias=False)
         self.dropout = nn.Dropout(config.dropout)
 
-        if config.attention_sink:
+        if bool(getattr(config, "qk_norm", False)):
+            self.q_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+            self.k_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+
+        if bool(getattr(config, "attention_output_gate", False)):
+            self.out_gate = AttentionOutputGate(config.hidden_size, self.n_heads, self.head_dim)
+        else:
+            self.out_gate = None
+
+        if _sink_enabled(config, kind):
             # Starts at 0 => the sink initially holds softmax weight exp(0)=1
             # relative to the (scaled) real logits, a mild, learnable floor.
             self.sink = nn.Parameter(torch.zeros(self.n_heads))
@@ -437,6 +765,13 @@ class HybridAttention(nn.Module):
         k = self.k_proj(hidden_states).view(bsz, q_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(hidden_states).view(bsz, q_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
 
+        if self.q_norm is not None:
+            # OLMo 2 / Gemma 3 / Qwen3 placement: normalise the per-head q and k
+            # *before* the rotary, so the rotation still acts on unit-scale
+            # vectors and the norm cannot undo a position-dependent phase.
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+
         q_cos, q_sin = cos, sin
         q = apply_rotary(q, q_cos, q_sin)
         k = apply_rotary(k, q_cos, q_sin)
@@ -488,6 +823,425 @@ class HybridAttention(nn.Module):
         weights = self.dropout(weights)
         out = torch.matmul(weights, value_repeat)
         out = out.transpose(1, 2).reshape(bsz, q_len, self.n_heads * self.head_dim)
+        if self.out_gate is not None:
+            out = self.out_gate(out, hidden_states)
+        return self.o_proj(out), present
+
+
+# ---------------------------------------------------------------------------
+# Differential Hybrid Attention (Microsoft ICLR 2025 oral)
+# ---------------------------------------------------------------------------
+
+
+class DifferentialHybridAttention(nn.Module):
+    """Differential Attention (Microsoft ICLR 2025 oral) with SWA/Global hybrid design.
+
+    Splits query and key representations into two halves (Q1, Q2) and (K1, K2).
+    Computes two softmax attention maps and takes their difference:
+        DiffMap = Softmax(Q1 K1^T / sqrt(d/2)) - lambda * Softmax(Q2 K2^T / sqrt(d/2))
+    This subtractive operation acts like noise-cancelling headphones for attention,
+    eliminating irrelevant background activations and sharpening retrieval.
+
+    Two v82 additions, both governed by config flags:
+
+    * ``differential_output_norm`` (default ``True``) restores the reference
+      formulation's per-head sublayer normalisation and ``(1 - lambda_init)``
+      rescale, which this implementation previously omitted. Changing this
+      default is safe only because **no trained checkpoint sets
+      ``use_differential_attention``** -- verified by loading every
+      ``output/**/*.pt`` and reading its stored config. Set it to ``False`` to
+      recover the pre-v82 arithmetic exactly.
+    * ``differential_noise_ratio`` (default ``1``) allocates one shared noise
+      map to every ``R`` signal heads instead of one each, by averaging the
+      noise queries within a group. ``R == 1`` is the previous behaviour with
+      identical weights. This is an approximation of the published GDA
+      parameterisation, not a reimplementation of it, and its effect on this
+      model is unmeasured.
+    """
+
+    def __init__(self, config: MiMoMixConfig, layer_index: int, kind: str):
+        super().__init__()
+        if kind not in {"swa", "global"}:
+            raise ValueError(f"unknown attention kind: {kind!r}")
+        self.config = config
+        self.layer_index = int(layer_index)
+        self.kind = kind
+        self.n_heads = int(config.n_heads)
+        self.n_kv_heads = int(config.n_kv_heads)
+        self.n_rep = self.n_heads // self.n_kv_heads
+        self.head_dim = int(config.head_dim)
+        self.sub_dim = self.head_dim // 2
+        if self.head_dim % 2 != 0:
+            raise ValueError("head_dim must be divisible by 2 for differential attention")
+        self.scaling = self.sub_dim ** -0.5
+        self.window = int(config.sliding_window) if kind == "swa" else None
+        self._attention_scaling = 1.0
+
+        self.q_proj = nn.Linear(config.hidden_size, self.n_heads * self.head_dim, bias=False)
+        self.k_proj = nn.Linear(config.hidden_size, self.n_kv_heads * self.head_dim, bias=False)
+        self.v_proj = nn.Linear(config.hidden_size, self.n_kv_heads * self.head_dim, bias=False)
+        self.o_proj = nn.Linear(self.n_heads * self.head_dim, config.hidden_size, bias=False)
+        self.dropout = nn.Dropout(config.dropout)
+
+        # Learnable lambda per head: lambda = exp(-softplus(lambda_param))
+        init_lambda = float(getattr(config, "differential_lambda_init", 0.8))
+        init_lambda = max(1e-4, min(0.999, init_lambda))
+        target_softplus = -math.log(init_lambda)
+        if target_softplus > 0:
+            p = math.log(max(1e-6, math.exp(target_softplus) - 1.0))
+        else:
+            p = 0.0
+        self.lambda_param = nn.Parameter(torch.full((self.n_heads,), p, dtype=torch.float32))
+        self.lambda_init = init_lambda
+
+        self.noise_ratio = max(1, int(getattr(config, "differential_noise_ratio", 1)))
+        if self.n_heads % self.noise_ratio != 0:
+            raise ValueError(
+                f"differential_noise_ratio ({self.noise_ratio}) must divide n_heads ({self.n_heads})"
+            )
+        self.n_noise_heads = self.n_heads // self.noise_ratio
+
+        self.output_norm: Optional[RMSNorm]
+        if bool(getattr(config, "differential_output_norm", True)):
+            # Reference DIFF Transformer: per-head sublayer norm on the
+            # differential output, then a (1 - lambda_init) rescale so the
+            # sublayer's output magnitude matches a plain-attention one.
+            self.output_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+            self.output_rescale = 1.0 - init_lambda
+        else:
+            self.output_norm = None
+            self.output_rescale = 1.0
+
+        if bool(getattr(config, "qk_norm", False)):
+            self.q_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+            self.k_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+
+        if bool(getattr(config, "attention_output_gate", False)):
+            self.out_gate = AttentionOutputGate(config.hidden_size, self.n_heads, self.head_dim)
+        else:
+            self.out_gate = None
+
+        if _sink_enabled(config, kind):
+            self.sink1 = nn.Parameter(torch.zeros(self.n_heads))
+            self.sink2 = nn.Parameter(torch.zeros(self.n_noise_heads))
+        else:
+            self.register_parameter("sink1", None)
+            self.register_parameter("sink2", None)
+
+        self.register_buffer("last_sink_mass", torch.zeros(1), persistent=False)
+        self.register_buffer("last_lambda", torch.zeros(self.n_heads), persistent=False)
+
+    def cache_span(self, slack: int = 0) -> Optional[int]:
+        if self.kind == "global":
+            return None
+        return int(self.window) + max(0, int(slack))
+
+    def _repeat_kv(self, x: torch.Tensor) -> torch.Tensor:
+        if self.n_rep == 1:
+            return x
+        b, h, t, d = x.shape
+        return x[:, :, None].expand(b, h, self.n_rep, t, d).reshape(b, h * self.n_rep, t, d)
+
+    def _match_kv_heads(self, x: torch.Tensor, target_heads: int) -> torch.Tensor:
+        """Expand (or, for a narrow noise branch, group-average) kv heads."""
+
+        b, h, t, d = x.shape
+        if h == target_heads:
+            return x
+        if target_heads > h:
+            if target_heads % h != 0:
+                raise ValueError(f"cannot expand {h} kv heads to {target_heads}")
+            rep = target_heads // h
+            return x[:, :, None].expand(b, h, rep, t, d).reshape(b, h * rep, t, d)
+        if h % target_heads != 0:
+            raise ValueError(f"cannot group {h} kv heads down to {target_heads}")
+        return x.view(b, target_heads, h // target_heads, t, d).mean(dim=2)
+
+    @property
+    def lambda_weight(self) -> torch.Tensor:
+        """Bounded per-head differential cancellation weight in (0, 1)."""
+        return torch.exp(-F.softplus(self.lambda_param))
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        query_positions: torch.Tensor,
+        key_positions: torch.Tensor,
+        past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        use_cache: bool = False,
+        cache_slack: int = 0,
+    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        bsz, q_len, _ = hidden_states.shape
+        q = self.q_proj(hidden_states).view(bsz, q_len, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(hidden_states).view(bsz, q_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(hidden_states).view(bsz, q_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
+
+        if self.q_norm is not None:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+
+        q = apply_rotary(q, cos, sin)
+        k = apply_rotary(k, cos, sin)
+
+        if past_kv is not None and past_kv[0].numel() > 0:
+            k = torch.cat([past_kv[0], k], dim=2)
+            v = torch.cat([past_kv[1], v], dim=2)
+            all_key_positions = torch.cat([key_positions, query_positions], dim=0)
+        else:
+            all_key_positions = query_positions
+
+        present: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if use_cache:
+            span = self.cache_span(cache_slack)
+            if span is not None and k.shape[2] > span:
+                present = (k[:, :, -span:].detach(), v[:, :, -span:].detach())
+            else:
+                present = (k.detach(), v.detach())
+
+        # Split into differential sub-heads
+        q1 = q[..., :self.sub_dim]
+        q2 = q[..., self.sub_dim:]
+        k1 = k[..., :self.sub_dim]
+        k2 = k[..., self.sub_dim:]
+
+        if self.noise_ratio > 1:
+            # GDA-style asymmetry: R signal heads share one noise map. The
+            # shared noise query is the mean of the group's noise queries, so
+            # every q2 parameter still receives gradient (no dead weights).
+            b, _, t, d = q2.shape
+            q2 = q2.view(b, self.n_noise_heads, self.noise_ratio, t, d).mean(dim=2)
+
+        k1_repeat = self._repeat_kv(k1)
+        k2_repeat = self._match_kv_heads(k2, self.n_noise_heads)
+        value_repeat = self._repeat_kv(v)
+
+        scores1 = torch.matmul(q1, k1_repeat.transpose(2, 3)) * self.scaling * self._attention_scaling
+        scores2 = torch.matmul(q2, k2_repeat.transpose(2, 3)) * self.scaling * self._attention_scaling
+
+        causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
+        if self.window is not None:
+            causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
+        allowed = causal.view(1, 1, q_len, -1)
+        if attention_mask is not None:
+            allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
+        neg_inf = torch.finfo(scores1.dtype).min
+        scores1 = scores1.masked_fill(~allowed, neg_inf)
+        scores2 = scores2.masked_fill(~allowed, neg_inf)
+
+        if self.sink1 is not None and self.sink2 is not None:
+            sink1 = self.sink1.view(1, self.n_heads, 1, 1).expand(bsz, self.n_heads, q_len, 1)
+            sink2 = self.sink2.view(1, self.n_noise_heads, 1, 1).expand(
+                bsz, self.n_noise_heads, q_len, 1
+            )
+            scores1 = torch.cat([sink1.to(scores1.dtype), scores1], dim=-1)
+            scores2 = torch.cat([sink2.to(scores2.dtype), scores2], dim=-1)
+            map1 = F.softmax(scores1.float(), dim=-1).to(q.dtype)
+            map2 = F.softmax(scores2.float(), dim=-1).to(q.dtype)
+            sink_mass = (map1[..., 0].mean() + map2[..., 0].mean()) * 0.5
+            self.last_sink_mass = sink_mass.detach().reshape(1)
+            map1 = map1[..., 1:]
+            map2 = map2[..., 1:]
+        else:
+            map1 = F.softmax(scores1.float(), dim=-1).to(q.dtype)
+            map2 = F.softmax(scores2.float(), dim=-1).to(q.dtype)
+            self.last_sink_mass = torch.zeros(1, device=q.device)
+
+        if self.noise_ratio > 1:
+            map2 = map2.repeat_interleave(self.noise_ratio, dim=1)
+
+        lambda_head = self.lambda_weight.view(1, self.n_heads, 1, 1).to(q.dtype)
+        self.last_lambda = self.lambda_weight.detach()
+
+        diff_weights = map1 - lambda_head * map2
+        weights = self.dropout(diff_weights)
+        out = torch.matmul(weights, value_repeat)
+        if self.output_norm is not None:
+            # Reference DIFF-Transformer sublayer norm, applied per head, then
+            # the (1 - lambda_init) rescale. Pre-v82 this was omitted entirely.
+            out = self.output_norm(out) * self.output_rescale
+        out = out.transpose(1, 2).reshape(bsz, q_len, self.n_heads * self.head_dim)
+        if self.out_gate is not None:
+            out = self.out_gate(out, hidden_states)
+        return self.o_proj(out), present
+
+
+# ---------------------------------------------------------------------------
+# Multi-Latent Attention (DeepSeek-V3 MLA)
+# ---------------------------------------------------------------------------
+
+
+class MultiLatentAttention(nn.Module):
+    """Multi-Head Latent Attention (MLA) for deep KV-cache compression.
+
+    Compresses Keys and Values jointly into a compact low-rank latent vector
+    c_kv, and handles rotary positional embeddings via a dedicated decoupled
+    k_pe / q_pe projection. This drastically shrinks the KV-cache memory
+    footprint on long contexts without losing full multi-head expressive power.
+
+    **v82 fix.** The decoupled pe sub-vector is ``mla_pe_dim`` wide, which is
+    usually narrower than ``head_dim``. Before v82 this class sliced
+    ``cos[:, :pe_dim]`` out of the *trunk's* ``head_dim``-wide table. That is
+    not a rotation: the trunk table is ``cat([freqs, freqs])`` over
+    ``head_dim/2`` frequencies, so component ``i`` is meant to pair with
+    ``i + head_dim/2``; truncating to ``pe_dim`` pairs it with
+    ``i + pe_dim/2`` instead, which carries a *different* frequency. Measured
+    consequences on the pre-fix code: the rotation changed the vector norm by
+    2.2866 (a rotation must change it by 0), and one fixed relative offset
+    scored ``+3.9137`` at absolute positions (5, 2) but ``+7.5882`` at
+    (15, 12) -- i.e. the "relative" position encoding was not relative. This
+    class now owns a :class:`RotaryEmbedding` built over ``pe_dim``
+    frequencies, so the pe rotation is a genuine rotation.
+
+    The layer keeps using the trunk's YaRN logit temperature
+    (``_attention_scaling``, assigned by :class:`MiMoMixModel`); only the
+    frequency table is decoupled.
+    """
+
+    def __init__(self, config: MiMoMixConfig, layer_index: int, kind: str = "global"):
+        super().__init__()
+        self.config = config
+        self.layer_index = int(layer_index)
+        self.kind = kind
+        self.n_heads = int(config.n_heads)
+        self.head_dim = int(config.head_dim)
+        self.latent_dim = int(getattr(config, "mla_latent_dim", 32))
+        self.pe_dim = int(getattr(config, "mla_pe_dim", 16))
+        self.scaling = (self.head_dim + self.pe_dim) ** -0.5
+        self.window = int(config.sliding_window) if kind == "swa" else None
+        self._attention_scaling = 1.0
+
+        self.q_content_proj = nn.Linear(config.hidden_size, self.n_heads * self.head_dim, bias=False)
+        self.q_pe_proj = nn.Linear(config.hidden_size, self.n_heads * self.pe_dim, bias=False)
+
+        self.kv_down_proj = nn.Linear(config.hidden_size, self.latent_dim, bias=False)
+        self.kv_norm = RMSNorm(self.latent_dim, config.rms_norm_eps)
+        self.k_up_proj = nn.Linear(self.latent_dim, self.n_heads * self.head_dim, bias=False)
+        self.v_up_proj = nn.Linear(self.latent_dim, self.n_heads * self.head_dim, bias=False)
+        self.k_pe_proj = nn.Linear(config.hidden_size, self.pe_dim, bias=False)
+
+        self.o_proj = nn.Linear(self.n_heads * self.head_dim, config.hidden_size, bias=False)
+        self.dropout = nn.Dropout(config.dropout)
+
+        if self.pe_dim > self.head_dim or self.pe_dim <= 0 or self.pe_dim % 2 != 0:
+            raise ValueError(
+                f"mla_pe_dim ({self.pe_dim}) must be a positive even number <= head_dim ({self.head_dim})"
+            )
+        # A rope table of exactly pe_dim frequencies. See the class docstring:
+        # slicing the trunk's head_dim-wide table here was Bug A.
+        self.pe_rotary = RotaryEmbedding(config, kind=kind, rotary_dim=self.pe_dim)
+
+        if bool(getattr(config, "qk_norm", False)):
+            # The pe halves carry the position signal and are left alone; the
+            # content halves are the ones whose scale the OLMo 2 placement is
+            # about. k_content is produced by the up-projection from the latent,
+            # so its norm sits after that projection.
+            self.q_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+            self.k_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+
+        if bool(getattr(config, "attention_output_gate", False)):
+            self.out_gate = AttentionOutputGate(config.hidden_size, self.n_heads, self.head_dim)
+        else:
+            self.out_gate = None
+
+        if _sink_enabled(config, kind):
+            self.sink = nn.Parameter(torch.zeros(self.n_heads))
+        else:
+            self.register_parameter("sink", None)
+
+        self.register_buffer("last_sink_mass", torch.zeros(1), persistent=False)
+
+    def cache_span(self, slack: int = 0) -> Optional[int]:
+        if self.kind == "global":
+            return None
+        return int(self.window) + max(0, int(slack))
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        query_positions: torch.Tensor,
+        key_positions: torch.Tensor,
+        past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        use_cache: bool = False,
+        cache_slack: int = 0,
+    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        bsz, q_len, _ = hidden_states.shape
+        q_content = self.q_content_proj(hidden_states).view(bsz, q_len, self.n_heads, self.head_dim).transpose(1, 2)
+        q_pe = self.q_pe_proj(hidden_states).view(bsz, q_len, self.n_heads, self.pe_dim).transpose(1, 2)
+
+        # Own table over pe_dim frequencies -- NOT a slice of the trunk's table.
+        pe_cos, pe_sin = self.pe_rotary(query_positions)
+        if self.q_norm is not None:
+            q_content = self.q_norm(q_content)
+        q_pe = apply_rotary(q_pe, pe_cos, pe_sin)
+
+        c_kv = self.kv_norm(self.kv_down_proj(hidden_states))  # (B, q_len, latent_dim)
+        k_pe = self.k_pe_proj(hidden_states).view(bsz, q_len, 1, self.pe_dim).transpose(1, 2)  # (B, 1, q_len, pe_dim)
+        k_pe = apply_rotary(k_pe, pe_cos, pe_sin)
+
+        if past_kv is not None and past_kv[0].numel() > 0:
+            c_kv_all = torch.cat([past_kv[0], c_kv], dim=1)
+            k_pe_all = torch.cat([past_kv[1], k_pe], dim=2)
+            all_key_positions = torch.cat([key_positions, query_positions], dim=0)
+        else:
+            c_kv_all = c_kv
+            k_pe_all = k_pe
+            all_key_positions = query_positions
+
+        present: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if use_cache:
+            span = self.cache_span(cache_slack)
+            if span is not None and c_kv_all.shape[1] > span:
+                present = (c_kv_all[:, -span:].detach(), k_pe_all[:, :, -span:].detach())
+            else:
+                present = (c_kv_all.detach(), k_pe_all.detach())
+
+        total_len = c_kv_all.shape[1]
+        k_content = self.k_up_proj(c_kv_all).view(bsz, total_len, self.n_heads, self.head_dim).transpose(1, 2)
+        if self.k_norm is not None:
+            k_content = self.k_norm(k_content)
+        v = self.v_up_proj(c_kv_all).view(bsz, total_len, self.n_heads, self.head_dim).transpose(1, 2)
+
+        scores_content = torch.matmul(q_content, k_content.transpose(2, 3))
+        scores_pe = torch.matmul(q_pe, k_pe_all.expand(bsz, self.n_heads, total_len, self.pe_dim).transpose(2, 3))
+        scores = (scores_content + scores_pe) * self.scaling * self._attention_scaling
+
+        causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
+        if self.window is not None:
+            causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
+        allowed = causal.view(1, 1, q_len, -1)
+        if attention_mask is not None:
+            allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
+        neg_inf = torch.finfo(scores.dtype).min
+        scores = scores.masked_fill(~allowed, neg_inf)
+
+        if self.sink is not None:
+            sink = self.sink.view(1, self.n_heads, 1, 1).expand(bsz, self.n_heads, q_len, 1)
+            scores = torch.cat([sink.to(scores.dtype), scores], dim=-1)
+            weights = F.softmax(scores.float(), dim=-1).to(q_content.dtype)
+            sink_mass = weights[..., 0]
+            weights = weights[..., 1:]
+            self.last_sink_mass = sink_mass.detach().mean().reshape(1)
+        else:
+            weights = F.softmax(scores.float(), dim=-1).to(q_content.dtype)
+            self.last_sink_mass = torch.zeros(1, device=q_content.device)
+
+        weights = self.dropout(weights)
+        out = torch.matmul(weights, v)
+        out = out.transpose(1, 2).reshape(bsz, q_len, self.n_heads * self.head_dim)
+        if self.out_gate is not None:
+            out = self.out_gate(out, hidden_states)
         return self.o_proj(out), present
 
 
@@ -528,8 +1282,14 @@ class SparseMoEFeedForward(nn.Module):
 
     * a **router z-loss** ``mean(logsumexp(logits)^2)`` that keeps router logits
       from drifting into a numerically bad regime;
-    * a light **sequence-level balance loss** ``N * sum(f_i * P_i)`` that
-      discourages within-sequence collapse. The bias rule does the real work.
+    * a light **balance loss** ``N * sum(f_i * P_i)``. ``moe_balance_scope``
+      selects its scope. ``"batch"`` (the default, and what every run up to and
+      including v80 actually computed despite older docstrings calling it
+      sequence-level) flattens ``(B, T)`` into one pool. ``"sequence"``
+      computes ``f`` and ``P`` per sequence and averages over the batch, which
+      is the DeepSeek-V3 4.5.3 complementary sequence-wise term. The bias rule
+      does the real work either way; the effect of the scope on this model is
+      unmeasured.
 
     ``n_shared_experts`` experts are always applied. Shared experts capture the
     common transformation so the routed experts can specialise -- fine-grained
@@ -545,6 +1305,7 @@ class SparseMoEFeedForward(nn.Module):
         self.score_function = config.router_score_function
         self.norm_topk_prob = bool(config.norm_topk_prob)
         self.update_speed = float(config.router_bias_update_speed)
+        self.balance_scope = str(getattr(config, "moe_balance_scope", "batch"))
 
         self.gate = nn.Linear(config.hidden_size, self.n_routed, bias=False)
         self.experts = nn.ModuleList(
@@ -614,10 +1375,29 @@ class SparseMoEFeedForward(nn.Module):
         self.pending_batches.zero_()
         return True
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, token_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """``token_mask`` is an optional ``(B, T)`` bool tensor of tokens that
+        actually reach the residual stream.
+
+        Mixture-of-Depths gates a token's MLP contribution to zero, but the
+        expert is still selected for it, so before v82 gated-out tokens drove
+        ``expert_load``, ``pending_load`` and the balance loss exactly as hard
+        as tokens the block actually used. Passing the MoD gate mask here
+        excludes them from all three. It does **not** stop the experts running
+        on those tokens -- see :class:`MixtureOfDepthsRouter` on why there is no
+        FLOP saving here.
+        """
+
         original_shape = x.shape
         flat = x.reshape(-1, original_shape[-1])
         n_tokens = flat.shape[0]
+        flat_mask: Optional[torch.Tensor] = None
+        if token_mask is not None:
+            flat_mask = token_mask.reshape(-1).to(dtype=torch.bool, device=flat.device)
+            if flat_mask.numel() != n_tokens:
+                raise ValueError(
+                    f"token_mask has {flat_mask.numel()} entries for {n_tokens} tokens"
+                )
 
         logits = self.gate(flat)
         scores = self._scores(logits)
@@ -648,14 +1428,36 @@ class SparseMoEFeedForward(nn.Module):
             output = output + self.shared_expert(flat)
 
         # --- routing telemetry and regularisers ---------------------------
-        load = one_hot.float().mean(dim=0)  # fraction of tokens per expert
-        mean_prob = scores.float().mean(dim=0)
+        occupancy = one_hot.float()
+        probabilities = scores.float()
+        if flat_mask is not None:
+            keep = flat_mask.float().unsqueeze(-1)
+            denom = keep.sum().clamp_min(1.0)
+            load = (occupancy * keep).sum(dim=0) / denom
+            mean_prob = (probabilities * keep).sum(dim=0) / denom
+        else:
+            load = occupancy.mean(dim=0)  # fraction of tokens per expert
+            mean_prob = probabilities.mean(dim=0)
         self.last_expert_load = load.detach()
         self.last_router_entropy = (
             -(mean_prob * mean_prob.clamp_min(1e-9).log()).sum().detach()
         )
         z_loss = torch.logsumexp(logits.float(), dim=-1).pow(2).mean()
-        balance_loss = float(self.n_routed) * torch.sum(load * mean_prob)
+        if self.balance_scope == "sequence" and len(original_shape) == 3:
+            bsz, seq_len = int(original_shape[0]), int(original_shape[1])
+            per_seq_occupancy = occupancy.view(bsz, seq_len, self.n_routed)
+            per_seq_prob = probabilities.view(bsz, seq_len, self.n_routed)
+            if flat_mask is not None:
+                keep_seq = flat_mask.view(bsz, seq_len, 1).float()
+                denom_seq = keep_seq.sum(dim=1).clamp_min(1.0)
+                seq_load = (per_seq_occupancy * keep_seq).sum(dim=1) / denom_seq
+                seq_prob = (per_seq_prob * keep_seq).sum(dim=1) / denom_seq
+            else:
+                seq_load = per_seq_occupancy.mean(dim=1)
+                seq_prob = per_seq_prob.mean(dim=1)
+            balance_loss = float(self.n_routed) * (seq_load * seq_prob).sum(dim=-1).mean()
+        else:
+            balance_loss = float(self.n_routed) * torch.sum(load * mean_prob)
         self.last_router_z_loss = z_loss.detach()
         self.last_router_balance_loss = balance_loss.detach()
         if self.training:
@@ -681,6 +1483,170 @@ class SparseMoEFeedForward(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Mixture-of-Depths router (Google DeepMind 2024)
+# ---------------------------------------------------------------------------
+
+
+class MixtureOfDepthsRouter(nn.Module):
+    """Mixture-of-Depths (MoD) token-level router (arXiv 2404.02258).
+
+    **This does not save compute here, and it never did.** The block gates only
+    the *residual contribution* of the attention and MLP sublayers; both
+    sublayers still execute for every token, on the full sequence. There is no
+    gather/scatter and no shortened sequence, so FLOPs are unchanged and
+    wall-clock is slightly *worse* than not using it. Treat this as a routing /
+    regularisation study -- a learned per-token gate on a block's output -- and
+    not as a compute saving. Telemetry reports ``mod_compute_saved: false`` to
+    keep that visible at the point of use.
+
+    Two v82 correctness fixes (both measured against the pre-v82 code):
+
+    *Capacity was per-call.* ``capacity = ceil(seq_len * ratio)`` is computed
+    from *this call's* ``seq_len``, so at ``seq_len == 1`` -- every cached
+    decode step -- capacity 1 >= 1 selected every token. Measured skip ratio was
+    0.500 at T=8 and T=4 but 0.000 at T=1, and full-forward vs incremental
+    decode logits differed by 8.1e-2 against a 1.2e-7 non-MoD baseline.
+
+    *Top-k is not causal.* Selecting the top ``capacity`` tokens of the whole
+    sequence lets a later token change an earlier token's routing: measured,
+    changing token 7 of 8 moved positions 0-3 by 0.519.
+
+    The paper's own remedy is implemented here: keep top-k for the training
+    forward, and train a small per-token **causal predictor** (a linear head,
+    BCE against top-k membership) that decides selection whenever the block
+    cannot see the whole sequence. To make batched and incremental decode agree
+    token-for-token, the predictor is used for *all* eval-mode selection, not
+    only cached steps -- otherwise a full eval forward would still take the
+    top-k path while its incremental replay took the predictor path, and the
+    two would disagree exactly as before.
+
+    Setting ``mod_causal_predictor=False`` restores the pre-v82 behaviour,
+    including the mismatch.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        capacity_ratio: float = 0.5,
+        causal_predictor: bool = True,
+        predictor_loss_coef: float = 1e-2,
+    ):
+        super().__init__()
+        self.capacity_ratio = float(capacity_ratio)
+        self.router_proj = nn.Linear(hidden_size, 1, bias=False)
+        self.use_causal_predictor = bool(causal_predictor)
+        self.predictor_loss_coef = float(predictor_loss_coef)
+        if self.use_causal_predictor:
+            self.predictor = nn.Linear(hidden_size, 1, bias=True)
+        else:
+            self.predictor = None
+        self.register_buffer("last_skip_ratio", torch.zeros(1), persistent=False)
+        self.register_buffer("last_predictor_loss", torch.zeros(()), persistent=False)
+        self.register_buffer("last_predictor_agreement", torch.zeros(()), persistent=False)
+        self.last_selection_mode = "topk"
+
+    def _clear_aux(self, reference: torch.Tensor) -> None:
+        self._aux_loss = reference.new_zeros(())
+
+    def aux_loss(self) -> torch.Tensor:
+        """Predictor BCE, already multiplied by ``mod_predictor_loss_coef``."""
+
+        value = getattr(self, "_aux_loss", None)
+        if value is None:
+            return self.router_proj.weight.new_zeros(())
+        return value
+
+    def gate_mask(self, x: torch.Tensor, incremental: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(selected_mask, weights)``, both ``(B, T)``.
+
+        ``selected_mask`` is bool; ``weights`` is ``sigmoid(router_logits)``.
+        ``incremental`` says the caller cannot see the whole sequence (a cache
+        is attached, or the query block is shorter than the context).
+        """
+
+        bsz, seq_len, _ = x.shape
+        router_logits = self.router_proj(x).squeeze(-1)  # (B, T)
+        weights = torch.sigmoid(router_logits)
+        capacity = max(1, min(seq_len, int(math.ceil(seq_len * self.capacity_ratio))))
+
+        predictor_logits: Optional[torch.Tensor] = None
+        if self.predictor is not None:
+            predictor_logits = self.predictor(x).squeeze(-1)
+
+        # top-k membership over the visible sequence: the training target and,
+        # in training mode, the selection itself.
+        topk_mask = torch.zeros(bsz, seq_len, dtype=torch.bool, device=x.device)
+        if capacity >= seq_len:
+            topk_mask[:] = True
+        else:
+            _, indices = torch.topk(weights, capacity, dim=-1, sorted=False)
+            topk_mask.scatter_(1, indices, True)
+
+        use_predictor = self.predictor is not None and (incremental or not self.training)
+        if use_predictor:
+            assert predictor_logits is not None
+            selected_mask = predictor_logits > 0.0
+            self.last_selection_mode = "predictor"
+        else:
+            selected_mask = topk_mask
+            self.last_selection_mode = "topk"
+
+        if self.training and predictor_logits is not None:
+            loss = F.binary_cross_entropy_with_logits(
+                predictor_logits, topk_mask.to(predictor_logits.dtype)
+            )
+            self._aux_loss = self.predictor_loss_coef * loss
+            self.last_predictor_loss = loss.detach()
+        else:
+            self._clear_aux(weights)
+
+        # Agreement between the causal predictor and the top-k target it was
+        # trained against. This is the diagnostic that says whether the
+        # predictor is a usable stand-in at decode time, so it is exactly the
+        # number wanted under eval() -- and it used to be computed only inside
+        # the training branch above, leaving every eval and benchmark snapshot
+        # reporting a stale value or the 0.0 it was initialised with. The aux
+        # loss stays training-only; this does not need to be. `topk_mask` is
+        # already computed on every call, so the cost is one comparison.
+        if predictor_logits is not None:
+            self.last_predictor_agreement = (
+                ((predictor_logits > 0.0) == topk_mask).float().mean().detach()
+            )
+
+        skipped = (~selected_mask).float().mean()
+        self.last_skip_ratio = skipped.detach().reshape(1)
+        return selected_mask, weights
+
+    def forward(
+        self, x: torch.Tensor, incremental: bool = False
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Legacy tuple interface: ``(selected_indices, weights, skip_ratio)``.
+
+        Kept because the existing tests and any external caller use it. It can
+        only return a rectangular index tensor, which is why the block itself
+        uses :meth:`gate_mask` -- the predictor selects a different number of
+        tokens per row.
+        """
+
+        bsz, seq_len, _ = x.shape
+        selected_mask, weights = self.gate_mask(x, incremental=incremental)
+        counts = selected_mask.sum(dim=-1)
+        width = int(counts.max().item()) if counts.numel() else 0
+        width = max(1, width)
+        # Pad short rows by repeating their first selected index; the mask is
+        # the authoritative object, this is a convenience view.
+        selected_indices = torch.zeros(bsz, width, dtype=torch.long, device=x.device)
+        for row in range(bsz):
+            idx = torch.nonzero(selected_mask[row], as_tuple=False).flatten()
+            if idx.numel() == 0:
+                idx = torch.zeros(1, dtype=torch.long, device=x.device)
+            if idx.numel() < width:
+                idx = torch.cat([idx, idx[-1:].expand(width - idx.numel())])
+            selected_indices[row] = idx[:width]
+        return selected_indices, weights, self.last_skip_ratio
+
+
+# ---------------------------------------------------------------------------
 # Decoder block
 # ---------------------------------------------------------------------------
 
@@ -688,10 +1654,18 @@ class SparseMoEFeedForward(nn.Module):
 class MiMoMixBlock(nn.Module):
     def __init__(self, config: MiMoMixConfig, layer_index: int, kind: str, force_dense: bool = False):
         super().__init__()
+        self.config = config
         self.layer_index = int(layer_index)
         self.kind = kind
         self.input_norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
-        self.self_attn = HybridAttention(config, layer_index, kind)
+
+        if getattr(config, "use_differential_attention", False):
+            self.self_attn = DifferentialHybridAttention(config, layer_index, kind)
+        elif getattr(config, "use_mla", False) and (kind == "global" or not getattr(config, "mla_global_only", True)):
+            self.self_attn = MultiLatentAttention(config, layer_index, kind)
+        else:
+            self.self_attn = HybridAttention(config, layer_index, kind)
+
         self.post_attn_norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
         is_moe = config.use_moe and layer_index >= config.n_dense_layers and not force_dense
         self.mlp: nn.Module
@@ -700,6 +1674,17 @@ class MiMoMixBlock(nn.Module):
         else:
             self.mlp = DenseFeedForward(config.hidden_size, config.intermediate_size, config.dropout)
         self.is_moe = is_moe
+
+        self.use_mod = bool(getattr(config, "use_mod", False) and layer_index >= config.n_dense_layers and not force_dense)
+        if self.use_mod:
+            self.mod_router = MixtureOfDepthsRouter(
+                config.hidden_size,
+                getattr(config, "mod_capacity_ratio", 0.5),
+                causal_predictor=bool(getattr(config, "mod_causal_predictor", True)),
+                predictor_loss_coef=float(getattr(config, "mod_predictor_loss_coef", 1e-2)),
+            )
+        else:
+            self.mod_router = None
 
     def forward(
         self,
@@ -714,7 +1699,7 @@ class MiMoMixBlock(nn.Module):
         cache_slack: int = 0,
     ):
         residual = hidden_states
-        hidden_states, present = self.self_attn(
+        attn_out, present = self.self_attn(
             self.input_norm(hidden_states),
             cos,
             sin,
@@ -725,9 +1710,33 @@ class MiMoMixBlock(nn.Module):
             use_cache=use_cache,
             cache_slack=cache_slack,
         )
-        hidden_states = residual + hidden_states
-        hidden_states = hidden_states + self.mlp(self.post_attn_norm(hidden_states))
-        return hidden_states, present
+
+        if self.use_mod and self.mod_router is not None:
+            # "Cannot see the whole sequence" == a cache is attached, or this is
+            # a single-token decode step. In eval mode the router uses its
+            # causal predictor regardless, so a batched forward and its
+            # incremental replay take the same path.
+            cached = past_kv is not None and past_kv[0].numel() > 0
+            incremental = bool(cached or hidden_states.shape[1] == 1)
+            selected_mask, weights = self.mod_router.gate_mask(
+                hidden_states, incremental=incremental
+            )
+            gate = (weights * selected_mask.to(weights.dtype)).unsqueeze(-1).to(hidden_states.dtype)
+
+            mid_states = residual + gate * attn_out
+            mlp_input = self.post_attn_norm(mid_states)
+            if self.is_moe:
+                # Gated-out tokens contribute nothing to the residual, so they
+                # must not shape the router's load statistics either.
+                mlp_out = self.mlp(mlp_input, token_mask=selected_mask)
+            else:
+                mlp_out = self.mlp(mlp_input)
+            out_states = mid_states + gate * mlp_out
+            return out_states, present
+        else:
+            hidden_states = residual + attn_out
+            hidden_states = hidden_states + self.mlp(self.post_attn_norm(hidden_states))
+            return hidden_states, present
 
 
 # ---------------------------------------------------------------------------
@@ -836,9 +1845,7 @@ class RecursiveThinkingCore(nn.Module):
 
         self.quality_encoder = nn.Sequential(nn.Linear(latent + 3, latent), nn.GELU())
         self.quality_head = nn.Linear(latent, 2)
-        nn.init.zeros_(self.quality_head.weight)
-        nn.init.zeros_(self.quality_head.bias)
-        nn.init.normal_(self.to_residual.weight, std=0.01)
+        self.reset_special_parameters()
 
         self.register_buffer("last_cycles_used", torch.zeros(()), persistent=False)
         self.register_buffer("last_ponder_cost", torch.zeros(()), persistent=False)
@@ -847,6 +1854,21 @@ class RecursiveThinkingCore(nn.Module):
         self.register_buffer("last_continue_probability", torch.full((), 0.5), persistent=False)
         self.last_exit_reason = "not_run"
         self._last_quality_logits: Optional[torch.Tensor] = None
+
+    def reset_special_parameters(self) -> None:
+        """The core's deliberate initialisation, re-appliable after a sweep.
+
+        ``quality_head`` starts at exactly zero so a fresh verifier reports
+        p=0.5 and cannot bias anything before it is supervised, and
+        ``to_residual`` starts at std 0.01 so the recursive residual is small
+        but not degenerate. :meth:`MiMoMixModel._restore_special_inits` calls
+        this after ``apply(_init_weights)``, which would otherwise replace both
+        with the generic ``N(0, 0.02)``.
+        """
+
+        nn.init.zeros_(self.quality_head.weight)
+        nn.init.zeros_(self.quality_head.bias)
+        nn.init.normal_(self.to_residual.weight, std=0.01)
 
     @property
     def temperature(self) -> torch.Tensor:
@@ -980,13 +2002,40 @@ class MiMoMixOutput:
     telemetry: Dict[str, object] = field(default_factory=dict)
 
 
+class MultimodalProjectionHead(nn.Module):
+    """MiMo-V2.5 style projection from raw multimodal features into model hidden_size.
+
+    Maps continuous image or audio token embeddings into the shared sequence
+    space, normalising with RMSNorm and an expansion-contraction MLP.
+    """
+
+    def __init__(self, input_dim: int, hidden_size: int, modality: str = "vision"):
+        super().__init__()
+        self.modality = modality
+        self.proj = nn.Sequential(
+            nn.Linear(input_dim, hidden_size * 2),
+            nn.GELU(),
+            nn.Linear(hidden_size * 2, hidden_size),
+            RMSNorm(hidden_size),
+        )
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """Projects (batch, num_tokens, input_dim) -> (batch, num_tokens, hidden_size)."""
+        return self.proj(features)
+
+
 class MiMoMixModel(nn.Module):
     """Decoder-only transformer with the full MiMoMix stack."""
 
     def __init__(self, config: MiMoMixConfig):
         super().__init__()
         self.config = config
-        self.layout = attention_layout(config.n_layers, config.hybrid_ratio, config.final_layer_global)
+        self.layout = attention_layout(
+            config.n_layers,
+            config.hybrid_ratio,
+            config.final_layer_global,
+            getattr(config, "global_layers", None),
+        )
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         # Two rotary tables. Global layers carry the context-extension policy;
@@ -1008,14 +2057,39 @@ class MiMoMixModel(nn.Module):
         )
         self.thinking_core = RecursiveThinkingCore(config) if config.use_thinking_core else None
 
+        self.multimodal_projector = (
+            MultimodalProjectionHead(
+                input_dim=getattr(config, "multimodal_input_dim", 128),
+                hidden_size=config.hidden_size,
+            )
+            if getattr(config, "use_multimodal", False)
+            else None
+        )
+
         # Propagate each layer's own RoPE attention-temperature policy. MTP
         # depths are global, so they take the global scaling.
         for module in self.modules():
-            if isinstance(module, HybridAttention):
-                source = self.rotary_local if module.kind == "swa" else self.rotary
+            if isinstance(module, (HybridAttention, DifferentialHybridAttention, MultiLatentAttention)):
+                source = self.rotary_local if getattr(module, "kind", "") == "swa" else self.rotary
                 module._attention_scaling = source.attention_scaling
 
         self.apply(self._init_weights)
+        # `self.apply` runs *after* every submodule's own __init__, so it
+        # overwrites any deliberate initialisation a submodule set for itself.
+        # Measured on the pre-v82 code: RecursiveThinkingCore.quality_head
+        # intends an exact zero init but came out of construction with
+        # weight.abs().sum() == 1.2718, and to_residual intends std 0.01 but
+        # came out at 0.0200 -- i.e. the generic 0.02 normal, not the intended
+        # one. Re-apply the deliberate inits here.
+        #
+        # This does NOT by itself wake the recursive core: `residual_scale`
+        # still starts at `thinking_residual_init`, whose default is 0.0, and
+        # that gate multiplies the core's own gradient. See
+        # docs/V59_MECHANISM_CAUSALITY.md -- after 1,000 steps v58's gate had
+        # reached 6.41e-04 and closing it entirely changed none of 12,192
+        # held-out predictions. Restoring the intended init fixes *what the
+        # weights are*, not *whether the mechanism is reachable*.
+        self.restored_special_inits = self._restore_special_inits()
         if config.tie_word_embeddings:
             self.lm_head.weight = self.embed_tokens.weight
 
@@ -1026,6 +2100,25 @@ class MiMoMixModel(nn.Module):
                 nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def _restore_special_inits(self) -> int:
+        """Re-run every submodule's ``reset_special_parameters`` hook.
+
+        Any module whose initialisation is load-bearing (a deliberate zero, a
+        non-default std, a bias chosen to make a gate near-identity) implements
+        that hook, and this puts it back after the blanket ``_init_weights``
+        sweep. Returns how many modules were restored.
+        """
+
+        restored = 0
+        for module in self.modules():
+            if module is self:
+                continue
+            hook = getattr(module, "reset_special_parameters", None)
+            if callable(hook):
+                hook()
+                restored += 1
+        return restored
 
     # -- parameter accounting ---------------------------------------------
 
@@ -1056,7 +2149,7 @@ class MiMoMixModel(nn.Module):
     def _collect_aux_loss(self, device, dtype) -> torch.Tensor:
         total = torch.zeros((), device=device, dtype=dtype)
         for module in self.modules():
-            if isinstance(module, SparseMoEFeedForward):
+            if isinstance(module, (SparseMoEFeedForward, MixtureOfDepthsRouter)):
                 total = total + module.aux_loss().to(device=device, dtype=dtype)
         return total
 
@@ -1081,9 +2174,31 @@ class MiMoMixModel(nn.Module):
         sinks: List[float] = []
         loads: List[List[float]] = []
         router_entropy: List[float] = []
+        diff_lambdas: List[List[float]] = []
+        mod_skips: List[float] = []
+        mod_modes: List[str] = []
+        mod_predictor_agreement: List[float] = []
+        sink_bearing: List[float] = []
         for module in self.modules():
-            if isinstance(module, HybridAttention):
-                sinks.append(float(module.last_sink_mass.mean()))
+            if isinstance(module, (HybridAttention, DifferentialHybridAttention, MultiLatentAttention)):
+                mass = float(module.last_sink_mass.mean())
+                sinks.append(mass)
+                # A layer with no sink parameter reports a real-looking 0.0, so
+                # averaging over every attention module dilutes the mean by
+                # however many layers have no sink to use. Under
+                # attention_sink_kinds="swa" that made the telemetry show a large
+                # drop in sink usage when the per-layer usage had not moved at
+                # all. `mean_sink_mass` is now the mean over sink-bearing layers
+                # only; `mean_sink_mass_all_layers` keeps the old denominator so
+                # a pre-v85 number is still reconstructable.
+                if getattr(module, "sink", None) is not None:
+                    sink_bearing.append(mass)
+            if isinstance(module, DifferentialHybridAttention):
+                diff_lambdas.append([float(v) for v in module.last_lambda])
+            if isinstance(module, MixtureOfDepthsRouter):
+                mod_skips.append(float(module.last_skip_ratio.item()))
+                mod_modes.append(str(module.last_selection_mode))
+                mod_predictor_agreement.append(float(module.last_predictor_agreement))
             if isinstance(module, SparseMoEFeedForward):
                 loads.append([float(v) for v in module.last_expert_load])
                 router_entropy.append(float(module.last_router_entropy))
@@ -1092,14 +2207,45 @@ class MiMoMixModel(nn.Module):
             "sliding_window": int(self.config.sliding_window),
             "rope_scaling": self.config.rope_scaling,
             "rope_attention_scaling": float(self.rotary.attention_scaling),
+            "rotary_dim": int(self.rotary.rotary_dim),
+            "head_dim": int(self.config.head_dim),
             "rope_global_base": float(self.rotary.effective_base),
             "rope_local_base": float(self.rotary_local.effective_base),
-            "mean_sink_mass": float(sum(sinks) / len(sinks)) if sinks else 0.0,
+            "mean_sink_mass": (
+                float(sum(sink_bearing) / len(sink_bearing)) if sink_bearing else 0.0
+            ),
+            "mean_sink_mass_all_layers": (
+                float(sum(sinks) / len(sinks)) if sinks else 0.0
+            ),
+            "sink_bearing_layers": len(sink_bearing),
+            "attention_modules": len(sinks),
             "per_layer_sink_mass": sinks,
             "expert_load": loads,
             "router_entropy": router_entropy,
             "parameters": self.parameter_report(),
         }
+        if diff_lambdas:
+            snapshot["differential_lambdas"] = diff_lambdas
+            snapshot["differential_attention"] = True
+        if mod_skips:
+            snapshot["mod_skip_ratios"] = mod_skips
+            snapshot["mod_mean_skip"] = float(sum(mod_skips) / len(mod_skips))
+            snapshot["mod_selection_mode"] = mod_modes
+            snapshot["mod_predictor_agreement"] = mod_predictor_agreement
+            # Honesty flag. The block gates the residual contribution only;
+            # attention and the MLP still run on every token, so "skipped"
+            # tokens cost the same FLOPs as selected ones. Do not read
+            # mod_mean_skip as a compute saving.
+            snapshot["mod_compute_saved"] = False
+            snapshot["mod_note"] = (
+                "residual-gating only: no FLOPs are skipped, this is a routing "
+                "study not a compute saving"
+            )
+        if getattr(self.config, "use_mla", False):
+            snapshot["mla_active"] = True
+            snapshot["mla_latent_dim"] = int(self.config.mla_latent_dim)
+            snapshot["mla_pe_dim"] = int(self.config.mla_pe_dim)
+            snapshot["mla_global_only"] = bool(getattr(self.config, "mla_global_only", True))
         if self.thinking_core is not None:
             snapshot["thinking"] = {
                 "cycles_used": float(self.thinking_core.last_cycles_used),
@@ -1137,7 +2283,8 @@ class MiMoMixModel(nn.Module):
             if past_key_values is not None and len(past_key_values) > 0:
                 for entry in past_key_values:
                     if entry is not None and entry[0].numel() > 0:
-                        past_len = max(past_len, int(entry[0].shape[2]))
+                        seq_dim = 1 if entry[0].ndim == 3 else 2
+                        past_len = max(past_len, int(entry[0].shape[seq_dim]))
         if attention_mask is not None and past_len > 0:
             # Under a hybrid cache each layer retains a different number of past
             # keys, so one caller-supplied mask cannot describe them all. Rather
@@ -1165,7 +2312,10 @@ class MiMoMixModel(nn.Module):
             past_kv = None
             if past_key_values is not None and index < len(past_key_values):
                 past_kv = past_key_values[index]
-            cached = 0 if past_kv is None or past_kv[0].numel() == 0 else int(past_kv[0].shape[2])
+            if past_kv is None or past_kv[0].numel() == 0:
+                cached = 0
+            else:
+                cached = int(past_kv[0].shape[1] if past_kv[0].ndim == 3 else past_kv[0].shape[2])
             key_positions = torch.arange(past_len - cached, past_len, device=device)
             layer_cos, layer_sin = (local_cos, local_sin) if layer.kind == "swa" else (cos, sin)
             hidden, present = layer(
@@ -1308,6 +2458,20 @@ class MiMoMixModel(nn.Module):
         return F.binary_cross_entropy_with_logits(
             logits[:, 0], target
         ) + F.binary_cross_entropy_with_logits(logits[:, 1], 1.0 - target)
+
+    def encode_multimodal_tokens(
+        self,
+        features: torch.Tensor,
+        modality: str = "vision",
+    ) -> torch.Tensor:
+        """Encode raw multimodal features into sequence-compatible token vectors (MiMo-V2.5).
+
+        features: (batch_size, num_tokens, input_dim)
+        returns: (batch_size, num_tokens, hidden_size)
+        """
+        if self.multimodal_projector is None:
+            raise RuntimeError("multimodal_projector is not enabled in model config (set use_multimodal=True)")
+        return self.multimodal_projector(features)
 
 
 def build_mimomix(**overrides) -> MiMoMixModel:
