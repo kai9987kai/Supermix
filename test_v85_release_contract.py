@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -199,13 +200,14 @@ CI_REQUIRED = [
 #: Measured on 2026-09-02: 76 of 183 root test files were referenced before
 #: v85, 80 after its first architecture/v82/release additions, and 87 after the
 #: existing v83/v84 multimodal, compare, quantum, resonance, and Studio suites
-#: were restored to the gate. 96 files remain outside CI; that is the honest
-#: state, and this ratchet prevents silently losing the recovered coverage.
+#: were restored to the gate. The apparent count of 87 included an untracked
+#: evidence-ledger test that a clean checkout could never run; 86 is the real
+#: committed baseline, and this ratchet prevents silently losing that coverage.
 #:
 #: This is a ratchet, not a target. It fails when coverage drops and never
 #: demands it be perfect. Raise it when you add suites; never lower it without
 #: saying why in the commit.
-CI_COVERAGE_FLOOR = 87
+CI_COVERAGE_FLOOR = 86
 
 
 def _root_test_files():
@@ -217,6 +219,15 @@ def _referenced_by_ci():
     # "test_audit.py" and the workflow appears to run a file that never existed.
     return set(re.findall(r"(?<![A-Za-z0-9_])test_[A-Za-z0-9_]+\.py",
                           WORKFLOW.read_text(encoding="utf-8")))
+
+
+def _python_paths_referenced_by_ci():
+    matches = re.findall(
+        r"(?<![A-Za-z0-9_./-])(?:(?:source|runtime_python)[\\/]"
+        r"[A-Za-z0-9_/\\-]+\.py|test_[A-Za-z0-9_]+\.py)",
+        WORKFLOW.read_text(encoding="utf-8"),
+    )
+    return {path.replace("\\", "/") for path in matches}
 
 
 @pytest.mark.skipif(not WORKFLOW.exists(), reason="workflow file absent")
@@ -250,6 +261,21 @@ def test_ci_does_not_name_test_files_that_do_not_exist():
     assert not phantom, (
         f"the workflow runs test files that do not exist: {phantom}. pytest "
         "exits on a missing path, so every suite sharing that line is skipped."
+    )
+
+
+@pytest.mark.skipif(not (ROOT / ".git").exists(), reason="git metadata absent")
+def test_ci_only_references_tracked_python_files():
+    tracked = set(
+        subprocess.check_output(
+            ["git", "ls-files"], cwd=ROOT, text=True, encoding="utf-8"
+        ).splitlines()
+    )
+    untracked = sorted(_python_paths_referenced_by_ci() - tracked)
+    assert not untracked, (
+        f"the workflow references Python files absent from the commit: {untracked}. "
+        "A local untracked file can make release-contract tests pass while a clean "
+        "CI checkout fails before the intended suite runs."
     )
 
 

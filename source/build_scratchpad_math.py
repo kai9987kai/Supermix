@@ -33,6 +33,7 @@ directly comparable on the same benchmark.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -75,6 +76,32 @@ DECOMPOSE_INNER = False
 #: cost, in the `--token_budget_report` table.
 AVERAGE_BINARY_STEPS = False
 
+#: Whether `two_step` resolves its percentage to an exact unit fraction before
+#: applying the second operation.
+#:
+#: Off reproduces v74-v86. On changes
+#:
+#:     1 percent of 320 = 3.2, times 25 = 80, then 80 - 17 = 63
+#:
+#: into
+#:
+#:     25 percent is one quarter, 320 / 4 = 80, then 80 - 17 = 63
+#:
+#: V86's paired benchmark put `two_step` at 0.300, down from v80's 0.633, and a
+#: live failure computed `3.2 x 25 = 85`. The alternative makes the dependency
+#: explicit using the exact division shapes the same checkpoint scores at 1.0.
+#: It is an untrained v87 arm, not a claimed improvement.
+TWO_STEP_DIVISION_TRACE = False
+
+#: Whether raw `average` and `two_step` prompts use a deterministic mixture of
+#: semantically equivalent forms. The choice comes from a separate hash of the
+#: row identity, so enabling the arm never consumes the problem RNG and cannot
+#: silently change operands, answers, or later rows.
+#:
+#: Off leaves the baseline generator stream unchanged. It is deliberately paired
+#: with a held-out paraphrase benchmark in `eval_prompt_robustness.py`.
+PROMPT_PARAPHRASES = False
+
 #: Whether `algebra_one_step` resolves the sign in words and splits the arithmetic.
 #:
 #: Off reproduces the v66-v81 corpora exactly. On changes two things, both of
@@ -105,6 +132,59 @@ PROMPT_FORMS = (
     "Please help with this. {expression}",
     "What is {expression}?",
 )
+
+PERCENT_FRACTIONS = {
+    10: ("one tenth", 10),
+    20: ("one fifth", 5),
+    25: ("one quarter", 4),
+    50: ("one half", 2),
+}
+
+V87_TRAIN_PROMPT_TEMPLATES = {
+    "average": (
+        "Find the average (mean) of these numbers: {csv}",
+        "Could you work out the mean of {natural}?",
+        "What is the average for {csv}?",
+        "Calculate the mean value of {natural}.",
+        "For the numbers {csv}, what is their mean?",
+    ),
+    "two_step": (
+        "What is {pct}% of {base}, then {word} {delta}?",
+        "Take {pct} percent of {base} and then {word} {delta}.",
+        "Start with {fraction} of {base}, then {natural_word} {delta}. What remains?",
+        "After finding {pct}% of {base}, {follow_word} {delta}. What is the result?",
+        "Compute {pct} percent of {base}; next, {word} {delta}.",
+    ),
+}
+
+
+def _natural_join(values: Sequence[int]) -> str:
+    rendered = [str(value) for value in values]
+    if len(rendered) == 2:
+        return " and ".join(rendered)
+    return ", ".join(rendered[:-1]) + ", and " + rendered[-1]
+
+
+def _prompt_variant_index(seed: int, row_index: int, task: str, count: int) -> int:
+    """Choose a prompt form without advancing the problem generator."""
+
+    identity = f"supermix-v87:{seed}:{row_index}:{task}".encode("utf-8")
+    digest = hashlib.blake2b(identity, digest_size=8).digest()
+    return int.from_bytes(digest, "big") % count
+
+
+def _paraphrase_prompt(
+    item: Dict[str, Any], *, seed: int, row_index: int
+) -> Tuple[str, str]:
+    """Return a training paraphrase and its stable template id."""
+
+    task = str(item.get("task") or "")
+    fields = dict(item.get("_prompt_fields") or {})
+    templates = V87_TRAIN_PROMPT_TEMPLATES.get(task)
+    if not templates or not fields:
+        return str(item["expression"]), "canonical"
+    index = _prompt_variant_index(seed, row_index, task, len(templates))
+    return templates[index].format(**fields), f"{task}.train.{index}"
 
 
 def _split_place_value(value: int) -> Tuple[int, int]:
@@ -179,6 +259,10 @@ def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
     total = sum(values)
     answer = total / len(values)
     joined = ", ".join(str(v) for v in values)
+    prompt_fields = {
+        "csv": joined,
+        "natural": _natural_join(values),
+    }
 
     # Decompose only what fits the sequence budget.
     #
@@ -233,6 +317,7 @@ def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
             ),
             "task": "average",
             "raw_prompt": True,
+            "_prompt_fields": prompt_fields,
         }
 
     if AVERAGE_BINARY_STEPS:
@@ -264,7 +349,7 @@ def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
         )
         return {"expression": f"Find the average (mean) of these numbers: {joined}",
                 "answer": answer, "working": working, "task": "average",
-                "raw_prompt": True}
+                "raw_prompt": True, "_prompt_fields": prompt_fields}
 
     running: List[str] = []
     accumulated = 0
@@ -285,11 +370,23 @@ def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
         f"divide by {len(values)}, total {round(answer, 6)}"
     )
     return {"expression": f"Find the average (mean) of these numbers: {joined}",
-            "answer": answer, "working": working, "task": "average", "raw_prompt": True}
+            "answer": answer, "working": working, "task": "average", "raw_prompt": True,
+            "_prompt_fields": prompt_fields}
 
 
 def _scratchpad_percent(rng: random.Random) -> Dict[str, Any]:
-    pct, base = rng.choice([5, 10, 20, 25, 50]), rng.randint(20, 2000)
+    # These must cover `eval_problem_solving._percent`, which draws from
+    # [5, 10, 12, 15, 20, 25]. Until v87 this list was [5, 10, 20, 25, 50], so
+    # 12 and 15 appeared in a third of the benchmark's percent problems and in
+    # none of the corpus's forty thousand rows. Split by percentage, v86 scored
+    # 16/17 on the four it had been taught and 0/13 on the two it had not; the
+    # task's reported 0.533 was that average and was read as difficulty for
+    # eight versions. 50 is kept -- the benchmark never asks for it, but
+    # dropping a percentage the model already handles buys nothing.
+    #
+    # Anything added here must survive DECOMPOSE_INNER's tens-and-units split,
+    # which 12 (10 + 2) and 15 (10 + 5) do.
+    pct, base = rng.choice([5, 10, 12, 15, 20, 25, 50]), rng.randint(20, 2000)
     one_percent = base / 100
     answer = pct * one_percent
     if DECOMPOSE_INNER:
@@ -304,11 +401,26 @@ def _scratchpad_percent(rng: random.Random) -> Dict[str, Any]:
         # units=0; writing "times 0 = 0.0" would make the model learn to produce
         # a term that is always noise, and two thirds of the multipliers here
         # have a zero half.
-        parts = [
-            f"times {factor} = {round(value, 6)}"
-            for factor, value in ((tens, part_tens), (units, part_units))
-            if factor
-        ]
+        written = [(factor, value) for factor, value
+                   in ((tens, part_tens), (units, part_units)) if factor]
+        parts = [f"times {factor} = {round(value, 6)}" for factor, value in written]
+        if len(written) == 2:
+            # Write the sum of the parts.
+            #
+            # Until v87 this step was silent, and the v86 replies show exactly
+            # what that cost. Asked for 15% of 56 the model wrote
+            # `times 10 = 5.6, times 5 = 2.8, total 1.8`: both parts right, and
+            # then 5.6 + 2.8 produced 1.8. Ten of the fourteen wrong percent
+            # replies have every written step true and a total that follows
+            # from none of them.
+            #
+            # `decompose_product` already writes its running sums once there
+            # are more than two partials, for the same reason. Two partials
+            # there cannot carry -- they are disjoint place values -- but these
+            # two can: 5.6 and 2.8 collide in the tenths.
+            first, second = written[0][1], written[1][1]
+            parts.append(f"{round(first, 6)} + {round(second, 6)} = "
+                         f"{round(first + second, 6)}")
         working = (
             f"1 percent of {base} = {round(one_percent, 6)}, "
             + ", ".join(parts)
@@ -480,15 +592,32 @@ def _scratchpad_two_step(rng: random.Random) -> Dict[str, Any]:
     add = rng.random() < 0.5
     answer = first + delta if add else first - delta
     op, word = ("+", "add") if add else ("-", "subtract")
+    fraction, divisor = PERCENT_FRACTIONS[pct]
+    if TWO_STEP_DIVISION_TRACE:
+        working = (
+            f"{pct} percent is {fraction}, {base} / {divisor} = {first}, "
+            f"then {first} {op} {delta} = {answer}, total {answer}"
+        )
+    else:
+        working = (
+            f"1 percent of {base} = {base / 100:g}, times {pct} = {first}, "
+            f"then {first} {op} {delta} = {answer}, total {answer}"
+        )
     return {
         "expression": f"What is {pct}% of {base}, then {word} {delta}?",
         "answer": float(answer),
-        "working": (
-            f"1 percent of {base} = {base / 100:g}, times {pct} = {first}, "
-            f"then {first} {op} {delta} = {answer}, total {answer}"
-        ),
+        "working": working,
         "task": "two_step",
         "raw_prompt": True,
+        "_prompt_fields": {
+            "pct": pct,
+            "base": base,
+            "word": word,
+            "delta": delta,
+            "fraction": fraction,
+            "natural_word": "add" if add else "take away",
+            "follow_word": "increase it by" if add else "reduce it by",
+        },
     }
 
 
@@ -514,16 +643,23 @@ def build_rows(target: int, seed: int = 66) -> List[Dict[str, Any]]:
         item = GENERATORS[index % len(GENERATORS)](rng)
         if item.get("raw_prompt"):
             user = item["expression"]
+            variant = "canonical"
+            if PROMPT_PARAPHRASES:
+                user, variant = _paraphrase_prompt(item, seed=seed, row_index=index)
         else:
             user = PROMPT_FORMS[rng.randrange(len(PROMPT_FORMS))].format(
                 expression=item["expression"]
             )
-        rows.append({
+            variant = "legacy_prompt_form"
+        row = {
             "user": user,
             "assistant": item["working"],
             "topic": "basic_math",
             "task": item["task"],
-        })
+        }
+        if PROMPT_PARAPHRASES and item.get("raw_prompt"):
+            row["prompt_variant"] = variant
+        rows.append(row)
     rng.shuffle(rows)
     return rows
 
@@ -553,6 +689,8 @@ def write(rows: Sequence[Dict[str, Any]], output: Path) -> Dict[str, Any]:
             "decompose_inner": DECOMPOSE_INNER,
             "average_binary_steps": AVERAGE_BINARY_STEPS,
             "algebra_word_sign": ALGEBRA_WORD_SIGN,
+            "two_step_division_trace": TWO_STEP_DIVISION_TRACE,
+            "prompt_paraphrases": PROMPT_PARAPHRASES,
         },
         "non_claims": [
             "Showing working is not reasoning. The model may learn to imitate the "
@@ -580,13 +718,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--average_binary_steps",
         action="store_true",
         help=("write the average's running total as explicit `a + b = c` steps "
-              "instead of bare running totals (hypothesis; unmeasured)"),
+              "instead of bare running totals. The motivation is measured: of "
+              "v86's 29 wrong average replies, 16 have every written step true "
+              "and a wrong answer, because the running sum is the one part the "
+              "format never writes. The effect is not -- no run has used this."),
     )
     parser.add_argument(
         "--algebra_word_sign",
         action="store_true",
         help=("resolve the algebra sign in words and split the arithmetic by "
-              "place value (hypothesis; unmeasured)"),
+              "place value. The motivation is measured: all 17 of v86's wrong "
+              "algebra replies state the right inverse operation and then get "
+              "the arithmetic wrong, and every one of them evaluates a double "
+              "negative -- `6 - -12 = 27`, `3 - -15 = 26`. The effect is not: "
+              "no run has used this."),
+    )
+    parser.add_argument(
+        "--two_step_division_trace",
+        action="store_true",
+        help=("resolve 10/20/25/50 percent to exact division before the second "
+              "operation (v87 hypothesis; unmeasured)"),
+    )
+    parser.add_argument(
+        "--prompt_paraphrases",
+        action="store_true",
+        help=("use deterministic training paraphrases for average and two_step "
+              "without changing the generated operands (v87 hypothesis)"),
     )
     return parser
 
@@ -594,9 +751,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     global DECOMPOSE_INNER, AVERAGE_BINARY_STEPS, ALGEBRA_WORD_SIGN
+    global TWO_STEP_DIVISION_TRACE, PROMPT_PARAPHRASES
     DECOMPOSE_INNER = bool(args.decompose_inner)
     AVERAGE_BINARY_STEPS = bool(args.average_binary_steps)
     ALGEBRA_WORD_SIGN = bool(args.algebra_word_sign)
+    TWO_STEP_DIVISION_TRACE = bool(args.two_step_division_trace)
+    PROMPT_PARAPHRASES = bool(args.prompt_paraphrases)
     rows = build_rows(args.target, args.seed)
     receipt = write(rows, Path(args.output))
     print(json.dumps({k: v for k, v in receipt.items() if k != "non_claims"}, indent=2))

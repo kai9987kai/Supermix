@@ -102,6 +102,25 @@ EXHAUSTION_MISSES = 5000
 #: `kinetic_energy`, and it must be stated every time the number is quoted.
 COMBINATION_IN_ENVELOPE = False
 
+#: Whether prompts are drawn from the wide natural-phrasing bank.
+#:
+#: Off reproduces v86's corpus exactly: each task shows one of its 4-5 written
+#: templates. On, `natural_phrasings.select` widens that to the way a person
+#: actually types -- casual register, missing punctuation, lowercase, long-form
+#: units, filler openers, numbers before or after the quantity name.
+#:
+#: The measurement behind it: v74 had exactly one template per task, scored
+#: 0.894 on its own benchmark and got **0 of 5** naturally-typed questions
+#: right. v86's 4-5 templates per task took that to **14 of 18**. This widens
+#: the same lever further.
+#:
+#: Safe to expand because the phrasing shown to the model is decoupled from the
+#: canonical query handed to the solver, so verification is unaffected however
+#: the question is worded. And `_pick` performs its narrow `rng.choice` on both
+#: paths, so every operand, answer and worked response is bit-identical whether
+#: this is on or off -- only the wording moves.
+NATURAL_PHRASINGS = False
+
 
 @dataclass
 class OmniProblem:
@@ -203,9 +222,93 @@ def decompose_product(a: int, b: int) -> str:
     return ", ".join(pieces)
 
 
-def _pick(rng: random.Random, templates: List[str], **values) -> str:
-    return rng.choice(templates).format(**{k: _number(v) if isinstance(v, (int, float))
-                                           else v for k, v in values.items()})
+def decompose_quotient(dividend: int, divisor: int) -> str:
+    """Show the working for `dividend / divisor`, one quotient place at a time.
+
+    `decompose_product` exists because v79 wrote `167 x 11 = 1837` in one jump
+    and scored 0.03. The three division tasks were left whole and have the same
+    defect from the other side, which v86 measured without anyone reading it
+    that way:
+
+        power         quotient 2-300   0.400
+        molarity      quotient 1-60    0.667
+        acceleration  quotient 2-60    0.733
+        division      quotient 11-60   1.000   <- decomposed
+
+    `division` is the same operation over the same range as the other three and
+    scores a full point above `power`. The one thing it does differently is
+    split the quotient by place value, so no written step has to produce more
+    than one significant digit.
+
+    A sweep over `power` with the format, wording and model held fixed and only
+    the quotient's width moving gives the dose-response directly
+    (`output/v87_measurements/division_dose_response.json`):
+
+        1-digit quotient   0.725 / 0.750
+        2-digit            0.375 / 0.575
+        3-digit            0.125 / 0.125
+
+    The divisor's width does almost nothing (0.725 against 0.750), which is
+    what makes this a quotient problem rather than an operand problem, and is
+    why splitting the *quotient* is the fix rather than splitting the dividend.
+
+        19152 / 76 -> "15200 / 76 = 200, 3800 / 76 = 50, 152 / 76 = 2,
+                       200 + 50 = 250, 250 + 2 = 252"
+
+    Every partial divides exactly, by construction rather than by luck: each
+    one is `digit * place * divisor`, so its quotient is `digit * place`.
+    """
+
+    quotient, remainder = divmod(dividend, divisor)
+    if remainder:
+        raise ValueError(
+            f"{dividend} / {divisor} is not exact; every division task in this "
+            "corpus is built backwards from the quotient so that it is"
+        )
+    digits = str(quotient)
+    width = len(digits)
+    # Zero places are kept, matching `decompose_product` above. That choice is
+    # deliberate there ("the shape is the same for every problem -- and that is
+    # the corpus that scored 0.93") and `_scratchpad_division` makes the same
+    # one, writing `0 / 7 = 0` when the units digit is zero. Dropping them here
+    # would make this the only decomposition in the corpus whose step count
+    # varies with the *digits* of the answer rather than its width, and no
+    # measurement supports preferring that.
+    parts = [int(d) * 10 ** (width - 1 - i) for i, d in enumerate(digits)]
+    pieces = [f"{part * divisor} / {divisor} = {part}" for part in parts]
+    if len(parts) <= 2:
+        # Two partials and no written addition: `_scratchpad_division`'s exact
+        # form, which scores 1.000. The sum of two place values cannot carry,
+        # so there is nothing for a written step to add.
+        return ", ".join(pieces)
+
+    running = parts[0]
+    for part in parts[1:]:
+        pieces.append(f"{running} + {part} = {running + part}")
+        running += part
+    return ", ".join(pieces)
+
+
+def _pick(rng: random.Random, templates: List[str], _task: Optional[str] = None,
+          **values) -> str:
+    """One phrasing of the question, with the numbers filled in.
+
+    The narrow `rng.choice` happens on **both** paths, so the RNG stream -- and
+    therefore every operand, answer and worked response in the corpus -- is
+    bit-identical whether or not `NATURAL_PHRASINGS` is on. With the flag on,
+    the index that choice produced is fed to `natural_phrasings.select` as part
+    of the row's identity instead of being used directly. See that module for
+    why a hash rather than a second draw.
+    """
+
+    narrow = rng.choice(templates)
+    template = narrow
+    if NATURAL_PHRASINGS and _task is not None:
+        import natural_phrasings  # local: keeps the flag-off path import-free
+
+        template = natural_phrasings.select(_task, templates, narrow, values)
+    return template.format(**{k: _number(v) if isinstance(v, (int, float))
+                              else v for k, v in values.items()})
 
 
 # -- task generators --------------------------------------------------------
@@ -242,7 +345,7 @@ def _acceleration(rng: random.Random) -> OmniProblem:
         "Find the acceleration produced by {f} N on {m} kg.",
         "What acceleration results from a {f} N force on a {m} kg body?",
     ], f=force, m=mass)
-    response = (f"acceleration = force / mass, {force} / {mass} = {accel}, "
+    response = (f"acceleration = force / mass, {decompose_quotient(force, mass)}, "
                 f"the acceleration is {accel} metres per second squared, total {accel}")
     return OmniProblem("acceleration", "physics", prompt, response, float(accel), "m/s^2",
                        f"force {force} N mass {mass} kg find acceleration",
@@ -319,7 +422,7 @@ def _power(rng: random.Random) -> OmniProblem:
         "Find the power when {w} J is delivered over {t} s.",
         "What power corresponds to {w} joules in {t} seconds?",
     ], w=work, t=time)
-    response = (f"power = work / time, {work} / {time} = {power}, "
+    response = (f"power = work / time, {decompose_quotient(work, time)}, "
                 f"the power is {power} watts, total {power}")
     return OmniProblem("power", "physics", prompt, response, float(power), "W",
                        f"work {work} J time {time} s power",
@@ -387,7 +490,7 @@ def _molarity(rng: random.Random) -> OmniProblem:
         "Find the concentration of {n} moles in {v} litres.",
         "What is the molar concentration of {n} mol in {v} L of solution?",
     ], n=moles, v=volume)
-    response = (f"molarity = moles / volume, {moles} / {volume} = {concentration}, "
+    response = (f"molarity = moles / volume, {decompose_quotient(moles, volume)}, "
                 f"the concentration is {concentration} molar, total {concentration}")
     return OmniProblem("molarity", "chemistry", prompt, response, float(concentration), "M",
                        f"moles {moles} mol volume {volume} L molarity",

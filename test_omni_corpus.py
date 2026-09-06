@@ -15,6 +15,7 @@ previously-observed failures cannot recur.
 from __future__ import annotations
 
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -118,7 +119,6 @@ def test_the_canonical_query_is_independent_of_the_phrasing():
 def test_no_response_ends_in_a_unit(task):
     """`total 5 m/s^2` extracts as 2. Every reply must end `total <number>`."""
 
-    import re
 
     for seed in range(5):
         response = _sample(task, seed).response
@@ -392,3 +392,116 @@ def test_naming_every_v82_option_at_its_default_changes_nothing():
 
     assert baseline == explicit
     assert omni.COMBINATION_IN_ENVELOPE is False
+
+
+# ---------------------------------------------------------------------------
+# The quotient decomposition
+# ---------------------------------------------------------------------------
+#
+# `decompose_product` fixed one-jump multiplication in v79. The three division
+# tasks kept a one-jump division until v87, and two measurements on the v86
+# checkpoint say that is where their points went.
+#
+# `output/v87_measurements/division_dose_response.json` moves only the width of
+# `power`'s quotient and finds 0.725 at one digit, 0.375 at two and 0.125 at
+# three, with the divisor's width worth almost nothing (0.725 against 0.750).
+#
+# `output/v87_measurements/significant_digits_sweep.json` then holds the width
+# at three digits and moves only how many of those digits had to be worked out:
+# 0.525 for 100/200/300, 0.275 for 250, 0.075 for 174. So the cost is per
+# *place determined*, which is exactly the quantity place-value splitting
+# reduces to one per step.
+
+DIVISION_TASKS = ["power", "molarity", "acceleration"]
+
+
+def test_the_quotient_is_split_by_place_value():
+    assert omni.decompose_quotient(19152, 76) == (
+        "15200 / 76 = 200, 3800 / 76 = 50, 152 / 76 = 2, "
+        "200 + 50 = 250, 250 + 2 = 252"
+    )
+
+
+def test_two_place_quotients_match_the_format_that_already_scores_1_000():
+    """`_scratchpad_division` writes exactly this, and `division` scores 1.000.
+
+    Two place values cannot carry into each other, so there is no addition
+    worth writing; departing from the proven form would be a guess.
+    """
+
+    assert omni.decompose_quotient(150, 3) == "150 / 3 = 50, 0 / 3 = 0"
+    assert omni.decompose_quotient(1275, 25) == "1250 / 25 = 50, 25 / 25 = 1"
+
+
+def test_no_written_step_determines_more_than_one_place():
+    """The property the whole change exists to create.
+
+    Every quotient the corpus asks for in a single step must be a digit times
+    a power of ten. A step returning 174 is the 0.075 case.
+    """
+
+    for dividend, divisor in ((19152, 76), (8178, 47), (30000, 100),
+                              (255, 15), (3000, 15), (162, 18)):
+        working = omni.decompose_quotient(dividend, divisor)
+        for quotient in re.findall(r"/ \d+ = (-?\d+)", working):
+            assert int(quotient) % 10 ** (len(quotient.lstrip("-")) - 1) == 0, (
+                f"{quotient} in '{working}' has more than one significant place"
+            )
+
+
+def test_every_partial_divides_exactly():
+    """Exact by construction, not by luck.
+
+    Each partial dividend is `digit * place * divisor`, so a partial that did
+    not divide cleanly would mean the construction is wrong and the corpus is
+    teaching false arithmetic -- which is worse than teaching none.
+    """
+
+    rng = random.Random(87)
+    for _ in range(400):
+        divisor = rng.randint(2, 100)
+        quotient = rng.randint(2, 300)
+        working = omni.decompose_quotient(quotient * divisor, divisor)
+        for part, stated in re.findall(r"(\d+) / \d+ = (\d+)", working):
+            assert int(part) == int(stated) * divisor
+
+
+def test_the_partial_quotients_sum_to_the_answer():
+    rng = random.Random(88)
+    for _ in range(400):
+        divisor = rng.randint(2, 100)
+        quotient = rng.randint(2, 300)
+        working = omni.decompose_quotient(quotient * divisor, divisor)
+        parts = [int(q) for q in re.findall(r"/ \d+ = (\d+)", working)]
+        assert sum(parts) == quotient
+
+
+def test_an_inexact_division_is_refused_rather_than_rounded():
+    """A checker that never says no is decoration."""
+
+    with pytest.raises(ValueError, match="not exact"):
+        omni.decompose_quotient(100, 3)
+
+
+@pytest.mark.parametrize("task", DIVISION_TASKS)
+def test_the_division_tasks_show_the_working(task):
+    rng = random.Random(11)
+    for _ in range(200):
+        problem = omni.TASKS[task](rng)
+        # The formula prefix ("power = work / time") also contains a
+        # division sign, so count only the steps that state numbers.
+        divisions = len(re.findall(r"\d+ / \d+ = ", problem.response))
+        quotient = int(problem.answer)
+        assert divisions == len(str(quotient)), (
+            f"{task}: quotient {quotient} written in {divisions} steps"
+        )
+
+
+@pytest.mark.parametrize("task", DIVISION_TASKS)
+def test_the_decomposed_rows_still_verify_against_the_solver(task):
+    """The oracle is unchanged: a longer working is still a checked working."""
+
+    rng = random.Random(12)
+    for _ in range(60):
+        problem = omni.TASKS[task](rng)
+        assert omni.verify(problem)

@@ -250,6 +250,47 @@ def _register_omni_generators() -> List[str]:
 OMNI_TASKS: List[str] = _register_omni_generators()
 
 
+def _register_code_generators() -> List[str]:
+    """Add the execution-verified code-tracing tasks to this benchmark.
+
+    Same argument as the omni adapter above, and the same shape. What differs
+    is the oracle: an omni row is checked against `nexus_solver`, a code row is
+    checked by **running the snippet**. The interpreter is the exact checker,
+    which is why this family belongs in a corpus whose whole premise is that
+    every row is verified before it ships.
+
+    The `code_` prefix means these can never shadow an arithmetic or omni task,
+    so the guard below is belt-and-braces rather than load-bearing.
+
+    Registered unconditionally, unlike the corpus-side flags. A benchmark task
+    is not a training decision: leaving it out would mean a corpus built with
+    code rows had no matching benchmark, which is exactly the silent
+    train/eval split `--combination_in_envelope` exists to prevent.
+    """
+
+    try:
+        import build_code_corpus as code
+    except Exception:  # noqa: BLE001 - optional; every other task still runs
+        return []
+
+    def adapt(name):
+        def generate(rng: random.Random) -> Problem:
+            problem = code.TASKS[name](rng)
+            return Problem(name, problem.prompt, problem.answer, "novel")
+        return generate
+
+    added = []
+    for name in code.TASKS:
+        if name not in GENERATORS:
+            GENERATORS[name] = adapt(name)
+            added.append(name)
+    return added
+
+
+#: Task names contributed by the execution-verified code corpus.
+CODE_TASKS: List[str] = _register_code_generators()
+
+
 def task_rng(task: str, seed: int) -> random.Random:
     """A generator's own RNG, derived from its *name* and the master seed.
 
@@ -466,6 +507,7 @@ def evaluate(
     problems: Sequence[Problem],
     max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
     settings: Optional[Dict[str, Any]] = None,
+    transcript: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Score a checkpoint and return a v2 receipt.
 
@@ -477,6 +519,13 @@ def evaluate(
     should put the seed, the task list and the generator fingerprint there --
     `main` does -- so that two receipts can be compared without guessing
     whether they drew the same problems.
+
+    Pass a list as `transcript` to collect every reply in full. The receipt's
+    own `examples` block keeps twelve replies clipped to 90 characters, which
+    is enough to see what a reply looks like and not enough to check whether
+    its working supports its answer -- and after v86 was caught writing
+    ``320 / 7 = 60`` on the way to a correct 60, that is a question worth being
+    able to ask of a whole run rather than of twelve rows.
     """
 
     model, tokenizer, payload = load_talk_checkpoint(checkpoint)
@@ -520,6 +569,20 @@ def evaluate(
         if predicted is not None:
             bucket["errors"].append(
                 abs(predicted - problem.answer) / max(1.0, abs(problem.answer))
+            )
+        if transcript is not None:
+            transcript.append(
+                {
+                    "source": problem.source,
+                    "task": problem.task,
+                    "prompt": problem.prompt,
+                    "reply": text,
+                    "expected": problem.answer,
+                    "predicted": predicted,
+                    "correct": correct,
+                    "tokens": tokens,
+                    "truncated": cut_off,
+                }
             )
         if len(examples) < 12:
             examples.append(
@@ -809,6 +872,16 @@ def build_parser() -> argparse.ArgumentParser:
             "needs mirroring."
         ),
     )
+    parser.add_argument(
+        "--dump_replies",
+        default=None,
+        help=(
+            "write every reply in full to this path as JSONL. The receipt's "
+            "`examples` block keeps twelve replies clipped to 90 characters, "
+            "which cannot answer whether a reply's working supports its "
+            "answer. `step_audit` reads this file."
+        ),
+    )
     parser.add_argument("--output", default=None)
     return parser
 
@@ -869,10 +942,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "corpus": str(corpus) if corpus else None,
         "seen_skipped": seen_skipped,
     }
+    transcript: Optional[List[Dict[str, Any]]] = [] if args.dump_replies else None
     report = evaluate(
-        Path(args.checkpoint), problems, args.max_new_tokens, settings=settings
+        Path(args.checkpoint), problems, args.max_new_tokens, settings=settings,
+        transcript=transcript,
     )
     print_summary(report)
+    if transcript is not None:
+        replies = Path(args.dump_replies)
+        replies.parent.mkdir(parents=True, exist_ok=True)
+        with replies.open("w", encoding="utf-8") as handle:
+            for record in transcript:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(f"replies -> {replies} ({len(transcript)} rows)")
     if args.output:
         destination = Path(args.output)
         destination.parent.mkdir(parents=True, exist_ok=True)

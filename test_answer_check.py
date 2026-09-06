@@ -413,26 +413,66 @@ def test_answer_check_is_not_on_the_verifier_allowlist():
 
 
 def test_supported_shapes_advertises_every_task_family():
-    """It listed nine of twenty-one until v82, under-selling the checker."""
+    """It listed nine of twenty-one until v82, under-selling the checker.
+
+    v87 adds three code-tracing shapes. They all parse as one task name,
+    `code_trace`, because a single parser covers all nine code tasks: it does
+    not re-implement each one, it runs the snippet the question contains. So
+    the shape count grows by three while the task set grows by one.
+    """
 
     shapes = check.supported_shapes()
     tasks = {check.parse_question(shape)[0] for shape in shapes}
 
-    assert len(shapes) == 21
+    assert len(shapes) == 24
     assert tasks == {
         "arithmetic", "percent", "algebra_one_step", "word_problem", "average",
         "multiplication", "division", "sequence", "two_step",
         "force", "acceleration", "momentum", "kinetic_energy", "work", "power",
         "voltage", "electrical_power", "wave_speed", "molarity",
         "combination", "arithmetic_series",
+        "code_trace",
     }
 
 
 def test_advertised_shapes_match_the_benchmark_task_list():
-    """A shape family the benchmark scores but the interface cannot check."""
+    """A shape family the benchmark scores but the interface cannot check.
+
+    The nine `code_*` benchmark tasks are all covered by the single
+    `code_trace` parser, so they are checked without appearing under their own
+    names. That is verified directly below rather than assumed from the naming.
+    """
 
     import eval_problem_solving as offline
 
     advertised = {check.parse_question(shape)[0] for shape in check.supported_shapes()}
+    code_tasks = set(getattr(offline, "CODE_TASKS", []))
 
-    assert set(offline.GENERATORS) - advertised == set()
+    assert set(offline.GENERATORS) - advertised - code_tasks == set()
+
+
+def test_every_code_task_is_actually_checkable():
+    """The nine code tasks must be judged, not merely excused above.
+
+    Measured 108 checked / 0 wrong / 0 unchecked at twelve samples each when
+    this was written. A code question the checker cannot parse would show
+    NOT CHECKED in the interface, which is safe but useless.
+    """
+
+    import random
+
+    import eval_problem_solving as offline
+
+    if not getattr(offline, "CODE_TASKS", None):
+        pytest.skip("code corpus not present")
+
+    rng = random.Random(3)
+    for name in offline.CODE_TASKS:
+        for _ in range(6):
+            problem = offline.GENERATORS[name](rng)
+            verdict = check.check(problem.prompt, f"... total {problem.answer:g}")
+            assert verdict is not None, f"{name}: NOT CHECKED for {problem.prompt!r}"
+            assert verdict.correct, (
+                f"{name}: the checker disagreed with the generator's own answer "
+                f"({verdict.expected} vs {problem.answer}) for {problem.prompt!r}"
+            )

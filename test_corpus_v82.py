@@ -98,21 +98,53 @@ def test_token_budget_counts_match_the_tokenizer_training_uses():
     assert report["tasks"]["force"]["response_max"] == longest
 
 
-def test_token_budget_reproduces_the_measured_long_tasks():
-    """Pinned so a format change to these three cannot pass unnoticed.
+#: Tasks whose format deliberately spends tokens to show working. Everything
+#: else stays short, and this set is small so that a task joining it is a
+#: decision someone made rather than a drift nobody noticed.
+LONG_TASKS = {"arithmetic_series", "combination", "kinetic_energy", "power"}
 
-    Measured today over the current generators with digit-level tokenisation:
-    `arithmetic_series` responses run to a median of 81 tokens, `combination`
-    60 and `kinetic_energy` 54, against 38 or less for every other task.
+
+def test_token_budget_reproduces_the_measured_long_tasks():
+    """Pinned so a format change to these cannot pass unnoticed.
+
+    Measured over the current generators with digit-level tokenisation:
+    `arithmetic_series` responses run to a median of 81 tokens, `power` 69,
+    `combination` 60 and `kinetic_energy` 54, against 39 or less for every
+    other task.
+
+    `power` joined this set in v87. It writes a division of up to three place
+    values -- ``15200 / 76 = 200, 3800 / 76 = 50, 152 / 76 = 2`` and then the
+    two sums -- where it used to write ``19152 / 76 = 252`` and score 0.400.
+    The cost is real and it is why this assertion moved: two sweeps on the v86
+    checkpoint put a three-significant-digit quotient at 0.075 and a
+    one-significant-digit quotient at 0.75-0.83, so the tokens buy a step the
+    model can actually do.
     """
 
     rows, _ = omni.build(per_task=120, seed=84)
     tasks = omni.token_budget_report(rows)["tasks"]
 
     assert tasks["arithmetic_series"]["response_median"] >= 70
+    assert tasks["power"]["response_median"] >= 60
     assert tasks["combination"]["response_median"] >= 50
     assert max(stats["response_median"] for name, stats in tasks.items()
-               if name not in {"arithmetic_series", "combination", "kinetic_energy"}) <= 40
+               if name not in LONG_TASKS) <= 40
+
+
+def test_the_long_tasks_still_fit_the_block_they_are_packed_into():
+    """Showing the working is only worth it if the row survives packing.
+
+    `_build_turn_aligned_tensors` drops an over-length turn *silently*, so a
+    format that grew past 128 tokens would not error -- it would quietly train
+    on fewer rows than the report claims. The longest turn today is
+    `arithmetic_series` at 111 and `power` at 100.
+    """
+
+    rows, _ = omni.build(per_task=120, seed=84)
+    report = omni.token_budget_report(rows)
+    for name, stats in report["tasks"].items():
+        assert stats["turn_max"] < report["sequence_length"], name
+        assert stats["dropped_fraction"] == 0.0, name
 
 
 def test_token_budget_reports_what_packing_would_drop():

@@ -54,6 +54,12 @@ LEAD_IN = {
 }
 
 NUMBER = r"-?\d+(?:\.\d+)?"
+REQUEST_PREFIX = (
+    r"(?:(?:please\s+)?(?:what\s+is|what's|calculate|compute|evaluate)|"
+    r"quick\s+question:|please\s+help\s+with\s+this\.|"
+    r"solve\s+this\s+basic\s+math\s+problem:)\s+"
+)
+NUMBER_LIST = rf"{NUMBER}(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+){NUMBER})+"
 
 #: Terse labelled forms taken verbatim from `build_omni_corpus`, one per science
 #: task. Each corpus task carries four or five phrasings; these are the ones that
@@ -68,6 +74,15 @@ SCIENCE_LEAD_IN = {
     "electrical_power": "voltage {u} V current {i} A electrical power",
     "voltage": "current {i} A resistance {r} ohm find voltage",
     "power": "work {w} J time {t} s power",
+}
+
+#: v91 Cognitive Lead-in formats for Pearlian causal DAG, proof audit, DoT, and conformal stopping
+COGNITIVE_LEAD_IN = {
+    "causal_intervention": "Given scenario {scenario}, compute causal query P({outcome} | do({treatment}={val})).",
+    "causal_counterfactual": "Given scenario {scenario} with factual {outcome}={factual_val}, compute counterfactual Y_{{{treatment} <- {cf_val}}}.",
+    "proof_verify": "Verify proof derivation: {trace}",
+    "diffusion_thought": "Denoise continuous thought latent for: {prompt}",
+    "conformal_stopping": "Evaluate conformal stopping at step {step} of {budget} with verifier {verifier} and entropy {entropy}.",
 }
 
 #: Quantity patterns, ordered so the more specific unit wins. `m/s^2` must be
@@ -100,6 +115,67 @@ SCIENCE_TARGETS = (
     ("force", r"force", ("m", "a")),
 )
 
+# Match the whole quantity-labelled sentence. Free-form prose may contain
+# constraints, additional targets or different physical assumptions; it must
+# reach the model intact rather than lose those details in a template rewrite.
+SCIENCE_SHAPES = {
+    "force": (
+        r"a body of mass @m@ has an acceleration of @a@\. what is the force",
+        r"mass @m@ (?:acceleration|accelerating at) @a@,? find the force",
+        r"find the force on a @m@ mass accelerating at @a@",
+        r"what force acts on mass @m@ with acceleration @a@",
+        r"given mass @m@ and acceleration @a@, compute the force",
+        r"if something weighs @m@ and speeds up at @a@, what force(?: is that)?",
+    ),
+    "acceleration": (
+        r"a force of @f@ acts on a mass of @m@\. what is the acceleration",
+        r"force @f@ mass @m@ find acceleration",
+        r"find the acceleration produced by @f@ on @m@",
+        r"what acceleration results from a @f@ force on a @m@ body",
+        r"a @m@ mass is pushed with @f@\. how fast does it accelerate",
+    ),
+    "momentum": (
+        r"a @m@ object moves with velocity @v@\. what is its momentum",
+        r"mass @m@ velocity @v@ find momentum",
+        r"find the momentum of a mass @m@ travelling at velocity @v@",
+        r"what is the linear momentum for mass @m@ and velocity @v@",
+        r"how much momentum does a @m@ (?:trolley|body|object) moving at @v@ have",
+        r"a @m@ (?:trolley|body|object) at @v@, what is its momentum",
+    ),
+    "kinetic_energy": (
+        r"a mass of @m@ moves at velocity @v@\. find the kinetic energy",
+        r"mass @m@ velocity @v@ kinetic energy",
+        r"(?:what is the )?kinetic energy of a @m@ body at @v@",
+        r"compute the kinetic energy for mass @m@ and speed @v@",
+    ),
+    "work": (
+        r"a force of @f@ moves an object @d@\. how much work is done",
+        r"force @f@ distance @d@ work done",
+        r"find the work done by @f@ acting over @d@",
+        r"what work is done when a @f@ force acts through @d@",
+        r"work done pushing with @f@ over @d@",
+    ),
+    "power": (
+        r"@w@ of work(?: is done)? in @t@[.,] what (?:is the )?power",
+        r"work @w@ time @t@ power",
+        r"find the power when @w@ is delivered over @t@",
+        r"what power corresponds to @w@ in @t@",
+    ),
+    "voltage": (
+        r"a current of @i@ flows through @r@\. what is the voltage",
+        r"current @i@ resistance @r@ find voltage",
+        r"find the potential difference across @r@ carrying @i@",
+        r"what voltage drives @i@ through a @r@ resistor",
+    ),
+    "electrical_power": (
+        r"a device runs at @u@ drawing @i@\. what is the electrical power",
+        r"voltage @u@ current @i@ electrical power",
+        r"find the power dissipated at @u@ and @i@",
+        r"what electrical power is used at @u@ and @i@",
+        r"a @u@ battery drives @i@\. what's the power",
+    ),
+}
+
 
 @dataclass(frozen=True)
 class Normalised:
@@ -122,13 +198,17 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _request(pattern: str, text: str, prefix: str = REQUEST_PREFIX):
+    return re.fullmatch(rf"(?:{prefix})?{pattern}\s*[?.!]?", text, flags=re.IGNORECASE)
+
+
 def _binary(text: str) -> Optional[Normalised]:
     """`A <op> B` in any of the ways people write it."""
 
     # "subtract A from B" names its operands in the opposite order to "B - A",
     # so it cannot be handled by the symmetric `A op B` scan below.
-    reversed_subtraction = re.search(
-        rf"subtract(?:ing)?\s+({NUMBER})\s+from\s+({NUMBER})", text, flags=re.IGNORECASE
+    reversed_subtraction = _request(
+        rf"subtract(?:ing)?\s+({NUMBER})\s+from\s+({NUMBER})", text
     )
     if reversed_subtraction:
         return Normalised(
@@ -147,10 +227,9 @@ def _binary(text: str) -> Optional[Normalised]:
     for task, pattern in operators:
         # Require the operator to be delimited so "6 - 2" matches but the
         # minus sign inside "-12" does not.
-        match = re.search(
+        match = _request(
             rf"({NUMBER})\s*(?:{pattern})\s*({NUMBER})",
             text,
-            flags=re.IGNORECASE,
         )
         if not match:
             continue
@@ -159,7 +238,7 @@ def _binary(text: str) -> Optional[Normalised]:
     return None
 
 
-def _quantities(text: str) -> dict:
+def _quantities(text: str) -> tuple[dict, str]:
     """Every quantity the text names by its unit, keyed by symbol.
 
     A unit is consumed once matched, so a single number cannot be read as two
@@ -170,11 +249,14 @@ def _quantities(text: str) -> dict:
     found: dict = {}
     remaining = text
     for symbol, pattern in QUANTITY_PATTERNS:
-        match = re.search(pattern, remaining, flags=re.IGNORECASE)
-        if match:
+        matches = list(re.finditer(pattern, remaining, flags=re.IGNORECASE))
+        if len(matches) > 1:
+            return {}, text
+        if matches:
+            match = matches[0]
             found[symbol] = match.group(1)
-            remaining = remaining[: match.start()] + " " + remaining[match.end():]
-    return found
+            remaining = remaining[: match.start()] + f"@{symbol}@" + remaining[match.end():]
+    return found, remaining
 
 
 def _science(text: str) -> Optional[Normalised]:
@@ -188,7 +270,7 @@ def _science(text: str) -> Optional[Normalised]:
     """
 
     lowered = text.lower()
-    quantities = _quantities(text)
+    quantities, template = _quantities(text)
     if not quantities:
         return None
     for task, target_pattern, required in SCIENCE_TARGETS:
@@ -196,8 +278,98 @@ def _science(text: str) -> Optional[Normalised]:
             continue
         if not all(symbol in quantities for symbol in required):
             continue
+        if not any(re.fullmatch(pattern, template.strip(" ?.!\t\n"), flags=re.IGNORECASE)
+                   for pattern in SCIENCE_SHAPES[task]):
+            continue
         values = {symbol: quantities[symbol] for symbol in required}
         return Normalised(SCIENCE_LEAD_IN[task].format(**values), task)
+    return None
+
+
+def _cognitive(source: str, original_text: str) -> Optional[Normalised]:
+    """Rewrite explicit v91 cognitive requests (causal, proof verification, DoT, conformal)."""
+    lowered = source.lower()
+
+    # 1. Causal intervention query: P(Y | do(X = x))
+    causal_match = re.fullmatch(
+        r"(?:(?:please\s+)?(?:compute|calculate|what\s+is)\s+(?:the\s+)?(?:causal|interventional)\s+effect\s+(?:on\s+)?([A-Za-z]+)\s+if\s+(?:we\s+)?do\s*\(?([A-Za-z]+)\s*=\s*(-?\d+(?:\.\d+)?)\)?(?:\s+in\s+([A-Za-z_]+))?|"
+        r"(?:please\s+)?compute\s+causal\s+query:?\s*(?:do\s*\(?([A-Za-z]+)\s*=\s*(-?\d+(?:\.\d+)?)\)?)\s*(?:on|find)\s*([A-Za-z]+)(?:\s+in\s+([A-Za-z_]+))?)\s*[?.!]?",
+        lowered,
+    )
+    if causal_match:
+        groups = causal_match.groups()
+        if groups[0] is not None:
+            outcome, treatment, val, scenario = groups[0], groups[1], groups[2], groups[3]
+        else:
+            treatment, val, outcome, scenario = groups[4], groups[5], groups[6], groups[7]
+        scenario = scenario or "physics_newton"
+        return Normalised(
+            COGNITIVE_LEAD_IN["causal_intervention"].format(
+                scenario=scenario, outcome=outcome.title(), treatment=treatment.title(), val=float(val)
+            ),
+            "causal_intervention",
+            original_text,
+        )
+
+    # 2. Causal counterfactual query
+    cf_match = re.fullmatch(
+        r"(?:please\s+)?what\s+(?:is|would\s+be)\s+the\s+counterfactual\s+(?:outcome|result)\s+(?:on|for)\s+([A-Za-z]+)\s+if\s+([A-Za-z]+)\s+(?:had\s+been|were)\s*(-?\d+(?:\.\d+)?)(?:\s+in\s+([A-Za-z_]+))?\s*[?.!]?",
+        lowered,
+    )
+    if cf_match:
+        outcome, treatment, cf_val, scenario = cf_match.groups()
+        scenario = scenario or "physics_newton"
+        return Normalised(
+            COGNITIVE_LEAD_IN["causal_counterfactual"].format(
+                scenario=scenario, outcome=outcome.title(), factual_val=3.8, treatment=treatment.title(), cf_val=float(cf_val)
+            ),
+            "causal_counterfactual",
+            original_text,
+        )
+
+    # 3. Proof verification request
+    proof_match = re.fullmatch(
+        r"(?:(?:please\s+)?(?:verify|check)\s+(?:the\s+)?(?:proof|derivation|steps)|find\s+(?:the\s+)?first\s+error\s+in(?:\s+the\s+proof)?):\s*(.+)\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if proof_match:
+        trace = proof_match.group(1).strip()
+        return Normalised(
+            COGNITIVE_LEAD_IN["proof_verify"].format(trace=trace),
+            "proof_verify",
+            original_text,
+        )
+
+    # 4. Diffusion-of-Thought command
+    dot_match = re.fullmatch(
+        r"(?:(?:please\s+)?(?:denoise\s+(?:continuous\s+)?(?:thought|reasoning)(?:\s+latent)?(?:\s+plan)?|crystallize\s+(?:thought|reasoning)\s+plan))\s*(?:for|on)?:\s*(.+)\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if dot_match:
+        prompt = dot_match.group(1).strip()
+        return Normalised(
+            COGNITIVE_LEAD_IN["diffusion_thought"].format(prompt=prompt),
+            "diffusion_thought",
+            original_text,
+        )
+
+    # 5. Conformal early exit check
+    conf_match = re.fullmatch(
+        r"(?:(?:please\s+)?(?:evaluate\s+conformal\s+stopping|conformal\s+early\s+exit\s+check)):\s*step\s*(\d+)\s*(?:of|/)\s*(\d+)\s*,?\s*verifier\s*(-?\d+(?:\.\d+)?)\s*,?\s*entropy\s*(-?\d+(?:\.\d+)?)\s*[?.!]?",
+        lowered,
+    )
+    if conf_match:
+        step, budget, verifier, entropy = conf_match.groups()
+        return Normalised(
+            COGNITIVE_LEAD_IN["conformal_stopping"].format(
+                step=int(step), budget=int(budget), verifier=float(verifier), entropy=float(entropy)
+            ),
+            "conformal_stopping",
+            original_text,
+        )
+
     return None
 
 
@@ -215,8 +387,8 @@ def normalise(text: str) -> Normalised:
     lowered = source.lower()
 
     # Two-step: a percentage followed by a further operation.
-    two_step = re.search(
-        rf"({NUMBER})\s*(?:%|percent)\s*(?:of)?\s*({NUMBER}).*?"
+    two_step = _request(
+        rf"({NUMBER})\s*(?:%|percent)\s*of\s*({NUMBER})\s*,?\s*"
         rf"then\s*(add|subtract|plus|minus)\s*({NUMBER})",
         lowered,
     )
@@ -226,57 +398,70 @@ def normalise(text: str) -> Normalised:
         return Normalised(
             f"What is {percent}% of {whole}, then {word} {operand}?",
             "two_step",
-            source,
+            text,
         )
 
-    percent = re.search(
+    percent = _request(
         rf"({NUMBER})\s*(?:%|percent)\s*(?:of)\s*({NUMBER})", lowered
     )
     if percent:
         return Normalised(
-            f"What is {percent.group(1)}% of {percent.group(2)}?", "percent", source
+            f"What is {percent.group(1)}% of {percent.group(2)}?", "percent", text
         )
 
-    if re.search(r"\b(?:average|mean)\b", lowered):
-        values = _numbers(source)
-        if len(values) >= 2:
-            joined = ", ".join(values)
-            return Normalised(
-                f"Find the average (mean) of these numbers: {joined}",
-                "average",
-                source,
-            )
+    average = _request(
+        rf"(?:the\s+)?(?:average(?:\s*\(mean\))?|mean)\s+of\s+"
+        rf"(?:these\s+numbers:\s*)?({NUMBER_LIST})",
+        lowered, prefix=rf"(?:{REQUEST_PREFIX}|find\s+)",
+    )
+    if average:
+        joined = ", ".join(_numbers(average.group(1)))
+        return Normalised(
+            f"Find the average (mean) of these numbers: {joined}", "average", text,
+        )
 
-    if re.search(r"\b(?:next|sequence|comes\s+after|continue)\b", lowered):
-        values = _numbers(source)
+    sequence = _request(
+        rf"(?:what\s+comes\s+next(?:\s+in\s+the\s+sequence)?|"
+        rf"continue\s+(?:the\s+)?sequence|(?:find\s+)?the\s+next\s+"
+        rf"(?:number|term)\s+in\s+the\s+sequence)\s*:?\s*({NUMBER_LIST})",
+        lowered, prefix=r"please\s+",
+    )
+    if sequence:
+        values = _numbers(sequence.group(1))
         if len(values) >= 3:
             joined = ", ".join(values)
             return Normalised(
-                f"What comes next in the sequence: {joined}?", "sequence", source
+                f"What comes next in the sequence: {joined}?", "sequence", text
             )
 
     # Algebra is already written the way the corpus writes it, and rewriting an
     # equation risks reordering its sides. Only the lead-in is normalised.
-    algebra = re.search(
-        rf"x\s*([+\-*/])\s*({NUMBER})\s*=\s*({NUMBER})", lowered
+    algebra = _request(
+        rf"x\s*([+\-*/])\s*({NUMBER})\s*=\s*({NUMBER})", lowered,
+        prefix=r"(?:please\s+)?solve\s+for\s+x:\s*",
     )
     if algebra:
         operator, operand, result = algebra.groups()
         return Normalised(
-            f"Solve for x: x {operator} {operand} = {result}", "algebra_one_step", source
+            f"Solve for x: x {operator} {operand} = {result}", "algebra_one_step", text
         )
+
+    # Cognitive requests before science/binary scan.
+    cognitive = _cognitive(source, text)
+    if cognitive is not None:
+        return cognitive
 
     # Science before the binary scan. "A 30 kg mass is pushed with 90 N" would
     # otherwise be harvested as an arithmetic pair by the `A op B` search.
     science = _science(source)
     if science is not None:
-        return Normalised(science.prompt, science.rule, source)
+        return Normalised(science.prompt, science.rule, text)
 
     binary = _binary(source)
     if binary is not None:
-        return Normalised(binary.prompt, binary.rule, source)
+        return Normalised(binary.prompt, binary.rule, text)
 
     # A word problem, or ordinary conversation. Both go through untouched: the
     # corpus's word problems are written in plain prose already, and rewriting
     # conversation would be pure damage.
-    return Normalised(source, None, source)
+    return Normalised(text, None, text)

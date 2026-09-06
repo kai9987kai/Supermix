@@ -331,3 +331,62 @@ def test_science_rewrites_never_alter_a_number():
     result = pn.normalise(text)
 
     assert set(re.findall(r"\d+", result.prompt)) <= set(re.findall(r"\d+", text)) | {"2"}
+
+
+@pytest.mark.parametrize("text", [
+    "What is 47 times 6? Answer in exactly 3 words.",
+    "Do not calculate 47 times 6; explain multiplication.",
+    "What is 47 times 6, in JSON?",
+    "Calculate 2 + 3 * 4",
+    "Subtract 3 from 10 then double it",
+    "What is 15% of 240 then divide by 2?",
+    "What is 20% of 150 then add 12 then subtract 3?",
+    "What is 20% of 150 minus 5 then add 12?",
+    "Give the next 3 numbers in the sequence: 5, 12, 19, 26",
+    "What comes next: 5, 12, 19, 26? Explain in 2 steps.",
+    "Find the average of 12, 18 and 30, rounded to 2 places",
+    "Find the mean of 4 and 8 without showing the answer",
+    "Solve for x: x + 5 = 12 and x > 10",
+    "Check whether x + 5 = 12 is true for x = 7",
+    "mass 10 kg velocity 7 m/s find momentum and kinetic energy",
+    "mass 10 kg velocity 7 m/s find momentum, answer in JSON",
+    "mass 10 kg velocity 7 m/s find momentum, not kinetic energy",
+    "mass 10 kg velocity 7 m/s find momentum after losing half its mass",
+    "Work done pushing with 20 N over 7 metres at an angle of 60 degrees?",
+    "Work done pushing with 20 N over 7 metres against friction?",
+    "mass 10 kg and mass 20 kg velocity 7 m/s find momentum",
+    "mass 12 kg acceleration 3 m/s^2 and acceleration 5 m/s^2 find the force",
+    "a 14 kg trolley at 5 m/s and 2 m distance, what is its momentum?",
+    "Say whether you understand: what is 47 times 6?",
+    "  Do not solve 4 + 5.\n Keep this formatting.  ",
+    "  ordinary\n conversation\twith spacing  ",
+])
+def test_unsupported_or_constrained_requests_preserve_the_exact_original(text):
+    result = pn.normalise(text)
+
+    assert result.prompt == text
+    assert result.original == text
+    assert result.rule is None
+    assert not result.changed
+
+
+def test_rewrite_reports_original_whitespace():
+    text = "  what is 47\t times 6\n"
+    result = pn.normalise(text)
+
+    assert result.prompt == "What is 47 x 6?"
+    assert result.original == text
+    assert result.changed
+
+
+@pytest.mark.parametrize("text", [
+    "What is -12 times 6?",
+    "Find the average (mean) of these numbers: -12, 3.5, 6",
+    "What comes next in the sequence: -12, -6, 0?",
+    "Given mass 25 kg and acceleration 4 m/s^2, compute the force.",
+])
+def test_supported_rewrites_are_idempotent(text):
+    result = pn.normalise(text)
+
+    assert result.rule is not None
+    assert pn.normalise(result.prompt).prompt == result.prompt

@@ -391,7 +391,73 @@ def _word_problem(question: str) -> Optional[Tuple[str, float]]:
 #:   seize on them without knowing which law applies. `_kinetic_energy` runs
 #:   first of the two: it names a mass and a velocity, which is also what
 #:   `momentum` matches on.
+def _code_trace(question: str) -> Optional[Tuple[str, float]]:
+    """Re-derive a code-tracing answer by executing the snippet in the question.
+
+    Every other parser here re-implements the arithmetic it checks. This one
+    does not need to: the question *contains* the program, so the check is to
+    run it. That makes it the strongest verifier in this module -- there is no
+    second implementation to drift from the first.
+
+    Extraction is deliberately narrow. The snippet is recovered by finding the
+    first assignment to a single-letter variable and taking everything from
+    there to the trailing question, then the same allowlisted, builtins-free,
+    timeout-bounded executor the corpus builder uses decides the value. A
+    question this cannot confidently parse returns ``None`` -- *not checked* --
+    which is the only safe failure for this module.
+    """
+
+    try:
+        import build_code_corpus as code
+    except Exception:  # noqa: BLE001 - the checker degrades, it does not break
+        return None
+
+    # The wrapper names the variable being asked about. Every template phrases
+    # it one of these ways, and a question naming none of them is not a code
+    # question this should touch.
+    target = None
+    for pattern in (r"value of ([A-Za-z_]\w*)", r"give (?:the value of )?([A-Za-z_]\w*)",
+                    r"what (?:is|does) ([A-Za-z_]\w*)", r"final ([A-Za-z_]\w*)",
+                    r"([A-Za-z_]\w*) after this runs", r"([A-Za-z_]\w*) hold at the end",
+                    r"\b([A-Za-z_]\w*)\?\s*$"):
+        found = re.search(pattern, question, flags=re.IGNORECASE)
+        if found:
+            target = found.group(1)
+            break
+    if target is None:
+        return None
+
+    # The code is the longest span that parses AND assigns that variable. Trying
+    # spans rather than pattern-matching the wrapper means a new phrasing cannot
+    # silently produce a wrong value: a mis-trimmed span fails to parse, and a
+    # span that parses but never assigns the target is rejected below.
+    start = re.search(r"[A-Za-z_]\w*\s*=\s*[\[\-\d]", question)
+    if start is None:
+        return None
+    body = question[start.start():]
+
+    # Candidate spans end at a whitespace boundary, longest first. An earlier
+    # version required the span to end in a digit or a bracket, which silently
+    # excluded `code_conditional` -- its snippet ends `else b - a`, on a
+    # variable name -- and left two of nine tasks unverifiable. Correctness
+    # comes from the executor accepting the span, not from guessing where the
+    # prose starts, so the heuristic is gone and only the boundary remains.
+    pieces = body.split(" ")
+    for size in range(len(pieces), 0, -1):
+        chunk = " ".join(pieces[:size]).rstrip(" ?.")
+        if not chunk or not re.search(rf"\b{re.escape(target)}\s*=", chunk):
+            continue
+        result = code.run_snippet(chunk, target)
+        if result.ok and result.value is not None:
+            return ("code_trace", float(result.value))
+    return None
+
+
 PARSERS: Tuple[Callable[[str], Optional[Tuple[str, float]]], ...] = (
+    # First: a code question contains numbers and operators that several
+    # parsers below would happily misread as arithmetic. `x = 5` and
+    # `range(4)` look like a binary expression to `_binary`.
+    _code_trace,
     _word_problem,
     _combination_choose,
     _arithmetic_series,
@@ -474,4 +540,14 @@ def supported_shapes() -> List[str]:
         "In how many ways can 2 items be chosen from 30?",
         "An arithmetic series starts at 15 with common difference 4. "
         "What is the sum of the first 8 terms?",
+        # code tracing (v87) -- checked by RUNNING the snippet rather than by
+        # re-implementing it, which makes it the only parser here with no
+        # second implementation to drift from the first.
+        #
+        # All nine code tasks are covered, measured at 108 checked / 0 wrong
+        # / 0 unchecked over twelve samples each. Ordinary prose is still left
+        # alone: "how are you today" and "x marks the spot" both return None.
+        "What does x hold at the end? x = 2\nfor i in range(6): x = x + 8",
+        "nums = [4, 10, 15]\nr = sum(nums) Give r.",
+        "nums = [8, 3, 4]\nr = nums[0] + nums[2] What is r?",
     ]
