@@ -2937,6 +2937,124 @@ def _consensus_mmr_rerank(
     return reranked, new_scores
 
 
+class NexusCognitiveCoProcessor:
+    """v91 Omni-Cognitive Bridge: hooks NexusEngine directly into ChatPipeline."""
+
+    _instance: Optional["NexusCognitiveCoProcessor"] = None
+
+    def __init__(self):
+        self._engine = None
+
+    @classmethod
+    def get_instance(cls) -> "NexusCognitiveCoProcessor":
+        if cls._instance is None:
+            cls._instance = NexusCognitiveCoProcessor()
+        return cls._instance
+
+    @property
+    def engine(self):
+        if self._engine is None:
+            try:
+                import nexus_engine as ne
+                self._engine = ne.NexusEngine()
+            except Exception:
+                self._engine = None
+        return self._engine
+
+    def evaluate_cognitive_query(self, query_text: str) -> Optional[Dict[str, Any]]:
+        """Evaluate if query_text matches a formal cognitive task and solve via NexusEngine."""
+        eng = self.engine
+        if eng is None:
+            return None
+
+        clean_q = (query_text or "").strip()
+        lowered = clean_q.lower()
+
+        # 1. Causal DAG / do-calculus query
+        causal_match = re.search(
+            r"(?:what\s+is\s+(?:the\s+)?(?:causal|interventional)\s+effect\s+(?:on\s+)?([A-Za-z]+)\s+if\s+(?:we\s+)?do\s*\(?([A-Za-z]+)\s*=\s*(-?\d+(?:\.\d+)?)\)?(?:\s+in\s+([A-Za-z_]+))?|"
+            r"compute\s+causal\s+query:?\s*(?:do\s*\(?([A-Za-z]+)\s*=\s*(-?\d+(?:\.\d+)?)\)?)\s*(?:on|find)\s*([A-Za-z]+)(?:\s+in\s+([A-Za-z_]+))?|"
+            r"given\s+scenario\s+([A-Za-z_]+),?\s*compute\s+causal\s+query\s*p\(([A-Za-z]+)\s*\|\s*do\(([A-Za-z]+)=(-?\d+(?:\.\d+)?)\)\))",
+            lowered,
+        )
+        if causal_match:
+            g = causal_match.groups()
+            if g[0] is not None:
+                outcome, treatment, val, scenario = g[0], g[1], float(g[2]), g[3] or "physics_newton"
+            elif g[4] is not None:
+                treatment, val, outcome, scenario = g[4], float(g[5]), g[6], g[7] or "physics_newton"
+            else:
+                scenario, outcome, treatment, val = g[8], g[9], g[10], float(g[11])
+            res = eng.evaluate_causal_dag(scenario=scenario, treatment_node=treatment.title(), outcome_node=outcome.title(), do_value=val)
+            adj = ", ".join(res.backdoor_adjustment_set) if res.backdoor_adjustment_set else "empty set"
+            ans_text = (
+                f"Pearlian Causal Query Result:\n"
+                f"- Scenario: {res.scenario_name}\n"
+                f"- Interventional Estimate P({res.outcome_variable} | do({res.treatment_variable}={res.intervention_value})): {res.interventional_estimate}\n"
+                f"- Back-Door Adjustment Set: {{{adj}}}\n"
+                f"- Confounding Bias: {res.confounding_bias}\n"
+                f"- Conclusion: Under surgery do({res.treatment_variable}={res.intervention_value}), {res.outcome_variable} is causally set to {res.interventional_estimate}."
+            )
+            return {
+                "text": ans_text,
+                "task": "causal_intervention",
+                "answer_authority": True,
+                "exact_user_match": True,
+                "confidence": 1.0,
+            }
+
+        # 2. Proof verification request
+        proof_match = re.search(
+            r"(?:verify\s+(?:the\s+)?(?:proof|derivation|steps)|check\s+(?:the\s+)?(?:proof|derivation)|find\s+(?:the\s+)?first\s+error\s+in(?:\s+the\s+proof)?):\s*(.+)",
+            clean_q,
+            flags=re.IGNORECASE,
+        )
+        if proof_match:
+            raw_trace = proof_match.group(1).strip()
+            res = eng.reflexive_self_correct(problem="Proof verification audit", proposed_solution=raw_trace)
+            status = "FAILED" if res.had_failure else "VERIFIED SOUND"
+            ans_text = (
+                f"Neuro-Symbolic Proof Audit: {status}\n"
+                f"- Diagnostic: {res.diagnostic_summary}\n"
+                f"- Corrected Answer: {res.corrected_final_answer}\n"
+                f"- Proof Trace: {' -> '.join(res.corrected_trace)}"
+            )
+            return {
+                "text": ans_text,
+                "task": "proof_verify",
+                "answer_authority": True,
+                "exact_user_match": True,
+                "confidence": res.correction_fidelity,
+            }
+
+        # 3. Diffusion-of-Thought command
+        dot_match = re.search(
+            r"(?:denoise\s+(?:continuous\s+)?(?:thought|reasoning)(?:\s+latent)?(?:\s+plan)?|crystallize\s+(?:thought|reasoning)\s+plan)\s*(?:for|on)?:\s*(.+)",
+            clean_q,
+            flags=re.IGNORECASE,
+        )
+        if dot_match:
+            goal = dot_match.group(1).strip()
+            res = eng.denoise_thought_latent(problem=goal, num_timesteps=15)
+            ans_text = (
+                f"Continuous Diffusion-of-Thought Crystallization:\n"
+                f"- Goal: {goal}\n"
+                f"- Crystallization Step: {res.crystallization_step} of {res.total_steps}\n"
+                f"- Mean JSD Stability: {res.mean_stability_jsd}\n"
+                f"- Crystallized Plan: {res.crystallized_plan}\n"
+                f"- Tokens: {' '.join(res.discrete_derivation_tokens)}"
+            )
+            return {
+                "text": ans_text,
+                "task": "diffusion_thought",
+                "answer_authority": True,
+                "exact_user_match": True,
+                "confidence": 0.95,
+            }
+
+        return None
+
+
 def pick_response(
     candidates: Sequence[Dict[str, Any]],
     query_text: str,
@@ -2947,6 +3065,12 @@ def pick_response(
     interaction_plan: Optional[Dict[str, Any]] = None,
     conversation_state: Optional[Dict[str, Any]] = None,
 ) -> str:
+    # v91 Nexus Cognitive Bridge: check if query is an active cognitive reasoning task
+    co_proc = NexusCognitiveCoProcessor.get_instance()
+    cog_res = co_proc.evaluate_cognitive_query(query_text)
+    if cog_res is not None:
+        return str(cog_res["text"])
+
     if not candidates:
         return "I do not have a good response for that yet."
 

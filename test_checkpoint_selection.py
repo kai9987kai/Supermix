@@ -170,10 +170,58 @@ def test_accuracy_criterion_breaks_ties_on_loss():
     assert tie_better_loss < tie_worse_loss
 
 
-def test_accuracy_criterion_falls_back_when_unmeasured():
-    """Before the first probe there is no accuracy; loss must still order runs."""
+def test_accuracy_criterion_does_not_select_unmeasured_weights():
+    """A loss improvement cannot substitute for an accuracy measurement."""
 
-    assert trainer.selection_score("accuracy", 0.42, None, None) == 0.42
+    assert trainer.selection_score("accuracy", 0.42, None, None) == float("inf")
+
+
+def test_accuracy_task_flag_pins_order_and_rejects_unknown_tasks():
+    parser = trainer.build_parser()
+    args = parser.parse_args(["--accuracy_task", "percent", "--accuracy_task", "arithmetic"])
+    assert args.accuracy_task == ["percent", "arithmetic"]
+    assert parser.parse_args([]).accuracy_task is None
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--accuracy_task", "nonexistent"])
+
+
+def test_probe_manifest_binds_every_ordered_prompt_and_answer():
+    problems = trainer.solving.generate_novel(100, seed=91, tasks=["arithmetic"])
+    original = trainer.accuracy_probe_manifest(problems, ["arithmetic"], 91, 96)
+    assert len(original["prompts_sha256"]) == 64
+    assert original == trainer.accuracy_probe_manifest(problems, ["arithmetic"], 91, 96)
+    # The final problem lies far beyond the generator fingerprint's 3-row sample.
+    problem = problems[-1]
+    problems[-1] = trainer.solving.Problem(problem.task, problem.prompt, problem.answer + 1, problem.source)
+    changed = trainer.accuracy_probe_manifest(problems, ["arithmetic"], 91, 96)
+    assert changed["prompts_sha256"] != original["prompts_sha256"]
+    assert changed["generator_fingerprint"] == original["generator_fingerprint"]
+
+
+def test_accuracy_report_uses_configured_cap_and_reports_task_counts(monkeypatch):
+    import torch
+
+    model = torch.nn.Linear(1, 1)
+    problems = [
+        trainer.solving.Problem("arithmetic", "first", 2, "test"),
+        trainer.solving.Problem("arithmetic", "second", 3, "test"),
+        trainer.solving.Problem("percent", "third", 4, "test"),
+    ]
+    caps = []
+
+    def reply(model, tokenizer, prompt, cap):
+        caps.append(cap)
+        return {"reply": "total 2" if prompt == "first" else "total 4"}
+
+    monkeypatch.setattr(trainer, "generate_reply", reply)
+    report = trainer.probe_accuracy_report(model, None, problems, max_new_tokens=137)
+    assert report["accuracy"] == pytest.approx(2 / 3)
+    assert report["by_task"] == {
+        "arithmetic": {"correct": 1, "total": 2, "accuracy": 0.5},
+        "percent": {"correct": 1, "total": 1, "accuracy": 1.0},
+    }
+    assert caps == [137, 137, 137]
+    assert model.training
 
 
 # -- reporting the criterion honestly (v75) ---------------------------------

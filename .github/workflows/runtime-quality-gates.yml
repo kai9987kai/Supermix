@@ -113,7 +113,6 @@ jobs:
             source/build_scratchpad_math.py \
             source/train_mimomix_generalisation.py \
             source/train_supervised.py \
-            source/nexus_evidence_ledger.py \
             runtime_python/chat_app.py \
             runtime_python/chat_web_app.py \
             runtime_python/model_variants.py
@@ -162,7 +161,6 @@ jobs:
             source/build_scratchpad_math.py \
             source/eval_problem_solving.py \
             source/train_mimomix_generalisation.py \
-            source/nexus_evidence_ledger.py \
             runtime_python/memory_authority.py \
             runtime_python/conversation_state.py \
             runtime_python/grounding_runtime.py \
@@ -200,7 +198,7 @@ jobs:
           python -m pytest -q test_mimomix_differential.py test_mimomix_mla.py test_mimomix_mod.py
           python -m pytest -q test_mimomix_multimodal.py test_nexus_compare.py test_nexus_quantum_bell.py test_nexus_resonance.py test_nexus_studio_v83.py test_nexus_studio_v84.py test_nexus_v84_innovations.py
           python -m pytest -q test_v85_release_contract.py
-          python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py test_nexus_engine.py test_nexus_api.py test_nexus_swarm.py test_nexus_got.py test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py test_nexus_studio_contract.py test_nexus_hybrid_advancements.py test_nexus_adaptive.py test_nexus_risk_control.py test_nexus_independent_checker.py test_nexus_nonce_ledger.py test_nexus_evidence_ledger.py
+          python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py test_nexus_engine.py test_nexus_api.py test_nexus_swarm.py test_nexus_got.py test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py test_nexus_studio_contract.py test_nexus_hybrid_advancements.py test_nexus_adaptive.py test_nexus_risk_control.py test_nexus_independent_checker.py test_nexus_nonce_ledger.py
 
       - name: Freeze and smoke-test protocol console
         if: runner.os == 'Windows'

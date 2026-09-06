@@ -16,6 +16,7 @@ its fix:
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -558,3 +559,126 @@ def test_the_saving_is_real():
 
     assert wide / narrow == 4.0
     assert (wide - narrow) / 1e9 > 1.3  # over 1.3 GB reclaimed
+
+
+def _selection_fixture(model, generator):
+    return trainer.selection_state_payload(
+        select_on="accuracy", checkpoint_step=12, best_score=-0.7995,
+        best_step=10, best_dev_loss=0.5, best_dev_seen=0.4,
+        best_probe_accuracy=0.8, best_probe_verbatim_rate=None, last_accuracy=0.8,
+        batch_generator=generator, history=[{"step": 10, "probe_accuracy": .8}, {"step": 12}],
+        best_state=model.state_dict(), accuracy_probe={"exam": "fixed", "cap": 112},
+    )
+
+
+def test_resume_restores_best_weights_and_both_rng_streams():
+    model = _tiny_model()
+    generator = torch.Generator().manual_seed(90)
+    stored = _selection_fixture(model, generator)
+    expected_batch = torch.randint(100, (16,), generator=generator)
+    expected_global = torch.rand(16)
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(3)
+    torch.manual_seed(19)
+    generator.manual_seed(19)
+    provenance = {"_selection_state": stored}
+    state = trainer.restore_resume_selection_state(
+        provenance, start_step=12, select_on="accuracy", batch_generator=generator,
+        model=model, accuracy_probe={"exam": "fixed", "cap": 112},
+    )
+    assert state["restored"] and state["best_step"] == 10
+    assert state["best_score"] == -.7995
+    assert torch.equal(torch.randint(100, (16,), generator=generator), expected_batch)
+    assert torch.equal(torch.rand(16), expected_global)
+    first = next(iter(model.state_dict()))
+    assert not torch.equal(state["best_state"][first], model.state_dict()[first])
+    assert "_selection_state" not in provenance
+
+
+@pytest.mark.parametrize("field,value", [
+    ("selection_state_schema", "old"), ("select_on", "dev_loss"),
+    ("checkpoint_step", 11), ("best_score", float("nan")), ("best_step", 13),
+    ("accuracy_probe", {"exam": "changed"}), ("history", [{"step": 11}]),
+    ("batch_generator_state", None), ("selection_best_state", {}),
+])
+def test_incomplete_or_mismatched_resume_state_fails_closed(field, value):
+    model = _tiny_model()
+    generator = torch.Generator().manual_seed(90)
+    state = _selection_fixture(model, generator)
+    state[field] = value
+    with pytest.raises(ValueError):
+        trainer.restore_resume_selection_state(
+            {"_selection_state": state}, start_step=12, select_on="accuracy",
+            batch_generator=generator, model=model, accuracy_probe={"exam": "fixed", "cap": 112},
+        )
+
+
+def test_warm_start_does_not_inherit_old_selection_or_rng():
+    model = _tiny_model()
+    generator = torch.Generator().manual_seed(90)
+    stored = _selection_fixture(model, generator)
+    before = generator.get_state().clone()
+    state = trainer.restore_resume_selection_state(
+        {"_selection_state": stored}, start_step=0, select_on="dev_loss",
+        batch_generator=generator, model=model, accuracy_probe={},
+    )
+    assert not state["restored"] and state["best_state"] is None
+    assert state["best_score"] == float("inf") and state["history"] == []
+    assert torch.equal(before, generator.get_state())
+
+
+def test_dev_recovery_does_not_overwrite_selected_checkpoint(tmp_path):
+    tokenizer = _tokenizer()
+    model = _tiny_model(tokenizer.vocab_size)
+    optimizer, scheduler = _optimiser_and_scheduler(model)
+    extra = _selection_fixture(model, torch.Generator().manual_seed(90))
+    trainer.save_progress_checkpoints(output_dir=tmp_path, run_name="test", model=model,
+                                     tokenizer=tokenizer, extra=extra, selection_improved=True,
+                                     dev_improved=True, optimiser=optimizer, scheduler=scheduler)
+    selected = (tmp_path / "test.selected.pt").read_bytes()
+    with torch.no_grad():
+        next(model.parameters()).add_(1)
+    trainer.save_progress_checkpoints(output_dir=tmp_path, run_name="test", model=model,
+                                     tokenizer=tokenizer, extra=extra, selection_improved=False,
+                                     dev_improved=True, optimiser=optimizer, scheduler=scheduler)
+    assert (tmp_path / "test.selected.pt").read_bytes() == selected
+    recovery = torch.load(tmp_path / "test.partial.pt", weights_only=False)
+    assert recovery["extra"]["partial"] and not recovery["extra"]["is_selection_best"]
+    assert recovery["extra"]["selection_best_state"]
+    assert "optimiser_state" in recovery and "scheduler_state" in recovery
+
+
+def test_interrupted_tiny_run_matches_uninterrupted_weights(tmp_path, monkeypatch):
+    corpus = tmp_path / "synthetic.jsonl"
+    corpus.write_text("".join(json.dumps({"user": f"Question {i}", "assistant": f"The calculated result is {i}."}) + "\n"
+                              for i in range(100)), encoding="utf-8")
+    def arguments(name, extra=()):
+        return trainer.build_parser().parse_args([
+            "--corpus_jsonl", str(corpus), "--output_dir", str(tmp_path / name), "--run_name", name,
+            "--steps", "4", "--eval_every", "1", "--batch_size", "2", "--eval_batch_size", "4",
+            "--sequence_length", "32", "--hidden_size", "32", "--n_layers", "1", "--n_heads", "2",
+            "--n_kv_heads", "1", "--intermediate_size", "64", "--moe_intermediate_size", "16",
+            "--n_routed_experts", "4", "--n_mtp_layers", "1", "--no_thinking_core",
+            "--accuracy_every", "0", "--select_on", "dev_loss", "--sample_tokens", "2",
+            "--max_row_fraction_per_sentence", "0.05", "--turn_aligned_packing", "--digit_tokens",
+            "--torch_threads", "1", "--checkpoint_every_improvement", *extra,
+        ])
+    continuous = trainer.run(arguments("continuous"))
+    save = trainer.save_progress_checkpoints
+    def crash_after_save(**kwargs):
+        save(**kwargs)
+        if kwargs["extra"]["steps"] == 2:
+            raise InterruptedError("simulated process crash after atomic checkpoint")
+    monkeypatch.setattr(trainer, "save_progress_checkpoints", crash_after_save)
+    with pytest.raises(InterruptedError):
+        trainer.run(arguments("resumed"))
+    monkeypatch.setattr(trainer, "save_progress_checkpoints", save)
+    recovered = trainer.run(arguments("resumed", ["--init_from", str(tmp_path / "resumed" / "resumed.partial.pt"), "--start_step", "2"]))
+    left = torch.load(tmp_path / "continuous" / "continuous.pt", weights_only=False)
+    right = torch.load(tmp_path / "resumed" / "resumed.pt", weights_only=False)
+    assert left["state_dict"].keys() == right["state_dict"].keys()
+    assert all(torch.equal(value, right["state_dict"][key]) for key, value in left["state_dict"].items())
+    assert "optimiser_state" not in right
+    assert [r["step"] for r in recovered["history"]] == [1, 2, 3, 4]
+    assert [r["dev_loss"] for r in recovered["history"]] == [r["dev_loss"] for r in continuous["history"]]

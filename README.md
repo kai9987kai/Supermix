@@ -13,6 +13,83 @@ This repository combines:
 
 It is intentionally a mixed workspace, not a minimal source-only model repo.
 
+## Supermix v90 Frontier Diffusion-of-Thought & Epistemic Reflexion (NexusMiMo-DoT Frontier)
+
+The **v90 Frontier Diffusion-of-Thought & Epistemic Reflexion** release advances the Supermix architecture into continuous-time thought spaces, reflexive self-correction, finite-sample conformal stopping, and Pearlian causal do-calculus:
+
+1. **Continuous-Time Diffusion-of-Thought (`source/nexus_diffusion_thought.py`)**:
+   - **Latent Denoising Process**: Models reasoning as continuous thought vector evolution from pure Gaussian noise $z_T \sim \mathcal{N}(0, I)$ down to crystallized plans via cosine variance scheduling (Nichol & Dhariwal 2021).
+   - **Score Guidance & Mutual Stability**: Score-based attractor pull conditioned on problem semantics with token projection Jensen-Shannon Divergence (JSD) stability gating.
+   - **Plan Crystallization**: Automatically crystallizes latent attractor states into verified discrete derivation tokens once mutual stability passes convergence thresholds.
+
+2. **Epistemic Reflexion & Negative-Constraint Working Memory (`source/nexus_reflexion.py`)**:
+   - **Root-Cause Failure Diagnosis**: Pairs with neuro-symbolic First-Error Localization (FEL) to isolate failed derivation steps.
+   - **Negative Avoidance Constraints**: Injects precise constraints (e.g. `ENFORCE_EXACT_RATIONAL_EQUIVALENCE`, `RESTRICT_TO_ACTIVE_REGISTERS`) into episodic working memory.
+   - **Autonomous Symbiotic Repair**: Synthesizes verified repaired proof traces and tracks historical failure avoidance across multi-turn reasoning.
+
+3. **Conformal Risk-Controlled Stopping (`source/nexus_conformal_stopping.py`)**:
+   - **Distribution-Free Early Exit**: Evaluates decision margins $\Delta_t = \pi_{(1)} - \pi_{(2)}$ against calibrated empirical quantiles $\hat{\lambda}$ with finite-sample corrections.
+   - **Provable Safety Guarantees**: Mathematically guarantees test-time error rate $\mathbb{P}(\text{Loss} > 0) \le \alpha$.
+   - **Test-Time FLOP Savings**: Achieves significant compute savings (30% to 60%) by certifying early termination without sacrificing formal soundness.
+
+4. **Pearlian Causal DAG & Do-Calculus Engine (`source/nexus_causal_dag.py`)**:
+   - **Structural Causal Models (SCMs)**: Supports canonical DAG topologies (Newtonian mechanics, clinical drug efficacy, market equilibria).
+   - **Do-Calculus Interventions**: Computes $P(Y \mid do(X = x))$ by surgically severing parental edges and isolates confounding bias via back-door adjustment sets.
+   - **Counterfactual Reasoning**: Simulates counterfactual outcomes $Y_{X \leftarrow x'}(u)$ given factual observations and inferred exogenous disturbances.
+
+5. **REST API & Unified Web Studio v90 (`source/nexus_api.py`, `web_static/nexus_studio.html`)**:
+   - High-performance endpoints: `POST /v1/dot/denoise`, `POST /v1/reflexion/correct`, `POST /v1/conformal/evaluate`, and `POST /v1/causal/dag_query`.
+   - Four interactive diagnostic tabs and panels in Nexus Studio: **DoT Denoiser**, **Reflexion Corrector**, **Conformal Stop**, and **Causal DAG**.
+   - Full technical documentation in `docs/V90_DIFFUSION_OF_THOUGHT.md` and complete test coverage in `test_nexus_v90_frontier_dot.py`.
+
+## Supermix v89 Frontier Epistemic Hybrid (NexusMiMo-Friston Hybrid)
+
+The **v89 Frontier Epistemic Hybrid** release elevates Supermix into an active, hypothesis-driven cognitive architecture:
+
+1. **Epistemic Active Inference Engine (`source/nexus_active_inference.py`)**:
+   - **Karl Friston Expected Free Energy (EFE)**: Evaluates candidate reasoning actions $a$ by minimizing $G(a) = \text{Pragmatic Risk} - \gamma \cdot \text{Epistemic Information Gain}$.
+   - **Dynamic Precision Tuning**: Dynamic precision parameter $\beta$ modulated by the RSI volatility oscillator and Shannon entropy to balance risk minimization against uncertainty-resolving exploration.
+
+2. **Neuro-Symbolic Proof Verification & First-Error Localization (`source/nexus_proof_verification.py`)**:
+   - **Step-by-Step Proof Auditing**: Eliminates phantom hallucinated variables by tracking active premise registers $\mathcal{R}_i$.
+   - **First-Error Accounting**: Directly pinpoints the exact first derivation step that deviates from exact rational arithmetic or logic.
+   - **Autonomous Symbolic Branch Repair**: Deterministically repairs flawed derivation branches to rescue reasoning trajectories.
+
+3. **Bidirectional Speculative Decoding (`source/nexus_speculative_bidirectional.py`)**:
+   - Extends Xiaomi MiMo speculative drafting to bidirectional consistency verification: forwards speculative draft ($P \to Y$) inverted via algebraic back-substitution ($Y \to P'$). Rejects hallucinations with low mutual consistency ($\rho_{\mathrm{bidir}} < 0.90$).
+
+4. **Epistemic Monte Carlo Tree Search (`NexusEpistemicMCTS` in `source/nexus_engine.py`)**:
+   - Unifies MCTS search tree expansion with Friston EFE policy guidance, dynamic pruning of steps with localized errors, and symbolic branch repair.
+
+5. **REST API & Unified Web Studio v89 (`source/nexus_api.py`, `web_static/nexus_studio.html`)**:
+   - High-performance REST endpoints: `/v1/active_inference/decide`, `/v1/proof/verify_steps`, `/v1/speculative/bidirectional`, and `/v1/mcts/epistemic_search`.
+   - Four new interactive diagnostic tabs in Nexus Studio: **Active Inference (EFE)**, **Proof Verifier (FEL)**, **Bidirectional Spec**, and **Epistemic MCTS**.
+   - Complete architectural documentation in `docs/V89_EPISTEMIC_HYBRID.md` and test coverage in `test_nexus_v89_frontier_epistemic.py`.
+
+## Supermix v88 Frontier Hybrid (NexusMiMo-DemLab)
+
+The **v88 Frontier Hybrid** release synthesizes algorithmic breakthroughs from **Xiaomi MiMo**, **`kai9987kai/AI-Dem-Lab`**, and **`kai9987kai/Supermix`** into a unified neural-symbolic cognitive architecture:
+
+1. **Mechanistic Interpretability Engine (`source/nexus_interpretability.py`)**:
+   - **Direct Logit Attribution (DLA)**: Decomposes target logit differences into exact per-head attention contributions $\alpha_h$ and MLP residual stream write projections.
+   - **Activation Patching**: Causal ablation replacing activations from corrupted runs to identify decisive subcircuits in few-shot reasoning.
+   - **Causal Register Scratchpad Validation**: Formally validates chain-of-thought intermediate registers via counterfactual perturbations ($s_t \to s_t + \delta$), detecting computational shortcuts and ensuring reasoning faithfulness (Shih et al. 2026).
+
+2. **Algorithmic Complexity & Dynamics Analyzer (`source/nexus_complexity.py`)**:
+   - **Shannon Entropy Spectrum & LZ Compressibility**: Calculates bit entropy and Lempel-Ziv compression ratios across token distributions and reasoning trajectories.
+   - **Normalized Compression Distance (NCD)**: Non-parametric algorithmic similarity metric approximating Kolmogorov complexity: $NCD(x, y) = \frac{C(xy) - \min(C(x), C(y))}{\max(C(x), C(y))}$.
+   - **Phase Space Loop & Collapse Detection**: Monitors sliding-window token entropy to detect repetitive loops or degenerate mode collapses before context saturation occurs.
+
+3. **Frontier Hybrid Engine Integration (`source/nexus_engine.py`)**:
+   - **Adaptive Continuous Auto-Loop**: Autonomous execution loop orchestrating multi-step generation governed by RSI (Relative Strength Index) volatility safeguards and discrete Bellman Q-learning policies ($Q(s, a) \leftarrow Q(s, a) + \alpha [r + \gamma \max_{a'} Q(s', a') - Q(s, a)]$).
+   - **Semantic Group Invariant Probing**: Measures reasoning invariance under GSM-Symbolic style perturbations (commutative argument reordering, distractor clauses, minimal contrast pairs).
+   - **Xiaomi MiMo Speculative Drafting & Quantum Entropy**: Native support for MTP speculative verification, hybrid attention caching, and Bell-CHSH quantum non-locality state transforms.
+
+4. **REST API & Unified Web Studio v88 (`source/nexus_api.py`, `web_static/nexus_studio.html`)**:
+   - High-performance REST endpoints: `/v1/circuits/attribute`, `/v1/complexity/analyze`, `/v1/autoloop/step`, `/v1/semantic/invariants`, and capability signal `/v1/signals`.
+   - Interactive visual diagnostics in Nexus Studio: Live mechanistic attention attribution heatmaps, Kolmogorov compressibility gauges, RSI auto-loop monitor, and GSM-Symbolic invariance prober.
+   - Complete architectural documentation in `docs/V88_FRONTIER_HYBRID.md` and test coverage in `test_nexus_v88_frontier_hybrid.py`.
+
 ## Supermix v85 — making the next run measurable, and the ruler that moved
 
 V85 is the **training line** (v58–v81); v82–v84 above are the parallel NexusMind

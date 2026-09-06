@@ -11,6 +11,7 @@ pin the parts that fail quietly if they regress -- eviction (memory), refusal
 from __future__ import annotations
 
 import sys
+import json
 import threading
 from pathlib import Path
 
@@ -174,3 +175,72 @@ def test_per_model_lock_is_not_shared_between_models():
     second = registry.acquire("b")
 
     assert first.lock is not second.lock
+
+
+@pytest.mark.parametrize("key,value", [
+    ("max_new_tokens", True), ("max_new_tokens", "96"), ("max_new_tokens", 0),
+    ("temperature", float("nan")), ("top_p", float("inf")),
+    ("session_id", []), ("check", "false"), ("mode", "other"), ("model", ["a"]),
+])
+def test_malformed_chat_controls_are_400_without_model_loading(key, value):
+    registry = _FakeRegistry(["a"], 1)
+    client = server.build_app(registry).test_client()
+    response = client.post("/api/chat", json={"message": "What is 2 + 3?", key: value})
+    assert response.status_code == 400
+    assert registry.loads == []
+
+
+def _stub_stream(loaded, message, history, cap, temperature, top_p, greedy, should_stop, progress=None):
+    progress.tokens = cap
+    progress.finish_reason = "length"
+    yield "total 5"
+
+
+def test_chat_and_page_share_default_cap_and_report_real_generation(monkeypatch):
+    monkeypatch.setattr(server, "stream_tokens", _stub_stream)
+    client = server.build_app(_FakeRegistry(["a"], 1)).test_client()
+    page = client.get("/").get_data(as_text=True)
+    assert f'value="{server.DEFAULT_MAX_NEW_TOKENS}"' in page
+    assert "__DEFAULT_MAX_NEW_TOKENS__" not in page
+    prompt = "What is 2 + 3? Do not calculate it; describe the operation."
+    response = client.post("/api/chat", json={"message": prompt})
+    assert response.status_code == 200
+    lines = response.get_data(as_text=True).splitlines()
+    done = json.loads(next(lines[i+1][6:] for i, line in enumerate(lines) if line == "event: done"))
+    assert done["tokens"] == server.DEFAULT_MAX_NEW_TOKENS == 96
+    assert done["hit_token_cap"] and done["finish_reason"] == "length"
+    assert done["normalised_rule"] is None
+    assert done["check"] is None
+
+
+def test_benchmark_reports_actual_exam_cap_and_development_scope(monkeypatch):
+    monkeypatch.setattr(server, "stream_tokens", _stub_stream)
+    client = server.build_app(_FakeRegistry(["a"], 1)).test_client()
+    response = client.post("/api/benchmark", json={"model": "a", "problems": 3, "seed": 65, "max_new_tokens": 112})
+    assert response.status_code == 200
+    report = response.get_json()
+    assert report["settings"]["max_new_tokens"] == 112
+    assert len(report["settings"]["problem_fingerprint"]) == 64
+    assert report["development_only"] and not report["selection_authorized"]
+    assert not report["training_overlap_checked"]
+    again = client.post("/api/benchmark", json={"problems": 3, "seed": 65, "max_new_tokens": 112}).get_json()
+    assert again["settings"] == report["settings"]
+
+
+@pytest.mark.parametrize("payload", [{"problems": "20"}, {"problems": False}, {"seed": []}, {"max_new_tokens": 257}])
+def test_bad_benchmark_controls_are_rejected_before_generation(payload):
+    registry = _FakeRegistry(["a"], 1)
+    response = server.build_app(registry).test_client().post("/api/benchmark", json=payload)
+    assert response.status_code == 400
+    assert not registry.loads
+
+
+def test_live_check_does_not_judge_a_fragment_of_an_unsupported_request():
+    assert server.check_reply("What is 2 + 3? Do not calculate it; describe the operation.", "total 5") is None
+    assert server.check_reply("Find the average of 10, 20, 30, and 40; answer in 2 sentences.", "total 20.4") is None
+    assert server.check_reply("What is 2 + 3?", "total 5").correct
+
+
+def test_live_check_retains_other_existing_checker_families():
+    verdict = server.check_reply("How many combinations of 5 things taken 2?", "total 10")
+    assert verdict is not None and verdict.correct

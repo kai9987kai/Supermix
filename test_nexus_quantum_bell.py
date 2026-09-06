@@ -1,6 +1,5 @@
 """Unit tests for AI-Dem-Lab Quantum Randomness & Bell Locality Sandbox."""
 
-import math
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "source"))
@@ -72,4 +71,3 @@ def test_wolfram_complexity_analyzer():
 
     res0 = analyzer.analyze(rule=0, steps=8, width=15)
     assert res0.complexity_class == "Class 1 (Uniform)"
-

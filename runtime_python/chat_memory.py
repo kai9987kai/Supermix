@@ -4,7 +4,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import torch
 
@@ -26,6 +26,18 @@ class MemoryRow:
     created_at: float
     user_vec: torch.Tensor
     assistant_vec: torch.Tensor
+
+
+@dataclass
+class ReflexionMemoryRow:
+    problem: str
+    failure_mode: str
+    failed_step: str
+    negative_constraint: str
+    repaired_answer: str
+    domain: str
+    created_at: float
+    vec: torch.Tensor
 
 
 class ChatMemoryDB:
@@ -53,6 +65,29 @@ class ChatMemoryDB:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_memory_created_at ON chat_memory(created_at DESC);")
+
+        # v91 Epistemic Reflexion & Negative Constraint Schema
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS epistemic_reflexion_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                problem TEXT NOT NULL,
+                failure_mode TEXT NOT NULL,
+                failed_step TEXT NOT NULL,
+                negative_constraint TEXT NOT NULL,
+                repaired_answer TEXT,
+                domain TEXT NOT NULL,
+                vec TEXT NOT NULL
+            );
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_epistemic_domain ON epistemic_reflexion_memory(domain);"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_epistemic_created_at ON epistemic_reflexion_memory(created_at DESC);"
+        )
         self.conn.commit()
 
     def close(self) -> None:
@@ -80,6 +115,109 @@ class ChatMemoryDB:
             ),
         )
         self.conn.commit()
+
+    def add_reflexion_capsule(
+        self,
+        problem: str,
+        failure_mode: str,
+        failed_step: str,
+        negative_constraint: str,
+        repaired_answer: str = "",
+        domain: str = "general",
+    ) -> None:
+        """Record an epistemic failure capsule and negative avoidance constraint into long-term memory."""
+        prob = (problem or "").strip()
+        constraint = (negative_constraint or "").strip()
+        if not prob or not constraint:
+            return
+
+        vec = featurize_text(prob)
+        self.conn.execute(
+            """
+            INSERT INTO epistemic_reflexion_memory (
+                created_at, problem, failure_mode, failed_step, negative_constraint, repaired_answer, domain, vec
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                float(time.time()),
+                prob,
+                str(failure_mode or "UNSPECIFIED_FAILURE"),
+                str(failed_step or ""),
+                constraint,
+                str(repaired_answer or ""),
+                str(domain or "general"),
+                _vec_to_json(vec),
+            ),
+        )
+        self.conn.commit()
+
+    def get_active_avoidance_constraints(
+        self, domain: Optional[str] = None, limit: int = 10
+    ) -> List[str]:
+        """Retrieve recent active negative avoidance constraints to prevent recurrent failure modes."""
+        cur = self.conn.cursor()
+        if domain:
+            cur.execute(
+                """
+                SELECT negative_constraint FROM epistemic_reflexion_memory
+                WHERE domain = ?
+                ORDER BY created_at DESC
+                LIMIT ?;
+                """,
+                (domain, max(1, int(limit))),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT negative_constraint FROM epistemic_reflexion_memory
+                ORDER BY created_at DESC
+                LIMIT ?;
+                """,
+                (max(1, int(limit)),),
+            )
+        rows = cur.fetchall()
+        return [str(r["negative_constraint"]) for r in rows if r["negative_constraint"]]
+
+    def search_relevant_constraints(
+        self, query_text: str, top_k: int = 3, min_similarity: float = 0.40
+    ) -> List[Dict[str, Any]]:
+        """Retrieve negative constraints semantically relevant to the current problem prompt."""
+        q = (query_text or "").strip()
+        if not q:
+            return []
+
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT created_at, problem, failure_mode, failed_step, negative_constraint, repaired_answer, domain, vec
+            FROM epistemic_reflexion_memory
+            ORDER BY created_at DESC
+            LIMIT 100;
+            """
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return []
+
+        q_vec = featurize_text(q)
+        results: List[Dict[str, Any]] = []
+        for r in rows:
+            r_vec = _vec_from_json(str(r["vec"]))
+            sim = float(torch.dot(q_vec, r_vec).item())
+            if sim >= min_similarity:
+                results.append(
+                    {
+                        "problem": str(r["problem"]),
+                        "failure_mode": str(r["failure_mode"]),
+                        "failed_step": str(r["failed_step"]),
+                        "negative_constraint": str(r["negative_constraint"]),
+                        "repaired_answer": str(r["repaired_answer"]),
+                        "domain": str(r["domain"]),
+                        "similarity": sim,
+                    }
+                )
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        return results[:max(1, int(top_k))]
 
     def _fetch_recent_pool(self, pool_size: int) -> List[MemoryRow]:
         cur = self.conn.cursor()
@@ -152,6 +290,9 @@ class ChatMemoryDB:
         return out
 
 
+EpistemicChatMemoryDB = ChatMemoryDB
+
+
 def render_memory_block(memories: Sequence[Dict[str, object]], max_chars: int = 1400) -> str:
     if not memories:
         return ""
@@ -166,6 +307,22 @@ def render_memory_block(memories: Sequence[Dict[str, object]], max_chars: int = 
         lines.append(f"Memory {i} Assistant: {assistant}")
         if len("\n".join(lines)) >= max_chars:
             break
+    block = "\n".join(lines).strip()
+    if len(block) > max_chars:
+        block = block[:max_chars].rstrip()
+    return block
+
+
+def render_epistemic_constraint_block(constraints: Sequence[str], max_chars: int = 800) -> str:
+    """Format active negative avoidance constraints for working memory injection."""
+    if not constraints:
+        return ""
+
+    lines: List[str] = ["Negative Working Memory Constraints (Avoid Previous Proof Failures):"]
+    for i, c in enumerate(constraints, start=1):
+        c_clean = str(c).strip()
+        if c_clean:
+            lines.append(f"- [Constraint {i}] {c_clean}")
     block = "\n".join(lines).strip()
     if len(block) > max_chars:
         block = block[:max_chars].rstrip()

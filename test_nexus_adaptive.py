@@ -38,7 +38,7 @@ def test_adaptive_policy_budget_planning():
 def test_adaptive_policy_rsi_hysteresis():
     cfg = ne.NexusConfig(max_thinking_budget=8)
     q_engine = observatory.BudgetPolicyLearner()
-    
+
     # High RSI oscillator (momentum of novelty/instability)
     rsi_high = ne.RSIMomentumOscillator()
     for _ in range(15):

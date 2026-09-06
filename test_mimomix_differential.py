@@ -1,7 +1,5 @@
-import math
 import pytest
 import torch
-import torch.nn.functional as F
 
 import sys
 from pathlib import Path
@@ -22,7 +20,7 @@ def test_differential_config_validation():
 def test_differential_hybrid_attention_forward():
     cfg = mc.MiMoMixConfig(hidden_size=64, n_heads=4, n_kv_heads=2, head_dim=16, use_differential_attention=True)
     attn = mc.DifferentialHybridAttention(cfg, layer_index=0, kind="global")
-    
+
     bsz, seq_len = 2, 8
     x = torch.randn(bsz, seq_len, cfg.hidden_size)
     positions = torch.arange(seq_len)

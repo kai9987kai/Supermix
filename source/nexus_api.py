@@ -84,6 +84,30 @@ __all__ = [
     "ConwayResponse",
     "ProofRepairRequest",
     "ProofRepairResponse",
+    "CircuitAttributionRequest",
+    "CircuitAttributionResponse",
+    "ComplexityAnalysisRequest",
+    "ComplexityAnalysisResponse",
+    "AutoLoopStepRequest",
+    "AutoLoopStepResponse",
+    "SemanticInvariantsRequest",
+    "SemanticInvariantsResponse",
+    "ActiveInferenceRequest",
+    "ActiveInferenceResponse",
+    "ProofVerifyRequest",
+    "ProofVerifyResponse",
+    "BidirectionalSpeculationRequest",
+    "BidirectionalSpeculationResponse",
+    "EpistemicTreeSearchRequest",
+    "EpistemicTreeSearchResponse",
+    "DiffusionThoughtRequest",
+    "DiffusionThoughtResponse",
+    "ReflexionCorrectionRequest",
+    "ReflexionCorrectionResponse",
+    "ConformalStoppingRequest",
+    "ConformalStoppingResponse",
+    "CausalDAGRequest",
+    "CausalDAGResponse",
     "NexusApiService",
     "create_app",
     "main",
@@ -382,6 +406,300 @@ class ProofRepairResponse:
     repaired_assertions: List[str]
     repair_operations_applied: List[str]
     receipt: Dict[str, Any] = field(default_factory=dict)
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CircuitAttributionRequest:
+    prompt: str
+    target_token: str
+    contrast_token: Optional[str] = None
+    clean_prompt: Optional[str] = None
+    corrupt_prompt: Optional[str] = None
+    patch_layer: Optional[int] = None
+    patch_head: Optional[int] = None
+    test_scratchpad: bool = False
+    trace_steps: List[str] = field(default_factory=list)
+    next_operation: Optional[str] = None
+
+
+@dataclass
+class CircuitAttributionResponse:
+    prompt: str
+    target_token: str
+    components: List[Dict[str, Any]]
+    activation_patch: Optional[Dict[str, Any]] = None
+    causal_register: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ComplexityAnalysisRequest:
+    text: str
+    compare_text: Optional[str] = None
+    window_size: int = 8
+
+
+@dataclass
+class ComplexityAnalysisResponse:
+    profile: Dict[str, Any]
+    ncd_comparison: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class AutoLoopStepRequest:
+    query: str
+    reward_feedback: Optional[float] = None
+    forced_action: Optional[str] = None
+
+
+@dataclass
+class AutoLoopStepResponse:
+    iteration: int
+    active_query: str
+    selected_mode: str
+    rsi_value: float
+    rsi_regime: str
+    reward_awarded: float
+    q_value_updated: float
+    entropy_sample: float
+    complexity_compression_ratio: float
+    loop_status: str
+    step_receipt: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SemanticInvariantsRequest:
+    problem: str
+    ground_truth_answer: Optional[str] = None
+    task_type: str = "arithmetic"
+
+
+@dataclass
+class SemanticInvariantsResponse:
+    canonical_problem: str
+    canonical_answer: str
+    invariant_paraphrase: str
+    operand_reordered: Optional[str]
+    distractor_variant: str
+    contrast_problem: str
+    contrast_expected_answer: str
+    invariance_score: float
+    contrast_distinction_passed: bool
+    all_equivalent_consistent: bool
+    stability_classification: str
+    variants_evaluated: List[Dict[str, Any]]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ActiveInferenceRequest:
+    query: str
+    current_trace_steps: List[str] = field(default_factory=list)
+    local_entropy: float = 0.85
+    rsi_volatility: float = 50.0
+    verification_confidence: float = 0.80
+    has_pending_subgoals: bool = False
+
+
+@dataclass
+class ActiveInferenceResponse:
+    query: str
+    current_state_summary: str
+    local_entropy: float
+    rsi_volatility: float
+    precision_beta: float
+    candidate_actions: List[Dict[str, Any]]
+    selected_action: Dict[str, Any]
+    epistemic_pragmatic_ratio: float
+    diagnostic_summary: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ProofVerifyRequest:
+    problem: str
+    trace_steps: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ProofVerifyResponse:
+    problem: str
+    has_error: bool
+    first_error_index: int
+    error_category: str
+    error_step_text: Optional[str]
+    diagnostic_explanation: str
+    step_records: List[Dict[str, Any]]
+    repaired_trace: List[str]
+    verified_final_answer: Optional[str]
+    proof_fidelity_score: float
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class BidirectionalSpeculationRequest:
+    problem: str
+    candidate_answer: Optional[str] = None
+
+
+@dataclass
+class BidirectionalSpeculationResponse:
+    problem: str
+    forward_draft: str
+    forward_answer: str
+    reverse_draft: str
+    reverse_inferred_premise: str
+    expected_premise: str
+    consistency_score: float
+    is_accepted: bool
+    rejection_reason: Optional[str]
+    diagnostic_summary: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class EpistemicTreeSearchRequest:
+    query: str
+    max_depth: int = 4
+    beam_width: int = 3
+
+
+@dataclass
+class EpistemicTreeSearchResponse:
+    query: str
+    optimal_trace: List[str]
+    verified_answer: Optional[str]
+    total_nodes_evaluated: int
+    pruned_branches_count: int
+    mean_efe: float
+    all_nodes: List[Dict[str, Any]]
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class DiffusionThoughtRequest:
+    problem: str
+    num_timesteps: int = 20
+    guidance_scale: float = 3.0
+    latent_dim: int = 16
+    seed: int = 42
+
+
+@dataclass
+class DiffusionThoughtResponse:
+    problem: str
+    total_steps: int
+    diffusion_trajectory: List[Dict[str, Any]]
+    crystallized_thought: str
+    crystallization_threshold: float
+    is_crystallized: bool
+    stability_drift: float
+    mean_step_jsd: float
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ReflexionCorrectionRequest:
+    problem: str
+    proposed_solution: str
+    ground_truth: Optional[str] = None
+    max_iterations: int = 3
+
+
+@dataclass
+class ReflexionCorrectionResponse:
+    problem: str
+    initial_solution: str
+    corrected_solution: str
+    iterations_used: int
+    is_verified_correct: bool
+    active_constraints: List[str]
+    epistemic_history: List[Dict[str, Any]]
+    diagnostic_summary: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ConformalStoppingRequest:
+    step_entropy: float = 0.4
+    rsi_volatility: float = 40.0
+    verifier_score: float = 0.85
+    step_index: int = 3
+    total_budget: int = 10
+    target_error_rate: float = 0.05
+
+
+@dataclass
+class ConformalStoppingResponse:
+    should_stop: bool
+    step_index: int
+    total_budget: int
+    empirical_nonconformity: float
+    calibrated_threshold: float
+    target_error_rate: float
+    finite_sample_bound: float
+    safety_guaranteed: bool
+    diagnostic_reason: str
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CausalDAGRequest:
+    scenario: str = "physics_newton"
+    treatment_node: str = "force"
+    outcome_node: str = "acceleration"
+    do_value: float = 10.0
+    observed_context: Optional[Dict[str, float]] = None
+
+
+@dataclass
+class CausalDAGResponse:
+    scenario: str
+    treatment_node: str
+    outcome_node: str
+    do_value: float
+    backdoor_adjustment_set: List[str]
+    is_identifiable: bool
+    interventional_estimate: float
+    counterfactual_estimate: Optional[float]
+    causal_graph_nodes: List[str]
+    causal_graph_edges: List[List[str]]
+    diagnostic_explanation: str
     telemetry: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1669,7 +1987,158 @@ class NexusApiService:
             res = self.engine.run_speculative_tree_search(req.query or "")
         return res.to_dict()
 
+    def handle_circuit_attribution(self, req: CircuitAttributionRequest) -> Dict[str, Any]:
+        with self._lock:
+            components = [
+                c.to_dict()
+                for c in self.engine.run_circuit_attribution(
+                    req.prompt, req.target_token, req.contrast_token
+                )
+            ]
+            patch_res = None
+            if req.clean_prompt and req.corrupt_prompt and req.patch_layer is not None:
+                patch_res = self.engine.run_activation_patching(
+                    clean_prompt=req.clean_prompt,
+                    corrupt_prompt=req.corrupt_prompt,
+                    target_token=req.target_token,
+                    layer_to_patch=req.patch_layer,
+                    head_to_patch=req.patch_head,
+                ).to_dict()
 
+            causal_res = None
+            if req.test_scratchpad or req.trace_steps:
+                causal_res = self.engine.run_causal_register_check(
+                    problem=req.prompt,
+                    trace_steps=req.trace_steps,
+                    next_operation=req.next_operation or "step_result",
+                ).to_dict()
+
+        return {
+            "prompt": req.prompt,
+            "target_token": req.target_token,
+            "components": components,
+            "activation_patch": patch_res,
+            "causal_register": causal_res,
+        }
+
+    def handle_complexity_analysis(self, req: ComplexityAnalysisRequest) -> Dict[str, Any]:
+        with self._lock:
+            profile = self.engine.run_complexity_analysis(req.text).to_dict()
+            ncd_res = None
+            if req.compare_text:
+                ncd_res = self.engine.run_ncd_comparison(req.text, req.compare_text).to_dict()
+
+        return {
+            "profile": profile,
+            "ncd_comparison": ncd_res,
+        }
+
+    def handle_autoloop_step(self, req: AutoLoopStepRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_autoloop_step(
+                current_query=req.query,
+                reward_feedback=req.reward_feedback,
+                forced_action=req.forced_action,
+            )
+        return res.to_dict()
+
+    def handle_semantic_invariants(self, req: SemanticInvariantsRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_semantic_invariant_eval(
+                problem=req.problem,
+                ground_truth_answer=req.ground_truth_answer,
+                task_type=req.task_type,
+            )
+        return res.to_dict()
+
+    def handle_active_inference(self, req: ActiveInferenceRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.evaluate_active_inference(
+                query=req.query,
+                current_trace_steps=req.current_trace_steps,
+                local_entropy=req.local_entropy,
+                rsi_volatility=req.rsi_volatility,
+                verification_confidence=req.verification_confidence,
+                has_pending_subgoals=req.has_pending_subgoals,
+            )
+        return res.to_dict()
+
+    def handle_proof_verify(self, req: ProofVerifyRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.locate_first_error(
+                problem=req.problem,
+                trace_steps=req.trace_steps,
+            )
+        return res.to_dict()
+
+    def handle_bidirectional_speculation(self, req: BidirectionalSpeculationRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.verify_bidirectional_speculation(
+                problem=req.problem,
+                candidate_answer=req.candidate_answer,
+            )
+        return res.to_dict()
+
+    def handle_epistemic_tree_search(self, req: EpistemicTreeSearchRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_epistemic_tree_search(
+                query=req.query,
+                max_depth=req.max_depth,
+                beam_width=req.beam_width,
+            )
+        return res.to_dict()
+
+    # ------------------------------------------------------------------ #
+    #  v90 Frontier DoT handlers                                           #
+    # ------------------------------------------------------------------ #
+
+    def handle_diffusion_thought(self, req: DiffusionThoughtRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.denoise_thought_latent(
+                problem=req.problem,
+                num_timesteps=req.num_timesteps,
+                guidance_scale=req.guidance_scale,
+                latent_dim=req.latent_dim,
+                seed=req.seed,
+            )
+        d = res.to_dict()
+        d.update({"answer_authority": False, "status": "analysis_only"})
+        return d
+
+    def handle_reflexion_correction(self, req: ReflexionCorrectionRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.reflexive_self_correct(
+                problem=req.problem,
+                proposed_solution=req.proposed_solution,
+                ground_truth=req.ground_truth,
+                max_iterations=req.max_iterations,
+            )
+        d = res.to_dict()
+        d.update({"answer_authority": False, "status": "analysis_only"})
+        return d
+
+    def handle_conformal_stopping(self, req: ConformalStoppingRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.evaluate_conformal_stopping(
+                step_entropy=req.step_entropy,
+                rsi_volatility=req.rsi_volatility,
+                verifier_score=req.verifier_score,
+                step_index=req.step_index,
+                total_budget=req.total_budget,
+                target_error_rate=req.target_error_rate,
+            )
+        return res.to_dict()
+
+    def handle_causal_dag(self, req: CausalDAGRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.evaluate_causal_dag(
+                scenario=req.scenario,
+                treatment_node=req.treatment_node,
+                outcome_node=req.outcome_node,
+                do_value=req.do_value,
+                observed_context=req.observed_context,
+            )
+        return res.to_dict()
 
     def handle_signals(self) -> Dict[str, Any]:
         with self._lock:
@@ -1683,7 +2152,7 @@ class NexusApiService:
                 }
             )
         return {
-            "service": "NexusMind Experimental Signals Diagnostics v82",
+            "service": "NexusMind Frontier Epistemic Diagnostics v88-v89-v90",
             "q_policy": q_summary,
             "q_policy_role": "disconnected_experiment_not_live_routing",
             "rsi_diagnostic": rsi_diag,
@@ -1697,6 +2166,24 @@ class NexusApiService:
                 "experts": self.engine.config.n_experts,
                 "top_k": self.engine.config.top_k_experts,
                 "auxiliary_loss_free": True,
+            },
+            "v88_frontier_hybrid": {
+                "mechanistic_circuit_prober": True,
+                "complexity_analyzer": True,
+                "continuous_autoloop_engine": True,
+                "semantic_invariant_engine": True,
+            },
+            "v89_frontier_epistemic": {
+                "active_inference_controller": True,
+                "proof_first_error_localizer": True,
+                "bidirectional_speculation_engine": True,
+                "epistemic_tree_search": True,
+            },
+            "v90_frontier_dot": {
+                "diffusion_thought_engine": True,
+                "reflexive_correction_engine": True,
+                "conformal_stopping_controller": True,
+                "causal_dag_engine": True,
             },
         }
 
@@ -1910,12 +2397,13 @@ def create_app(service: Optional[NexusApiService] = None):
         from pydantic import BaseModel, Field
 
         app = FastAPI(
-            title="NexusMind Experimental Evidence API",
+            title="NexusMind Frontier Epistemic Evidence API v89",
             description=(
                 "Verifier-first closed-world answers plus explicitly bounded heuristic "
-                "analysis and neural architecture telemetry."
+                "analysis, neural architecture telemetry, mechanistic interpretability, "
+                "epistemic active inference, and neuro-symbolic proof verification."
             ),
-            version="82.0.0",
+            version="89.0.0",
         )
 
         class PyThinkMessage(BaseModel):
@@ -1927,13 +2415,62 @@ def create_app(service: Optional[NexusApiService] = None):
             prompt: Optional[str] = None
             mode: str = "auto"
             max_output_tokens: int = 256
-            thinking_budget: int = 4
-            tools: List[Dict[str, Any]] = Field(default_factory=list)
+            thinking_budget: Optional[int] = None
+            tools: Optional[List[Dict[str, Any]]] = None
             persona: Optional[str] = None
             session_id: Optional[str] = None
-            entropy_source: Optional[str] = "crypto"
+            entropy_source: Optional[str] = None
             request_nonce: str = ""
             stream: bool = False
+
+        class PyActiveInferenceRequest(BaseModel):
+            query: str
+            current_trace_steps: List[str] = Field(default_factory=list)
+            local_entropy: float = 0.85
+            rsi_volatility: float = 50.0
+            verification_confidence: float = 0.80
+            has_pending_subgoals: bool = False
+
+        class PyProofVerifyRequest(BaseModel):
+            problem: str
+            trace_steps: List[str] = Field(default_factory=list)
+
+        class PyBidirectionalSpeculationRequest(BaseModel):
+            problem: str
+            candidate_answer: Optional[str] = None
+
+        class PyEpistemicTreeSearchRequest(BaseModel):
+            query: str
+            max_depth: int = 4
+            beam_width: int = 3
+
+        class PyDiffusionThoughtRequest(BaseModel):
+            problem: str
+            num_timesteps: int = 20
+            guidance_scale: float = 3.0
+            latent_dim: int = 16
+            seed: int = 42
+
+        class PyReflexionCorrectionRequest(BaseModel):
+            problem: str
+            proposed_solution: str
+            ground_truth: Optional[str] = None
+            max_iterations: int = 3
+
+        class PyConformalStoppingRequest(BaseModel):
+            step_entropy: float = 0.4
+            rsi_volatility: float = 40.0
+            verifier_score: float = 0.85
+            step_index: int = 3
+            total_budget: int = 10
+            target_error_rate: float = 0.05
+
+        class PyCausalDAGRequest(BaseModel):
+            scenario: str = "physics_newton"
+            treatment_node: str = "Force"
+            outcome_node: str = "Acceleration"
+            do_value: float = 10.0
+            observed_context: Optional[Dict[str, Any]] = None
 
         class PyEntropyRequest(BaseModel):
             source: str = "crypto"
@@ -2028,7 +2565,32 @@ def create_app(service: Optional[NexusApiService] = None):
             branching_factor: int = 3
             max_depth: int = 4
 
+        class PyCircuitAttributionRequest(BaseModel):
+            prompt: str
+            target_token: str
+            contrast_token: Optional[str] = None
+            clean_prompt: Optional[str] = None
+            corrupt_prompt: Optional[str] = None
+            patch_layer: Optional[int] = None
+            patch_head: Optional[int] = None
+            test_scratchpad: bool = False
+            trace_steps: List[str] = Field(default_factory=list)
+            next_operation: Optional[str] = None
 
+        class PyComplexityAnalysisRequest(BaseModel):
+            text: str
+            compare_text: Optional[str] = None
+            window_size: int = 8
+
+        class PyAutoLoopStepRequest(BaseModel):
+            query: str
+            reward_feedback: Optional[float] = None
+            forced_action: Optional[str] = None
+
+        class PySemanticInvariantsRequest(BaseModel):
+            problem: str
+            ground_truth_answer: Optional[str] = None
+            task_type: str = "arithmetic"
 
         @app.post("/v1/think")
         async def think_endpoint(req: PyThinkRequest):
@@ -2144,7 +2706,129 @@ def create_app(service: Optional[NexusApiService] = None):
             )
             return svc.handle_speculative_tree(st_req)
 
+        @app.post("/v1/circuits/attribute")
+        async def circuit_attribution_endpoint(req: PyCircuitAttributionRequest):
+            c_req = CircuitAttributionRequest(
+                prompt=req.prompt,
+                target_token=req.target_token,
+                contrast_token=req.contrast_token,
+                clean_prompt=req.clean_prompt,
+                corrupt_prompt=req.corrupt_prompt,
+                patch_layer=req.patch_layer,
+                patch_head=req.patch_head,
+                test_scratchpad=req.test_scratchpad,
+                trace_steps=req.trace_steps,
+                next_operation=req.next_operation,
+            )
+            return svc.handle_circuit_attribution(c_req)
 
+        @app.post("/v1/complexity/analyze")
+        async def complexity_analysis_endpoint(req: PyComplexityAnalysisRequest):
+            c_req = ComplexityAnalysisRequest(
+                text=req.text,
+                compare_text=req.compare_text,
+                window_size=req.window_size,
+            )
+            return svc.handle_complexity_analysis(c_req)
+
+        @app.post("/v1/autoloop/step")
+        async def autoloop_step_endpoint(req: PyAutoLoopStepRequest):
+            a_req = AutoLoopStepRequest(
+                query=req.query,
+                reward_feedback=req.reward_feedback,
+                forced_action=req.forced_action,
+            )
+            return svc.handle_autoloop_step(a_req)
+
+        @app.post("/v1/semantic/invariants")
+        async def semantic_invariants_endpoint(req: PySemanticInvariantsRequest):
+            s_req = SemanticInvariantsRequest(
+                problem=req.problem,
+                ground_truth_answer=req.ground_truth_answer,
+                task_type=req.task_type,
+            )
+            return svc.handle_semantic_invariants(s_req)
+
+        @app.post("/v1/active_inference/decide")
+        async def active_inference_endpoint(req: PyActiveInferenceRequest):
+            a_req = ActiveInferenceRequest(
+                query=req.query,
+                current_trace_steps=req.current_trace_steps,
+                local_entropy=req.local_entropy,
+                rsi_volatility=req.rsi_volatility,
+                verification_confidence=req.verification_confidence,
+                has_pending_subgoals=req.has_pending_subgoals,
+            )
+            return svc.handle_active_inference(a_req)
+
+        @app.post("/v1/proof/verify_steps")
+        async def proof_verify_endpoint(req: PyProofVerifyRequest):
+            p_req = ProofVerifyRequest(
+                problem=req.problem,
+                trace_steps=req.trace_steps,
+            )
+            return svc.handle_proof_verify(p_req)
+
+        @app.post("/v1/speculative/bidirectional")
+        async def bidirectional_speculation_endpoint(req: PyBidirectionalSpeculationRequest):
+            b_req = BidirectionalSpeculationRequest(
+                problem=req.problem,
+                candidate_answer=req.candidate_answer,
+            )
+            return svc.handle_bidirectional_speculation(b_req)
+
+        @app.post("/v1/mcts/epistemic_search")
+        async def epistemic_search_endpoint(req: PyEpistemicTreeSearchRequest):
+            e_req = EpistemicTreeSearchRequest(
+                query=req.query,
+                max_depth=req.max_depth,
+                beam_width=req.beam_width,
+            )
+            return svc.handle_epistemic_tree_search(e_req)
+
+        @app.post("/v1/dot/denoise")
+        async def diffusion_thought_endpoint(req: PyDiffusionThoughtRequest):
+            d_req = DiffusionThoughtRequest(
+                problem=req.problem,
+                num_timesteps=req.num_timesteps,
+                guidance_scale=req.guidance_scale,
+                latent_dim=req.latent_dim,
+                seed=req.seed,
+            )
+            return svc.handle_diffusion_thought(d_req)
+
+        @app.post("/v1/reflexion/correct")
+        async def reflexion_correction_endpoint(req: PyReflexionCorrectionRequest):
+            r_req = ReflexionCorrectionRequest(
+                problem=req.problem,
+                proposed_solution=req.proposed_solution,
+                ground_truth=req.ground_truth,
+                max_iterations=req.max_iterations,
+            )
+            return svc.handle_reflexion_correction(r_req)
+
+        @app.post("/v1/conformal/evaluate")
+        async def conformal_stopping_endpoint(req: PyConformalStoppingRequest):
+            c_req = ConformalStoppingRequest(
+                step_entropy=req.step_entropy,
+                rsi_volatility=req.rsi_volatility,
+                verifier_score=req.verifier_score,
+                step_index=req.step_index,
+                total_budget=req.total_budget,
+                target_error_rate=req.target_error_rate,
+            )
+            return svc.handle_conformal_stopping(c_req)
+
+        @app.post("/v1/causal/dag_query")
+        async def causal_dag_endpoint(req: PyCausalDAGRequest):
+            cq_req = CausalDAGRequest(
+                scenario=req.scenario,
+                treatment_node=req.treatment_node,
+                outcome_node=req.outcome_node,
+                do_value=req.do_value,
+                observed_context=req.observed_context,
+            )
+            return svc.handle_causal_dag(cq_req)
 
         @app.get("/v1/signals")
         async def signals_endpoint():
@@ -2239,7 +2923,7 @@ def create_app(service: Optional[NexusApiService] = None):
             store = svc._ensure_verification_nonce_store()
             return {
                 "status": "ok",
-                "service": "NexusMind Experimental Evidence API v82",
+                "service": "NexusMind Frontier Epistemic Evidence API v88-v89-v90",
                 "answer_policy": epistemics.SELECTIVE_ANSWER_POLICY_VERSION,
                 "verification_nonce_backend": (
                     "sqlite_durable"

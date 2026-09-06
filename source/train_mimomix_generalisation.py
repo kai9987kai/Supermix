@@ -45,13 +45,14 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import torch
 
@@ -83,6 +84,26 @@ from train_mimomix_talk import (  # noqa: E402
 
 RECEIPT_SCHEMA = "supermix-v58-generalisation-benchmark-v1"
 COMPARISON_SCHEMA = "supermix-v58-thinking-core-ablation-v1"
+SELECTION_STATE_SCHEMA = "supermix-v87-selection-state-v1"
+SELECTION_STATE_KEYS = (
+    "selection_state_schema",
+    "select_on",
+    "checkpoint_step",
+    "best_score",
+    "best_step",
+    "best_dev_loss",
+    "best_dev_seen",
+    "best_probe_accuracy",
+    "best_probe_verbatim_rate",
+    "last_accuracy",
+    "batch_generator_state",
+    "torch_rng_state",
+    "cuda_rng_states",
+    "scaler_state",
+    "selection_best_state",
+    "accuracy_probe",
+    "history",
+)
 
 
 def load_corpus_pairs(
@@ -197,6 +218,7 @@ def load_initial_weights(
         # mid-curve resume must match. Absent on pre-v75 checkpoints, where the
         # caller falls back to the completed-step count as before.
         "source_total_steps": extra.get("total_steps"),
+        "source_frozen_split": extra.get("frozen_split"),
         "source_dev_loss": extra.get("best_dev_loss"),
         "missing_keys": sorted(missing),
         "unexpected_keys": sorted(unexpected),
@@ -207,23 +229,10 @@ def load_initial_weights(
         "has_scheduler_state": "scheduler_state" in payload,
         "_optimiser_state": payload.get("optimiser_state"),
         "_scheduler_state": payload.get("scheduler_state"),
-        # Selection state (v82). Without it a resumed leg starts with
-        # best_score = +inf, so its *first* evaluation trivially "improves" and
-        # overwrites a better pre-crash checkpoint with a worse one. Absent on
-        # every checkpoint written before v82, in which case the caller falls
-        # back to the old cold start and says so in the receipt.
+        # Kept private until resume validation; tensors cannot enter the JSON receipt.
         "_selection_state": {
             key: extra.get(key)
-            for key in (
-                "best_score",
-                "best_step",
-                "best_dev_loss",
-                "best_dev_seen",
-                "best_probe_accuracy",
-                "best_probe_verbatim_rate",
-                "last_accuracy",
-                "batch_generator_state",
-            )
+            for key in SELECTION_STATE_KEYS
             if extra.get(key) is not None
         },
         "note": (
@@ -302,6 +311,254 @@ def restore_training_state(
     return applied
 
 
+def selection_state_payload(
+    *,
+    select_on: str,
+    checkpoint_step: int,
+    best_score: float,
+    best_step: int,
+    best_dev_loss: float,
+    best_dev_seen: float,
+    best_probe_accuracy: Optional[float],
+    best_probe_verbatim_rate: Optional[float],
+    last_accuracy: Optional[float],
+    batch_generator: torch.Generator,
+    history: Sequence[Mapping[str, Any]],
+    best_state: Optional[Mapping[str, torch.Tensor]],
+    accuracy_probe: Mapping[str, Any],
+    scaler: Any = None,
+) -> Dict[str, Any]:
+    """State needed to make a crash resume equivalent to the interrupted leg."""
+
+    return {
+        "selection_state_schema": SELECTION_STATE_SCHEMA,
+        "select_on": select_on,
+        "checkpoint_step": int(checkpoint_step),
+        "best_score": float(best_score),
+        "best_step": int(best_step),
+        "best_dev_loss": float(best_dev_loss),
+        "best_dev_seen": float(best_dev_seen),
+        "best_probe_accuracy": best_probe_accuracy,
+        "best_probe_verbatim_rate": best_probe_verbatim_rate,
+        "last_accuracy": last_accuracy,
+        "batch_generator_state": batch_generator.get_state().cpu().clone(),
+        "torch_rng_state": torch.get_rng_state().clone(),
+        "cuda_rng_states": (
+            [state.cpu().clone() for state in torch.cuda.get_rng_state_all()]
+            if torch.cuda.is_initialized() else []
+        ),
+        "scaler_state": scaler.state_dict() if scaler is not None else None,
+        # One atomic recovery file binds the old best weights to its score even
+        # if a crash interrupts a subsequent selected/partial pair of writes.
+        "selection_best_state": (
+            {key: value.detach().cpu().clone() for key, value in best_state.items()}
+            if best_state is not None else None
+        ),
+        "accuracy_probe": dict(accuracy_probe),
+        "history": [dict(entry) for entry in history],
+    }
+
+
+def restore_resume_selection_state(
+    provenance: Optional[Dict[str, Any]],
+    *,
+    start_step: int,
+    select_on: str,
+    batch_generator: torch.Generator,
+    model: MiMoMixModel,
+    accuracy_probe: Mapping[str, Any],
+    scaler: Any = None,
+) -> Dict[str, Any]:
+    """Restore selection and sampling state only for a genuine crash resume.
+
+    ``--init_from`` with ``--start_step 0`` is a warm start on a new curve. Its
+    checkpoint's best score, batch stream and history belong to the old run and
+    must not leak into the new selection decision.
+    """
+
+    cold = {
+        "restored": False,
+        "best_score": float("inf"),
+        "best_step": 0,
+        "best_dev_loss": float("inf"),
+        "best_dev_seen": float("inf"),
+        "best_probe_accuracy": None,
+        "best_probe_verbatim_rate": None,
+        "last_accuracy": None,
+        "history": [],
+        "best_state": None,
+    }
+    stored = provenance.pop("_selection_state", {}) if provenance is not None else {}
+    if start_step <= 0:
+        if provenance is not None and stored:
+            provenance["selection_state_restore"] = {
+                "restored": False,
+                "reason": "warm_start",
+            }
+        return cold
+
+    if stored.get("selection_state_schema") != SELECTION_STATE_SCHEMA:
+        raise ValueError(
+            "crash resume needs complete selection and RNG state; this legacy "
+            "checkpoint supports a warm start with --start_step 0 instead"
+        )
+
+    if stored.get("select_on") != select_on:
+        raise ValueError(
+            "resume checkpoint selected on "
+            f"{stored.get('select_on')!r}, not this run's {select_on!r}"
+        )
+    if int(stored.get("checkpoint_step", -1)) != int(start_step):
+        raise ValueError(
+            "resume selection state is bound to step "
+            f"{stored.get('checkpoint_step')}, not --start_step {start_step}"
+        )
+
+    if stored.get("accuracy_probe") != dict(accuracy_probe):
+        raise ValueError("resume accuracy probe differs in tasks, prompts, answers or token budget")
+
+    history = stored.get("history")
+    if not isinstance(history, list) or not all(isinstance(row, dict) for row in history):
+        raise ValueError("resume selection state has invalid training history")
+
+    restored = {
+        "restored": True,
+        "best_score": float(stored["best_score"]),
+        "best_step": int(stored["best_step"]),
+        "best_dev_loss": float(stored["best_dev_loss"]),
+        "best_dev_seen": float(stored["best_dev_seen"]),
+        "best_probe_accuracy": stored.get("best_probe_accuracy"),
+        "best_probe_verbatim_rate": stored.get("best_probe_verbatim_rate"),
+        "last_accuracy": stored.get("last_accuracy"),
+        "history": [dict(row) for row in history],
+    }
+    best_step = restored["best_step"]
+    if not 0 <= best_step <= start_step:
+        raise ValueError("resume best_step is outside the completed training interval")
+    for key in ("best_score", "best_dev_loss", "best_dev_seen"):
+        value = restored[key]
+        if math.isnan(value) or value == -float("inf") or (best_step and not math.isfinite(value)):
+            raise ValueError(f"resume selection state has invalid {key}")
+    for key in ("best_probe_accuracy", "best_probe_verbatim_rate", "last_accuracy"):
+        value = restored[key]
+        if value is not None and (not math.isfinite(value) or not 0 <= value <= 1):
+            raise ValueError(f"resume selection state has invalid {key}")
+    if best_step and select_on == "accuracy" and restored["best_probe_accuracy"] is None:
+        raise ValueError("resume accuracy selection omits the selected checkpoint's measurement")
+    if not history or history[-1].get("step") != start_step:
+        raise ValueError("resume history does not end at the checkpoint step")
+    restored["best_state"] = (
+        validate_selected_weights(stored.get("selection_best_state"), model)
+        if best_step else None
+    )
+
+    # Validate the RNG blobs before mutating either stream.
+    states = []
+    for name in ("batch_generator_state", "torch_rng_state"):
+        state = stored.get(name)
+        if not isinstance(state, torch.Tensor):
+            raise ValueError(f"resume state omits {name}")
+        torch.Generator().set_state(state.cpu())
+        states.append(state.cpu())
+    cuda_states = stored.get("cuda_rng_states", [])
+    if cuda_states and (not torch.cuda.is_available() or len(cuda_states) != torch.cuda.device_count()):
+        raise ValueError("resume CUDA RNG state requires the original CUDA device count")
+    scaler_state = stored.get("scaler_state")
+    if (scaler is not None) != (scaler_state is not None):
+        raise ValueError("resume AMP scaler configuration differs from the checkpoint")
+    if scaler is not None:
+        scaler.load_state_dict(scaler_state)
+    batch_generator.set_state(states[0])
+    torch.set_rng_state(states[1])
+    if cuda_states:
+        torch.cuda.set_rng_state_all(cuda_states)
+    if provenance is not None:
+        provenance["selection_state_restore"] = {
+            "restored": True,
+            "checkpoint_step": int(start_step),
+            "best_step": restored["best_step"],
+            "history_entries": len(history),
+        }
+    return restored
+
+
+def validate_selected_weights(stored: Any, model: MiMoMixModel) -> Dict[str, torch.Tensor]:
+    """Check the embedded selection-best weights before accepting their score."""
+    current = model.state_dict()
+    if not isinstance(stored, dict) or set(stored) != set(current):
+        raise ValueError("resume checkpoint omits compatible selection-best weights")
+    if not all(isinstance(value, torch.Tensor) for value in stored.values()):
+        raise ValueError("resume selection-best weights contain non-tensors")
+    incompatible = {
+        key: (tuple(stored[key].shape), tuple(current[key].shape))
+        for key in current
+        if stored[key].shape != current[key].shape
+    }
+    if incompatible:
+        raise ValueError(
+            "resume checkpoint has incompatible selected weights, e.g. "
+            f"{next(iter(incompatible.items()))}"
+        )
+    return {key: value.detach().cpu().clone() for key, value in stored.items()}
+
+
+def save_progress_checkpoints(
+    *,
+    output_dir: Path,
+    run_name: str,
+    model: MiMoMixModel,
+    tokenizer: text_utils.WordTokenizer,
+    extra: Mapping[str, Any],
+    selection_improved: bool,
+    dev_improved: bool,
+    optimiser: torch.optim.Optimizer,
+    scheduler: Any,
+) -> None:
+    """Persist independent selection-best and latest-recovery checkpoints."""
+
+    if selection_improved:
+        selected_extra = dict(extra)
+        for key in ("selection_best_state", "batch_generator_state", "torch_rng_state", "cuda_rng_states", "scaler_state"):
+            selected_extra.pop(key, None)
+        selected_extra.update(
+            {
+                "written_because": "selection",
+                "is_selection_best": True,
+                "selection_checkpoint": True,
+                "partial": False,
+            }
+        )
+        save_talk_checkpoint(
+            output_dir / f"{run_name}.selected.pt",
+            model,
+            tokenizer,
+            extra=selected_extra,
+        )
+
+    if selection_improved or dev_improved:
+        recovery_extra = dict(extra)
+        recovery_extra.update(
+            {
+                "written_because": "selection" if selection_improved else "dev_loss",
+                "is_selection_best": selection_improved,
+                "selection_checkpoint": False,
+                "partial": True,
+                "note": (
+                    "written mid-run for crash recovery; matching selection-best "
+                    "weights are embedded in selection_best_state"
+                ),
+            }
+        )
+        save_talk_checkpoint(
+            output_dir / f"{run_name}.partial.pt",
+            model,
+            tokenizer,
+            extra=recovery_extra,
+            optimiser=optimiser,
+            scheduler=scheduler,
+        )
+
+
 #: Weight on the verbatim rate in the ``balanced`` criterion, in nats per unit of
 #: verbatim fraction. 0.5 means a checkpoint reciting 20% more of its training
 #: text must be 0.1 nats better on dev to be preferred -- roughly the size of the
@@ -348,20 +605,55 @@ def probe_accuracy(
     selecting against a signal that could not see them.
     """
 
-    if not problems:
-        return None
+    return probe_accuracy_report(model, tokenizer, problems, max_new_tokens)["accuracy"]
+
+
+def probe_accuracy_report(
+    model, tokenizer, problems, max_new_tokens: int = DEFAULT_PROBE_MAX_NEW_TOKENS
+) -> Dict[str, Any]:
+    """Measure the aggregate and task counts from the same generated replies."""
+
     was_training = model.training
     model.eval()
     correct = 0
+    by_task: Dict[str, Dict[str, Any]] = {}
     try:
         for problem in problems:
             reply = generate_reply(model, tokenizer, problem.prompt, max_new_tokens)
             text = reply["reply"] if isinstance(reply, dict) else str(reply)
-            if solving.is_correct(solving.extract_answer(text), problem.answer):
-                correct += 1
+            matched = int(solving.is_correct(solving.extract_answer(text), problem.answer))
+            correct += matched
+            counts = by_task.setdefault(problem.task, {"correct": 0, "total": 0})
+            counts["correct"] += matched
+            counts["total"] += 1
     finally:
         model.train(was_training)
-    return correct / len(problems)
+    for counts in by_task.values():
+        counts["accuracy"] = counts["correct"] / counts["total"]
+    return {
+        "accuracy": correct / len(problems) if problems else None,
+        "correct": correct,
+        "total": len(problems),
+        "by_task": by_task,
+    }
+
+
+def accuracy_probe_manifest(problems, tasks, seed: int, max_new_tokens: int) -> Dict[str, Any]:
+    """Bind the complete ordered exam, including answers, to its recorded settings."""
+
+    records = [
+        {"task": problem.task, "prompt": problem.prompt, "answer": problem.answer}
+        for problem in problems
+    ]
+    encoded = json.dumps(records, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return {
+        "tasks": list(tasks),
+        "seed": int(seed),
+        "problems": len(problems),
+        "max_new_tokens": int(max_new_tokens),
+        "prompts_sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "generator_fingerprint": solving.generator_fingerprint(tasks) if tasks else None,
+    }
 
 
 def task_labelled_rows(
@@ -460,7 +752,7 @@ def selection_score(
         # accuracy fall back to dev loss, scaled small enough that it can never
         # outweigh a whole percentage point of correctness.
         if accuracy is None:
-            return dev_loss
+            return float("inf")
         return -accuracy + min(dev_loss, 1.0) * 1e-3
     if criterion == "dev_loss" or verbatim is None:
         return dev_loss
@@ -531,27 +823,42 @@ def generalisation_gap(scored: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> Dict[str, Any]:
+    validate_resume_settings(args)
+    validate_selection_settings(args)
     torch.manual_seed(args.seed)
     if args.torch_threads:
         torch.set_num_threads(max(1, args.torch_threads))
     device, device_info = resolve_device(args.device, preference=args.device_preference)
 
     corpus_jsonl = getattr(args, "corpus_jsonl", None)
-    pairs = load_corpus_pairs(
-        args.database,
-        limit=args.pairs,
-        corpus_jsonl=corpus_jsonl,
-        min_response_characters=getattr(args, "min_response_characters", 8),
-    )
-    split = splits.build_generalisation_split(
-        pairs,
-        dev_fraction=args.dev_fraction,
-        test_fraction=args.test_fraction,
-        target_row_fraction=args.tier3_row_fraction,
-        max_row_fraction_per_sentence=args.max_row_fraction_per_sentence,
-        seed=args.split_seed,
-        source=corpus_jsonl or args.database,
-    )
+    frozen_split = None
+    if getattr(args, "frozen_split", None):
+        from v87_frozen_split import load_frozen_split
+
+        if not corpus_jsonl or not getattr(args, "turn_aligned_packing", False):
+            raise ValueError("--frozen_split requires --corpus_jsonl and --turn_aligned_packing")
+        split, frozen_split = load_frozen_split(
+            corpus_jsonl, args.frozen_split, limit=args.pairs,
+            min_response_characters=getattr(args, "min_response_characters", 8),
+        )
+        if args.split_seed != frozen_split["seed"]:
+            raise ValueError("--split_seed differs from the frozen split receipt")
+    else:
+        pairs = load_corpus_pairs(
+            args.database,
+            limit=args.pairs,
+            corpus_jsonl=corpus_jsonl,
+            min_response_characters=getattr(args, "min_response_characters", 8),
+        )
+        split = splits.build_generalisation_split(
+            pairs,
+            dev_fraction=args.dev_fraction,
+            test_fraction=args.test_fraction,
+            target_row_fraction=args.tier3_row_fraction,
+            max_row_fraction_per_sentence=args.max_row_fraction_per_sentence,
+            seed=args.split_seed,
+            source=corpus_jsonl or args.database,
+        )
     verification = splits.verify_split(split)
 
     # Vocabulary from the training rows only. Building it over the whole corpus
@@ -596,6 +903,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     init_provenance: Optional[Dict[str, Any]] = None
     if initialised_from:
         init_provenance = load_initial_weights(model, tokenizer, initialised_from)
+        if args.start_step > 0 and frozen_split != init_provenance.get("source_frozen_split"):
+            raise ValueError("crash recovery requires the identical frozen split and corpus receipt")
         print(f"  init_from    {initialised_from} "
               f"({init_provenance['source_steps']} prior steps)")
 
@@ -652,7 +961,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         source_steps = init_provenance.get("source_total_steps")
         if source_steps is None:
             source_steps = init_provenance.get("source_steps")
-        if source_steps is not None and int(source_steps) != int(args.steps):
+        if args.start_step == 0:
+            init_provenance["_scheduler_state"] = None
+            init_provenance["scheduler_skipped"] = "warm start begins a fresh learning-rate curve"
+        elif source_steps is not None and int(source_steps) != int(args.steps):
             init_provenance["_scheduler_state"] = None
             init_provenance["scheduler_skipped"] = (
                 f"source ran {source_steps} steps against this run's {args.steps}; "
@@ -686,28 +998,22 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 "to warm-start on a fresh curve instead."
             )
 
-    history: List[Dict[str, Any]] = []
     generator = torch.Generator().manual_seed(args.seed)
-    best_dev = float("inf")
-    best_score = float("inf")
-    # Tracked separately from `best_score` so crash-safety writes stay
-    # frequent even when the selection criterion rarely moves.
-    best_dev_seen = float("inf")
-    best_verbatim: Optional[float] = None
-    best_accuracy: Optional[float] = None
     # Sampled fresh, never from the corpus, so a memorised answer scores 0.
+    accuracy_tasks = list(getattr(args, "accuracy_task", None) or solving.GENERATORS)
     accuracy_probes = (
-        solving.generate_novel(args.accuracy_problems, seed=args.seed + 900)
+        solving.generate_novel(args.accuracy_problems, seed=args.seed + 900, tasks=accuracy_tasks)
         if args.accuracy_every > 0 else []
+    )
+    probe_manifest = accuracy_probe_manifest(
+        accuracy_probes, accuracy_tasks if accuracy_probes else [], args.seed + 900, probe_cap
     )
     # Built only when a criterion needs it: indexing costs ~30s, and the
     # default criterion must not pay for a feature it does not use.
     recall = None
-    if args.select_on != "dev_loss" and corpus_jsonl:
+    if args.select_on in ("novelty", "balanced") and corpus_jsonl:
         recall = recall_index.RecallIndex.from_jsonl(corpus_jsonl)
         print(f"  recall index  {recall.hashes.size:,} windows / {recall.rows:,} rows")
-    best_state: Optional[Dict[str, torch.Tensor]] = None
-    best_step = 0
     started = time.perf_counter()
     running, seen = 0.0, 0
 
@@ -725,6 +1031,21 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # fp16 needs loss scaling to keep small gradients from flushing to zero;
     # bf16 has the exponent range of fp32 and does not.
     scaler = torch.amp.GradScaler(device.type) if args.amp == "fp16" else None
+    resumed = restore_resume_selection_state(
+        init_provenance,
+        start_step=args.start_step,
+        select_on=args.select_on,
+        batch_generator=generator,
+        model=model,
+        accuracy_probe=probe_manifest,
+        scaler=scaler,
+    )
+    history: List[Dict[str, Any]] = resumed["history"]
+    best_dev, best_score = resumed["best_dev_loss"], resumed["best_score"]
+    best_dev_seen = resumed["best_dev_seen"]
+    best_verbatim, best_accuracy = resumed["best_probe_verbatim_rate"], resumed["best_probe_accuracy"]
+    best_state, best_step = resumed["best_state"], resumed["best_step"]
+    last_accuracy = resumed["last_accuracy"]
 
     # `--start_step` resumes mid-curve: the run keeps the *same* `--steps`
     # OneCycle schedule and simply picks up where the crashed leg stopped, so
@@ -773,7 +1094,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             if accuracy_probes and (
                 step % args.accuracy_every == 0 or step == args.steps
             ):
-                accuracy = probe_accuracy(model, tokenizer, accuracy_probes)
+                accuracy_report = probe_accuracy_report(
+                    model, tokenizer, accuracy_probes, max_new_tokens=probe_cap
+                )
+                accuracy = accuracy_report["accuracy"]
             entry = {
                 "step": step,
                 "train_lm_loss": round(running / max(1, seen), 6),
@@ -785,24 +1109,25 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 entry["probe_verbatim_rate"] = round(verbatim, 4)
             if accuracy is not None:
                 entry["probe_accuracy"] = round(accuracy, 4)
+                entry["probe_by_task"] = accuracy_report["by_task"]
             history.append(entry)
             running, seen = 0.0, 0
 
-            # Carry the last measured accuracy forward: it is sampled less
-            # often than dev loss, and a step with no fresh measurement
-            # should not be scored as if accuracy were unknown.
+            # Retain the last reading for recovery, but selection requires this
+            # checkpoint's own measurement. A previous step's accuracy cannot
+            # justify promoting these different weights on a loss tie-break.
             if accuracy is not None:
                 last_accuracy = accuracy
             score = selection_score(
                 args.select_on, dev_metrics["loss"], verbatim,
-                locals().get("last_accuracy"),
+                accuracy,
             )
             selection_improved = score < best_score
             if selection_improved:
                 best_score = score
                 best_dev = dev_metrics["loss"]
                 best_verbatim = verbatim
-                best_accuracy = locals().get("last_accuracy")
+                best_accuracy = accuracy
                 best_step = step
                 best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
@@ -824,16 +1149,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             if dev_improved:
                 best_dev_seen = dev_metrics["loss"]
             if args.checkpoint_every_improvement and (selection_improved or dev_improved):
-                save_talk_checkpoint(
-                    output_dir / f"{args.run_name}.partial.pt",
-                    model,
-                    tokenizer,
+                save_progress_checkpoints(
+                    output_dir=output_dir,
+                    run_name=args.run_name,
+                    model=model,
+                    tokenizer=tokenizer,
                     extra={
                         "run_name": args.run_name,
                         "arm": args.arm,
-                        "best_dev_loss": round(best_dev, 6),
                         "dev_loss_at_write": round(dev_metrics["loss"], 6),
-                        "best_step": best_step,
                         "steps": step,
                         # Steps *completed* and the length of the schedule they
                         # were completed on are different numbers. A resume
@@ -842,18 +1166,28 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                         # mid-run checkpoint look like a differently-shaped run.
                         "total_steps": args.steps,
                         "start_step": args.start_step,
-                        "select_on": args.select_on,
-                        "written_because": (
-                            "selection" if selection_improved else "dev_loss"
-                        ),
-                        "is_selection_best": selection_improved,
-                        "partial": True,
-                        "note": (
-                            "written mid-run for crash recovery; holds the "
-                            "selection-best weights only when is_selection_best "
-                            "is true"
+                        "corpus_jsonl": str(corpus_jsonl) if corpus_jsonl else None,
+                        "frozen_split": frozen_split,
+                        "database": str(args.database) if args.database else None,
+                        **selection_state_payload(
+                            select_on=args.select_on,
+                            checkpoint_step=step,
+                            best_score=best_score,
+                            best_step=best_step,
+                            best_dev_loss=best_dev,
+                            best_dev_seen=best_dev_seen,
+                            best_probe_accuracy=best_accuracy,
+                            best_probe_verbatim_rate=best_verbatim,
+                            last_accuracy=last_accuracy,
+                            batch_generator=generator,
+                            history=history,
+                            best_state=best_state,
+                            accuracy_probe=probe_manifest,
+                            scaler=scaler,
                         ),
                     },
+                    selection_improved=selection_improved,
+                    dev_improved=dev_improved,
                     optimiser=optimiser,
                     scheduler=scheduler,
                 )
@@ -861,7 +1195,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 f"step {step:>5}/{args.steps}  train {history[-1]['train_lm_loss']:.4f}  "
                 f"dev {dev_metrics['loss']:.4f}  ppl {dev_metrics['perplexity']:.2f}  "
                 + (f"acc {accuracy:.2f}  " if accuracy is not None else "")
-                + 
+                +
                 f"{history[-1]['elapsed_seconds']:.0f}s",
                 flush=True,
             )
@@ -896,6 +1230,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "architecture": "mimomix_core.MiMoMixModel (v53), unmodified",
         "split": split.report(tokenizer),
         "split_verification": verification,
+        "frozen_split": frozen_split,
         "held_out_sentences": split.held_out_sentences,
         "tokenizer": tokenizer.vocabulary_report([a for _, a in split.dev]),
         "config": config.to_dict(),
@@ -922,6 +1257,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "min_response_characters": getattr(args, "min_response_characters", None),
             "max_vocab": getattr(args, "max_vocab", None),
             "corpus_jsonl": str(corpus_jsonl) if corpus_jsonl else None,
+            "frozen_split_sha256": frozen_split["receipt_sha256"] if frozen_split else None,
             "amp": getattr(args, "amp", None),
             "decay_mode": getattr(args, "decay_mode", None),
             "repeat_subset_fraction": getattr(args, "repeat_subset_fraction", None),
@@ -934,6 +1270,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "probe_max_new_tokens": probe_cap,
         },
         "probe_token_budget": token_budget,
+        "accuracy_probe": probe_manifest,
         "device": str(device_info.get("resolved", device)),
         "train_seconds": train_seconds,
         "history": history,
@@ -1000,6 +1337,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "steps": args.steps,
             "total_steps": args.steps,
             "start_step": args.start_step,
+            "accuracy_probe": probe_manifest,
+            "selection_checkpoint": True,
+            "is_selection_best": True,
+            "note": "selected weights for inference or warm start; use partial.pt for crash recovery",
             # The corpus travels with the weights. `eval_problem_solving`'s
             # "seen" arm is only a memorisation control if its rows are rows
             # this checkpoint trained on, and until v85 that arm defaulted to a
@@ -1008,11 +1349,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             # a memorisation gap. A checkpoint that carries its own corpus lets
             # the benchmark check instead of assume.
             "corpus_jsonl": str(corpus_jsonl) if corpus_jsonl else None,
+            "frozen_split": frozen_split,
             "database": str(args.database) if getattr(args, "database", None) else None,
             "created_at": report["created_at"],
         },
-        optimiser=optimiser,
-        scheduler=scheduler,
     )
     atomic_json(output_dir / "generalisation_results.json", report)
     return report
@@ -1120,6 +1460,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tier3_row_fraction", type=float, default=0.02)
     parser.add_argument("--max_row_fraction_per_sentence", type=float, default=0.002)
     parser.add_argument("--split_seed", type=int, default=58)
+    parser.add_argument("--frozen_split", default=None,
+                        help="v87 original-source row split receipt; requires JSONL and turn-aligned packing")
     parser.add_argument(
         "--amp",
         choices=("off", "bf16", "fp16"),
@@ -1147,6 +1489,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=20,
         help="problems per accuracy probe; generation is slow on CPU",
+    )
+    parser.add_argument(
+        "--accuracy_task",
+        action="append",
+        choices=tuple(solving.GENERATORS),
+        default=None,
+        help="repeat to pin the ordered task list used by every accuracy probe",
     )
     parser.add_argument(
         "--select_on",

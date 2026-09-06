@@ -33,7 +33,9 @@ queueing behind a lock -- a fast honest refusal beats an unbounded wait.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import sys
 import threading
 import time
@@ -43,20 +45,20 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import torch
-import torch.nn.functional as F
 
 SOURCE_DIR = Path(__file__).resolve().parent
 if str(SOURCE_DIR) not in sys.path:
     sys.path.append(str(SOURCE_DIR))
 
 import mimomix_text as text_utils  # noqa: E402
-import answer_check
+import answer_check  # noqa: E402
 import prompt_normaliser  # noqa: E402
 import eval_problem_solving as solving  # noqa: E402
 import recall_index  # noqa: E402
 from train_mimomix_talk import load_talk_checkpoint  # noqa: E402
 
 MAX_NEW_TOKENS = 256
+DEFAULT_MAX_NEW_TOKENS = solving.DEFAULT_MAX_NEW_TOKENS
 #: Hard cap on prompt+history tokens fed to the model. Older turns fall off the
 #: front rather than growing without bound.
 MAX_CONTEXT = 512
@@ -168,6 +170,33 @@ class ModelRegistry:
 # -- generation -------------------------------------------------------------
 
 
+@dataclass
+class GenerationProgress:
+    tokens: int = 0
+    finish_reason: str = "length"
+
+
+def generation_details(reply: str, progress: GenerationProgress, cap: int) -> Dict[str, Any]:
+    return {
+        "tokens": progress.tokens,
+        "max_new_tokens": cap,
+        "finish_reason": progress.finish_reason,
+        "hit_token_cap": progress.finish_reason == "length",
+        "truncated": solving.is_truncated(reply, progress.tokens, cap),
+    }
+
+
+def check_reply(message: str, reply: str):
+    verdict = answer_check.check(message, reply)
+    covered = (set(prompt_normaliser.LEAD_IN) | set(prompt_normaliser.SCIENCE_LEAD_IN)
+               | {"arithmetic", "average", "percent", "two_step", "sequence", "algebra_one_step"})
+    # A substring checker must not undo the full-request parser's refusal.
+    # Keep the separate checker families (e.g. bounded code traces) unchanged.
+    if verdict is not None and verdict.task in covered and prompt_normaliser.normalise(message).rule is None:
+        return None
+    return verdict
+
+
 def stream_tokens(
     loaded: LoadedModel,
     message: str,
@@ -177,6 +206,7 @@ def stream_tokens(
     top_p: float,
     greedy: bool,
     should_stop,
+    progress: Optional[GenerationProgress] = None,
 ) -> Iterator[str]:
     """Yield decoded text incrementally.
 
@@ -187,6 +217,7 @@ def stream_tokens(
     stops the work instead of paying for a reply nobody will read.
     """
 
+    progress = progress if progress is not None else GenerationProgress()
     tokenizer = loaded.tokenizer
     # Prior turns first, so the model sees the conversation rather than an
     # isolated question. The single-model app carried history and this server
@@ -203,6 +234,7 @@ def stream_tokens(
     with torch.no_grad():
         for _ in range(max_new_tokens):
             if should_stop():
+                progress.finish_reason = "cancelled"
                 break
             window = torch.tensor([ids + generated][0][-MAX_CONTEXT:], dtype=torch.long).unsqueeze(0)
             logits = loaded.model(window, return_mtp=False).logits[0, -1]
@@ -220,8 +252,10 @@ def stream_tokens(
                 nxt = int(order[keep][choice])
 
             if nxt == text_utils.EOS:
+                progress.finish_reason = "eos"
                 break
             generated.append(nxt)
+            progress.tokens += 1
 
             # Decode the whole reply each step and emit only the new suffix:
             # tokens carry their own leading whitespace, so decoding one at a
@@ -275,6 +309,19 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    def integer_option(payload, key, default, minimum, maximum):
+        value = payload.get(key, default)
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ValueError(f"{key} must be an integer from {minimum} to {maximum}")
+        return value
+
+    def float_option(payload, key, default, minimum, maximum):
+        value = payload.get(key, default)
+        if (type(value) not in (int, float) or not math.isfinite(value)
+                or not minimum <= value <= maximum):
+            raise ValueError(f"{key} must be a finite number from {minimum} to {maximum}")
+        return float(value)
+
     def read_request() -> Tuple[Dict[str, Any], Optional[str]]:
         payload = flask_request.get_json(silent=True)
         if not isinstance(payload, dict):
@@ -285,9 +332,21 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
         if len(message) > MAX_MESSAGE_CHARACTERS:
             return {}, "message is too long"
         name = payload.get("model") or registry.names()[0]
-        if name not in registry.spec:
+        if not isinstance(name, str) or name not in registry.spec:
             return {}, f"unknown model {name!r}"
         session_id = payload.get("session_id")
+        if session_id is not None and not isinstance(session_id, str):
+            return {}, "session_id must be a string"
+        if type(payload.get("check", True)) is not bool:
+            return {}, "check must be a boolean"
+        if payload.get("mode", "greedy") not in ("greedy", "sample"):
+            return {}, "mode must be greedy or sample"
+        try:
+            cap = integer_option(payload, "max_new_tokens", DEFAULT_MAX_NEW_TOKENS, 1, MAX_NEW_TOKENS)
+            temperature = float_option(payload, "temperature", 0.9, 0.05, 2.0)
+            top_p = float_option(payload, "top_p", 0.9, 0.05, 1.0)
+        except ValueError as exc:
+            return {}, str(exc)
         # Map how a person writes an operation onto the token v74 was trained
         # on. Measured: "what is 47 times 6" answers 242, "What is 47 x 6?"
         # answers 282. The rewrite is reported back so the interface can show
@@ -302,15 +361,16 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             "model": name,
             "session_id": session_id if isinstance(session_id, str) and session_id else "default",
             "check": bool(payload.get("check", True)),
-            "max_new_tokens": max(1, min(int(payload.get("max_new_tokens", 64)), MAX_NEW_TOKENS)),
-            "temperature": max(0.05, min(float(payload.get("temperature", 0.9)), 2.0)),
-            "top_p": max(0.05, min(float(payload.get("top_p", 0.9)), 1.0)),
+            "max_new_tokens": cap,
+            "temperature": temperature,
+            "top_p": top_p,
             "greedy": payload.get("mode", "greedy") == "greedy",
         }, None
 
     @app.get("/")
     def index():
-        return Response(PAGE, mimetype="text/html")
+        return Response(PAGE.replace("__DEFAULT_MAX_NEW_TOKENS__", str(DEFAULT_MAX_NEW_TOKENS)),
+                        mimetype="text/html")
 
     @app.get("/api/models")
     def models():
@@ -326,11 +386,13 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
 
         started = time.perf_counter()
         pieces: List[str] = []
+        progress = GenerationProgress()
         with loaded.lock:
             for chunk in stream_tokens(
                 loaded, message, [], options["max_new_tokens"],
                 options["temperature"], options["top_p"], options["greedy"],
                 should_stop=lambda: False,
+                progress=progress,
             ):
                 pieces.append(chunk)
         elapsed = time.perf_counter() - started
@@ -339,11 +401,13 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             "model": loaded.name,
             "reply": reply,
             "latency_ms": round(elapsed * 1000, 2),
+            **generation_details(reply, progress, options["max_new_tokens"]),
         }
         if loaded.recall is not None:
             result["recall"] = loaded.recall.score(reply).to_dict()
-        verdict = answer_check.check(message, reply)
-        result["check"] = verdict.to_dict() if verdict else None
+        if options.get("check", True):
+            verdict = check_reply(message, reply)
+            result["check"] = verdict.to_dict() if verdict else None
         return result
 
     @app.post("/api/compare")
@@ -360,8 +424,8 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
         if error:
             return no_store({"error": error}, 400)
         payload = flask_request.get_json(silent=True) or {}
-        names = payload.get("models") or registry.names()
-        if not isinstance(names, list) or not names:
+        names = payload.get("models", registry.names())
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
             return no_store({"error": "models must be a non-empty list"}, 400)
         unknown = [n for n in names if n not in registry.spec]
         if unknown:
@@ -391,6 +455,9 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             }
             return no_store({
                 "message": options["message"],
+                "asked": options["asked"],
+                "asked_as": options["message"],
+                "normalised_rule": options["normalised_rule"],
                 "results": results,
                 # Only meaningful when the question was checkable at all.
                 "answers_agree": (len(agree) <= 1) if agree else None,
@@ -400,18 +467,20 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
 
     @app.post("/api/benchmark")
     def benchmark():
-        """Score a model on freshly generated problems, from the browser.
+        """Run a small reproducible development sample with evaluator settings."""
 
-        The same generators `eval_problem_solving` uses, so the number here and
-        the number in a receipt mean the same thing. Capped small because
-        generation is slow on CPU and this holds an admission slot.
-        """
-
-        payload = flask_request.get_json(silent=True) or {}
+        payload = flask_request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return no_store({"error": "request body must be a JSON object"}, 400)
         name = payload.get("model") or registry.names()[0]
-        if name not in registry.spec:
+        if not isinstance(name, str) or name not in registry.spec:
             return no_store({"error": f"unknown model {name!r}"}, 400)
-        count = max(1, min(int(payload.get("problems", 20)), 60))
+        try:
+            count = integer_option(payload, "problems", 20, 1, 60)
+            seed = integer_option(payload, "seed", 65, -(2 ** 63), 2 ** 63 - 1)
+            cap = integer_option(payload, "max_new_tokens", DEFAULT_MAX_NEW_TOKENS, 1, MAX_NEW_TOKENS)
+        except ValueError as exc:
+            return no_store({"error": str(exc)}, 400)
 
         if not admission.acquire(blocking=False):
             response = no_store({"error": "server busy"}, 503)
@@ -419,15 +488,17 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             return response
         try:
             loaded = registry.acquire(name)
-            problems = solving.generate_novel(count, seed=int(payload.get("seed", 65)))
+            problems = solving.generate_novel(count, seed=seed)
             per_task: Dict[str, Dict[str, int]] = {}
             for problem in problems:
                 out = generate_once(
                     loaded, problem.prompt,
-                    {"max_new_tokens": 64, "temperature": 0.9, "top_p": 0.9, "greedy": True},
+                    {"max_new_tokens": cap, "temperature": 0.9, "top_p": 0.9,
+                     "greedy": True, "check": False},
                 )
-                bucket = per_task.setdefault(problem.task, {"n": 0, "correct": 0})
+                bucket = per_task.setdefault(problem.task, {"n": 0, "correct": 0, "truncated": 0})
                 bucket["n"] += 1
+                bucket["truncated"] += int(out["truncated"])
                 bucket["correct"] += int(
                     solving.is_correct(solving.extract_answer(out["reply"]), problem.answer)
                 )
@@ -438,14 +509,34 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                 "problems": total,
                 "correct": correct,
                 "accuracy": round(correct / max(1, total), 4),
+                "truncated_replies": sum(b["truncated"] for b in per_task.values()),
+                "development_only": True,
+                "training_overlap_checked": False,
+                "selection_authorized": False,
+                "settings": {
+                    "seed": seed,
+                    "tasks": list(solving.GENERATORS),
+                    "shared_rng": False,
+                    "generator_fingerprint": solving.generator_fingerprint(),
+                    "problem_fingerprint": hashlib.sha256(json.dumps(
+                        [(p.task, p.prompt, p.answer) for p in problems],
+                        ensure_ascii=True, separators=(",", ":"), allow_nan=False,
+                    ).encode("utf-8")).hexdigest(),
+                    "max_new_tokens": cap,
+                    "greedy": True,
+                    "normalise_prompts": False,
+                    "tolerance": solving.TOLERANCE,
+                },
                 "by_task": {
                     k: {**v, "accuracy": round(v["correct"] / max(1, v["n"]), 4)}
                     for k, v in sorted(per_task.items())
                 },
                 "note": (
-                    "freshly generated problems, never drawn from training; a "
-                    "memorised answer scores zero. Small samples are noisy -- "
-                    f"n={total} carries roughly +-{int(196 / max(1, total) ** 0.5)} points"
+                    "Development sample from training-related generators. Training "
+                    "overlap and prompt/answer collisions have not been checked; "
+                    "memorisation can contribute to this score. Small samples are "
+                    "noisy and may omit task families. This is not sealed holdout "
+                    "or model-promotion evidence."
                 ),
             })
         finally:
@@ -453,8 +544,12 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
 
     @app.post("/api/reset")
     def reset():
-        payload = flask_request.get_json(silent=True) or {}
+        payload = flask_request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return no_store({"error": "request body must be a JSON object"}, 400)
         session_id = payload.get("session_id") or "default"
+        if not isinstance(session_id, str):
+            return no_store({"error": "session_id must be a string"}, 400)
         with sessions_guard:
             sessions.pop(session_id, None)
         return no_store({"session_id": session_id, "cleared": True})
@@ -491,7 +586,7 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
         history = history_for(options["session_id"])
 
         def events() -> Iterator[str]:
-            produced = 0
+            progress = GenerationProgress()
             try:
                 with loaded.lock:
                     for chunk in stream_tokens(
@@ -499,8 +594,8 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                         options["max_new_tokens"],
                         options["temperature"], options["top_p"], options["greedy"],
                         should_stop=cancelled.is_set,
+                        progress=progress,
                     ):
-                        produced += 1
                         pieces.append(chunk)
                         yield f"event: token\ndata: {json.dumps({'text': chunk})}\n\n"
                 elapsed = time.perf_counter() - started
@@ -513,9 +608,9 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                     "asked": options["asked"],
                     "asked_as": options["message"],
                     "normalised_rule": options["normalised_rule"],
-                    "tokens": produced,
+                    **generation_details(reply, progress, options["max_new_tokens"]),
                     "latency_ms": round(elapsed * 1000, 2),
-                    "tokens_per_second": round(produced / max(1e-6, elapsed), 2),
+                    "tokens_per_second": round(progress.tokens / max(1e-6, elapsed), 2),
                 }
                 if loaded.recall is not None:
                     summary["recall"] = loaded.recall.score(reply).to_dict()
@@ -524,12 +619,12 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                     # `None` here means the question was not one of the shapes
                     # this can verify, and the interface must show that as
                     # "not checked" rather than as a pass.
-                    verdict = answer_check.check(options["message"], reply)
+                    verdict = check_reply(options["message"], reply)
                     summary["check"] = verdict.to_dict() if verdict else None
                 remember(options["session_id"], options["message"], reply)
                 with stats_guard:
                     stats["requests"] += 1
-                    stats["tokens"] += produced
+                    stats["tokens"] += progress.tokens
                 yield f"event: done\ndata: {json.dumps(summary)}\n\n"
             except GeneratorExit:
                 # The client went away mid-stream. Flask closes the generator;
@@ -584,7 +679,7 @@ form{display:flex;gap:8px;margin-top:14px}form input{flex:1}
   <h1>Supermix chat</h1>
   <select id="model"></select>
   <select id="mode"><option value="greedy">greedy</option><option value="sample">sample</option></select>
-  <input id="ntok" type="number" value="64" min="1" max="256" style="width:80px" title="max tokens">
+  <input id="ntok" type="number" value="__DEFAULT_MAX_NEW_TOKENS__" min="1" max="256" style="width:80px" title="max tokens">
   <label class="tog"><input type="checkbox" id="cmp"> compare all</label>
   <button id="bench" type="button">Benchmark</button>
   <button id="reset" type="button">Clear</button>
@@ -636,6 +731,7 @@ async function send(ev){
           const m = document.createElement('div'); m.className='meta';
           m.textContent = `${data.model} · ${data.tokens} tokens · ${data.tokens_per_second.toFixed(1)} tok/s · ${data.latency_ms.toFixed(0)} ms`;
           bot.appendChild(m);
+          if(data.hit_token_cap){ bot.appendChild(badge('meta', 'Token limit reached')); }
           if(data.normalised_rule){
             // The question was rewritten into the corpus format before the
             // model saw it. Show it: answering a different question than the
@@ -718,10 +814,11 @@ el('bench').addEventListener('click', async ()=>{
   el('log').appendChild(box); window.scrollTo(0,document.body.scrollHeight);
   try{
     const r = await fetch('/api/benchmark', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({model:el('model').value, problems:20})});
+      body: JSON.stringify({model:el('model').value, problems:20, max_new_tokens:Number(el('ntok').value)})});
     const d = await r.json();
     if(!r.ok){ box.textContent='error: '+(d.error||r.status); return; }
-    box.innerHTML = '<b>'+d.model+'</b> — '+d.correct+'/'+d.problems+' = '+(d.accuracy*100).toFixed(0)+'%';
+    box.textContent = d.model+' — '+d.correct+'/'+d.problems+' = '+(d.accuracy*100).toFixed(0)+'%';
+    box.appendChild(badge('meta', d.settings.max_new_tokens+' token cap; '+d.truncated_replies+' truncated replies'));
     const t=document.createElement('table');
     for(const [k,v] of Object.entries(d.by_task)){
       const row=t.insertRow(); row.insertCell().textContent=k;
