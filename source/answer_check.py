@@ -40,6 +40,7 @@ questions this module is willing to judge at all.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
@@ -49,6 +50,7 @@ from typing import Callable, List, Optional, Tuple
 TOLERANCE = 1e-6
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:/\d+)?")
+_DECIMAL = r"-?\d+(?:\.\d+)?"
 
 
 @dataclass
@@ -84,9 +86,11 @@ def extract_answer(text: str) -> Optional[float]:
     try:
         if "/" in raw:
             numerator, denominator = raw.split("/", 1)
-            return float(numerator) / float(denominator)
-        return float(raw)
-    except (ValueError, ZeroDivisionError):
+            value = float(numerator) / float(denominator)
+        else:
+            value = float(raw)
+        return value if math.isfinite(value) else None
+    except (ValueError, ZeroDivisionError, OverflowError):
         return None
 
 
@@ -123,26 +127,36 @@ def _is_compound_expression(question: str) -> bool:
 
 
 def _binary(question: str) -> Optional[Tuple[str, float]]:
-    match = re.search(r"(-?\d+)\s*([+-])\s*(-?\d+)", question)
+    match = re.search(rf"(?<![\w.+-])({_DECIMAL})\s*([+-])\s*({_DECIMAL})(?!\w|\.\d)", question)
     if not match or "=" in question or _is_compound_expression(question):
         return None
-    left, op, right = int(match.group(1)), match.group(2), int(match.group(3))
+    left, op, right = float(match.group(1)), match.group(2), float(match.group(3))
     return ("arithmetic", float(left + right if op == "+" else left - right))
 
 
 def _percent(question: str) -> Optional[Tuple[str, float]]:
-    match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)", question, re.I)
+    match = re.search(rf"({_DECIMAL})\s*%\s*of\s*({_DECIMAL})", question, re.I)
     if not match:
         return None
     return ("percent", float(match.group(1)) * float(match.group(2)) / 100.0)
 
 
 def _algebra(question: str) -> Optional[Tuple[str, float]]:
-    match = re.search(r"x\s*([+-])\s*(-?\d+)\s*=\s*(-?\d+)", question, re.I)
+    match = re.search(rf"\bx\s*([+*/-])\s*({_DECIMAL})\s*=\s*({_DECIMAL})(?!\w|\.\d)", question, re.I)
     if not match:
         return None
-    op, constant, right = match.group(1), int(match.group(2)), int(match.group(3))
-    return ("algebra_one_step", float(right - constant if op == "+" else right + constant))
+    op, constant, right = match.group(1), float(match.group(2)), float(match.group(3))
+    if op in "*/" and constant == 0:
+        return None
+    if op == "+":
+        result = right - constant
+    elif op == "-":
+        result = right + constant
+    elif op == "*":
+        result = right / constant
+    else:
+        result = right * constant
+    return ("algebra_one_step", result)
 
 
 def _average(question: str) -> Optional[Tuple[str, float]]:
@@ -179,20 +193,64 @@ def _division(question: str) -> Optional[Tuple[str, float]]:
     return ("division", float(match.group(1)) / divisor)
 
 
+#: The fractions `two_step` is allowed to state in words, and their percentages.
+#: Kept in step with `build_scratchpad_math.PERCENT_FRACTIONS`; a form this does
+#: not know falls through to `_percent`, which reads the percentage and ignores
+#: the second operation, so it must not silently disagree.
+_SPOKEN_FRACTIONS = {
+    "one tenth": 10.0, "one fifth": 20.0, "one quarter": 25.0, "one half": 50.0,
+}
+
+#: How the second operation can be worded. `reduce it by` and `take away` are
+#: subtraction; `increase it by` is addition.
+_ADD_WORDS = r"add|increase it by"
+_SUBTRACT_WORDS = r"subtract|reduce it by|take away"
+
+
 def _two_step(question: str) -> Optional[Tuple[str, float]]:
-    """`P% of N, then add/subtract M`. Must precede `_percent`, which it contains."""
+    """`P% of N`, then a second operation. Must precede `_percent`, which it contains.
+
+    v88 gave this task five prompt templates where it had one, and the extra
+    forms broke the original pattern in three ways at once: the percentage can
+    be spelled out (`Take 15 percent of 320`) or spoken as a fraction (`Start
+    with one quarter of 320`), the two clauses can be joined by `and then`, a
+    semicolon or a full stop, and the operation can be worded (`reduce it by`,
+    `increase it by`, `take away`).
+
+    A miss here is not harmless. `_two_step` runs before `_percent` precisely
+    because it contains a percent question, so a form this does not match is
+    read by `_percent` as `P% of N` -- the first half only -- and every such row
+    is then reported WRONG against a correct reply. That is what 174 of 20,391
+    checked rows did before this was widened, all of them `two_step`.
+    """
+
+    base: Optional[float] = None
+    tail = question
 
     match = re.search(
-        r"(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\s*,?\s*then\s*(add|subtract)\s*(-?\d+(?:\.\d+)?)",
-        question,
-        re.I,
-    )
-    if not match:
+        rf"({_DECIMAL})\s*(?:%|percent)\s*of\s*({_DECIMAL})", question, re.I)
+    if match:
+        base = float(match.group(1)) * float(match.group(2)) / 100.0
+        tail = question[match.end():]
+    else:
+        spoken = re.search(
+            rf"\b({'|'.join(_SPOKEN_FRACTIONS)})\s+of\s*({_DECIMAL})",
+            question, re.I)
+        if spoken:
+            base = (_SPOKEN_FRACTIONS[spoken.group(1).lower()]
+                    * float(spoken.group(2)) / 100.0)
+            tail = question[spoken.end():]
+    if base is None:
         return None
-    percent, whole, operation, operand = match.groups()
-    base = float(percent) * float(whole) / 100.0
-    delta = float(operand)
-    return ("two_step", base + delta if operation.lower() == "add" else base - delta)
+
+    operation = re.search(
+        rf"(?:then|and then|next|,|;|\.)\s*({_ADD_WORDS}|{_SUBTRACT_WORDS})"
+        rf"\s*({_DECIMAL})", tail, re.I)
+    if not operation:
+        return None
+    word, operand = operation.group(1).lower(), float(operation.group(2))
+    adds = re.fullmatch(_ADD_WORDS, word, re.I) is not None
+    return ("two_step", base + operand if adds else base - operand)
 
 
 def _sequence(question: str) -> Optional[Tuple[str, float]]:
@@ -476,9 +534,12 @@ PARSERS: Tuple[Callable[[str], Optional[Tuple[str, float]]], ...] = (
 
 def parse_question(question: str) -> Optional[Tuple[str, float]]:
     for parser in PARSERS:
-        result = parser(question)
+        try:
+            result = parser(question)
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return None
         if result is not None:
-            return result
+            return result if math.isfinite(result[1]) else None
     return None
 
 

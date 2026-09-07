@@ -484,17 +484,50 @@ def test_an_inexact_division_is_refused_rather_than_rounded():
 
 
 @pytest.mark.parametrize("task", DIVISION_TASKS)
-def test_the_division_tasks_show_the_working(task):
+def test_the_division_tasks_state_their_quotient_in_one_step(task):
+    """v88 reverts `decompose_quotient`, and this pins the reason.
+
+    v87 split the quotient by place value, so a three-digit answer was written
+    in three division steps. It was turned on with a real measurement behind it
+    -- accuracy on one written step falls sevenfold with the number of
+    significant places it must produce -- and it made every task using it much
+    worse: power 0.333 -> 0.048, molarity 0.667 -> 0.333, acceleration
+    0.762 -> 0.571 (`output/v87_measurements/v87_paired_n630.json`).
+
+    The defect is that the partial dividends are back-computed from the answer,
+    so to write `1920 / 64 = 30` the model must already know the quotient digit
+    is 30. `decompose_product` splits an **input** and works; this split the
+    **output** and cannot be executed forward.
+    """
+
+    assert omni.DECOMPOSE_QUOTIENT is False, (
+        "the flag defaults on again; v87 measured this format as harmful"
+    )
     rng = random.Random(11)
     for _ in range(200):
         problem = omni.TASKS[task](rng)
         # The formula prefix ("power = work / time") also contains a
         # division sign, so count only the steps that state numbers.
         divisions = len(re.findall(r"\d+ / \d+ = ", problem.response))
-        quotient = int(problem.answer)
-        assert divisions == len(str(quotient)), (
-            f"{task}: quotient {quotient} written in {divisions} steps"
+        assert divisions == 1, (
+            f"{task}: quotient written in {divisions} steps, expected one"
         )
+
+
+@pytest.mark.parametrize("task", DIVISION_TASKS)
+def test_the_decompose_quotient_arm_still_works_when_asked_for(task):
+    """The negative result stays reproducible rather than being deleted."""
+
+    omni.DECOMPOSE_QUOTIENT = True
+    try:
+        rng = random.Random(11)
+        for _ in range(60):
+            problem = omni.TASKS[task](rng)
+            divisions = len(re.findall(r"\d+ / \d+ = ", problem.response))
+            assert divisions == len(str(int(problem.answer)))
+            assert omni.verify(problem), "a split row must still verify"
+    finally:
+        omni.DECOMPOSE_QUOTIENT = False
 
 
 @pytest.mark.parametrize("task", DIVISION_TASKS)

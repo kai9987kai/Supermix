@@ -222,6 +222,36 @@ def decompose_product(a: int, b: int) -> str:
     return ", ".join(pieces)
 
 
+#: Whether the three division tasks split their quotient by place value.
+#:
+#: **Off, because v87 measured this and it is a design error.** It was turned on
+#: for v87 with a real measurement behind it -- accuracy on a single written step
+#: falls sevenfold with the number of significant places it must produce, 0.825
+#: for `7` against 0.075 for `174` -- and it made all three tasks much worse:
+#:
+#:     power         0.333 -> 0.048
+#:     molarity      0.667 -> 0.333
+#:     acceleration  0.762 -> 0.571
+#:
+#: The reason is that the partial dividends are back-computed from the answer:
+#:
+#:     model:  6400 / 64 = 100,  420 / 64 = 5,  122 / 64 = 2
+#:     truth:  6400 / 64 = 100, 1920 / 64 = 30, 192 / 64 = 3
+#:
+#: To write `1920` the model must already know the next quotient digit is 30.
+#: The format is a valid presentation of a result, not a procedure that can be
+#: executed forward, so the model invents dividends and divides them wrongly.
+#:
+#: `decompose_product` works because it splits an **input**, whose digits are on
+#: the page. This splits the **output**. A decomposition helps only when every
+#: step it adds is derivable forward from what is already written and inside the
+#: model's arithmetic; this satisfies neither.
+#:
+#: Kept behind a flag rather than deleted so the negative result stays
+#: reproducible -- `output/v87_measurements/v87_paired_n630.json` is the receipt.
+DECOMPOSE_QUOTIENT = False
+
+
 def decompose_quotient(dividend: int, divisor: int) -> str:
     """Show the working for `dividend / divisor`, one quotient place at a time.
 
@@ -327,7 +357,7 @@ def _force(rng: random.Random) -> OmniProblem:
         "Find the force on a {m} kg mass accelerating at {a} m/s^2.",
         "What force acts on mass {m} kg with acceleration {a} m/s^2?",
         "Given mass {m} kg and acceleration {a} m/s^2, compute the force.",
-    ], m=mass, a=accel)
+    ], m=mass, a=accel, _task="force")
     response = (f"force = mass x acceleration, {decompose_product(mass, accel)}, "
                 f"the force is {answer} newtons, total {answer}")
     return OmniProblem("force", "physics", prompt, response, float(answer), "N",
@@ -344,8 +374,9 @@ def _acceleration(rng: random.Random) -> OmniProblem:
         "force {f} N mass {m} kg find acceleration",
         "Find the acceleration produced by {f} N on {m} kg.",
         "What acceleration results from a {f} N force on a {m} kg body?",
-    ], f=force, m=mass)
-    response = (f"acceleration = force / mass, {decompose_quotient(force, mass)}, "
+    ], f=force, m=mass, _task="acceleration")
+    response = (f"acceleration = force / mass, "
+                f"{decompose_quotient(force, mass) if DECOMPOSE_QUOTIENT else f'{force} / {mass} = {accel}'}, "
                 f"the acceleration is {accel} metres per second squared, total {accel}")
     return OmniProblem("acceleration", "physics", prompt, response, float(accel), "m/s^2",
                        f"force {force} N mass {mass} kg find acceleration",
@@ -361,7 +392,7 @@ def _momentum(rng: random.Random) -> OmniProblem:
         "mass {m} kg velocity {v} m/s find momentum",
         "Find the momentum of a mass {m} kg travelling at velocity {v} m/s.",
         "What is the linear momentum for mass {m} kg and velocity {v} m/s?",
-    ], m=mass, v=velocity)
+    ], m=mass, v=velocity, _task="momentum")
     response = (f"momentum = mass x velocity, {decompose_product(mass, velocity)}, "
                 f"the momentum is {answer} kilogram metres per second, total {answer}")
     return OmniProblem("momentum", "physics", prompt, response, float(answer), "kg*m/s",
@@ -384,7 +415,7 @@ def _kinetic_energy(rng: random.Random) -> OmniProblem:
         "mass {m} kg velocity {v} m/s kinetic energy",
         "What is the kinetic energy of a {m} kg body at {v} m/s?",
         "Compute the kinetic energy for mass {m} kg and speed {v} m/s.",
-    ], m=mass, v=velocity)
+    ], m=mass, v=velocity, _task="kinetic_energy")
     response = (f"kinetic energy = half x mass x velocity squared, "
                 f"half of {mass} = {half_mass}, "
                 f"velocity squared = {velocity} x {velocity} = {squared}, "
@@ -404,7 +435,7 @@ def _work(rng: random.Random) -> OmniProblem:
         "force {f} N distance {d} m work done",
         "Find the work done by {f} N acting over {d} m.",
         "What work is done when a {f} N force acts through {d} m?",
-    ], f=force, d=distance)
+    ], f=force, d=distance, _task="work")
     response = (f"work = force x distance, {decompose_product(force, distance)}, "
                 f"the work done is {answer} joules, total {answer}")
     return OmniProblem("work", "physics", prompt, response, float(answer), "J",
@@ -421,8 +452,9 @@ def _power(rng: random.Random) -> OmniProblem:
         "work {w} J time {t} s power",
         "Find the power when {w} J is delivered over {t} s.",
         "What power corresponds to {w} joules in {t} seconds?",
-    ], w=work, t=time)
-    response = (f"power = work / time, {decompose_quotient(work, time)}, "
+    ], w=work, t=time, _task="power")
+    response = (f"power = work / time, "
+                f"{decompose_quotient(work, time) if DECOMPOSE_QUOTIENT else f'{work} / {time} = {power}'}, "
                 f"the power is {power} watts, total {power}")
     return OmniProblem("power", "physics", prompt, response, float(power), "W",
                        f"work {work} J time {time} s power",
@@ -438,7 +470,7 @@ def _voltage(rng: random.Random) -> OmniProblem:
         "current {i} A resistance {r} ohm find voltage",
         "Find the potential difference across {r} ohm carrying {i} A.",
         "What voltage drives {i} A through a {r} ohm resistor?",
-    ], i=current, r=resistance)
+    ], i=current, r=resistance, _task="voltage")
     response = (f"voltage = current x resistance, {decompose_product(current, resistance)}, "
                 f"the voltage is {answer} volts, total {answer}")
     return OmniProblem("voltage", "physics", prompt, response, float(answer), "V",
@@ -455,7 +487,7 @@ def _electrical_power(rng: random.Random) -> OmniProblem:
         "voltage {v} V current {i} A electrical power",
         "Find the power dissipated at {v} V and {i} A.",
         "What electrical power is used at {v} volts and {i} amps?",
-    ], v=voltage, i=current)
+    ], v=voltage, i=current, _task="electrical_power")
     response = (f"power = voltage x current, {decompose_product(voltage, current)}, "
                 f"the power is {answer} watts, total {answer}")
     return OmniProblem("electrical_power", "physics", prompt, response, float(answer), "W",
@@ -472,7 +504,7 @@ def _wave_speed(rng: random.Random) -> OmniProblem:
         "frequency {f} Hz wavelength {w} m wave speed",
         "Find the speed of a wave of frequency {f} Hz and wavelength {w} m.",
         "What is the wave speed at {f} Hz with a {w} m wavelength?",
-    ], f=frequency, w=wavelength)
+    ], f=frequency, w=wavelength, _task="wave_speed")
     response = (f"wave speed = frequency x wavelength, {decompose_product(frequency, wavelength)}, "
                 f"the wave speed is {answer} metres per second, total {answer}")
     return OmniProblem("wave_speed", "physics", prompt, response, float(answer), "m/s",
@@ -489,8 +521,9 @@ def _molarity(rng: random.Random) -> OmniProblem:
         "moles {n} mol volume {v} L molarity",
         "Find the concentration of {n} moles in {v} litres.",
         "What is the molar concentration of {n} mol in {v} L of solution?",
-    ], n=moles, v=volume)
-    response = (f"molarity = moles / volume, {decompose_quotient(moles, volume)}, "
+    ], n=moles, v=volume, _task="molarity")
+    response = (f"molarity = moles / volume, "
+                f"{decompose_quotient(moles, volume) if DECOMPOSE_QUOTIENT else f'{moles} / {volume} = {concentration}'}, "
                 f"the concentration is {concentration} molar, total {concentration}")
     return OmniProblem("molarity", "chemistry", prompt, response, float(concentration), "M",
                        f"moles {moles} mol volume {volume} L molarity",
@@ -510,7 +543,7 @@ def _combination(rng: random.Random) -> OmniProblem:
         "n choose k n = {n} k = {k}",
         "Find the number of combinations of {n} things taken {k} at a time.",
         "How many combinations are there of {n} choose {k}?",
-    ], n=n, k=k)
+    ], n=n, k=k, _task="combination")
     product = n * (n - 1)
     if COMBINATION_IN_ENVELOPE:
         # Halve before multiplying, not after. One of `n` and `n - 1` is
@@ -552,7 +585,7 @@ def _arithmetic_series(rng: random.Random) -> OmniProblem:
         "sum of arithmetic series first term {a} common difference {d} n {n}",
         "Find the sum of {n} terms of an arithmetic progression "
         "with first term {a} and difference {d}.",
-    ], a=first, d=difference, n=terms)
+    ], a=first, d=difference, n=terms, _task="arithmetic_series")
     span = (terms - 1) * difference
     half_terms = terms // 2
     ends = first + last
@@ -1092,6 +1125,8 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
             "priming_fraction": priming_fraction,
             "keep_canonical": keep_canonical,
             "combination_in_envelope": COMBINATION_IN_ENVELOPE,
+            "natural_phrasings": NATURAL_PHRASINGS,
+            "decompose_quotient": DECOMPOSE_QUOTIENT,
         },
     }
     if balanced_operands and not repeat:
@@ -1149,6 +1184,21 @@ def build_parser() -> argparse.ArgumentParser:
                               "intermediate leaves the two-digit-by-one-digit "
                               "envelope. NARROWS THE BENCHMARK TOO -- scores are "
                               "not comparable with v80's"))
+    parser.add_argument("--natural_phrasings", action="store_true",
+                        help=("widen each task from its four or five textbook "
+                              "templates to fifteen, including the casual "
+                              "register a question actually arrives in. Changes "
+                              "the prompt and nothing else: operands, answers, "
+                              "worked responses and the canonical query the "
+                              "solver parses are all bit-identical. The last "
+                              "three forms per task are withheld for "
+                              "eval_natural_phrasing.py"))
+    parser.add_argument("--decompose_quotient", action="store_true",
+                        help=("split the three division tasks' quotient by "
+                              "place value. MEASURED HARMFUL in v87 -- power "
+                              "0.333 -> 0.048 -- because the partial dividends "
+                              "are back-computed from the answer. Kept only so "
+                              "the negative result stays reproducible"))
     return parser
 
 
@@ -1168,8 +1218,10 @@ def main(argv=None) -> int:
             "stratifies repeated draws, and the uniqueness path never calls it. "
             "Drop one of the two."
         )
-    global COMBINATION_IN_ENVELOPE
+    global COMBINATION_IN_ENVELOPE, NATURAL_PHRASINGS, DECOMPOSE_QUOTIENT
     COMBINATION_IN_ENVELOPE = bool(args.combination_in_envelope)
+    NATURAL_PHRASINGS = bool(args.natural_phrasings)
+    DECOMPOSE_QUOTIENT = bool(args.decompose_quotient)
     rows, report = build(args.per_task, args.seed, args.task or None,
                          repeat=not args.unique,
                          retry_rate=args.retry_rate,

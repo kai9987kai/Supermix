@@ -112,20 +112,20 @@ def test_token_budget_reproduces_the_measured_long_tasks():
     `combination` 60 and `kinetic_energy` 54, against 39 or less for every
     other task.
 
-    `power` joined this set in v87. It writes a division of up to three place
-    values -- ``15200 / 76 = 200, 3800 / 76 = 50, 152 / 76 = 2`` and then the
-    two sums -- where it used to write ``19152 / 76 = 252`` and score 0.400.
-    The cost is real and it is why this assertion moved: two sweeps on the v86
-    checkpoint put a three-significant-digit quotient at 0.075 and a
-    one-significant-digit quotient at 0.75-0.83, so the tokens buy a step the
-    model can actually do.
+    `power` joined this set in v87 and **left it again in v88**. It briefly wrote
+    a division of up to three place values, which cost 30 tokens of median
+    response, and the format was reverted because it scored 0.048 against v86's
+    0.333 -- the partial dividends are back-computed from the answer, so the
+    working cannot be produced forward. Its median is back to v86's 39.
     """
 
     rows, _ = omni.build(per_task=120, seed=84)
     tasks = omni.token_budget_report(rows)["tasks"]
 
     assert tasks["arithmetic_series"]["response_median"] >= 70
-    assert tasks["power"]["response_median"] >= 60
+    assert tasks["power"]["response_median"] <= 45, (
+        "power is long again -- decompose_quotient is back on"
+    )
     assert tasks["combination"]["response_median"] >= 50
     assert max(stats["response_median"] for name, stats in tasks.items()
                if name not in LONG_TASKS) <= 40

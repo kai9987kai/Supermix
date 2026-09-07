@@ -106,6 +106,54 @@ def test_a_reply_with_no_number_is_wrong_not_unchecked():
     assert verdict.predicted is None and not verdict.correct
 
 
+@pytest.mark.parametrize("question,expected,previous_wrong", [
+    ("What is 2.5 + 3.5?", 6.0, 8.0),
+    ("What is -2.5 + 3.5?", 1.0, 8.0),
+    ("What is 2.5 - 3.5?", -1.0, 2.0),
+    ("What is -2.5 - -3.5?", 1.0, 8.0),
+    ("What is 2.5+-3.5?", -1.0, 2.0),
+    ("What is -25% of 80?", -20.0, 20.0),
+    ("What is 25% of -80?", -20.0, 20.0),
+    ("What is -25% of -80?", 20.0, -20.0),
+    ("What is -25% of 80, then add 2.5?", -17.5, 22.5),
+    ("What is 25% of -80, then subtract -2.5?", -17.5, 22.5),
+    ("Solve for x: x + 2.5 = 7.5", 5.0, 9.5),
+    ("Solve for x: x - -2.5 = 7.5", 5.0, 10.0),
+    ("Solve for x: x * -2.5 = 7.5", -3.0, 3.0),
+    ("Solve for x: x / -2.5 = 7.5", -18.75, 18.75),
+])
+def test_decimal_operands_and_negative_signs_are_not_partial_matches(question, expected, previous_wrong):
+    verdict = check.check(question, f"Final answer: {expected}")
+
+    assert verdict is not None and verdict.correct
+    assert verdict.expected == pytest.approx(expected)
+    assert not check.check(question, f"Final answer: {previous_wrong}").correct
+
+
+@pytest.mark.parametrize("question", [
+    "Solve for x: x * 0 = 0",
+    "Solve for x: x * 0 = 5",
+    "Solve for x: x / 0 = 5",
+    "What is 2e3 + 4?",
+    "What is 2 + 3e4?",
+])
+def test_undefined_algebra_and_unsupported_number_notation_are_not_checked(question):
+    assert check.parse_question(question) is None
+
+
+def test_nonfinite_expected_values_cannot_accept_a_finite_wrong_answer():
+    enormous = "9" * 400
+    assert check.check(f"What is {enormous} * 2?", "1") is None
+    assert check.check(f"What is {enormous}% of 50?", "1") is None
+    assert check.check(f"What is 50% of {enormous}, then add 2?", "1") is None
+
+
+def test_nonfinite_reply_is_an_invalid_prediction():
+    verdict = check.check("What is 2 + 3?", "9" * 400)
+    assert verdict is not None and not verdict.correct
+    assert verdict.predicted is None
+
+
 # -- parser precedence ------------------------------------------------------
 
 
@@ -476,3 +524,55 @@ def test_every_code_task_is_actually_checkable():
                 f"{name}: the checker disagreed with the generator's own answer "
                 f"({verdict.expected} vs {problem.answer}) for {problem.prompt!r}"
             )
+
+
+def test_every_two_step_phrasing_is_checkable():
+    """v88 gave `two_step` five templates where it had one.
+
+    A miss is not harmless. `_two_step` runs before `_percent` because it
+    *contains* a percent question, so an unmatched form is read as `P% of N` --
+    the first clause only -- and a correct reply is then reported WRONG. That is
+    what 174 of 20,391 checked corpus rows did before the parser was widened,
+    every one of them this task.
+    """
+
+    cases = [
+        ("What is 15% of 320, then subtract 17?", 31.0),
+        ("Take 15 percent of 320 and then subtract 17.", 31.0),
+        ("Compute 15 percent of 320; next, add 17.", 65.0),
+        ("After finding 15% of 320, reduce it by 17. What is the result?", 31.0),
+        ("After finding 15% of 320, increase it by 17. What is the result?", 65.0),
+        ("Start with one quarter of 320, then add 17. What remains?", 97.0),
+        ("Start with one half of 320, then take away 17. What remains?", 143.0),
+        ("Start with one tenth of 320, then take away 17. What remains?", 15.0),
+        ("Start with one fifth of 320, then add 17. What remains?", 81.0),
+    ]
+    for question, truth in cases:
+        # (module is imported as `check` in this file)
+
+        verdict = check.check(question, f"total {truth}")
+        assert verdict is not None, f"not checked at all: {question!r}"
+        assert verdict.task == "two_step", (
+            f"{question!r} was read as {verdict.task}, not two_step -- "
+            "`_percent` will have taken the first clause and dropped the second"
+        )
+        assert abs(verdict.expected - truth) < 1e-6, (
+            f"{question!r}: expected {truth}, derived {verdict.expected}"
+        )
+        assert verdict.correct
+
+
+def test_a_spoken_fraction_matches_its_percentage():
+    """`one quarter of 320` and `25% of 320` must derive the same base."""
+
+    for words, percent in (("one tenth", 10), ("one fifth", 20),
+                           ("one quarter", 25), ("one half", 50)):
+        spoken = check.check(
+            f"Start with {words} of 640, then add 5. What remains?", "total 0")
+        numeric = check.check(
+            f"What is {percent}% of 640, then add 5?", "total 0")
+        assert spoken is not None and numeric is not None, words
+        assert abs(spoken.expected - numeric.expected) < 1e-6, (
+            f"{words} derived {spoken.expected}, {percent}% derived "
+            f"{numeric.expected}"
+        )

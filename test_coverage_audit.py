@@ -133,14 +133,24 @@ def test_every_benchmark_task_is_either_compared_or_named_as_uncompared():
 # ---------------------------------------------------------------------------
 
 
-def test_a_split_percentage_writes_the_sum_of_its_parts():
-    """v86 wrote `times 10 = 5.6, times 5 = 2.8, total 1.8`.
+def test_a_split_percentage_leaves_its_final_addition_implicit():
+    """v88 reverts the written sum, and this pins why.
 
-    Both parts right, and then 5.6 + 2.8 produced 1.8. Ten of fourteen wrong
-    percent replies have every written step true, so the silent addition is
-    where they go.
+    The diagnosis that motivated writing it still stands: ten of v86's fourteen
+    wrong percent replies had every written step true and a total that followed
+    from none of them, because the final addition was never written.
+
+    Writing it did not make it doable -- percent fell 0.476 -> 0.286. v87 now
+    gets both parts right and fails the addition it was forced to state:
+    `2.4 + 1.2 = 3.2`. These carry across the decimal point, and a written step
+    that carries is false 0.186 of the time against 0.104 for one that does not.
+
+    Making a step explicit only helps when the model can perform it.
     """
 
+    assert scratch.PERCENT_WRITTEN_SUM is False, (
+        "the flag defaults on again; v87 measured this format as harmful"
+    )
     scratch.DECOMPOSE_INNER = True
     try:
         rng = random.Random(4)
@@ -148,11 +158,28 @@ def test_a_split_percentage_writes_the_sum_of_its_parts():
                  if row["working"].count("times ") == 2]
         assert split, "no two-part percentage was generated"
         for row in split:
-            assert " + " in row["working"], row["working"]
+            body = row["working"].rsplit("total ", 1)[0]
+            assert " + " not in body, f"the sum is written again: {row['working']}"
             stated = float(row["working"].rsplit("total ", 1)[1])
             assert abs(stated - row["answer"]) < 1e-4
     finally:
         scratch.DECOMPOSE_INNER = False
+
+
+def test_the_written_sum_arm_still_works_when_asked_for():
+    """The negative result stays reproducible rather than being deleted."""
+
+    scratch.DECOMPOSE_INNER = True
+    scratch.PERCENT_WRITTEN_SUM = True
+    try:
+        rng = random.Random(4)
+        split = [row for row in (scratch._scratchpad_percent(rng) for _ in range(400))
+                 if row["working"].count("times ") == 2]
+        assert split
+        assert all(" + " in row["working"] for row in split)
+    finally:
+        scratch.DECOMPOSE_INNER = False
+        scratch.PERCENT_WRITTEN_SUM = False
 
 
 def test_a_single_part_percentage_has_nothing_to_add():

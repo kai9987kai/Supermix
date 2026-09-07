@@ -45,6 +45,35 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 RECEIPT_SCHEMA = "supermix-v66-scratchpad-math-v1"
 
+#: Whether `percent` writes the addition of its two partial products.
+#:
+#: **Off, because v87 measured this and it made the task worse**, 0.476 -> 0.286.
+#: The reasoning for turning it on was sound and the diagnosis behind it still
+#: holds: ten of v86's fourteen wrong percent replies had every written step true
+#: and a total that followed from none of them, because the final sum was the one
+#: operation the format never wrote.
+#:
+#: Writing it did not make it doable. v87 now gets both parts right and fails the
+#: addition it was forced to state:
+#:
+#:     1 percent of 24 = 0.24, times 10 = 2.4, times 5 = 1.2,
+#:     2.4 + 1.2 = 3.2                                    (truth 3.6)
+#:
+#: These are decimal additions that carry across the point, and carrying is where
+#: this model breaks: over all 630 v86 replies a written +/- step that needs a
+#: carry is false 0.186 of the time against 0.104 for one that does not
+#: (Fisher exact p = 0.033).
+#:
+#: The lesson v87 paid for: making a step explicit only helps when the model can
+#: perform it. An operation left implicit is sometimes reached another way; an
+#: operation written down must be executed, and a wrong one poisons the total.
+#:
+#: The coverage fix in `_scratchpad_percent` is **not** reverted with this. That
+#: one closed a real hole -- 12% and 15% appear in a third of the benchmark's
+#: percent problems and in none of v86's 40,000 percent rows -- and is orthogonal.
+PERCENT_WRITTEN_SUM = False
+
+
 #: Whether `average` and `percent` show working for their *inner* operations.
 #:
 #: Off reproduces the v66-v70 corpora exactly. On applies v68's rule to the two
@@ -404,7 +433,7 @@ def _scratchpad_percent(rng: random.Random) -> Dict[str, Any]:
         written = [(factor, value) for factor, value
                    in ((tens, part_tens), (units, part_units)) if factor]
         parts = [f"times {factor} = {round(value, 6)}" for factor, value in written]
-        if len(written) == 2:
+        if len(written) == 2 and PERCENT_WRITTEN_SUM:
             # Write the sum of the parts.
             #
             # Until v87 this step was silent, and the v86 replies show exactly

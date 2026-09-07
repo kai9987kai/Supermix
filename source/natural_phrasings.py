@@ -63,6 +63,7 @@ is what teaches that the answer does not depend on the wording.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from typing import Dict, Mapping, Sequence, Tuple
 
@@ -233,16 +234,82 @@ EXTRA_PHRASINGS: Dict[str, Tuple[str, ...]] = {
 }
 
 
-def bank(task: str, templates: Sequence[str]) -> Tuple[str, ...]:
+#: How many of each task's natural phrasings are withheld from training.
+#:
+#: Widening a phrasing bank and then scoring on the same bank measures nothing:
+#: a model can memorise fifteen templates as easily as five, and the benchmark
+#: would report that as understanding. These last few forms per task are never
+#: built into a corpus, so `eval_natural_phrasing.py` can ask the question that
+#: matters -- does the answer survive a phrasing the model has **never seen** --
+#: rather than the one that flatters it.
+#:
+#: Three per task leaves seven or eight for training and gives the benchmark
+#: 36 held-out forms across twelve tasks. Taken from the end of each tuple, so
+#: appending a phrasing extends the training set and never silently moves a form
+#: out of the benchmark.
+HELD_OUT_PER_TASK = 3
+
+
+#: Set by `held_out_only()`. When true, `bank` returns *only* the withheld
+#: forms, so an ordinary generator renders a held-out phrasing using its own
+#: keyword arguments. Rendering the template from `OmniProblem.params` instead
+#: would not work: the params dict keys are physics symbols (`F`, `W`, `I`)
+#: while the templates use the lowercase names `_pick` is called with.
+_HELD_OUT_ONLY = False
+
+
+@contextlib.contextmanager
+def held_out_only():
+    """Make every generator emit a phrasing that training never contained.
+
+    Used by `eval_natural_phrasing.py`. The generator's RNG stream does not
+    depend on which phrasing is chosen, so the same seed inside and outside this
+    block yields the same operands and the same answer with a different prompt --
+    which is what makes that benchmark paired.
+    """
+
+    global _HELD_OUT_ONLY
+    previous = _HELD_OUT_ONLY
+    _HELD_OUT_ONLY = True
+    try:
+        yield
+    finally:
+        _HELD_OUT_ONLY = previous
+
+
+def held_out(task: str) -> Tuple[str, ...]:
+    """The phrasings withheld from training, for evaluation only.
+
+    Never call this from a corpus builder. `test_natural_phrasings.py` asserts
+    that no built corpus contains any string this returns.
+    """
+
+    extra = EXTRA_PHRASINGS.get(task, ())
+    if len(extra) <= HELD_OUT_PER_TASK:
+        return ()
+    return extra[-HELD_OUT_PER_TASK:]
+
+
+def bank(task: str, templates: Sequence[str],
+         include_held_out: bool = False) -> Tuple[str, ...]:
     """The task's own templates first, then the natural ones.
 
     Concatenation rather than replacement, so the forms v86 was trained on --
     and the forms `prompt_normaliser` rewrites *into* -- cannot be dropped by
     editing this file. An unknown task simply keeps its own templates, which is
     what lets a new generator be added without touching this module.
+
+    The last `HELD_OUT_PER_TASK` natural forms are excluded unless asked for,
+    so the training corpus and the phrasing benchmark cannot overlap.
     """
 
-    return tuple(templates) + EXTRA_PHRASINGS.get(task, ())
+    withheld = held_out(task)
+    if _HELD_OUT_ONLY and withheld:
+        return withheld
+    extra = EXTRA_PHRASINGS.get(task, ())
+    if not include_held_out and withheld:
+        extra = extra[:-len(withheld)]
+    return tuple(templates) + extra
 
 
 def variant_index(task: str, narrow_index: int, values: Mapping[str, object],
