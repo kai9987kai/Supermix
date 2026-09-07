@@ -153,11 +153,58 @@ rule in §1: the tens digit is read off the subtrahend, so it is derivable
 forward, and neither step crosses a column.
 
 **It is not being built on that reasoning alone.** That is exactly what v87 did.
-`output/v87_measurements/carry_probe.py` asks the same subtraction three ways —
-whole, split, and a non-borrowing control — and only a result where the split
-beats the whole step *and* the control confirms borrowing is the mechanism
-justifies the corpus arm. If the control scores no better than the borrowing
-case, carrying is not the problem and the split buys nothing.
+`output/v87_measurements/carry_probe.py` was written to test it first, and it has
+now run.
+
+### The probe, and the version of it that was invalid
+
+The first version asked the model two-digit subtractions — `61 - 56` — to isolate
+the borrow. Everything scored **0/100**, which looked devastating and was an
+artefact: `subtraction` trains only on three-digit operands, so a two-digit
+question is out of distribution and the model answers it by inventing a hundreds
+column.
+
+```
+asked 61 - 56  →  600 - 0 = 600, 11 - 56 = -45, total 555
+```
+
+This is precisely the error `subdivision_probe.py` made in v87, which its own
+README warns about at length. Probing outside the training distribution measures
+the distribution, not the mechanism.
+
+The corrected probe stays inside it. The `subtraction` format already splits
+every problem into a hundreds step and a remainder step, and that remainder is a
+two-digit subtraction the model performs in its own distribution — one that
+either borrows or does not:
+
+```
+borrows       561 - 356   remainder 61 - 56
+carry-free    568 - 356   remainder 68 - 56
+```
+
+Matched pairs share a subtrahend and a hundreds step, and both members are
+constrained to a positive remainder so the contrast is the borrow alone rather
+than borrow-plus-sign.
+
+| | n = 120 | 95% CI |
+|---|---|---|
+| remainder **borrows** | **59/120 = 0.492** | [0.404, 0.580] |
+| remainder carry-free | **103/120 = 0.858** | [0.785, 0.910] |
+
+McNemar exact two-sided **p = 0.0000**, 49 discordant pairs to 5.
+
+A **37-point** effect where the post-hoc scan above suggested 8, and every
+failure is exactly +10 — the tens digit computed without the borrow:
+
+```
+60 - 53 = 17   truth  7      81 - 63 = 28   truth 18
+83 - 76 = 17   truth  7      92 - 84 = 18   truth  8
+```
+
+**The mechanism is confirmed and the format is still not being built in v88.**
+v88 exists to measure prompt understanding; an untested arithmetic arm in the
+same run would confound exactly that. This is the pre-registered v89 change, with
+its justification measured in advance rather than after the loss comes in.
 
 ---
 
@@ -168,3 +215,49 @@ unnecessary — and possibly harmful, since it rewrites a form the model now
 understands into one it merely also understands. The chat server runs it by
 default. The held-out benchmark deliberately runs without it, so the two numbers
 together say whether the default should change.
+
+---
+
+## 7. The first attempt diverged, and why
+
+v88 was launched at the default `--lr 0.003` -- the value v80, v86 and v87 all
+used unchanged -- with a model twice the size. It diverged.
+
+| step | v87 dev | v88 dev |
+|---|---|---|
+| 1000 | 0.5116 | **0.4771** |
+| 1500 | 0.4495 | 0.4794 |
+| 2000 | 0.4111 | 0.5180 |
+| 2500 | 0.3708 | 0.5127 |
+| 3000 | 0.3551 | **0.5981** |
+
+Accuracy at step 3,000: **0.02** against v87's 0.10.
+
+v88 was *ahead* at step 1,000 and rose at four of the next five evaluations. The
+turn coincides exactly with the OneCycle warmup: `--pct_start 0.1` peaks the LR
+at step 2,300, the rise begins at 1,500 as the LR climbs toward it, and the loss
+was still climbing 700 steps past the peak. That is instability, not the normal
+mid-schedule wobble.
+
+The single dip at step 2,500 (0.5180 -> 0.5127) looked like the peak passing and
+was noise. It is recorded because acting on it would have cost another twenty
+hours -- one favourable eval is not a recovery.
+
+Stopped at step 3,000 and relaunched with `--lr 0.0015`, halved for a doubled
+model, everything else identical. Five hours lost.
+
+The failed run is kept at `output/v88_corpus_lr3e3_diverged/` with its log, for
+the same reason `DECOMPOSE_QUOTIENT` is a flag rather than a deletion: a negative
+result nobody can reproduce gets rediscovered.
+
+**The tripwire for the relaunch, set before it ran:** v87 reached dev 0.4495 by
+step 1,500. A run above that at the same step is in trouble and is stopped
+rather than nursed.
+
+### What this says about §4
+
+Size and step budget were treated as the two decisions to get right, and the
+optimiser was not treated as a decision at all. It is one. A model chosen on
+measured step cost still has to train, and nothing in `size_cost.py` -- which
+measures wall clock per step and nothing else -- could have caught this. The
+sizing measurement was necessary and not sufficient.
