@@ -79,7 +79,6 @@ SCIENCE_LEAD_IN = {
 #: v91 Cognitive Lead-in formats for Pearlian causal DAG, proof audit, DoT, and conformal stopping
 COGNITIVE_LEAD_IN = {
     "causal_intervention": "Given scenario {scenario}, compute causal query P({outcome} | do({treatment}={val})).",
-    "causal_counterfactual": "Given scenario {scenario} with factual {outcome}={factual_val}, compute counterfactual Y_{{{treatment} <- {cf_val}}}.",
     "proof_verify": "Verify proof derivation: {trace}",
     "diffusion_thought": "Denoise continuous thought latent for: {prompt}",
     "conformal_stopping": "Evaluate conformal stopping at step {step} of {budget} with verifier {verifier} and entropy {entropy}.",
@@ -287,54 +286,46 @@ def _science(text: str) -> Optional[Normalised]:
 
 
 def _cognitive(source: str, original_text: str) -> Optional[Normalised]:
-    """Rewrite explicit v91 cognitive requests (causal, proof verification, DoT, conformal)."""
-    lowered = source.lower()
+    """Rewrite complete cognitive requests without supplying missing facts.
+
+    Identifiers and numeric literals are data, so preserve their spelling.
+    Proofs and thought payloads may contain indentation or quoted whitespace;
+    match those against the original instead of the whitespace-cleaned source.
+    """
 
     # 1. Causal intervention query: P(Y | do(X = x))
     causal_match = re.fullmatch(
-        r"(?:(?:please\s+)?(?:compute|calculate|what\s+is)\s+(?:the\s+)?(?:causal|interventional)\s+effect\s+(?:on\s+)?([A-Za-z]+)\s+if\s+(?:we\s+)?do\s*\(?([A-Za-z]+)\s*=\s*(-?\d+(?:\.\d+)?)\)?(?:\s+in\s+([A-Za-z_]+))?|"
-        r"(?:please\s+)?compute\s+causal\s+query:?\s*(?:do\s*\(?([A-Za-z]+)\s*=\s*(-?\d+(?:\.\d+)?)\)?)\s*(?:on|find)\s*([A-Za-z]+)(?:\s+in\s+([A-Za-z_]+))?)\s*[?.!]?",
-        lowered,
+        r"(?:(?:please\s+)?(?:compute|calculate|what\s+is)\s+(?:the\s+)?(?:causal|interventional)\s+effect\s+(?:on\s+)?(?P<outcome>[A-Za-z_]\w*)\s+if\s+(?:we\s+)?|"
+        r"(?:please\s+)?compute\s+causal\s+query:?\s*)"
+        rf"do\s*(?P<paren>\()?\s*(?P<treatment>[A-Za-z_]\w*)\s*=\s*(?P<val>{NUMBER})\s*(?(paren)\))"
+        r"(?(outcome)|\s+(?:on|find)\s*(?P<query_outcome>[A-Za-z_]\w*))"
+        r"\s+in\s+(?P<scenario>[A-Za-z_]\w*)\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
     )
     if causal_match:
-        groups = causal_match.groups()
-        if groups[0] is not None:
-            outcome, treatment, val, scenario = groups[0], groups[1], groups[2], groups[3]
-        else:
-            treatment, val, outcome, scenario = groups[4], groups[5], groups[6], groups[7]
-        scenario = scenario or "physics_newton"
         return Normalised(
             COGNITIVE_LEAD_IN["causal_intervention"].format(
-                scenario=scenario, outcome=outcome.title(), treatment=treatment.title(), val=float(val)
+                scenario=causal_match.group("scenario"),
+                outcome=causal_match.group("outcome") or causal_match.group("query_outcome"),
+                treatment=causal_match.group("treatment"), val=causal_match.group("val"),
             ),
             "causal_intervention",
             original_text,
         )
 
-    # 2. Causal counterfactual query
-    cf_match = re.fullmatch(
-        r"(?:please\s+)?what\s+(?:is|would\s+be)\s+the\s+counterfactual\s+(?:outcome|result)\s+(?:on|for)\s+([A-Za-z]+)\s+if\s+([A-Za-z]+)\s+(?:had\s+been|were)\s*(-?\d+(?:\.\d+)?)(?:\s+in\s+([A-Za-z_]+))?\s*[?.!]?",
-        lowered,
-    )
-    if cf_match:
-        outcome, treatment, cf_val, scenario = cf_match.groups()
-        scenario = scenario or "physics_newton"
-        return Normalised(
-            COGNITIVE_LEAD_IN["causal_counterfactual"].format(
-                scenario=scenario, outcome=outcome.title(), factual_val=3.8, treatment=treatment.title(), cf_val=float(cf_val)
-            ),
-            "causal_counterfactual",
-            original_text,
-        )
+    # Counterfactuals require the factual state and structural assumptions.
+    # The former template invented an outcome of 3.8 and a default scenario.
+    # Leave such requests intact for the model to handle the missing context.
 
     # 3. Proof verification request
     proof_match = re.fullmatch(
-        r"(?:(?:please\s+)?(?:verify|check)\s+(?:the\s+)?(?:proof|derivation|steps)|find\s+(?:the\s+)?first\s+error\s+in(?:\s+the\s+proof)?):\s*(.+)\s*[?.!]?",
-        source,
-        flags=re.IGNORECASE,
+        r"\s*(?:please\s+)?(?:verify|check)\s+(?:the\s+)?(?:proof(?:\s+derivation)?|derivation|steps):[ \t]*(.+)",
+        original_text,
+        flags=re.IGNORECASE | re.DOTALL,
     )
-    if proof_match:
-        trace = proof_match.group(1).strip()
+    if proof_match and proof_match.group(1).strip():
+        trace = proof_match.group(1)
         return Normalised(
             COGNITIVE_LEAD_IN["proof_verify"].format(trace=trace),
             "proof_verify",
@@ -343,12 +334,12 @@ def _cognitive(source: str, original_text: str) -> Optional[Normalised]:
 
     # 4. Diffusion-of-Thought command
     dot_match = re.fullmatch(
-        r"(?:(?:please\s+)?(?:denoise\s+(?:continuous\s+)?(?:thought|reasoning)(?:\s+latent)?(?:\s+plan)?|crystallize\s+(?:thought|reasoning)\s+plan))\s*(?:for|on)?:\s*(.+)\s*[?.!]?",
-        source,
-        flags=re.IGNORECASE,
+        r"\s*(?:(?:please\s+)?(?:denoise\s+(?:continuous\s+)?(?:thought|reasoning)(?:\s+latent)?(?:\s+plan)?|crystallize\s+(?:thought|reasoning)\s+plan))\s*(?:for|on)?:[ \t]*(.+)",
+        original_text,
+        flags=re.IGNORECASE | re.DOTALL,
     )
-    if dot_match:
-        prompt = dot_match.group(1).strip()
+    if dot_match and dot_match.group(1).strip():
+        prompt = dot_match.group(1)
         return Normalised(
             COGNITIVE_LEAD_IN["diffusion_thought"].format(prompt=prompt),
             "diffusion_thought",
@@ -358,13 +349,14 @@ def _cognitive(source: str, original_text: str) -> Optional[Normalised]:
     # 5. Conformal early exit check
     conf_match = re.fullmatch(
         r"(?:(?:please\s+)?(?:evaluate\s+conformal\s+stopping|conformal\s+early\s+exit\s+check)):\s*step\s*(\d+)\s*(?:of|/)\s*(\d+)\s*,?\s*verifier\s*(-?\d+(?:\.\d+)?)\s*,?\s*entropy\s*(-?\d+(?:\.\d+)?)\s*[?.!]?",
-        lowered,
+        source,
+        flags=re.IGNORECASE,
     )
     if conf_match:
         step, budget, verifier, entropy = conf_match.groups()
         return Normalised(
             COGNITIVE_LEAD_IN["conformal_stopping"].format(
-                step=int(step), budget=int(budget), verifier=float(verifier), entropy=float(entropy)
+                step=step, budget=budget, verifier=verifier, entropy=entropy
             ),
             "conformal_stopping",
             original_text,

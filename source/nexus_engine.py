@@ -2806,15 +2806,14 @@ class NexusEngine:
         ground_truth: Optional[str] = None,
         max_iterations: int = 3,
     ) -> reflexion.ReflexionCorrectionResult:
-        # Decompose solution into trace steps for the localizer
-        trace_steps = [s.strip() for s in proposed_solution.split(".") if s.strip()]
-        if not trace_steps:
-            trace_steps = [proposed_solution]
-        if ground_truth:
-            trace_steps.append(ground_truth)
+        # Split sentence boundaries while preserving decimal literals. Reference
+        # answers are compared separately and never enter the trace or registers.
+        trace_steps = [s.strip() for s in re.split(r"[\n;]+|(?<!\d)\.(?!\d)|(?<=\d)\.(?=\s|$)", proposed_solution) if s.strip()]
         return self.reflexive_correction.diagnose_and_correct(
             problem=problem,
             trace_steps=trace_steps,
+            ground_truth=ground_truth,
+            max_iterations=max_iterations,
         )
 
     def evaluate_conformal_stopping(
@@ -2826,16 +2825,25 @@ class NexusEngine:
         total_budget: int = 10,
         target_error_rate: float = 0.05,
     ) -> conformal.ConformalStoppingResult:
-        # Map to underlying evaluate_stopping signature
-        # Use verifier_score as top_confidence; step_entropy as runner_up proxy
-        runner_up = max(0.0, min(1.0, verifier_score - step_entropy * 0.5))
-        return self.conformal_stopping.evaluate_stopping(
+        # These inputs are diagnostic proxies, not measured candidate probabilities.
+        # Increased uncertainty or volatility can only reduce stop support.
+        entropy = conformal.ConformalStoppingController.validate_probability(step_entropy, "step_entropy")
+        verifier = conformal.ConformalStoppingController.validate_probability(verifier_score, "verifier_score")
+        volatility = conformal.ConformalStoppingController.validate_probability(rsi_volatility / 100.0, "rsi_volatility / 100")
+        margin = verifier * (1.0 - entropy) * (1.0 - volatility)
+        result = self.conformal_stopping.evaluate_stopping(
             query=f"step_{step_index}_of_{total_budget}",
             current_step=step_index,
             max_budget=total_budget,
-            top_confidence=verifier_score,
-            runner_up_confidence=runner_up,
+            top_confidence=verifier,
+            runner_up_confidence=verifier - margin,
+            target_risk_alpha=target_error_rate,
         )
+        result.telemetry.update({
+            "confidence_source": "diagnostic_proxy_not_candidate_probabilities",
+            "step_entropy": entropy, "rsi_volatility": rsi_volatility,
+        })
+        return result
 
     def evaluate_causal_dag(
         self,

@@ -1,24 +1,18 @@
-"""Supermix v89 Neuro-Symbolic Proof Verification & First-Error Localization (FEL).
+"""Exact, bounded arithmetic trace checking and first-error localization.
 
-Implements rigorous step-by-step proof checking across chain-of-thought derivations,
-directly solving the first-error accounting challenge identified in V87 research notes.
-
-Each reasoning step is evaluated against:
-1. Syntactic Soundness: Deterministic equation and expression parsing.
-2. Register Grounding: Operands must derive strictly from problem premises or previously established registers (flags PHANTOM_REGISTER).
-3. Arithmetic / Formal Exactness: LHS == RHS under exact rational arithmetic (flags ARITHMETIC_ERROR).
-4. Premise Contradiction: Explicit contradiction of stated problem constraints (flags PREMISE_CONTRADICTION).
-
-When an error is detected, the localizer pinpoints the exact first step, explains the failure mode,
-and computes a deterministic symbolic repair that rescues the derivation.
+Supported steps are single binary numeric equations and terminal totals. Literal
+membership is only a register check: this module does not verify the meaning of
+the question, units, premise truth, or whether the chosen operation answers it.
+Suggested repairs have no authority until the complete trace is checked again.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from fractions import Fraction
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 
 class ProofErrorCategory:
@@ -42,6 +36,8 @@ class StepVerificationRecord:
     expected_result: Optional[float] = None
     repaired_step_text: Optional[str] = None
     diagnostic_note: str = ""
+    exact_declared_result: Optional[str] = None
+    exact_expected_result: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -51,7 +47,7 @@ class StepVerificationRecord:
 class FirstErrorResult:
     problem: str
     has_error: bool
-    first_error_index: int  # -1 if completely valid
+    first_error_index: int
     error_category: str
     error_step_text: Optional[str]
     diagnostic_explanation: str
@@ -62,266 +58,194 @@ class FirstErrorResult:
     telemetry: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "problem": self.problem,
-            "has_error": self.has_error,
-            "first_error_index": self.first_error_index,
-            "error_category": self.error_category,
-            "error_step_text": self.error_step_text,
-            "diagnostic_explanation": self.diagnostic_explanation,
-            "step_records": [s.to_dict() for s in self.step_records],
-            "repaired_trace": self.repaired_trace,
-            "verified_final_answer": self.verified_final_answer,
-            "proof_fidelity_score": self.proof_fidelity_score,
-            "telemetry": self.telemetry,
-        }
+        return asdict(self)
 
 
 class FirstErrorLocalizer:
-    """Neuro-Symbolic Proof Verifier with Step-Level First-Error Localization (FEL)."""
+    """Check every assertion under a deliberately small arithmetic grammar."""
 
-    EQ_PATTERN = re.compile(
-        r"(-?\d+(?:\.\d+)?)\s*([\+\-\*\/])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)"
+    DECIMAL = r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?"
+    NUMBER = rf"(?:[+-]?\d+/\d+|{DECIMAL})"
+    EQ_PATTERN = re.compile(rf"({NUMBER})\s*([+*/-])\s*({NUMBER})\s*=\s*({NUMBER})[.!]?")
+    TOTAL_PATTERN = re.compile(
+        rf"(?:the\s+)?(?:total|answer|result)(?:\s+is|\s*[:=])?\s+({NUMBER})[.!]?",
+        re.IGNORECASE,
     )
-    NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
+    # A sign directly after a number is a binary operator, not its next operand's sign.
+    NUMBER_PATTERN = re.compile(rf"(?<![\w.]){NUMBER}(?![\w.])")
+    MAX_STEP_CHARS = 4096
 
     def __init__(self, tolerance: float = 1e-5):
+        # Retained for caller compatibility; equality and grounding are always exact.
         self.tolerance = tolerance
 
-    def extract_problem_numbers(self, problem: str) -> Set[float]:
-        """Extract all literal numbers present in the problem prompt as base registers."""
-        numbers: Set[float] = set()
+    @staticmethod
+    def parse_number(text: str) -> Fraction:
+        if len(text) > 128:
+            raise ValueError("Numeric literal exceeds the supported length")
+        exponent = re.search(r"[eE]([+-]?\d+)$", text)
+        if exponent and abs(int(exponent.group(1))) > 100:
+            raise ValueError("Numeric exponent exceeds the supported range")
+        value = Fraction(text)
+        if not math.isfinite(float(value)):
+            raise ValueError("Numeric literal is outside the finite display range")
+        return value
+
+    def _problem_registers(self, problem: str) -> Set[Fraction]:
+        registers: Set[Fraction] = set()
         for match in self.NUMBER_PATTERN.finditer(problem):
             try:
-                val = float(match.group(0))
-                numbers.add(round(val, 4))
-            except ValueError:
-                pass
-        return numbers
+                registers.add(self.parse_number(match.group(0)))
+            except (ValueError, ZeroDivisionError, OverflowError):
+                continue
+        return registers
+
+    def extract_problem_numbers(self, problem: str) -> Set[float]:
+        """Legacy float view for diagnostic consumers; verification uses exact values."""
+        return {float(value) for value in self._problem_registers(problem)}
 
     def evaluate_step(
-        self,
-        step_idx: int,
-        step_text: str,
-        active_registers: Set[float],
+        self, step_idx: int, step_text: str, active_registers: Set[float],
     ) -> StepVerificationRecord:
-        """Verify an individual reasoning step against active registers and exact arithmetic."""
         text = step_text.strip()
-        eq_match = self.EQ_PATTERN.search(text)
-
-        if not eq_match:
-            # Check if it's a terminal answer or percentage definition
-            # e.g. "total 42" or "25 percent is one quarter"
-            total_match = re.search(r"\btotal\s+(-?\d+(?:\.\d+)?)", text, re.IGNORECASE)
-            if total_match:
-                val = float(total_match.group(1))
-                is_grounded = any(abs(val - r) < self.tolerance for r in active_registers)
-                if not is_grounded and active_registers:
-                    return StepVerificationRecord(
-                        step_index=step_idx,
-                        step_text=step_text,
-                        is_valid=False,
-                        detected_error_category=ProofErrorCategory.PHANTOM_REGISTER,
-                        declared_result=val,
-                        diagnostic_note=f"Declared final total {val} does not match any computed register in trace.",
-                    )
-                return StepVerificationRecord(
-                    step_index=step_idx,
-                    step_text=step_text,
-                    is_valid=True,
-                    detected_error_category=ProofErrorCategory.NONE,
-                    declared_result=val,
-                    diagnostic_note="Valid terminal total registration.",
-                )
-
-            # Check percentage definition
-            pct_match = re.search(r"(\d+)\s*percent is", text, re.IGNORECASE)
-            if pct_match:
-                return StepVerificationRecord(
-                    step_index=step_idx,
-                    step_text=step_text,
-                    is_valid=True,
-                    detected_error_category=ProofErrorCategory.NONE,
-                    diagnostic_note="Definitional percentage step.",
-                )
-
-            # If no recognizable equation or total
-            return StepVerificationRecord(
-                step_index=step_idx,
-                step_text=step_text,
-                is_valid=True,
-                detected_error_category=ProofErrorCategory.NONE,
-                diagnostic_note="Descriptive or transitional step without explicit arithmetic assertion.",
-            )
-
-        # We have an equation: op1 operator op2 = declared_res
-        op1_str, op, op2_str, res_str = eq_match.groups()
-        op1 = float(op1_str)
-        op2 = float(op2_str)
-        declared_res = float(res_str)
-
-        # 1. Check Register Grounding: op1 and op2 should exist in active registers
-        op1_grounded = any(abs(op1 - r) < self.tolerance for r in active_registers)
-        op2_grounded = any(abs(op2 - r) < self.tolerance for r in active_registers)
-
-        if not op1_grounded or not op2_grounded:
-            phantom = op1 if not op1_grounded else op2
-            # Repair: attempt grounding
-            return StepVerificationRecord(
-                step_index=step_idx,
-                step_text=step_text,
-                is_valid=False,
-                detected_error_category=ProofErrorCategory.PHANTOM_REGISTER,
-                declared_operands=[op1, op2],
-                declared_operator=op,
-                declared_result=declared_res,
-                diagnostic_note=f"Operand {phantom} is a phantom register not found in premises or prior step outputs.",
-            )
-
-        # 2. Compute exact ground truth
-        try:
-            frac1 = Fraction(op1_str)
-            frac2 = Fraction(op2_str)
-            if op == "+":
-                expected_frac = frac1 + frac2
-            elif op == "-":
-                expected_frac = frac1 - frac2
-            elif op == "*":
-                expected_frac = frac1 * frac2
-            elif op == "/":
-                if frac2 == 0:
-                    return StepVerificationRecord(
-                        step_index=step_idx,
-                        step_text=step_text,
-                        is_valid=False,
-                        detected_error_category=ProofErrorCategory.ARITHMETIC_ERROR,
-                        diagnostic_note="Division by zero encountered in step.",
-                    )
-                expected_frac = frac1 / frac2
-            else:
-                expected_frac = Fraction(0)
-            expected_res = float(expected_frac)
-        except Exception as e:
-            return StepVerificationRecord(
-                step_index=step_idx,
-                step_text=step_text,
-                is_valid=False,
-                detected_error_category=ProofErrorCategory.SYNTAX_ERROR,
-                diagnostic_note=f"Evaluation syntax failure: {e}",
-            )
-
-        # 3. Check Arithmetic Exactness
-        if abs(declared_res - expected_res) > self.tolerance:
-            fmt_exp = f"{int(expected_res)}" if expected_res.is_integer() else f"{round(expected_res, 4)}"
-            repaired = f"{op1_str} {op} {op2_str} = {fmt_exp}"
-            return StepVerificationRecord(
-                step_index=step_idx,
-                step_text=step_text,
-                is_valid=False,
-                detected_error_category=ProofErrorCategory.ARITHMETIC_ERROR,
-                declared_operands=[op1, op2],
-                declared_operator=op,
-                declared_result=declared_res,
-                expected_result=round(expected_res, 4),
-                repaired_step_text=repaired,
-                diagnostic_note=f"Arithmetic error: {op1_str} {op} {op2_str} is {fmt_exp}, not {declared_res}.",
-            )
-
-        # Step is completely valid
-        return StepVerificationRecord(
-            step_index=step_idx,
-            step_text=step_text,
-            is_valid=True,
-            detected_error_category=ProofErrorCategory.NONE,
-            declared_operands=[op1, op2],
-            declared_operator=op,
-            declared_result=declared_res,
-            expected_result=round(expected_res, 4),
-            repaired_step_text=step_text,
-            diagnostic_note="Step verified: exact arithmetic and grounded registers.",
+        record = StepVerificationRecord(
+            step_idx, step_text, False, ProofErrorCategory.UNSUPPORTED_LEAP,
+            diagnostic_note="Unsupported assertion; expected one complete numeric equation or terminal total.",
         )
+        if len(text) > self.MAX_STEP_CHARS:
+            record.detected_error_category = ProofErrorCategory.SYNTAX_ERROR
+            record.diagnostic_note = "Step exceeds the supported length."
+            return record
+        equation = self.EQ_PATTERN.fullmatch(text)
+        terminal = self.TOTAL_PATTERN.fullmatch(text)
+        if equation is None and terminal is None:
+            return record
+        try:
+            registers = {self.parse_number(str(value)) for value in active_registers}
+            if terminal:
+                value = self.parse_number(terminal.group(1))
+                record.declared_result = float(value)
+                record.exact_declared_result = str(value)
+                record.is_valid = value in registers
+                record.detected_error_category = (
+                    ProofErrorCategory.NONE if record.is_valid else ProofErrorCategory.PHANTOM_REGISTER
+                )
+                record.diagnostic_note = (
+                    "Terminal value occurs in active registers; full-trace dependency check still required."
+                    if record.is_valid else "Terminal value does not occur in any verified active register."
+                )
+                return record
 
-    def verify_and_localize(
-        self,
-        problem: str,
-        trace_steps: List[str],
-    ) -> FirstErrorResult:
-        """Execute step-by-step proof verification and locate the first error if present."""
-        if not trace_steps:
-            return FirstErrorResult(
-                problem=problem,
-                has_error=True,
-                first_error_index=0,
-                error_category=ProofErrorCategory.UNSUPPORTED_LEAP,
-                error_step_text=None,
-                diagnostic_explanation="Empty reasoning trace cannot satisfy proof verification.",
-                step_records=[],
-                repaired_trace=[],
-                verified_final_answer=None,
-                proof_fidelity_score=0.0,
+            left_text, operator, right_text, result_text = equation.groups()
+            left, right, declared = map(self.parse_number, (left_text, right_text, result_text))
+            record.declared_operands = [float(left), float(right)]
+            record.declared_operator = operator
+            record.declared_result = float(declared)
+            record.exact_declared_result = str(declared)
+            if left not in registers or right not in registers:
+                missing = left if left not in registers else right
+                record.detected_error_category = ProofErrorCategory.PHANTOM_REGISTER
+                record.diagnostic_note = f"Operand {missing} is a phantom register absent from premises and valid prior steps."
+                return record
+            if operator == "+":
+                expected = left + right
+            elif operator == "-":
+                expected = left - right
+            elif operator == "*":
+                expected = left * right
+            else:
+                if right == 0:
+                    record.detected_error_category = ProofErrorCategory.ARITHMETIC_ERROR
+                    record.diagnostic_note = "Division by zero cannot be repaired to a numeric result."
+                    return record
+                expected = left / right
+            record.expected_result = float(expected)
+            record.exact_expected_result = str(expected)
+            record.is_valid = declared == expected
+            record.detected_error_category = (
+                ProofErrorCategory.NONE if record.is_valid else ProofErrorCategory.ARITHMETIC_ERROR
             )
+            record.repaired_step_text = (
+                step_text if record.is_valid else f"{left_text} {operator} {right_text} = {expected}"
+            )
+            record.diagnostic_note = (
+                "Exact arithmetic and literal register membership checked; problem semantics are unchecked."
+                if record.is_valid else f"Arithmetic error: expected exact result {expected}, received {result_text}."
+            )
+            return record
+        except (ValueError, ZeroDivisionError, OverflowError):
+            record.detected_error_category = ProofErrorCategory.SYNTAX_ERROR
+            record.diagnostic_note = "Invalid or out-of-range numeric literal."
+            return record
 
-        active_registers = self.extract_problem_numbers(problem)
+    @staticmethod
+    def _answer_text(value: Fraction) -> str:
+        # Keep the historic small-integer display without rounding large integers.
+        if value.denominator == 1 and abs(value.numerator) <= 2**53:
+            return f"{value.numerator}.0"
+        return str(value)
+
+    def verify_and_localize(self, problem: str, trace_steps: List[str]) -> FirstErrorResult:
+        initial_registers = self._problem_registers(problem)
+        running_registers = set(initial_registers)
         records: List[StepVerificationRecord] = []
         repaired_trace: List[str] = []
+        last_computed: Optional[Fraction] = None
+        terminal_seen = False
 
-        first_err_idx = -1
-        first_err_cat = ProofErrorCategory.NONE
-        first_err_step = None
-        first_err_note = ""
+        for index, step in enumerate(trace_steps):
+            record = self.evaluate_step(index, step, running_registers)
+            terminal = self.TOTAL_PATTERN.fullmatch(step.strip()) is not None
+            if terminal_seen:
+                record.is_valid = False
+                record.detected_error_category = ProofErrorCategory.UNSUPPORTED_LEAP
+                record.diagnostic_note = "Assertions after the terminal answer are unsupported."
+            elif terminal and record.is_valid:
+                if last_computed is None or Fraction(record.exact_declared_result) != last_computed:
+                    record.is_valid = False
+                    record.detected_error_category = ProofErrorCategory.UNSUPPORTED_LEAP
+                    record.diagnostic_note = "Terminal answer must equal the most recent verified equation result."
+            records.append(record)
+            repaired_trace.append(record.repaired_step_text or step)
+            if terminal:
+                terminal_seen = True
+            # Invalid equations never create registers, including their suggested repairs.
+            if record.is_valid and record.exact_expected_result is not None:
+                last_computed = Fraction(record.exact_expected_result)
+                running_registers.add(last_computed)
 
-        running_registers = set(active_registers)
-
-        for i, step in enumerate(trace_steps):
-            rec = self.evaluate_step(i, step, running_registers)
-            records.append(rec)
-
-            if not rec.is_valid and first_err_idx == -1:
-                first_err_idx = i
-                first_err_cat = rec.detected_error_category
-                first_err_step = rec.step_text
-                first_err_note = rec.diagnostic_note
-
-            if rec.repaired_step_text:
-                repaired_trace.append(rec.repaired_step_text)
-            else:
-                repaired_trace.append(step)
-
-            # Register update
-            if rec.expected_result is not None:
-                running_registers.add(round(rec.expected_result, 4))
-            elif rec.declared_result is not None and rec.is_valid:
-                running_registers.add(round(rec.declared_result, 4))
-
-        valid_count = sum(1 for r in records if r.is_valid)
-        fidelity = round(valid_count / len(records), 3)
-
-        if first_err_idx == -1:
-            diag = f"All {len(records)} reasoning steps verified sound. Grounded registers: {len(running_registers)}."
-            final_ans = None
-            if records and records[-1].declared_result is not None:
-                final_ans = str(records[-1].declared_result)
+        first_error = next((record for record in records if not record.is_valid), None)
+        has_error = first_error is not None or not records
+        valid_count = sum(record.is_valid for record in records)
+        answer = self._answer_text(last_computed) if not has_error and last_computed is not None else None
+        if first_error:
+            diagnostic = f"First error at step {first_error.step_index} [{first_error.detected_error_category}]: {first_error.diagnostic_note}"
+        elif not records:
+            diagnostic = "Empty reasoning trace cannot satisfy arithmetic verification."
         else:
-            diag = f"First error at step {first_err_idx} [{first_err_cat}]: {first_err_note}"
-            final_ans = None
-            if records and records[-1].expected_result is not None:
-                final_ans = str(records[-1].expected_result)
-
+            diagnostic = f"All {len(records)} supported arithmetic steps checked. Problem semantics and answer relevance are not verified."
         return FirstErrorResult(
             problem=problem,
-            has_error=(first_err_idx != -1),
-            first_error_index=first_err_idx,
-            error_category=first_err_cat,
-            error_step_text=first_err_step,
-            diagnostic_explanation=diag,
+            has_error=has_error,
+            first_error_index=first_error.step_index if first_error else (0 if not records else -1),
+            error_category=first_error.detected_error_category if first_error else (
+                ProofErrorCategory.UNSUPPORTED_LEAP if not records else ProofErrorCategory.NONE
+            ),
+            error_step_text=first_error.step_text if first_error else None,
+            diagnostic_explanation=diagnostic,
             step_records=records,
             repaired_trace=repaired_trace,
-            verified_final_answer=final_ans,
-            proof_fidelity_score=fidelity,
+            verified_final_answer=answer,
+            proof_fidelity_score=round(valid_count / len(records), 3) if records else 0.0,
             telemetry={
                 "steps_analyzed": len(records),
                 "valid_steps": valid_count,
-                "initial_registers_count": len(active_registers),
+                "initial_registers_count": len(initial_registers),
                 "terminal_registers_count": len(running_registers),
+                "verification_scope": "arithmetic_trace_only",
+                "problem_semantics_verified": False,
+                "answer_authority": False,
+                "exact_final_register": str(last_computed) if not has_error and last_computed is not None else None,
+                "repair_requires_reverification": has_error,
             },
         )

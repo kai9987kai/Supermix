@@ -244,3 +244,43 @@ def test_live_check_does_not_judge_a_fragment_of_an_unsupported_request():
 def test_live_check_retains_other_existing_checker_families():
     verdict = server.check_reply("How many combinations of 5 things taken 2?", "total 10")
     assert verdict is not None and verdict.correct
+
+
+@pytest.mark.parametrize("prompt", [
+    "Check proof: calculate 2 + 3",
+    "Verify proof derivation: What is 2 + 3?",
+    "Check proof: How many combinations of 5 things taken 2?",
+    "Denoise thought: What is 25% of 80?",
+    "Crystallize reasoning plan: Find the mean of 10, 20 and 30",
+])
+def test_cognitive_rewrite_never_authorizes_an_embedded_numeric_verdict(prompt):
+    assert server.check_reply(prompt, "total 5") is None
+
+
+@pytest.mark.parametrize("endpoint", ["/api/chat", "/api/compare"])
+@pytest.mark.parametrize("normalise", [False, True])
+@pytest.mark.parametrize("prompt", [
+    "Check proof: What is 2 + 3?",
+    "Denoise thought: What is 25% of 80?",
+    "Check proof: How many combinations of 5 things taken 2?",
+])
+def test_http_cognitive_requests_remain_not_checked(monkeypatch, endpoint, normalise, prompt):
+    monkeypatch.setattr(server, "stream_tokens", _stub_stream)
+    client = server.build_app(_FakeRegistry(["a"], 1), normalise_prompts=normalise).test_client()
+    response = client.post(endpoint, json={"message": prompt})
+
+    assert response.status_code == 200
+    if endpoint == "/api/chat":
+        lines = response.get_data(as_text=True).splitlines()
+        result = json.loads(next(lines[i + 1][6:] for i, line in enumerate(lines) if line == "event: done"))
+        assert result["check"] is None
+    else:
+        result = response.get_json()
+        assert result["results"][0]["check"] is None
+        assert result["answers_agree"] is None
+
+
+def test_live_decimal_check_uses_the_complete_operands():
+    verdict = server.check_reply("What is 2.5 + 3.5?", "total 6")
+    assert verdict is not None and verdict.correct
+    assert verdict.expected == 6

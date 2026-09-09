@@ -390,3 +390,68 @@ def test_supported_rewrites_are_idempotent(text):
 
     assert result.rule is not None
     assert pn.normalise(result.prompt).prompt == result.prompt
+
+
+@pytest.mark.parametrize("text", [
+    "Compute causal effect on Force if do(Mass=5)",
+    "Compute causal query do(Mass=5) on Force",
+    "What would be the counterfactual outcome for F if M were 4?",
+    "What would be the counterfactual outcome for F if M were 4 in physics_newton?",
+    "What would be the counterfactual outcome for Recovery if Drug were 1 in drug_recovery?",
+    "Compute causal effect on Force if do(Mass=5 in physics_newton",
+    "Compute causal effect on Force if do Mass=5) in physics_newton",
+    "Compute causal query do(Mass=5) on Force in physics_newton; report assumptions",
+    "Do not compute causal effect on Force if do(Mass=5) in physics_newton",
+    "Find the first error in the proof: 2 + 3 = 5; 5 + 1 = 7",
+    "Check proof:   \n\t",
+    "Denoise thought: \n\t",
+])
+def test_incomplete_or_constrained_cognitive_prompts_are_not_reinterpreted(text):
+    result = pn.normalise(text)
+
+    assert result.prompt == result.original == text
+    assert result.rule is None
+
+
+@pytest.mark.parametrize("text", [
+    "Compute causal effect on Force_2 if do(Mass_1=9007199254740993) in MyStudy_2",
+    "COMPUTE causal query do(Mass_1=9007199254740993) on Force_2 in MyStudy_2",
+    "What is the interventional effect on Force_2 if we do Mass_1=9007199254740993 in MyStudy_2?",
+])
+def test_causal_rewrite_preserves_identifiers_and_exact_numeric_literals(text):
+    result = pn.normalise(text)
+
+    assert result.rule == "causal_intervention"
+    assert result.prompt == (
+        "Given scenario MyStudy_2, compute causal query "
+        "P(Force_2 | do(Mass_1=9007199254740993))."
+    )
+    assert result.original == text
+
+
+def test_conformal_rewrite_does_not_round_decimal_literals():
+    number = "0.123456789123456789"
+    result = pn.normalise(
+        f"Conformal early exit check: step 0001 of 0010 verifier {number} entropy -{number}"
+    )
+
+    assert result.rule == "conformal_stopping"
+    assert result.prompt == (
+        f"Evaluate conformal stopping at step 0001 of 0010 "
+        f"with verifier {number} and entropy -{number}."
+    )
+
+
+@pytest.mark.parametrize("prompt_header,prefix,rule", [
+    ("Check proof", "Verify proof derivation: ", "proof_verify"),
+    ("Denoise thought", "Denoise continuous thought latent for: ", "diffusion_thought"),
+])
+def test_cognitive_payloads_preserve_line_structure_and_quoted_whitespace(prompt_header, prefix, rule):
+    payload = '\n```python\nif x:\n    result = "a  b"\n\tprint(result)\n```\nExplain each step.\n'
+    text = f"{prompt_header}: {payload}"
+    result = pn.normalise(text)
+
+    assert result.rule == rule
+    assert result.prompt == prefix + payload
+    assert result.original == text
+    assert pn.normalise(result.prompt).prompt == result.prompt

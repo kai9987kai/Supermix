@@ -187,13 +187,17 @@ def generation_details(reply: str, progress: GenerationProgress, cap: int) -> Di
 
 
 def check_reply(message: str, reply: str):
+    rule = prompt_normaliser.normalise(message).rule
+    if rule in prompt_normaliser.COGNITIVE_LEAD_IN:
+        return None
     verdict = answer_check.check(message, reply)
     covered = (set(prompt_normaliser.LEAD_IN) | set(prompt_normaliser.SCIENCE_LEAD_IN)
                | {"arithmetic", "average", "percent", "two_step", "sequence", "algebra_one_step"})
     # A substring checker must not undo the full-request parser's refusal.
     # Keep the separate checker families (e.g. bounded code traces) unchanged.
-    if verdict is not None and verdict.task in covered and prompt_normaliser.normalise(message).rule is None:
-        return None
+    if verdict is not None:
+        if verdict.task in covered and rule not in covered:
+            return None
     return verdict
 
 
