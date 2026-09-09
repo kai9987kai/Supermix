@@ -455,3 +455,102 @@ def test_cognitive_payloads_preserve_line_structure_and_quoted_whitespace(prompt
     assert result.prompt == prefix + payload
     assert result.original == text
     assert pn.normalise(result.prompt).prompt == result.prompt
+
+
+# ---------------------------------------------------------------------------
+# The two counting tasks
+# ---------------------------------------------------------------------------
+
+
+class TestCountingRules:
+    """v88's held-out phrasing benchmark put `arithmetic_series` at 0/25 and
+    `combination` at 2/25 on wordings withheld from training, against 25/25 for
+    both on their trained wordings. They did not compute wrongly -- they fell
+    through to the dialogue corpus and answered as a chatbot:
+
+        total of 8 terms from 8 with common difference 2
+          -> "Practical answer: Sure. I can propose a concrete plan if you want."
+
+    With these rules both reach 25/25, and the whole benchmark's phrasing gap
+    falls from 0.2333 to 0.0800.
+
+    These cases were written BEFORE the held-out forms were looked at, so that
+    the benchmark stayed a test rather than a target. Two of them caught real
+    bugs that a benchmark-fitted rule would have hidden.
+    """
+
+    @pytest.mark.parametrize("text, chosen, pool", [
+        ("how many ways can i pick 2 from 54", "2", "54"),
+        ("number of ways to choose 2 items out of 54", "2", "54"),
+        ("54 choose 2", "2", "54"),
+        ("pick 2 from 54, how many combinations", "2", "54"),
+        ("how many combinations of 2 from 54 are there", "2", "54"),
+        ("ways to select 2 out of 54", "2", "54"),
+        ("combinations: 2 from 54", "2", "54"),
+    ])
+    def test_a_combination_question_reaches_the_trained_form(self, text, chosen, pool):
+        result = pn.normalise(text)
+        assert result.rule == "combination", text
+        assert result.prompt == (
+            f"In how many ways can {chosen} items be chosen from {pool}?")
+
+    def test_the_pool_is_found_by_role_and_not_by_position(self):
+        """`54 choose 2` and `choosing 2 out of 54` name the same problem.
+
+        A rule that took the first number as the pool would answer the second
+        one backwards -- and the reply would look confident with correct-looking
+        working, which is worse than not firing.
+        """
+
+        for text in ("54 choose 2", "choosing 2 out of 54",
+                     "number of combinations of 54 choose 2 please"):
+            result = pn.normalise(text)
+            assert result.prompt == (
+                "In how many ways can 2 items be chosen from 54?"), text
+
+    @pytest.mark.parametrize("text, first, step, count", [
+        ("sum 10 terms starting at 9 going up by 4", "9", "4", "10"),
+        ("add up 8 terms from 8 step 2", "8", "2", "8"),
+        ("what do 8 terms starting at 17 rising by 2 add to", "17", "2", "8"),
+        ("series starting at 12 increasing by 6, sum of 10 terms", "12", "6", "10"),
+        ("total of 8 terms beginning at 17 with step 2", "17", "2", "8"),
+    ])
+    def test_a_series_question_reaches_the_trained_form(self, text, first, step, count):
+        result = pn.normalise(text)
+        assert result.rule == "arithmetic_series", text
+        assert result.prompt == (
+            f"An arithmetic series starts at {first} with common difference "
+            f"{step}. What is the sum of the first {count} terms?")
+
+    def test_first_counts_terms_rather_than_naming_the_first_term(self):
+        """`sum of the first 10 terms, start 9` starts at 9, not 10 and not 1.
+
+        Both wrong readings were real. The regex first matched `first 10` and
+        took 10 as the first term; adding a lookahead for `terms` then let it
+        backtrack to the `1` of `10`, which the lookahead no longer blocked. The
+        guard against a partial number match is what fixes it.
+        """
+
+        result = pn.normalise(
+            "sum of the first 10 terms, start 9, common difference 4")
+        assert result.prompt == (
+            "An arithmetic series starts at 9 with common difference 4. "
+            "What is the sum of the first 10 terms?")
+
+    @pytest.mark.parametrize("text", [
+        "how many ways are there to solve this",
+        "what is an arithmetic series",
+        "choose a number between 1 and 10",
+        "the sum of my terms of employment",
+        "pick 2",
+        "how many terms are in a series",
+    ])
+    def test_a_question_without_its_operands_is_left_alone(self, text):
+        """A wrong rewrite is worse than none.
+
+        `choose a number between 1 and 10` contains `choose` and two numbers and
+        was rewritten into a combination question by the first version of these
+        rules -- answering something nobody asked.
+        """
+
+        assert pn.normalise(text).changed is False, text

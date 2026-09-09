@@ -76,6 +76,36 @@ SCIENCE_LEAD_IN = {
     "power": "work {w} J time {t} s power",
 }
 
+#: The two counting tasks, which carry no units and so cannot be reached by the
+#: quantity patterns above.
+#:
+#: v88's held-out phrasing benchmark put `arithmetic_series` at **0/25** and
+#: `combination` at **2/25** on wordings withheld from training, against 25/25
+#: for both on their trained wordings. They do not fail by computing wrongly.
+#: They stop being a maths model and answer from the dialogue corpus:
+#:
+#:     total of 8 terms from 8 with common difference 2
+#:       -> "Practical answer: Sure. I can propose a concrete plan if you want."
+#:     choosing 2 out of 54, how many ways is that
+#:       -> "Recommended path: Got it."
+#:
+#: Every other task in that benchmark scores 19/25 or better, so this is not a
+#: general weakness -- it is these two shapes falling closer to the 96,108
+#: language rows than to their own 40,000. A presentation fix is the right tool:
+#: the model answers both perfectly once the question is in its own form.
+COUNTING_LEAD_IN = {
+    "combination": "In how many ways can {k} items be chosen from {n}?",
+    "arithmetic_series": ("An arithmetic series starts at {a} with common "
+                          "difference {d}. What is the sum of the first {n} "
+                          "terms?"),
+}
+
+#: Words that mark a counting question. A rule fires only when one of these is
+#: present *and* the operands can be located by role, never by position -- see
+#: `_counting` for why position is not usable here.
+CHOOSE_WORDS = r"choose|choosing|chose|pick|picking|select|selecting|combination|ways|options"
+SERIES_WORDS = r"series|progression|terms?"
+
 #: v91 Cognitive Lead-in formats for Pearlian causal DAG, proof audit, DoT, and conformal stopping
 COGNITIVE_LEAD_IN = {
     "causal_intervention": "Given scenario {scenario}, compute causal query P({outcome} | do({treatment}={val})).",
@@ -285,6 +315,85 @@ def _science(text: str) -> Optional[Normalised]:
     return None
 
 
+def _counting(text: str) -> Optional[Normalised]:
+    """Rewrite a combination or arithmetic-series question into the corpus form.
+
+    Operands are found **by role, never by position**. `54 choose 2` and
+    `choosing 2 out of 54` name the same problem in opposite orders, and a rule
+    that took the first number as `n` would silently answer the second one
+    backwards -- which is worse than not firing, because the reply looks
+    confident and the working looks right.
+
+    So: `combination` anchors `n` to a from/of/out-of preposition and treats the
+    other number as `k`, and falls back to size ordering only when no
+    preposition is present (`54 choose 2`), where the pool is necessarily the
+    larger. `arithmetic_series` anchors each of its three operands to its own
+    marker word and fires only when all three are found.
+
+    Conservative in the same way `_science` is: a question that names the task
+    but does not carry its operands goes through untouched. `"how many ways are
+    there to solve this"` must reach ordinary conversation.
+    """
+
+    lowered = text.lower()
+
+    # -- arithmetic series: needs a first term, a difference and a count ------
+    if re.search(SERIES_WORDS, lowered):
+        count = re.search(rf"({NUMBER})\s+terms?\b", lowered) or re.search(
+            rf"\b(?:first|sum\s+of|total\s+of|add\s+up)\s+({NUMBER})\b", lowered)
+        # `sum of the first 10 terms` counts terms; it does not name the first
+        # term. The negative lookahead is what separates the two readings, and
+        # without it "first 10 terms, start 9" is rewritten as starting at 10.
+        first = re.search(
+            rf"(?:start(?:s|ing)?(?:\s+at)?|begin(?:s|ning)?(?:\s+at)?|"
+            rf"first(?:\s+term)?|from)\s+({NUMBER})(?![\d.])(?!\s*terms?\b)",
+            lowered)
+        step = re.search(
+            rf"(?:common\s+difference|difference|step|rising\s+by|rises\s+by|"
+            rf"increasing\s+by|increases\s+by|going\s+up\s+by|goes\s+up\s+by)"
+            rf"\s+(?:of\s+)?({NUMBER})", lowered)
+        if count and first and step:
+            return Normalised(
+                COUNTING_LEAD_IN["arithmetic_series"].format(
+                    a=first.group(1), d=step.group(1), n=count.group(1)),
+                "arithmetic_series", text)
+
+    # -- combination: needs a chosen count and a pool ------------------------
+    if re.search(CHOOSE_WORDS, lowered):
+        pool = re.search(
+            rf"(?:from|out\s+of|of)\s+({NUMBER})", lowered)
+        if pool:
+            others = [value for value in re.findall(NUMBER, lowered)
+                      if value != pool.group(1)]
+            # `combinations of 2 from 54` puts a number after `of` that is the
+            # chosen count, not the pool; the later preposition wins.
+            later = re.findall(rf"(?:from|out\s+of)\s+({NUMBER})", lowered)
+            if later:
+                pool_value = later[-1]
+                others = [v for v in re.findall(NUMBER, lowered) if v != pool_value]
+            else:
+                pool_value = pool.group(1)
+            if len(others) == 1:
+                chosen, size = others[0], pool_value
+                if float(chosen) < float(size):
+                    return Normalised(
+                        COUNTING_LEAD_IN["combination"].format(k=chosen, n=size),
+                        "combination", text)
+        else:
+            # `54 choose 2` -- no preposition, so the pool is the larger. The
+            # match must be the *whole* question: "choose a number between 1 and
+            # 10" also contains `choose` and two numbers, and rewriting that into
+            # a combination question would answer something nobody asked.
+            adjacent = re.fullmatch(
+                rf"\s*({NUMBER})\s+choose\s+({NUMBER})\s*", lowered)
+            if adjacent:
+                low, high = sorted(adjacent.groups(), key=float)
+                return Normalised(
+                    COUNTING_LEAD_IN["combination"].format(k=low, n=high),
+                    "combination", text)
+    return None
+
+
 def _cognitive(source: str, original_text: str) -> Optional[Normalised]:
     """Rewrite complete cognitive requests without supplying missing facts.
 
@@ -448,6 +557,14 @@ def normalise(text: str) -> Normalised:
     science = _science(source)
     if science is not None:
         return Normalised(science.prompt, science.rule, text)
+
+    # Counting before the binary scan too. "choosing 2 out of 54" carries two
+    # numbers and no operator, which the `A op B` search would leave alone, but
+    # "sum 10 terms starting at 9 going up by 4" carries three and could be
+    # harvested as an average.
+    counting = _counting(source)
+    if counting is not None:
+        return Normalised(counting.prompt, counting.rule, text)
 
     binary = _binary(source)
     if binary is not None:

@@ -127,6 +127,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--cap", type=int, default=96)
     ap.add_argument("--output")
     ap.add_argument("--dump_replies")
+    ap.add_argument("--normalise", action="store_true",
+                    help=("run prompt_normaliser over both columns first. OFF by "
+                          "default because needing the rewrite is what this "
+                          "measures; on, it reports what the chat server "
+                          "actually does, since that normalises by default"))
     args = ap.parse_args(argv)
 
     pairs = build_pairs(args.per_task, args.seed)
@@ -142,7 +147,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     for n, pair in enumerate(pairs, 1):
         row = dict(pair)
         for column in ("trained", "held_out"):
-            reply = generate_reply(model, tokenizer, pair[f"{column}_prompt"],
+            asked = pair[f"{column}_prompt"]
+            if args.normalise:
+                import prompt_normaliser
+                rewritten = prompt_normaliser.normalise(asked)
+                row[f"{column}_rewritten"] = rewritten.changed
+                row[f"{column}_rule"] = rewritten.rule
+                asked = rewritten.prompt
+            reply = generate_reply(model, tokenizer, asked,
                                    max_new_tokens=args.cap)
             text = reply["reply"] if isinstance(reply, dict) else str(reply)
             got = extract_answer(text)
