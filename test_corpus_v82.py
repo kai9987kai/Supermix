@@ -694,3 +694,90 @@ def test_the_default_build_is_unchanged_by_every_new_option():
                              token_budget=False)
 
     assert baseline == explicit
+
+
+class TestAverageTerminates:
+    """`average` asks for values a digit-level model cannot produce.
+
+    The generator draws four to six numbers and divides by the count. Fours and
+    fives always terminate; six repeats whenever the sum is not a multiple of
+    three, so **22% of average problems demand something like
+    `59.333333333333336`**.
+
+    `build_omni_corpus` states the principle that violates: a task that cannot
+    produce a value the model could plausibly learn is left out rather than
+    padded with noise. Measured on v88, five of average's six wrong replies fail
+    at exactly this -- expected `59.333333333333336`, answered `59.0`.
+    """
+
+    def test_the_flag_is_off_by_default(self):
+        """It narrows the benchmark, so it is a declared trade and not a default."""
+
+        assert scratch.AVERAGE_TERMINATES is False
+
+    def test_no_mean_repeats_when_the_arm_is_on(self):
+        """Terminating, not short: dividing by four gives `.25`, two places.
+
+        The first version of this asserted one decimal place and failed on
+        `73 / 4 = 18.25` -- a perfectly representable answer. Two places is the
+        real bound, from the fours; the arm's job is to remove the *repeating*
+        cases, which only sixes produce.
+        """
+
+        scratch.AVERAGE_TERMINATES = True
+        scratch.DECOMPOSE_INNER = True
+        try:
+            rng = random.Random(5)
+            for _ in range(2000):
+                answer = scratch._scratchpad_average(rng)["answer"]
+                assert abs(answer * 100 - round(answer * 100)) < 1e-9, (
+                    f"{answer} does not terminate within two decimal places"
+                )
+        finally:
+            scratch.AVERAGE_TERMINATES = False
+            scratch.DECOMPOSE_INNER = False
+
+    def test_the_arm_moves_one_value_by_at_most_two(self):
+        """A bigger nudge would bias the operand distribution.
+
+        Only a division by six can repeat, and the sum only ever needs to reach
+        the next multiple of three, so the adjustment is bounded by construction
+        rather than by clamping.
+        """
+
+        for size in (4, 5, 6):
+            for base in (5, 40, 99):
+                values = [base] * size
+                adjusted = scratch._terminating_mean(values)
+                assert len(adjusted) == len(values)
+                assert adjusted[:-1] == values[:-1], "only the last value moves"
+                assert abs(adjusted[-1] - values[-1]) <= 2
+                assert 5 <= adjusted[-1] <= 99, "left the generator's own range"
+
+    def test_a_mean_that_already_terminates_is_untouched(self):
+        for values in ([10, 20, 30, 40], [5, 5, 5, 5, 5], [6, 6, 6, 6, 6, 6]):
+            assert scratch._terminating_mean(values) == values
+
+    def test_the_arm_consumes_no_randomness(self):
+        """Enabling it must not shift any later row.
+
+        The adjustment happens after the draw, so a corpus built with the arm on
+        differs from one built without it only in `average`, and only in that
+        task's last value.
+        """
+
+        def draw(flag):
+            scratch.AVERAGE_TERMINATES = flag
+            rng = random.Random(77)
+            return [scratch._scratchpad_average(rng)["expression"]
+                    for _ in range(200)]
+
+        try:
+            plain, fixed = draw(False), draw(True)
+            differing = sum(a != b for a, b in zip(plain, fixed))
+            assert 0 < differing < len(plain), (
+                f"{differing} of {len(plain)} rows differ; expected some but "
+                "not all -- fours and fives already terminate"
+            )
+        finally:
+            scratch.AVERAGE_TERMINATES = False

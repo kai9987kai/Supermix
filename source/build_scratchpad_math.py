@@ -81,6 +81,37 @@ PERCENT_WRITTEN_SUM = False
 #: scored worst on, 33.3% and 58.3% against 91.7-100% for the decomposed tasks.
 DECOMPOSE_INNER = False
 
+#: Whether `average` is constrained so its mean always terminates.
+#:
+#: **Off. Untrained, and it narrows the benchmark as well as the corpus.**
+#:
+#: The generator draws four to six values and divides by the count. Four and
+#: five always terminate; six repeats whenever the sum is not a multiple of
+#: three, so **22% of `average` problems ask for a value like
+#: `59.333333333333336`**.
+#:
+#: `build_omni_corpus` states the principle this violates:
+#:
+#:     Where a task cannot produce a value a digit-level model could plausibly
+#:     learn, it is left out rather than padded with noise -- training on
+#:     `294.1995` teaches the shape of a float, not physics.
+#:
+#: Measured on v88, five of `average`'s six wrong replies fail at the final
+#: division, and the mismatches are exactly this shape: expected
+#: `59.333333333333336`, answered `59.0`; expected `77.5`, answered
+#: `76.833333`.
+#:
+#: On, the last value moves by at most two so the sum is a multiple of three,
+#: and no mean repeats. They still reach two decimal places -- dividing by four
+#: gives `.25` -- which is exactly representable and is not what this fixes. No
+#: randomness is consumed, so the arm cannot shift any later row.
+#:
+#: **This narrows the benchmark too**, because `eval_problem_solving` calls the
+#: same generator. An `average` score measured with this on is not comparable
+#: with v88's 0.714, and that has to be said every time the number is quoted --
+#: the same trade `COMBINATION_IN_ENVELOPE` takes in `build_omni_corpus`.
+AVERAGE_TERMINATES = False
+
 #: Whether `average` writes its running total as explicit binary additions.
 #:
 #: Off reproduces the v66-v81 corpora exactly, including the v80 build. On
@@ -269,6 +300,27 @@ def _scratchpad_binary(a: int, b: int, op: str, answer: int) -> Dict[str, Any]:
             "task": "addition" if op == "+" else "subtraction"}
 
 
+def _terminating_mean(values: List[int]) -> List[int]:
+    """Nudge the last value so the mean has at most one decimal place.
+
+    Only a division by six can repeat here: fours and fives always terminate,
+    and `sum / 6` is exact when the sum is a multiple of three. So the last
+    value moves by at most two, which keeps it inside the generator's own
+    5..99 range and leaves the other values untouched.
+
+    No randomness is consumed, so enabling the arm cannot shift any later row.
+    """
+
+    if len(values) % 3 == 0 and sum(values) % 3:
+        adjusted = list(values)
+        shift = -(sum(values) % 3)
+        if adjusted[-1] + shift < 5:
+            shift += 3
+        adjusted[-1] += shift
+        return adjusted
+    return values
+
+
 def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
     # Four to seven values, not four to five.
     #
@@ -285,6 +337,8 @@ def _scratchpad_average(rng: random.Random) -> Dict[str, Any]:
     # a seven-value row is long enough to be dropped by turn-aligned packing,
     # which would silently reintroduce that same gap at the top of the range.
     values = [rng.randint(5, 99) for _ in range(rng.choice([4, 5, 6]))]
+    if AVERAGE_TERMINATES:
+        values = _terminating_mean(values)
     total = sum(values)
     answer = total / len(values)
     joined = ", ".join(str(v) for v in values)
