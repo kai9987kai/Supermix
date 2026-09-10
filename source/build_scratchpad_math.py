@@ -771,6 +771,7 @@ def write(rows: Sequence[Dict[str, Any]], output: Path) -> Dict[str, Any]:
         "format_flags": {
             "decompose_inner": DECOMPOSE_INNER,
             "average_binary_steps": AVERAGE_BINARY_STEPS,
+            "average_terminates": AVERAGE_TERMINATES,
             "algebra_word_sign": ALGEBRA_WORD_SIGN,
             "two_step_division_trace": TWO_STEP_DIVISION_TRACE,
             "prompt_paraphrases": PROMPT_PARAPHRASES,
@@ -796,6 +797,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--decompose-inner",
         action="store_true",
         help="show working for the inner operations of average and percent",
+    )
+    parser.add_argument(
+        "--average_terminates",
+        action="store_true",
+        help=("constrain average so no mean repeats. 22% of its problems "
+              "currently ask for a value like 59.333333333333336, which is "
+              "what five of v88's six wrong average replies fail on. NARROWS "
+              "THE BENCHMARK TOO -- eval_problem_solving calls this same "
+              "generator, so a score measured with this on is not comparable "
+              "with v88's average of 0.714."),
     )
     parser.add_argument(
         "--average_binary_steps",
@@ -834,9 +845,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     global DECOMPOSE_INNER, AVERAGE_BINARY_STEPS, ALGEBRA_WORD_SIGN
+    global AVERAGE_TERMINATES
     global TWO_STEP_DIVISION_TRACE, PROMPT_PARAPHRASES
     DECOMPOSE_INNER = bool(args.decompose_inner)
     AVERAGE_BINARY_STEPS = bool(args.average_binary_steps)
+    AVERAGE_TERMINATES = bool(args.average_terminates)
     ALGEBRA_WORD_SIGN = bool(args.algebra_word_sign)
     TWO_STEP_DIVISION_TRACE = bool(args.two_step_division_trace)
     PROMPT_PARAPHRASES = bool(args.prompt_paraphrases)

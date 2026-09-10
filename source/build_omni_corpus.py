@@ -1223,6 +1223,7 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
             "combination_in_envelope": COMBINATION_IN_ENVELOPE,
             "natural_phrasings": NATURAL_PHRASINGS,
             "decompose_quotient": DECOMPOSE_QUOTIENT,
+            "long_division": LONG_DIVISION,
         },
     }
     if balanced_operands and not repeat:
@@ -1289,6 +1290,13 @@ def build_parser() -> argparse.ArgumentParser:
                               "solver parses are all bit-identical. The last "
                               "three forms per task are withheld for "
                               "eval_natural_phrasing.py"))
+    parser.add_argument("--long_division", action="store_true",
+                        help=("show the three division tasks' working one "
+                              "quotient digit at a time, school method. Every "
+                              "number is on the page or one bring-down from it, "
+                              "which is what decompose_quotient lacked. Targets "
+                              "24 of the 29 division errors that make up 58% of "
+                              "v88's remaining failures. UNTRAINED"))
     parser.add_argument("--decompose_quotient", action="store_true",
                         help=("split the three division tasks' quotient by "
                               "place value. MEASURED HARMFUL in v87 -- power "
@@ -1315,9 +1323,11 @@ def main(argv=None) -> int:
             "Drop one of the two."
         )
     global COMBINATION_IN_ENVELOPE, NATURAL_PHRASINGS, DECOMPOSE_QUOTIENT
+    global LONG_DIVISION
     COMBINATION_IN_ENVELOPE = bool(args.combination_in_envelope)
     NATURAL_PHRASINGS = bool(args.natural_phrasings)
     DECOMPOSE_QUOTIENT = bool(args.decompose_quotient)
+    LONG_DIVISION = bool(args.long_division)
     rows, report = build(args.per_task, args.seed, args.task or None,
                          repeat=not args.unique,
                          retry_rate=args.retry_rate,
