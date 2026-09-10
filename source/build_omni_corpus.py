@@ -251,6 +251,102 @@ def decompose_product(a: int, b: int) -> str:
 #: reproducible -- `output/v87_measurements/v87_paired_n630.json` is the receipt.
 DECOMPOSE_QUOTIENT = False
 
+#: Whether the three division tasks show long division instead of one jump.
+#:
+#: **Off. Untrained, and offered as a measured proposal rather than a result.**
+#:
+#: Division is where v88's remaining errors live. Of the 50 wrong replies in the
+#: whole 630-problem benchmark, 24 are the three division tasks -- `power` 15 of
+#: 21, `acceleration` 6, `molarity` 3 -- and every one of them fails at the same
+#: place, the single one-shot division step:
+#:
+#:     power = work / time, 5712 / 48 = 114      truth 119
+#:
+#: `DECOMPOSE_QUOTIENT` above already tried to split this and made it much
+#: worse, because each partial dividend was back-computed from the answer. The
+#: bar for any replacement is therefore the rule that failure established: every
+#: step derivable forward from what is on the page, and inside the model's
+#: arithmetic.
+#:
+#: What changed is the second half. v88's written subtraction is now reliable --
+#: 4 of 147 carry-free steps false and 9 of 134 borrowing ones, against v87-era
+#: rates of 0.104 and 0.186 -- and multiplication scores 1.000. Long division
+#: rests on exactly those two operations, so it is viable now in a way it was
+#: not when `decompose_quotient` was written.
+#:
+#: Measured over 1,200 generated division problems before proposing it:
+#:
+#:     format               median  p95  max  turns >=128  widest operand
+#:     one-shot (today)         31   36   42            0   5 digits
+#:     subtract multiples       67   99  107            0   5 digits
+#:     long division            79  111  122            0   4 digits
+#:
+#: `subtract multiples` was rejected on the envelope, not the budget: it asks
+#: for `16992 - 11800`, and `subtraction` trains on three digits. Long division
+#: keeps 97% of its operands at three digits or fewer because each remainder is
+#: bounded by ten times the divisor.
+#:
+#: What it still does not have is a training run. The digit estimate
+#: (`48 into 91 = 1`) is the smallest one available -- one digit, against a
+#: two-digit dividend -- but it is an estimate, and nothing here proves the
+#: model can make it. Do not enable this and a phrasing arm in the same run.
+LONG_DIVISION = False
+
+
+def long_division(dividend: int, divisor: int, with_total: bool = True) -> str:
+    """Show `dividend / divisor` one quotient digit at a time, school method.
+
+    Every number written is already on the page or derived from one that is:
+
+        48 into 57 = 1, 57 - 48 = 9, 48 into 91 = 1, 91 - 48 = 43,
+        48 into 432 = 9, 9 x 48 = 432, 432 - 432 = 0, total 119
+
+    `57` is the leading digits of the dividend, `9` is what the subtraction just
+    produced, `91` appends the next dividend digit to it. Contrast
+    `decompose_quotient`, which needed `1920` -- a number obtainable only by
+    already knowing the quotient digit was 30.
+
+    The multiplication line is written only when the digit exceeds one, because
+    `1 x 48 = 48` restates its own operand and the subtrahend is visible without
+    it. That is worth roughly eight tokens per unit digit, and this format has
+    six tokens of headroom against the 128-token turn at its longest.
+    """
+
+    text = str(dividend)
+    pieces: List[str] = []
+    carry = 0
+    quotient = ""
+    for char in text:
+        carry = carry * 10 + int(char)
+        digit = carry // divisor
+        if digit or quotient:
+            quotient += str(digit)
+            product = digit * divisor
+            # A zero quotient digit still gets a line. Without one the trace
+            # jumps from a remainder to a carry two bring-downs later --
+            #
+            #     76 into 80 = 1, 80 - 76 = 4, 76 into 456 = 6, ... total 106
+            #
+            # -- and nothing on the page says a digit was skipped, so following
+            # it literally gives 16. `test_every_operand_is_already_on_the_page`
+            # found this; only a small fraction of quotients carry an internal
+            # zero, so it would have survived a spot check of the output.
+            pieces.append(f"{divisor} into {carry} = {digit}")
+            if digit > 1:
+                pieces.append(f"{digit} x {divisor} = {product}")
+            # `432 - 432 = 0` states a remainder that is already visible: the
+            # product equals the carry on the line above it. Dropping it is
+            # worth about eight tokens, and it is what brings the longest turn
+            # back under the budget -- three of 18,000 sampled rows reached 130
+            # with it, and packing discards those without a word.
+            if digit and carry != product:
+                pieces.append(f"{carry} - {product} = {carry - product}")
+            carry -= product
+    body = ", ".join(pieces)
+    # The science responses append their own `total`; a second one inside
+    # the division would restate the answer and cost tokens for nothing.
+    return f"{body}, total {int(quotient or 0)}" if with_total else body
+
 
 def decompose_quotient(dividend: int, divisor: int) -> str:
     """Show the working for `dividend / divisor`, one quotient place at a time.
@@ -376,7 +472,7 @@ def _acceleration(rng: random.Random) -> OmniProblem:
         "What acceleration results from a {f} N force on a {m} kg body?",
     ], f=force, m=mass, _task="acceleration")
     response = (f"acceleration = force / mass, "
-                f"{decompose_quotient(force, mass) if DECOMPOSE_QUOTIENT else f'{force} / {mass} = {accel}'}, "
+                f"{long_division(force, mass, with_total=False) if LONG_DIVISION else decompose_quotient(force, mass) if DECOMPOSE_QUOTIENT else f'{force} / {mass} = {accel}'}, "
                 f"the acceleration is {accel} metres per second squared, total {accel}")
     return OmniProblem("acceleration", "physics", prompt, response, float(accel), "m/s^2",
                        f"force {force} N mass {mass} kg find acceleration",
@@ -454,7 +550,7 @@ def _power(rng: random.Random) -> OmniProblem:
         "What power corresponds to {w} joules in {t} seconds?",
     ], w=work, t=time, _task="power")
     response = (f"power = work / time, "
-                f"{decompose_quotient(work, time) if DECOMPOSE_QUOTIENT else f'{work} / {time} = {power}'}, "
+                f"{long_division(work, time, with_total=False) if LONG_DIVISION else decompose_quotient(work, time) if DECOMPOSE_QUOTIENT else f'{work} / {time} = {power}'}, "
                 f"the power is {power} watts, total {power}")
     return OmniProblem("power", "physics", prompt, response, float(power), "W",
                        f"work {work} J time {time} s power",
@@ -523,7 +619,7 @@ def _molarity(rng: random.Random) -> OmniProblem:
         "What is the molar concentration of {n} mol in {v} L of solution?",
     ], n=moles, v=volume, _task="molarity")
     response = (f"molarity = moles / volume, "
-                f"{decompose_quotient(moles, volume) if DECOMPOSE_QUOTIENT else f'{moles} / {volume} = {concentration}'}, "
+                f"{long_division(moles, volume, with_total=False) if LONG_DIVISION else decompose_quotient(moles, volume) if DECOMPOSE_QUOTIENT else f'{moles} / {volume} = {concentration}'}, "
                 f"the concentration is {concentration} molar, total {concentration}")
     return OmniProblem("molarity", "chemistry", prompt, response, float(concentration), "M",
                        f"moles {moles} mol volume {volume} L molarity",
