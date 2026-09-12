@@ -1,0 +1,139 @@
+{
+  "schema": "supermix-paired-comparison-v1",
+  "baseline": "v88",
+  "new": "v89",
+  "checkpoint": "output\\v89_corpus\\v89_corpus.pt",
+  "problems": 628,
+  "mcnemar_p": {
+    "all_shared": 0.7797679305530743,
+    "control": 1.0
+  },
+  "per_task": {
+    "arithmetic": {
+      "baseline": 0.8095238095238095,
+      "new": 0.8571428571428571,
+      "delta": 0.04761904761904756,
+      "n": 21
+    },
+    "percent": {
+      "baseline": 0.8571428571428571,
+      "new": 0.7142857142857143,
+      "delta": -0.1428571428571428,
+      "n": 21
+    },
+    "average": {
+      "baseline": 0.7142857142857143,
+      "new": 0.42857142857142855,
+      "delta": -0.28571428571428575,
+      "n": 21
+    },
+    "algebra_one_step": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "word_problem": {
+      "baseline": 0.8571428571428571,
+      "new": 0.9047619047619048,
+      "delta": 0.04761904761904767,
+      "n": 21
+    },
+    "multiplication": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "division": {
+      "baseline": 1.0,
+      "new": 0.9523809523809523,
+      "delta": -0.04761904761904767,
+      "n": 21
+    },
+    "sequence": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 19
+    },
+    "two_step": {
+      "baseline": 0.6666666666666666,
+      "new": 0.5238095238095238,
+      "delta": -0.1428571428571428,
+      "n": 21
+    },
+    "force": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "acceleration": {
+      "baseline": 0.7142857142857143,
+      "new": 0.7619047619047619,
+      "delta": 0.04761904761904756,
+      "n": 21
+    },
+    "momentum": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "kinetic_energy": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "work": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "power": {
+      "baseline": 0.2857142857142857,
+      "new": 0.8095238095238095,
+      "delta": 0.5238095238095238,
+      "n": 21
+    },
+    "voltage": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "electrical_power": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "wave_speed": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "molarity": {
+      "baseline": 0.8571428571428571,
+      "new": 0.9523809523809523,
+      "delta": 0.09523809523809523,
+      "n": 21
+    },
+    "combination": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    },
+    "arithmetic_series": {
+      "baseline": 1.0,
+      "new": 1.0,
+      "delta": 0.0,
+      "n": 21
+    }
+  }
+}
