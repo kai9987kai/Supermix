@@ -1,0 +1,2402 @@
+[
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "15 J of work is done in 5 s. What is the power?",
+  "reply": "power = work / time, 155 / 5 = 29, the power is 29 watts, total 29",
+  "expected": 3.0,
+  "predicted": 29.0,
+  "correct": false,
+  "work": 15,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 24 J time 3 s power",
+  "reply": "power = work / time, 24 / 3 = 9, the power is 9 watts, total 9",
+  "expected": 8.0,
+  "predicted": 9.0,
+  "correct": false,
+  "work": 24,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 4 J is delivered over 2 s.",
+  "reply": "power = work / time, 4 / 2 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 4,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 81 joules in 9 seconds?",
+  "reply": "power = work / time, 811 / 9 = 99, the power is 99 watts, total 99",
+  "expected": 9.0,
+  "predicted": 99.0,
+  "correct": false,
+  "work": 81,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "45 J of work is done in 5 s. What is the power?",
+  "reply": "power = work / time, 45 / 5 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 45,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 54 J time 6 s power",
+  "reply": "power = work / time, 54 / 6 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 54,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 8 J is delivered over 2 s.",
+  "reply": "power = work / time, 8 / 2 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 8,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 20 joules in 5 seconds?",
+  "reply": "power = work / time, 20 / 5 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 20,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "40 J of work is done in 8 s. What is the power?",
+  "reply": "power = work / time, 40 / 8 = 5, the power is 5 watts, total 5",
+  "expected": 5.0,
+  "predicted": 5.0,
+  "correct": true,
+  "work": 40,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 64 J time 8 s power",
+  "reply": "power = work / time, 64 / 8 = 8, the power is 8 watts, total 8",
+  "expected": 8.0,
+  "predicted": 8.0,
+  "correct": true,
+  "work": 64,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 24 J is delivered over 6 s.",
+  "reply": "power = work / time, 24 / 6 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 24,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 48 joules in 8 seconds?",
+  "reply": "power = work / time, 48 / 8 = 5, the power is 5 watts, total 5",
+  "expected": 6.0,
+  "predicted": 5.0,
+  "correct": false,
+  "work": 48,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "54 J of work is done in 9 s. What is the power?",
+  "reply": "power = work / time, 54 / 9 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 54,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 45 J time 5 s power",
+  "reply": "power = work / time, 45 / 5 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 45,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 18 J is delivered over 3 s.",
+  "reply": "power = work / time, 18 / 3 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 18,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 35 joules in 7 seconds?",
+  "reply": "power = work / time, 35 / 7 = 5, the power is 5 watts, total 5",
+  "expected": 5.0,
+  "predicted": 5.0,
+  "correct": true,
+  "work": 35,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "21 J of work is done in 7 s. What is the power?",
+  "reply": "power = work / time, 211 / 7 = 33, the power is 33 watts, total 33",
+  "expected": 3.0,
+  "predicted": 33.0,
+  "correct": false,
+  "work": 21,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 24 J time 8 s power",
+  "reply": "power = work / time, 24 / 8 = 3, the power is 3 watts, total 3",
+  "expected": 3.0,
+  "predicted": 3.0,
+  "correct": true,
+  "work": 24,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 48 J is delivered over 8 s.",
+  "reply": "power = work / time, 48 / 8 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 48,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 18 joules in 6 seconds?",
+  "reply": "power = work / time, 18 / 6 = 27, the power is 27 watts, total 27",
+  "expected": 3.0,
+  "predicted": 27.0,
+  "correct": false,
+  "work": 18,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "20 J of work is done in 5 s. What is the power?",
+  "reply": "power = work / time, 20 / 5 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 20,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 16 J time 8 s power",
+  "reply": "power = work / time, 16 / 8 = 17, the power is 17 watts, total 17",
+  "expected": 2.0,
+  "predicted": 17.0,
+  "correct": false,
+  "work": 16,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 54 J is delivered over 9 s.",
+  "reply": "power = work / time, 54 / 9 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 54,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 48 joules in 6 seconds?",
+  "reply": "power = work / time, 48 / 6 = 8, the power is 8 watts, total 8",
+  "expected": 8.0,
+  "predicted": 8.0,
+  "correct": true,
+  "work": 48,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "12 J of work is done in 2 s. What is the power?",
+  "reply": "power = work / time, 12 / 2 = 7, the power is 7 watts, total 7",
+  "expected": 6.0,
+  "predicted": 7.0,
+  "correct": false,
+  "work": 12,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 42 J time 6 s power",
+  "reply": "power = work / time, 42 / 6 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 42,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 56 J is delivered over 7 s.",
+  "reply": "power = work / time, 56 / 7 = 7, the power is 7 watts, total 7",
+  "expected": 8.0,
+  "predicted": 7.0,
+  "correct": false,
+  "work": 56,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 20 joules in 5 seconds?",
+  "reply": "power = work / time, 20 / 5 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 20,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "18 J of work is done in 2 s. What is the power?",
+  "reply": "power = work / time, 188 / 2 = 94, the power is 94 watts, total 94",
+  "expected": 9.0,
+  "predicted": 94.0,
+  "correct": false,
+  "work": 18,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 18 J time 3 s power",
+  "reply": "power = work / time, 18 / 3 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 18,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 15 J is delivered over 5 s.",
+  "reply": "power = work / time, 15 / 5 = 3, the power is 3 watts, total 3",
+  "expected": 3.0,
+  "predicted": 3.0,
+  "correct": true,
+  "work": 15,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 63 joules in 7 seconds?",
+  "reply": "power = work / time, 63 / 7 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 63,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "18 J of work is done in 2 s. What is the power?",
+  "reply": "power = work / time, 188 / 2 = 94, the power is 94 watts, total 94",
+  "expected": 9.0,
+  "predicted": 94.0,
+  "correct": false,
+  "work": 18,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 12 J time 2 s power",
+  "reply": "power = work / time, 12 / 2 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 12,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 27 J is delivered over 3 s.",
+  "reply": "power = work / time, 27 / 3 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 27,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 6 joules in 3 seconds?",
+  "reply": "power = work / time, 6 / 3 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 6,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "12 J of work is done in 3 s. What is the power?",
+  "reply": "power = work / time, 12 / 3 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 12,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "work 9 J time 3 s power",
+  "reply": "power = work / time, 9 / 3 = 3, the power is 3 watts, total 3",
+  "expected": 3.0,
+  "predicted": 3.0,
+  "correct": true,
+  "work": 9,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "Find the power when 49 J is delivered over 7 s.",
+  "reply": "power = work / time, 49 / 7 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 49,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/1-digit",
+  "prompt": "What power corresponds to 6 joules in 3 seconds?",
+  "reply": "power = work / time, 6 / 3 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 6,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "270 J of work is done in 3 s. What is the power?",
+  "reply": "power = work / time, 270 / 3 = 80, the power is 80 watts, total 80",
+  "expected": 90.0,
+  "predicted": 80.0,
+  "correct": false,
+  "work": 270,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 66 J time 6 s power",
+  "reply": "power = work / time, 66 / 6 = 11, the power is 11 watts, total 11",
+  "expected": 11.0,
+  "predicted": 11.0,
+  "correct": true,
+  "work": 66,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 234 J is delivered over 9 s.",
+  "reply": "power = work / time, 234 / 9 = 27, the power is 27 watts, total 27",
+  "expected": 26.0,
+  "predicted": 27.0,
+  "correct": false,
+  "work": 234,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 95 joules in 5 seconds?",
+  "reply": "power = work / time, 95 / 5 = 17, the power is 17 watts, total 17",
+  "expected": 19.0,
+  "predicted": 17.0,
+  "correct": false,
+  "work": 95,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "765 J of work is done in 9 s. What is the power?",
+  "reply": "power = work / time, 765 / 9 = 85, the power is 85 watts, total 85",
+  "expected": 85.0,
+  "predicted": 85.0,
+  "correct": true,
+  "work": 765,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 168 J time 7 s power",
+  "reply": "power = work / time, 168 / 7 = 28, the power is 28 watts, total 28",
+  "expected": 24.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 168,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 160 J is delivered over 2 s.",
+  "reply": "power = work / time, 160 / 2 = 10, the power is 10 watts, total 10",
+  "expected": 80.0,
+  "predicted": 10.0,
+  "correct": false,
+  "work": 160,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 408 joules in 6 seconds?",
+  "reply": "power = work / time, 408 / 6 = 74, the power is 74 watts, total 74",
+  "expected": 68.0,
+  "predicted": 74.0,
+  "correct": false,
+  "work": 408,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "280 J of work is done in 8 s. What is the power?",
+  "reply": "power = work / time, 280 / 8 = 35, the power is 35 watts, total 35",
+  "expected": 35.0,
+  "predicted": 35.0,
+  "correct": true,
+  "work": 280,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 176 J time 8 s power",
+  "reply": "power = work / time, 176 / 8 = 28, the power is 28 watts, total 28",
+  "expected": 22.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 176,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 182 J is delivered over 7 s.",
+  "reply": "power = work / time, 182 / 7 = 28, the power is 28 watts, total 28",
+  "expected": 26.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 182,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 182 joules in 2 seconds?",
+  "reply": "power = work / time, 182 / 2 = 94, the power is 94 watts, total 94",
+  "expected": 91.0,
+  "predicted": 94.0,
+  "correct": false,
+  "work": 182,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "176 J of work is done in 8 s. What is the power?",
+  "reply": "power = work / time, 176 / 8 = 17, the power is 17 watts, total 17",
+  "expected": 22.0,
+  "predicted": 17.0,
+  "correct": false,
+  "work": 176,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 231 J time 3 s power",
+  "reply": "power = work / time, 231 / 3 = 7, the power is 7 watts, total 7",
+  "expected": 77.0,
+  "predicted": 7.0,
+  "correct": false,
+  "work": 231,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 264 J is delivered over 8 s.",
+  "reply": "power = work / time, 264 / 8 = 33, the power is 33 watts, total 33",
+  "expected": 33.0,
+  "predicted": 33.0,
+  "correct": true,
+  "work": 264,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 513 joules in 9 seconds?",
+  "reply": "power = work / time, 513 / 9 = 57, the power is 57 watts, total 57",
+  "expected": 57.0,
+  "predicted": 57.0,
+  "correct": true,
+  "work": 513,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "56 J of work is done in 2 s. What is the power?",
+  "reply": "power = work / time, 56 / 2 = 28, the power is 28 watts, total 28",
+  "expected": 28.0,
+  "predicted": 28.0,
+  "correct": true,
+  "work": 56,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 176 J time 2 s power",
+  "reply": "power = work / time, 176 / 2 = 82, the power is 82 watts, total 82",
+  "expected": 88.0,
+  "predicted": 82.0,
+  "correct": false,
+  "work": 176,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 474 J is delivered over 6 s.",
+  "reply": "power = work / time, 474 / 6 = 89, the power is 89 watts, total 89",
+  "expected": 79.0,
+  "predicted": 89.0,
+  "correct": false,
+  "work": 474,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 40 joules in 2 seconds?",
+  "reply": "power = work / time, 40 / 2 = 20, the power is 20 watts, total 20",
+  "expected": 20.0,
+  "predicted": 20.0,
+  "correct": true,
+  "work": 40,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "159 J of work is done in 3 s. What is the power?",
+  "reply": "power = work / time, 159 / 3 = 53, the power is 53 watts, total 53",
+  "expected": 53.0,
+  "predicted": 53.0,
+  "correct": true,
+  "work": 159,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 360 J time 9 s power",
+  "reply": "power = work / time, 360 / 9 = 40, the power is 40 watts, total 40",
+  "expected": 40.0,
+  "predicted": 40.0,
+  "correct": true,
+  "work": 360,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 100 J is delivered over 5 s.",
+  "reply": "power = work / time, 100 / 5 = 20, the power is 20 watts, total 20",
+  "expected": 20.0,
+  "predicted": 20.0,
+  "correct": true,
+  "work": 100,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 192 joules in 3 seconds?",
+  "reply": "power = work / time, 192 / 3 = 94, the power is 94 watts, total 94",
+  "expected": 64.0,
+  "predicted": 94.0,
+  "correct": false,
+  "work": 192,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "180 J of work is done in 2 s. What is the power?",
+  "reply": "power = work / time, 180 / 2 = 95, the power is 95 watts, total 95",
+  "expected": 90.0,
+  "predicted": 95.0,
+  "correct": false,
+  "work": 180,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 236 J time 4 s power",
+  "reply": "power = work / time, 236 / 4 = 58, the power is 58 watts, total 58",
+  "expected": 59.0,
+  "predicted": 58.0,
+  "correct": false,
+  "work": 236,
+  "time_s": 4
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 132 J is delivered over 2 s.",
+  "reply": "power = work / time, 132 / 2 = 66, the power is 66 watts, total 66",
+  "expected": 66.0,
+  "predicted": 66.0,
+  "correct": true,
+  "work": 132,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 232 joules in 8 seconds?",
+  "reply": "power = work / time, 232 / 8 = 28, the power is 28 watts, total 28",
+  "expected": 29.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 232,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "696 J of work is done in 8 s. What is the power?",
+  "reply": "power = work / time, 696 / 8 = 78, the power is 78 watts, total 78",
+  "expected": 87.0,
+  "predicted": 78.0,
+  "correct": false,
+  "work": 696,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 408 J time 6 s power",
+  "reply": "power = work / time, 408 / 6 = 74, the power is 74 watts, total 74",
+  "expected": 68.0,
+  "predicted": 74.0,
+  "correct": false,
+  "work": 408,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 320 J is delivered over 8 s.",
+  "reply": "power = work / time, 320 / 8 = 45, the power is 45 watts, total 45",
+  "expected": 40.0,
+  "predicted": 45.0,
+  "correct": false,
+  "work": 320,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 136 joules in 4 seconds?",
+  "reply": "power = work / time, 136 / 4 = 39, the power is 39 watts, total 39",
+  "expected": 34.0,
+  "predicted": 39.0,
+  "correct": false,
+  "work": 136,
+  "time_s": 4
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "168 J of work is done in 7 s. What is the power?",
+  "reply": "power = work / time, 168 / 7 = 28, the power is 28 watts, total 28",
+  "expected": 24.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 168,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 306 J time 6 s power",
+  "reply": "power = work / time, 306 / 6 = 58, the power is 58 watts, total 58",
+  "expected": 51.0,
+  "predicted": 58.0,
+  "correct": false,
+  "work": 306,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 237 J is delivered over 3 s.",
+  "reply": "power = work / time, 237 / 3 = 99, the power is 99 watts, total 99",
+  "expected": 79.0,
+  "predicted": 99.0,
+  "correct": false,
+  "work": 237,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 512 joules in 8 seconds?",
+  "reply": "power = work / time, 512 / 8 = 54, the power is 54 watts, total 54",
+  "expected": 64.0,
+  "predicted": 54.0,
+  "correct": false,
+  "work": 512,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "135 J of work is done in 9 s. What is the power?",
+  "reply": "power = work / time, 135 / 9 = 15, the power is 15 watts, total 15",
+  "expected": 15.0,
+  "predicted": 15.0,
+  "correct": true,
+  "work": 135,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "work 552 J time 6 s power",
+  "reply": "power = work / time, 552 / 6 = 92, the power is 92 watts, total 92",
+  "expected": 92.0,
+  "predicted": 92.0,
+  "correct": true,
+  "work": 552,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "Find the power when 75 J is delivered over 3 s.",
+  "reply": "power = work / time, 75 / 3 = 25, the power is 25 watts, total 25",
+  "expected": 25.0,
+  "predicted": 25.0,
+  "correct": true,
+  "work": 75,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/2-digit",
+  "prompt": "What power corresponds to 145 joules in 5 seconds?",
+  "reply": "power = work / time, 145 / 5 = 29, the power is 29 watts, total 29",
+  "expected": 29.0,
+  "predicted": 29.0,
+  "correct": true,
+  "work": 145,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "390 J of work is done in 2 s. What is the power?",
+  "reply": "power = work / time, 390 / 2 = 185, the power is 185 watts, total 185",
+  "expected": 195.0,
+  "predicted": 185.0,
+  "correct": false,
+  "work": 390,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 854 J time 7 s power",
+  "reply": "power = work / time, 854 / 7 = 126, the power is 126 watts, total 126",
+  "expected": 122.0,
+  "predicted": 126.0,
+  "correct": false,
+  "work": 854,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 1020 J is delivered over 5 s.",
+  "reply": "power = work / time, 1020 / 5 = 202, the power is 202 watts, total 202",
+  "expected": 204.0,
+  "predicted": 202.0,
+  "correct": false,
+  "work": 1020,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1800 joules in 9 seconds?",
+  "reply": "power = work / time, 1800 / 9 = 200, the power is 200 watts, total 200",
+  "expected": 200.0,
+  "predicted": 200.0,
+  "correct": true,
+  "work": 1800,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "1862 J of work is done in 7 s. What is the power?",
+  "reply": "power = work / time, 186 / 7 = 28, the power is 28 watts, total 28",
+  "expected": 266.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 1862,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 1610 J time 7 s power",
+  "reply": "power = work / time, 1610 / 7 = 220, the power is 220 watts, total 220",
+  "expected": 230.0,
+  "predicted": 220.0,
+  "correct": false,
+  "work": 1610,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 1792 J is delivered over 7 s.",
+  "reply": "power = work / time, 1792 / 7 = 284, the power is 284 watts, total 284",
+  "expected": 256.0,
+  "predicted": 284.0,
+  "correct": false,
+  "work": 1792,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1305 joules in 9 seconds?",
+  "reply": "power = work / time, 1305 / 9 = 115, the power is 115 watts, total 115",
+  "expected": 145.0,
+  "predicted": 115.0,
+  "correct": false,
+  "work": 1305,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "1026 J of work is done in 9 s. What is the power?",
+  "reply": "power = work / time, 1026 / 9 = 124, the power is 124 watts, total 124",
+  "expected": 114.0,
+  "predicted": 124.0,
+  "correct": false,
+  "work": 1026,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 732 J time 3 s power",
+  "reply": "power = work / time, 732 / 3 = 288, the power is 288 watts, total 288",
+  "expected": 244.0,
+  "predicted": 288.0,
+  "correct": false,
+  "work": 732,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 896 J is delivered over 7 s.",
+  "reply": "power = work / time, 896 / 7 = 116, the power is 116 watts, total 116",
+  "expected": 128.0,
+  "predicted": 116.0,
+  "correct": false,
+  "work": 896,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 348 joules in 2 seconds?",
+  "reply": "power = work / time, 348 / 2 = 144, the power is 144 watts, total 144",
+  "expected": 174.0,
+  "predicted": 144.0,
+  "correct": false,
+  "work": 348,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "1136 J of work is done in 4 s. What is the power?",
+  "reply": "power = work / time, 1136 / 4 = 249, the power is 249 watts, total 249",
+  "expected": 284.0,
+  "predicted": 249.0,
+  "correct": false,
+  "work": 1136,
+  "time_s": 4
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 410 J time 2 s power",
+  "reply": "power = work / time, 410 / 2 = 25, the power is 25 watts, total 25",
+  "expected": 205.0,
+  "predicted": 25.0,
+  "correct": false,
+  "work": 410,
+  "time_s": 2
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 330 J is delivered over 3 s.",
+  "reply": "power = work / time, 330 / 3 = 110, the power is 110 watts, total 110",
+  "expected": 110.0,
+  "predicted": 110.0,
+  "correct": true,
+  "work": 330,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 327 joules in 3 seconds?",
+  "reply": "power = work / time, 327 / 3 = 91, the power is 91 watts, total 91",
+  "expected": 109.0,
+  "predicted": 91.0,
+  "correct": false,
+  "work": 327,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "936 J of work is done in 4 s. What is the power?",
+  "reply": "power = work / time, 936 / 4 = 219, the power is 219 watts, total 219",
+  "expected": 234.0,
+  "predicted": 219.0,
+  "correct": false,
+  "work": 936,
+  "time_s": 4
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 744 J time 4 s power",
+  "reply": "power = work / time, 744 / 4 = 181, the power is 181 watts, total 181",
+  "expected": 186.0,
+  "predicted": 181.0,
+  "correct": false,
+  "work": 744,
+  "time_s": 4
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 800 J is delivered over 4 s.",
+  "reply": "power = work / time, 800 / 4 = 200, the power is 200 watts, total 200",
+  "expected": 200.0,
+  "predicted": 200.0,
+  "correct": true,
+  "work": 800,
+  "time_s": 4
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1326 joules in 6 seconds?",
+  "reply": "power = work / time, 1326 / 6 = 224, the power is 224 watts, total 224",
+  "expected": 221.0,
+  "predicted": 224.0,
+  "correct": false,
+  "work": 1326,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "918 J of work is done in 6 s. What is the power?",
+  "reply": "power = work / time, 918 / 6 = 134, the power is 134 watts, total 134",
+  "expected": 153.0,
+  "predicted": 134.0,
+  "correct": false,
+  "work": 918,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 1610 J time 7 s power",
+  "reply": "power = work / time, 1610 / 7 = 220, the power is 220 watts, total 220",
+  "expected": 230.0,
+  "predicted": 220.0,
+  "correct": false,
+  "work": 1610,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 378 J is delivered over 3 s.",
+  "reply": "power = work / time, 378 / 3 = 124, the power is 124 watts, total 124",
+  "expected": 126.0,
+  "predicted": 124.0,
+  "correct": false,
+  "work": 378,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1148 joules in 7 seconds?",
+  "reply": "power = work / time, 1148 / 7 = 164, the power is 164 watts, total 164",
+  "expected": 164.0,
+  "predicted": 164.0,
+  "correct": true,
+  "work": 1148,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "875 J of work is done in 7 s. What is the power?",
+  "reply": "power = work / time, 875 / 7 = 115, the power is 115 watts, total 115",
+  "expected": 125.0,
+  "predicted": 115.0,
+  "correct": false,
+  "work": 875,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 790 J time 5 s power",
+  "reply": "power = work / time, 790 / 5 = 194, the power is 194 watts, total 194",
+  "expected": 158.0,
+  "predicted": 194.0,
+  "correct": false,
+  "work": 790,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 765 J is delivered over 5 s.",
+  "reply": "power = work / time, 765 / 5 = 139, the power is 139 watts, total 139",
+  "expected": 153.0,
+  "predicted": 139.0,
+  "correct": false,
+  "work": 765,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1080 joules in 6 seconds?",
+  "reply": "power = work / time, 1080 / 6 = 180, the power is 180 watts, total 180",
+  "expected": 180.0,
+  "predicted": 180.0,
+  "correct": true,
+  "work": 1080,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "1477 J of work is done in 7 s. What is the power?",
+  "reply": "power = work / time, 1477 / 7 = 191, the power is 191 watts, total 191",
+  "expected": 211.0,
+  "predicted": 191.0,
+  "correct": false,
+  "work": 1477,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 1592 J time 8 s power",
+  "reply": "power = work / time, 1592 / 8 = 214, the power is 214 watts, total 214",
+  "expected": 199.0,
+  "predicted": 214.0,
+  "correct": false,
+  "work": 1592,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 1472 J is delivered over 8 s.",
+  "reply": "power = work / time, 1472 / 8 = 214, the power is 214 watts, total 214",
+  "expected": 184.0,
+  "predicted": 214.0,
+  "correct": false,
+  "work": 1472,
+  "time_s": 8
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1278 joules in 6 seconds?",
+  "reply": "power = work / time, 1278 / 6 = 227, the power is 227 watts, total 227",
+  "expected": 213.0,
+  "predicted": 227.0,
+  "correct": false,
+  "work": 1278,
+  "time_s": 6
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "1245 J of work is done in 5 s. What is the power?",
+  "reply": "power = work / time, 1245 / 5 = 291, the power is 291 watts, total 291",
+  "expected": 249.0,
+  "predicted": 291.0,
+  "correct": false,
+  "work": 1245,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 972 J time 9 s power",
+  "reply": "power = work / time, 972 / 9 = 104, the power is 104 watts, total 104",
+  "expected": 108.0,
+  "predicted": 104.0,
+  "correct": false,
+  "work": 972,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 504 J is delivered over 3 s.",
+  "reply": "power = work / time, 504 / 3 = 188, the power is 188 watts, total 188",
+  "expected": 168.0,
+  "predicted": 188.0,
+  "correct": false,
+  "work": 504,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 1350 joules in 5 seconds?",
+  "reply": "power = work / time, 1350 / 5 = 290, the power is 290 watts, total 290",
+  "expected": 270.0,
+  "predicted": 290.0,
+  "correct": false,
+  "work": 1350,
+  "time_s": 5
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "1085 J of work is done in 7 s. What is the power?",
+  "reply": "power = work / time, 1085 / 7 = 175, the power is 175 watts, total 175",
+  "expected": 155.0,
+  "predicted": 175.0,
+  "correct": false,
+  "work": 1085,
+  "time_s": 7
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "work 474 J time 3 s power",
+  "reply": "power = work / time, 474 / 3 = 162, the power is 162 watts, total 162",
+  "expected": 158.0,
+  "predicted": 162.0,
+  "correct": false,
+  "work": 474,
+  "time_s": 3
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "Find the power when 2187 J is delivered over 9 s.",
+  "reply": "power = work / time, 2187 / 9 = 213, the power is 213 watts, total 213",
+  "expected": 243.0,
+  "predicted": 213.0,
+  "correct": false,
+  "work": 2187,
+  "time_s": 9
+ },
+ {
+  "cell": "1-digit/3-digit",
+  "prompt": "What power corresponds to 318 joules in 3 seconds?",
+  "reply": "power = work / time, 318 / 3 = 94, the power is 94 watts, total 94",
+  "expected": 106.0,
+  "predicted": 94.0,
+  "correct": false,
+  "work": 318,
+  "time_s": 3
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "60 J of work is done in 30 s. What is the power?",
+  "reply": "power = work / time, 60 / 30 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 60,
+  "time_s": 30
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 248 J time 31 s power",
+  "reply": "power = work / time, 248 / 31 = 9, the power is 9 watts, total 9",
+  "expected": 8.0,
+  "predicted": 9.0,
+  "correct": false,
+  "work": 248,
+  "time_s": 31
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 378 J is delivered over 54 s.",
+  "reply": "power = work / time, 378 / 54 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 378,
+  "time_s": 54
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 492 joules in 82 seconds?",
+  "reply": "power = work / time, 492 / 82 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 492,
+  "time_s": 82
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "234 J of work is done in 26 s. What is the power?",
+  "reply": "power = work / time, 234 / 26 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 234,
+  "time_s": 26
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 368 J time 46 s power",
+  "reply": "power = work / time, 368 / 46 = 9, the power is 9 watts, total 9",
+  "expected": 8.0,
+  "predicted": 9.0,
+  "correct": false,
+  "work": 368,
+  "time_s": 46
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 88 J is delivered over 22 s.",
+  "reply": "power = work / time, 88 / 22 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 88,
+  "time_s": 22
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 150 joules in 30 seconds?",
+  "reply": "power = work / time, 150 / 30 = 4, the power is 4 watts, total 4",
+  "expected": 5.0,
+  "predicted": 4.0,
+  "correct": false,
+  "work": 150,
+  "time_s": 30
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "68 J of work is done in 34 s. What is the power?",
+  "reply": "power = work / time, 68 / 34 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 68,
+  "time_s": 34
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 132 J time 44 s power",
+  "reply": "power = work / time, 132 / 44 = 3, the power is 3 watts, total 3",
+  "expected": 3.0,
+  "predicted": 3.0,
+  "correct": true,
+  "work": 132,
+  "time_s": 44
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 376 J is delivered over 94 s.",
+  "reply": "power = work / time, 376 / 94 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 376,
+  "time_s": 94
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 340 joules in 85 seconds?",
+  "reply": "power = work / time, 340 / 85 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 340,
+  "time_s": 85
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "156 J of work is done in 52 s. What is the power?",
+  "reply": "power = work / time, 156 / 52 = 28, the power is 28 watts, total 28",
+  "expected": 3.0,
+  "predicted": 28.0,
+  "correct": false,
+  "work": 156,
+  "time_s": 52
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 234 J time 39 s power",
+  "reply": "power = work / time, 234 / 39 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 234,
+  "time_s": 39
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 711 J is delivered over 79 s.",
+  "reply": "power = work / time, 711 / 79 = 10, the power is 10 watts, total 10",
+  "expected": 9.0,
+  "predicted": 10.0,
+  "correct": false,
+  "work": 711,
+  "time_s": 79
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 135 joules in 27 seconds?",
+  "reply": "power = work / time, 135 / 27 = 5, the power is 5 watts, total 5",
+  "expected": 5.0,
+  "predicted": 5.0,
+  "correct": true,
+  "work": 135,
+  "time_s": 27
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "156 J of work is done in 39 s. What is the power?",
+  "reply": "power = work / time, 156 / 39 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 156,
+  "time_s": 39
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 384 J time 64 s power",
+  "reply": "power = work / time, 384 / 64 = 6, the power is 6 watts, total 6",
+  "expected": 6.0,
+  "predicted": 6.0,
+  "correct": true,
+  "work": 384,
+  "time_s": 64
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 216 J is delivered over 72 s.",
+  "reply": "power = work / time, 216 / 72 = 3, the power is 3 watts, total 3",
+  "expected": 3.0,
+  "predicted": 3.0,
+  "correct": true,
+  "work": 216,
+  "time_s": 72
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 427 joules in 61 seconds?",
+  "reply": "power = work / time, 427 / 61 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 427,
+  "time_s": 61
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "294 J of work is done in 42 s. What is the power?",
+  "reply": "power = work / time, 294 / 42 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 294,
+  "time_s": 42
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 756 J time 84 s power",
+  "reply": "power = work / time, 756 / 84 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 756,
+  "time_s": 84
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 162 J is delivered over 81 s.",
+  "reply": "power = work / time, 162 / 81 = 14, the power is 14 watts, total 14",
+  "expected": 2.0,
+  "predicted": 14.0,
+  "correct": false,
+  "work": 162,
+  "time_s": 81
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 168 joules in 84 seconds?",
+  "reply": "power = work / time, 168 / 84 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 168,
+  "time_s": 84
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "320 J of work is done in 80 s. What is the power?",
+  "reply": "power = work / time, 320 / 80 = 40, the power is 40 watts, total 40",
+  "expected": 4.0,
+  "predicted": 40.0,
+  "correct": false,
+  "work": 320,
+  "time_s": 80
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 72 J time 12 s power",
+  "reply": "power = work / time, 72 / 12 = 7, the power is 7 watts, total 7",
+  "expected": 6.0,
+  "predicted": 7.0,
+  "correct": false,
+  "work": 72,
+  "time_s": 12
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 200 J is delivered over 50 s.",
+  "reply": "power = work / time, 200 / 50 = 4, the power is 4 watts, total 4",
+  "expected": 4.0,
+  "predicted": 4.0,
+  "correct": true,
+  "work": 200,
+  "time_s": 50
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 665 joules in 95 seconds?",
+  "reply": "power = work / time, 665 / 95 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 665,
+  "time_s": 95
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "170 J of work is done in 85 s. What is the power?",
+  "reply": "power = work / time, 170 / 85 = 2, the power is 2 watts, total 2",
+  "expected": 2.0,
+  "predicted": 2.0,
+  "correct": true,
+  "work": 170,
+  "time_s": 85
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 190 J time 38 s power",
+  "reply": "power = work / time, 190 / 38 = 5, the power is 5 watts, total 5",
+  "expected": 5.0,
+  "predicted": 5.0,
+  "correct": true,
+  "work": 190,
+  "time_s": 38
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 315 J is delivered over 63 s.",
+  "reply": "power = work / time, 315 / 63 = 5, the power is 5 watts, total 5",
+  "expected": 5.0,
+  "predicted": 5.0,
+  "correct": true,
+  "work": 315,
+  "time_s": 63
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 540 joules in 60 seconds?",
+  "reply": "power = work / time, 540 / 60 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 540,
+  "time_s": 60
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "182 J of work is done in 91 s. What is the power?",
+  "reply": "power = work / time, 182 / 91 = 14, the power is 14 watts, total 14",
+  "expected": 2.0,
+  "predicted": 14.0,
+  "correct": false,
+  "work": 182,
+  "time_s": 91
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 340 J time 68 s power",
+  "reply": "power = work / time, 340 / 68 = 5, the power is 5 watts, total 5",
+  "expected": 5.0,
+  "predicted": 5.0,
+  "correct": true,
+  "work": 340,
+  "time_s": 68
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 224 J is delivered over 28 s.",
+  "reply": "power = work / time, 224 / 28 = 8, the power is 8 watts, total 8",
+  "expected": 8.0,
+  "predicted": 8.0,
+  "correct": true,
+  "work": 224,
+  "time_s": 28
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 176 joules in 22 seconds?",
+  "reply": "power = work / time, 176 / 22 = 8, the power is 8 watts, total 8",
+  "expected": 8.0,
+  "predicted": 8.0,
+  "correct": true,
+  "work": 176,
+  "time_s": 22
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "567 J of work is done in 81 s. What is the power?",
+  "reply": "power = work / time, 567 / 81 = 7, the power is 7 watts, total 7",
+  "expected": 7.0,
+  "predicted": 7.0,
+  "correct": true,
+  "work": 567,
+  "time_s": 81
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "work 66 J time 22 s power",
+  "reply": "power = work / time, 66 / 22 = 3, the power is 3 watts, total 3",
+  "expected": 3.0,
+  "predicted": 3.0,
+  "correct": true,
+  "work": 66,
+  "time_s": 22
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "Find the power when 198 J is delivered over 22 s.",
+  "reply": "power = work / time, 198 / 22 = 7, the power is 7 watts, total 7",
+  "expected": 9.0,
+  "predicted": 7.0,
+  "correct": false,
+  "work": 198,
+  "time_s": 22
+ },
+ {
+  "cell": "2-digit/1-digit",
+  "prompt": "What power corresponds to 396 joules in 44 seconds?",
+  "reply": "power = work / time, 396 / 44 = 9, the power is 9 watts, total 9",
+  "expected": 9.0,
+  "predicted": 9.0,
+  "correct": true,
+  "work": 396,
+  "time_s": 44
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "1131 J of work is done in 39 s. What is the power?",
+  "reply": "power = work / time, 1131 / 39 = 39, the power is 39 watts, total 39",
+  "expected": 29.0,
+  "predicted": 39.0,
+  "correct": false,
+  "work": 1131,
+  "time_s": 39
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 5963 J time 67 s power",
+  "reply": "power = work / time, 5963 / 67 = 89, the power is 89 watts, total 89",
+  "expected": 89.0,
+  "predicted": 89.0,
+  "correct": true,
+  "work": 5963,
+  "time_s": 67
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 7644 J is delivered over 91 s.",
+  "reply": "power = work / time, 7644 / 91 = 84, the power is 84 watts, total 84",
+  "expected": 84.0,
+  "predicted": 84.0,
+  "correct": true,
+  "work": 7644,
+  "time_s": 91
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 7310 joules in 85 seconds?",
+  "reply": "power = work / time, 7310 / 85 = 94, the power is 94 watts, total 94",
+  "expected": 86.0,
+  "predicted": 94.0,
+  "correct": false,
+  "work": 7310,
+  "time_s": 85
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "234 J of work is done in 13 s. What is the power?",
+  "reply": "power = work / time, 234 / 13 = 18, the power is 18 watts, total 18",
+  "expected": 18.0,
+  "predicted": 18.0,
+  "correct": true,
+  "work": 234,
+  "time_s": 13
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 1952 J time 61 s power",
+  "reply": "power = work / time, 1952 / 61 = 32, the power is 32 watts, total 32",
+  "expected": 32.0,
+  "predicted": 32.0,
+  "correct": true,
+  "work": 1952,
+  "time_s": 61
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 1890 J is delivered over 42 s.",
+  "reply": "power = work / time, 1890 / 42 = 45, the power is 45 watts, total 45",
+  "expected": 45.0,
+  "predicted": 45.0,
+  "correct": true,
+  "work": 1890,
+  "time_s": 42
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 3567 joules in 87 seconds?",
+  "reply": "power = work / time, 3567 / 87 = 41, the power is 41 watts, total 41",
+  "expected": 41.0,
+  "predicted": 41.0,
+  "correct": true,
+  "work": 3567,
+  "time_s": 87
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "540 J of work is done in 36 s. What is the power?",
+  "reply": "power = work / time, 540 / 36 = 15, the power is 15 watts, total 15",
+  "expected": 15.0,
+  "predicted": 15.0,
+  "correct": true,
+  "work": 540,
+  "time_s": 36
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 1276 J time 58 s power",
+  "reply": "power = work / time, 1276 / 58 = 21, the power is 21 watts, total 21",
+  "expected": 22.0,
+  "predicted": 21.0,
+  "correct": false,
+  "work": 1276,
+  "time_s": 58
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 3069 J is delivered over 99 s.",
+  "reply": "power = work / time, 3069 / 99 = 31, the power is 31 watts, total 31",
+  "expected": 31.0,
+  "predicted": 31.0,
+  "correct": true,
+  "work": 3069,
+  "time_s": 99
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 9312 joules in 96 seconds?",
+  "reply": "power = work / time, 9312 / 96 = 103, the power is 103 watts, total 103",
+  "expected": 97.0,
+  "predicted": 103.0,
+  "correct": false,
+  "work": 9312,
+  "time_s": 96
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "2058 J of work is done in 98 s. What is the power?",
+  "reply": "power = work / time, 2058 / 98 = 21, the power is 21 watts, total 21",
+  "expected": 21.0,
+  "predicted": 21.0,
+  "correct": true,
+  "work": 2058,
+  "time_s": 98
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 5325 J time 75 s power",
+  "reply": "power = work / time, 5325 / 75 = 75, the power is 75 watts, total 75",
+  "expected": 71.0,
+  "predicted": 75.0,
+  "correct": false,
+  "work": 5325,
+  "time_s": 75
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 2352 J is delivered over 24 s.",
+  "reply": "power = work / time, 2352 / 24 = 103, the power is 103 watts, total 103",
+  "expected": 98.0,
+  "predicted": 103.0,
+  "correct": false,
+  "work": 2352,
+  "time_s": 24
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 5494 joules in 67 seconds?",
+  "reply": "power = work / time, 5494 / 67 = 82, the power is 82 watts, total 82",
+  "expected": 82.0,
+  "predicted": 82.0,
+  "correct": true,
+  "work": 5494,
+  "time_s": 67
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "7680 J of work is done in 80 s. What is the power?",
+  "reply": "power = work / time, 7680 / 80 = 98, the power is 98 watts, total 98",
+  "expected": 96.0,
+  "predicted": 98.0,
+  "correct": false,
+  "work": 7680,
+  "time_s": 80
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 5032 J time 74 s power",
+  "reply": "power = work / time, 5032 / 74 = 78, the power is 78 watts, total 78",
+  "expected": 68.0,
+  "predicted": 78.0,
+  "correct": false,
+  "work": 5032,
+  "time_s": 74
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 2232 J is delivered over 31 s.",
+  "reply": "power = work / time, 2232 / 31 = 72, the power is 72 watts, total 72",
+  "expected": 72.0,
+  "predicted": 72.0,
+  "correct": true,
+  "work": 2232,
+  "time_s": 31
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 891 joules in 27 seconds?",
+  "reply": "power = work / time, 891 / 27 = 33, the power is 33 watts, total 33",
+  "expected": 33.0,
+  "predicted": 33.0,
+  "correct": true,
+  "work": 891,
+  "time_s": 27
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "893 J of work is done in 47 s. What is the power?",
+  "reply": "power = work / time, 893 / 47 = 19, the power is 19 watts, total 19",
+  "expected": 19.0,
+  "predicted": 19.0,
+  "correct": true,
+  "work": 893,
+  "time_s": 47
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 2378 J time 41 s power",
+  "reply": "power = work / time, 2378 / 41 = 58, the power is 58 watts, total 58",
+  "expected": 58.0,
+  "predicted": 58.0,
+  "correct": true,
+  "work": 2378,
+  "time_s": 41
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 4324 J is delivered over 92 s.",
+  "reply": "power = work / time, 4324 / 92 = 48, the power is 48 watts, total 48",
+  "expected": 47.0,
+  "predicted": 48.0,
+  "correct": false,
+  "work": 4324,
+  "time_s": 92
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 252 joules in 12 seconds?",
+  "reply": "power = work / time, 252 / 12 = 24, the power is 24 watts, total 24",
+  "expected": 21.0,
+  "predicted": 24.0,
+  "correct": false,
+  "work": 252,
+  "time_s": 12
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "5141 J of work is done in 97 s. What is the power?",
+  "reply": "power = work / time, 5141 / 97 = 53, the power is 53 watts, total 53",
+  "expected": 53.0,
+  "predicted": 53.0,
+  "correct": true,
+  "work": 5141,
+  "time_s": 97
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 864 J time 48 s power",
+  "reply": "power = work / time, 864 / 48 = 17, the power is 17 watts, total 17",
+  "expected": 18.0,
+  "predicted": 17.0,
+  "correct": false,
+  "work": 864,
+  "time_s": 48
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 858 J is delivered over 26 s.",
+  "reply": "power = work / time, 858 / 26 = 24, the power is 24 watts, total 24",
+  "expected": 33.0,
+  "predicted": 24.0,
+  "correct": false,
+  "work": 858,
+  "time_s": 26
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 2964 joules in 38 seconds?",
+  "reply": "power = work / time, 2964 / 38 = 78, the power is 78 watts, total 78",
+  "expected": 78.0,
+  "predicted": 78.0,
+  "correct": true,
+  "work": 2964,
+  "time_s": 38
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "2040 J of work is done in 30 s. What is the power?",
+  "reply": "power = work / time, 2040 / 30 = 76, the power is 76 watts, total 76",
+  "expected": 68.0,
+  "predicted": 76.0,
+  "correct": false,
+  "work": 2040,
+  "time_s": 30
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 2716 J time 28 s power",
+  "reply": "power = work / time, 2716 / 28 = 97, the power is 97 watts, total 97",
+  "expected": 97.0,
+  "predicted": 97.0,
+  "correct": true,
+  "work": 2716,
+  "time_s": 28
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 5888 J is delivered over 64 s.",
+  "reply": "power = work / time, 5888 / 64 = 92, the power is 92 watts, total 92",
+  "expected": 92.0,
+  "predicted": 92.0,
+  "correct": true,
+  "work": 5888,
+  "time_s": 64
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 1104 joules in 69 seconds?",
+  "reply": "power = work / time, 1104 / 69 = 12, the power is 12 watts, total 12",
+  "expected": 16.0,
+  "predicted": 12.0,
+  "correct": false,
+  "work": 1104,
+  "time_s": 69
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "2449 J of work is done in 79 s. What is the power?",
+  "reply": "power = work / time, 2449 / 79 = 31, the power is 31 watts, total 31",
+  "expected": 31.0,
+  "predicted": 31.0,
+  "correct": true,
+  "work": 2449,
+  "time_s": 79
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 6642 J time 82 s power",
+  "reply": "power = work / time, 6642 / 82 = 88, the power is 88 watts, total 88",
+  "expected": 81.0,
+  "predicted": 88.0,
+  "correct": false,
+  "work": 6642,
+  "time_s": 82
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 4565 J is delivered over 83 s.",
+  "reply": "power = work / time, 4565 / 83 = 55, the power is 55 watts, total 55",
+  "expected": 55.0,
+  "predicted": 55.0,
+  "correct": true,
+  "work": 4565,
+  "time_s": 83
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 1221 joules in 33 seconds?",
+  "reply": "power = work / time, 1221 / 33 = 37, the power is 37 watts, total 37",
+  "expected": 37.0,
+  "predicted": 37.0,
+  "correct": true,
+  "work": 1221,
+  "time_s": 33
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "2046 J of work is done in 31 s. What is the power?",
+  "reply": "power = work / time, 2046 / 31 = 76, the power is 76 watts, total 76",
+  "expected": 66.0,
+  "predicted": 76.0,
+  "correct": false,
+  "work": 2046,
+  "time_s": 31
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "work 3599 J time 59 s power",
+  "reply": "power = work / time, 3599 / 59 = 61, the power is 61 watts, total 61",
+  "expected": 61.0,
+  "predicted": 61.0,
+  "correct": true,
+  "work": 3599,
+  "time_s": 59
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "Find the power when 1767 J is delivered over 93 s.",
+  "reply": "power = work / time, 1767 / 93 = 19, the power is 19 watts, total 19",
+  "expected": 19.0,
+  "predicted": 19.0,
+  "correct": true,
+  "work": 1767,
+  "time_s": 93
+ },
+ {
+  "cell": "2-digit/2-digit",
+  "prompt": "What power corresponds to 1710 joules in 19 seconds?",
+  "reply": "power = work / time, 1710 / 19 = 100, the power is 100 watts, total 100",
+  "expected": 90.0,
+  "predicted": 100.0,
+  "correct": false,
+  "work": 1710,
+  "time_s": 19
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "14212 J of work is done in 68 s. What is the power?",
+  "reply": "power = work / time, 14212 / 68 = 194, the power is 194 watts, total 194",
+  "expected": 209.0,
+  "predicted": 194.0,
+  "correct": false,
+  "work": 14212,
+  "time_s": 68
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 15232 J time 68 s power",
+  "reply": "power = work / time, 15232 / 68 = 214, the power is 214 watts, total 214",
+  "expected": 224.0,
+  "predicted": 214.0,
+  "correct": false,
+  "work": 15232,
+  "time_s": 68
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 13464 J is delivered over 51 s.",
+  "reply": "power = work / time, 13464 / 51 = 244, the power is 244 watts, total 244",
+  "expected": 264.0,
+  "predicted": 244.0,
+  "correct": false,
+  "work": 13464,
+  "time_s": 51
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 15921 joules in 61 seconds?",
+  "reply": "power = work / time, 15921 / 61 = 261, the power is 261 watts, total 261",
+  "expected": 261.0,
+  "predicted": 261.0,
+  "correct": true,
+  "work": 15921,
+  "time_s": 61
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "6327 J of work is done in 37 s. What is the power?",
+  "reply": "power = work / time, 6327 / 37 = 191, the power is 191 watts, total 191",
+  "expected": 171.0,
+  "predicted": 191.0,
+  "correct": false,
+  "work": 6327,
+  "time_s": 37
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 3979 J time 23 s power",
+  "reply": "power = work / time, 3979 / 23 = 153, the power is 153 watts, total 153",
+  "expected": 173.0,
+  "predicted": 153.0,
+  "correct": false,
+  "work": 3979,
+  "time_s": 23
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 6665 J is delivered over 31 s.",
+  "reply": "power = work / time, 6665 / 31 = 225, the power is 225 watts, total 225",
+  "expected": 215.0,
+  "predicted": 225.0,
+  "correct": false,
+  "work": 6665,
+  "time_s": 31
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 23959 joules in 97 seconds?",
+  "reply": "power = work / time, 23959 / 97 = 247, the power is 247 watts, total 247",
+  "expected": 247.0,
+  "predicted": 247.0,
+  "correct": true,
+  "work": 23959,
+  "time_s": 97
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "13950 J of work is done in 90 s. What is the power?",
+  "reply": "power = work / time, 13950 / 90 = 175, the power is 175 watts, total 175",
+  "expected": 155.0,
+  "predicted": 175.0,
+  "correct": false,
+  "work": 13950,
+  "time_s": 90
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 19106 J time 82 s power",
+  "reply": "power = work / time, 19106 / 82 = 223, the power is 223 watts, total 223",
+  "expected": 233.0,
+  "predicted": 223.0,
+  "correct": false,
+  "work": 19106,
+  "time_s": 82
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 4738 J is delivered over 46 s.",
+  "reply": "power = work / time, 4738 / 46 = 107, the power is 107 watts, total 107",
+  "expected": 103.0,
+  "predicted": 107.0,
+  "correct": false,
+  "work": 4738,
+  "time_s": 46
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 10790 joules in 83 seconds?",
+  "reply": "power = work / time, 10790 / 83 = 140, the power is 140 watts, total 140",
+  "expected": 130.0,
+  "predicted": 140.0,
+  "correct": false,
+  "work": 10790,
+  "time_s": 83
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "8800 J of work is done in 80 s. What is the power?",
+  "reply": "power = work / time, 8800 / 80 = 100, the power is 100 watts, total 100",
+  "expected": 110.0,
+  "predicted": 100.0,
+  "correct": false,
+  "work": 8800,
+  "time_s": 80
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 2565 J time 15 s power",
+  "reply": "power = work / time, 2565 / 15 = 175, the power is 175 watts, total 175",
+  "expected": 171.0,
+  "predicted": 175.0,
+  "correct": false,
+  "work": 2565,
+  "time_s": 15
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 3570 J is delivered over 35 s.",
+  "reply": "power = work / time, 3570 / 35 = 114, the power is 114 watts, total 114",
+  "expected": 102.0,
+  "predicted": 114.0,
+  "correct": false,
+  "work": 3570,
+  "time_s": 35
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 5274 joules in 18 seconds?",
+  "reply": "power = work / time, 5274 / 18 = 273, the power is 273 watts, total 273",
+  "expected": 293.0,
+  "predicted": 273.0,
+  "correct": false,
+  "work": 5274,
+  "time_s": 18
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "8878 J of work is done in 46 s. What is the power?",
+  "reply": "power = work / time, 8878 / 46 = 197, the power is 197 watts, total 197",
+  "expected": 193.0,
+  "predicted": 197.0,
+  "correct": false,
+  "work": 8878,
+  "time_s": 46
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 6764 J time 38 s power",
+  "reply": "power = work / time, 6764 / 38 = 193, the power is 193 watts, total 193",
+  "expected": 178.0,
+  "predicted": 193.0,
+  "correct": false,
+  "work": 6764,
+  "time_s": 38
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 6182 J is delivered over 22 s.",
+  "reply": "power = work / time, 6182 / 22 = 241, the power is 241 watts, total 241",
+  "expected": 281.0,
+  "predicted": 241.0,
+  "correct": false,
+  "work": 6182,
+  "time_s": 22
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 12702 joules in 87 seconds?",
+  "reply": "power = work / time, 12702 / 87 = 166, the power is 166 watts, total 166",
+  "expected": 146.0,
+  "predicted": 166.0,
+  "correct": false,
+  "work": 12702,
+  "time_s": 87
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "22989 J of work is done in 97 s. What is the power?",
+  "reply": "power = work / time, 22989 / 97 = 217, the power is 217 watts, total 217",
+  "expected": 237.0,
+  "predicted": 217.0,
+  "correct": false,
+  "work": 22989,
+  "time_s": 97
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 18352 J time 74 s power",
+  "reply": "power = work / time, 18352 / 74 = 223, the power is 223 watts, total 223",
+  "expected": 248.0,
+  "predicted": 223.0,
+  "correct": false,
+  "work": 18352,
+  "time_s": 74
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 15950 J is delivered over 55 s.",
+  "reply": "power = work / time, 15950 / 55 = 290, the power is 290 watts, total 290",
+  "expected": 290.0,
+  "predicted": 290.0,
+  "correct": true,
+  "work": 15950,
+  "time_s": 55
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 11457 joules in 57 seconds?",
+  "reply": "power = work / time, 11457 / 57 = 211, the power is 211 watts, total 211",
+  "expected": 201.0,
+  "predicted": 211.0,
+  "correct": false,
+  "work": 11457,
+  "time_s": 57
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "10340 J of work is done in 47 s. What is the power?",
+  "reply": "power = work / time, 10340 / 47 = 280, the power is 280 watts, total 280",
+  "expected": 220.0,
+  "predicted": 280.0,
+  "correct": false,
+  "work": 10340,
+  "time_s": 47
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 9593 J time 53 s power",
+  "reply": "power = work / time, 9593 / 53 = 191, the power is 191 watts, total 191",
+  "expected": 181.0,
+  "predicted": 191.0,
+  "correct": false,
+  "work": 9593,
+  "time_s": 53
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 1540 J is delivered over 14 s.",
+  "reply": "power = work / time, 1540 / 14 = 100, the power is 100 watts, total 100",
+  "expected": 110.0,
+  "predicted": 100.0,
+  "correct": false,
+  "work": 1540,
+  "time_s": 14
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 5096 joules in 28 seconds?",
+  "reply": "power = work / time, 5096 / 28 = 177, the power is 177 watts, total 177",
+  "expected": 182.0,
+  "predicted": 177.0,
+  "correct": false,
+  "work": 5096,
+  "time_s": 28
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "16191 J of work is done in 63 s. What is the power?",
+  "reply": "power = work / time, 16191 / 63 = 217, the power is 217 watts, total 217",
+  "expected": 257.0,
+  "predicted": 217.0,
+  "correct": false,
+  "work": 16191,
+  "time_s": 63
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 6771 J time 61 s power",
+  "reply": "power = work / time, 6771 / 61 = 101, the power is 101 watts, total 101",
+  "expected": 111.0,
+  "predicted": 101.0,
+  "correct": false,
+  "work": 6771,
+  "time_s": 61
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 6438 J is delivered over 58 s.",
+  "reply": "power = work / time, 6438 / 58 = 111, the power is 111 watts, total 111",
+  "expected": 111.0,
+  "predicted": 111.0,
+  "correct": true,
+  "work": 6438,
+  "time_s": 58
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 11032 joules in 56 seconds?",
+  "reply": "power = work / time, 11032 / 56 = 163, the power is 163 watts, total 163",
+  "expected": 197.0,
+  "predicted": 163.0,
+  "correct": false,
+  "work": 11032,
+  "time_s": 56
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "3500 J of work is done in 35 s. What is the power?",
+  "reply": "power = work / time, 3500 / 35 = 100, the power is 100 watts, total 100",
+  "expected": 100.0,
+  "predicted": 100.0,
+  "correct": true,
+  "work": 3500,
+  "time_s": 35
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 9702 J time 42 s power",
+  "reply": "power = work / time, 9702 / 42 = 206, the power is 206 watts, total 206",
+  "expected": 231.0,
+  "predicted": 206.0,
+  "correct": false,
+  "work": 9702,
+  "time_s": 42
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 8883 J is delivered over 63 s.",
+  "reply": "power = work / time, 8883 / 63 = 131, the power is 131 watts, total 131",
+  "expected": 141.0,
+  "predicted": 131.0,
+  "correct": false,
+  "work": 8883,
+  "time_s": 63
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 10670 joules in 97 seconds?",
+  "reply": "power = work / time, 10670 / 97 = 120, the power is 120 watts, total 120",
+  "expected": 110.0,
+  "predicted": 120.0,
+  "correct": false,
+  "work": 10670,
+  "time_s": 97
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "14842 J of work is done in 82 s. What is the power?",
+  "reply": "power = work / time, 14842 / 82 = 166, the power is 166 watts, total 166",
+  "expected": 181.0,
+  "predicted": 166.0,
+  "correct": false,
+  "work": 14842,
+  "time_s": 82
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "work 5225 J time 25 s power",
+  "reply": "power = work / time, 5225 / 25 = 181, the power is 181 watts, total 181",
+  "expected": 209.0,
+  "predicted": 181.0,
+  "correct": false,
+  "work": 5225,
+  "time_s": 25
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "Find the power when 15562 J is delivered over 62 s.",
+  "reply": "power = work / time, 15562 / 62 = 211, the power is 211 watts, total 211",
+  "expected": 251.0,
+  "predicted": 211.0,
+  "correct": false,
+  "work": 15562,
+  "time_s": 62
+ },
+ {
+  "cell": "2-digit/3-digit",
+  "prompt": "What power corresponds to 23030 joules in 94 seconds?",
+  "reply": "power = work / time, 23030 / 94 = 250, the power is 250 watts, total 250",
+  "expected": 245.0,
+  "predicted": 250.0,
+  "correct": false,
+  "work": 23030,
+  "time_s": 94
+ }
+]

@@ -1,0 +1,47 @@
+{
+  "schema": "supermix-v85-batch-size-sweep-v1",
+  "question": "Is per-sequence cost flat in batch size? If so a smaller batch buys optimiser updates for free, which is the cheapest attack on the v85 dilution finding.",
+  "method": "all batches interleaved in one process; ratio of medians",
+  "settings": {
+    "rounds": 4,
+    "steps": 6,
+    "seq": 128,
+    "threads": 8,
+    "shape": "v80"
+  },
+  "batches": {
+    "4": {
+      "median_s_per_step": 0.9116,
+      "spread": 0.2735,
+      "s_per_sequence": 0.227892,
+      "updates_per_hour": 3949,
+      "ratio_to_batch16": 0.34
+    },
+    "8": {
+      "median_s_per_step": 1.5325,
+      "spread": 0.5303,
+      "s_per_sequence": 0.191563,
+      "updates_per_hour": 2349,
+      "ratio_to_batch16": 0.571
+    },
+    "16": {
+      "median_s_per_step": 2.685,
+      "spread": 0.4933,
+      "s_per_sequence": 0.167812,
+      "updates_per_hour": 1341,
+      "ratio_to_batch16": 1.0
+    },
+    "32": {
+      "median_s_per_step": 4.4702,
+      "spread": 1.812,
+      "s_per_sequence": 0.139694,
+      "updates_per_hour": 805,
+      "ratio_to_batch16": 1.665
+    }
+  },
+  "non_claims": [
+    "Ratios only. Absolute seconds on this box vary up to 5x between identical runs and never transfer across sessions.",
+    "A smaller batch is a different optimisation trajectory, not just more updates. Flat per-sequence cost says it is affordable, not that it is better; only a paired training arm can say that.",
+    "Measured under x86-64 PyTorch running via Prism emulation on ARM64 hardware, which is what this project actually runs on."
+  ]
+}

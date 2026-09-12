@@ -1,0 +1,271 @@
+{
+  "schema": "supermix-v85-passk-headroom-v1",
+  "question": "Does solver-verified rejection sampling have raw material to harvest?",
+  "checkpoint": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\output\\v80_omni\\v80_omni.pt",
+  "settings": {
+    "k": 6,
+    "temperature": 0.8,
+    "top_k": 40,
+    "cap": 112,
+    "per_task": 3,
+    "seed": 860
+  },
+  "overall": {
+    "n": 24,
+    "pass_at_1": 0.5,
+    "pass_at_6": 0.6667,
+    "union_greedy_or_sample": 0.7083,
+    "headroom": 0.2083,
+    "per_sample_correct_rate": 0.4097
+  },
+  "per_task": {
+    "acceleration": {
+      "n": 3,
+      "pass_at_1": 0.0,
+      "pass_at_6": 0.6667,
+      "union_greedy_or_sample": 0.6667,
+      "headroom": 0.6667,
+      "per_sample_correct_rate": 0.2222
+    },
+    "algebra_one_step": {
+      "n": 3,
+      "pass_at_1": 0.6667,
+      "pass_at_6": 0.6667,
+      "union_greedy_or_sample": 0.6667,
+      "headroom": 0.0,
+      "per_sample_correct_rate": 0.3889
+    },
+    "arithmetic": {
+      "n": 3,
+      "pass_at_1": 0.6667,
+      "pass_at_6": 1.0,
+      "union_greedy_or_sample": 1.0,
+      "headroom": 0.3333,
+      "per_sample_correct_rate": 0.6667
+    },
+    "average": {
+      "n": 3,
+      "pass_at_1": 0.0,
+      "pass_at_6": 0.3333,
+      "union_greedy_or_sample": 0.3333,
+      "headroom": 0.3333,
+      "per_sample_correct_rate": 0.1111
+    },
+    "division": {
+      "n": 3,
+      "pass_at_1": 0.6667,
+      "pass_at_6": 0.6667,
+      "union_greedy_or_sample": 0.6667,
+      "headroom": 0.0,
+      "per_sample_correct_rate": 0.2778
+    },
+    "percent": {
+      "n": 3,
+      "pass_at_1": 1.0,
+      "pass_at_6": 1.0,
+      "union_greedy_or_sample": 1.0,
+      "headroom": 0.0,
+      "per_sample_correct_rate": 1.0
+    },
+    "power": {
+      "n": 3,
+      "pass_at_1": 0.3333,
+      "pass_at_6": 0.0,
+      "union_greedy_or_sample": 0.3333,
+      "headroom": 0.0,
+      "per_sample_correct_rate": 0.0
+    },
+    "two_step": {
+      "n": 3,
+      "pass_at_1": 0.6667,
+      "pass_at_6": 1.0,
+      "union_greedy_or_sample": 1.0,
+      "headroom": 0.3333,
+      "per_sample_correct_rate": 0.6111
+    }
+  },
+  "tasks_with_harvestable_headroom": [
+    "acceleration",
+    "arithmetic",
+    "average",
+    "two_step"
+  ],
+  "rows": [
+    {
+      "task": "average",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "average",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "average",
+      "greedy_correct": false,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 2
+    },
+    {
+      "task": "algebra_one_step",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "algebra_one_step",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 4
+    },
+    {
+      "task": "algebra_one_step",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 3
+    },
+    {
+      "task": "acceleration",
+      "greedy_correct": false,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 3
+    },
+    {
+      "task": "acceleration",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "acceleration",
+      "greedy_correct": false,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 1
+    },
+    {
+      "task": "power",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "power",
+      "greedy_correct": true,
+      "any_sample_correct": false,
+      "union_correct": true,
+      "hits_of_k": 0
+    },
+    {
+      "task": "power",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "percent",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 6
+    },
+    {
+      "task": "percent",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 6
+    },
+    {
+      "task": "percent",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 6
+    },
+    {
+      "task": "division",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 3
+    },
+    {
+      "task": "division",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 2
+    },
+    {
+      "task": "division",
+      "greedy_correct": false,
+      "any_sample_correct": false,
+      "union_correct": false,
+      "hits_of_k": 0
+    },
+    {
+      "task": "arithmetic",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 6
+    },
+    {
+      "task": "arithmetic",
+      "greedy_correct": false,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 1
+    },
+    {
+      "task": "arithmetic",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 5
+    },
+    {
+      "task": "two_step",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 6
+    },
+    {
+      "task": "two_step",
+      "greedy_correct": false,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 1
+    },
+    {
+      "task": "two_step",
+      "greedy_correct": true,
+      "any_sample_correct": true,
+      "union_correct": true,
+      "hits_of_k": 4
+    }
+  ],
+  "reading": "Headroom is the fraction of problems the model can already solve somewhere in k samples but does not solve greedily. That is exactly the set a rejection-sampling round would harvest and train on. Near zero headroom means the run is not worth spending.",
+  "non_claims": [
+    "pass@6 counts the 6 SAMPLES only. The separate union column adds problems solved only by the greedy decode. An earlier version of this receipt reported the union as pass@6, inflating it to 0.7083 against the true 0.6667; the `power` task is the proof, with a union cell of 0.333 and a per-sample rate of 0.000. Headroom is union minus greedy and is unchanged.",
+    "n=3 per task; per-task headroom below roughly 56 points is noise.",
+    "pass@k is an upper bound on what rejection sampling can harvest, not a prediction of what a fine-tune would reach.",
+    "Sampling was added here; every shipped decode path is argmax. These temperature and top-k settings are a first guess, not a tuned choice."
+  ],
+  "corrected": "2026-09-03: pass_at_k separated from the greedy union"
+}

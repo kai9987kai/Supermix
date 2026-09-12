@@ -1,0 +1,114 @@
+{
+  "schema": "supermix-v87-subdivision-probe-v1",
+  "checkpoint": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\output\\v86_corpus\\v86_corpus.pt",
+  "question": "On the problems where a one-shot division scores 0.125, can the model do the place-value sub-divisions that a decomposed format would ask for instead?",
+  "sub_problems": 211,
+  "sub_correct": 26,
+  "sub_accuracy": 0.1232,
+  "sub_accuracy_95ci": [
+    0.0855,
+    0.1744
+  ],
+  "problems": 79,
+  "all_parts_correct": 0,
+  "all_parts_accuracy": 0.0,
+  "all_parts_95ci": [
+    0.0,
+    0.0464
+  ],
+  "by_part_width": {
+    "3-digit part": {
+      "n": 79,
+      "correct": 1,
+      "accuracy": 0.0127
+    },
+    "2-digit part": {
+      "n": 66,
+      "correct": 25,
+      "accuracy": 0.3788
+    },
+    "1-digit part": {
+      "n": 66,
+      "correct": 0,
+      "accuracy": 0.0
+    }
+  },
+  "examples": [
+    {
+      "prompt": "Solve this basic math problem: 200 / 2",
+      "reply": "200 / 2 = 50, 0 / 2 = 0, total 50",
+      "expected": 100,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 180 / 2",
+      "reply": "180 / 2 = 40, 0 / 2 = 0, total 40",
+      "expected": 90,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 10 / 2",
+      "reply": "100 / 2 = 50, 0 / 2 = 0, total 50",
+      "expected": 5,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 700 / 7",
+      "reply": "70 / 7 = 10, 0 / 7 = 0, total 10",
+      "expected": 100,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 140 / 7",
+      "reply": "140 / 7 = 20, 0 / 7 = 0, total 20",
+      "expected": 20,
+      "correct": true
+    },
+    {
+      "prompt": "Solve this basic math problem: 14 / 7",
+      "reply": "70 / 7 = 10, 14 / 7 = 2, total 12",
+      "expected": 2,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 1000 / 5",
+      "reply": "100 / 5 = 20, 0 / 5 = 0, total 20",
+      "expected": 200,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 20 / 5",
+      "reply": "200 / 5 = 40, 20 / 5 = 4, total 44",
+      "expected": 4,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 1800 / 9",
+      "reply": "90 / 9 = 10, 30 / 9 = 4, total 14",
+      "expected": 200,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 1400 / 7",
+      "reply": "140 / 7 = 20, 0 / 7 = 0, total 20",
+      "expected": 200,
+      "correct": false
+    },
+    {
+      "prompt": "Solve this basic math problem: 420 / 7",
+      "reply": "320 / 7 = 60, 0 / 7 = 0, total 60",
+      "expected": 60,
+      "correct": true
+    },
+    {
+      "prompt": "Solve this basic math problem: 42 / 7",
+      "reply": "350 / 7 = 50, 42 / 7 = 6, total 56",
+      "expected": 6,
+      "correct": false
+    }
+  ],
+  "non_claims": [
+    "These sub-problems are out of the distribution `division` was trained on (divisors 2-9, quotients 11-60), so this is a lower bound on what a model trained on the decomposed format would do.",
+    "Getting every part right is necessary for the decomposed format to help, not sufficient: the model would also have to sum the partial quotients, which this does not test."
+  ]
+}

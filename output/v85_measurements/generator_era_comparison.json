@@ -1,0 +1,204 @@
+{
+  "schema": "supermix-v82-generator-era-comparison-v1",
+  "checkpoint": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\output\\v80_omni\\v80_omni.pt",
+  "question": "How much of v80's per-task score is the model, and how much is the generator version the benchmark happened to be run against?",
+  "v80_corpus_built": "2026-08-25T23:37:59+01:00",
+  "eras": {
+    "a5bd5bf2_what_v80_trained_on": {
+      "arithmetic_series": {
+        "correct": 0,
+        "n": 12,
+        "accuracy": 0.0,
+        "sample": {
+          "prompt": "An arithmetic series starts at 54 with common difference 26. What is the sum of the first ",
+          "target_response": "last term = first + (n - 1) x difference, 33 - 1 = 32, 32 x 26 = 832, 54 + 832 = 886, sum = n x (first + last)",
+          "model_reply": "last term = first + (n - 1) x difference, 33 - 1 = 22, 22 x 26 = 532, 54 + 532 = 586, sum = n x (first + last)",
+          "expected": 15510.0,
+          "predicted": 960.0
+        }
+      },
+      "combination": {
+        "correct": 0,
+        "n": 12,
+        "accuracy": 0.0,
+        "sample": {
+          "prompt": "How many combinations are there of 16 choose 5?",
+          "target_response": "combinations = n choose k, 16 choose 5 = 4368, there are 4368 ways, total 4368",
+          "model_reply": "combinations = n choose k, 16 choose 5 = 365, there are 365 ways, total 365",
+          "expected": 4368.0,
+          "predicted": 365.0
+        }
+      },
+      "kinetic_energy": {
+        "correct": 2,
+        "n": 12,
+        "accuracy": 0.1667,
+        "sample": {
+          "prompt": "What is the kinetic energy of a 142 kg body at 74 m/s?",
+          "target_response": "kinetic energy = half x mass x velocity squared, velocity squared = 74 x 74 = 5476, 142 x 5476 = 777592, half ",
+          "model_reply": "kinetic energy = half x mass x velocity squared, velocity squared = 74 x 74 = 5476, 142 x 5476 = 716008, half ",
+          "expected": 388796.0,
+          "predicted": 358004.0
+        }
+      },
+      "average": null,
+      "algebra_one_step": null,
+      "force": {
+        "correct": 11,
+        "n": 12,
+        "accuracy": 0.9167,
+        "sample": {
+          "prompt": "Find the force on a 94 kg mass accelerating at 55 m/s^2.",
+          "target_response": "force = mass x acceleration, 94 x 55 = 5170, the force is 5170 newtons, total 5170",
+          "model_reply": "force = mass x acceleration, 90 x 55 = 4950, 4 x 55 = 220, 4950 + 220 = 5170, the force is 5170 newtons, total",
+          "expected": 5170.0,
+          "predicted": 5170.0
+        }
+      },
+      "multiplication": null
+    },
+    "74642029_v81_corrections": {
+      "arithmetic_series": {
+        "correct": 2,
+        "n": 12,
+        "accuracy": 0.1667,
+        "sample": {
+          "prompt": "An arithmetic series starts at 27 with common difference 14. What is the sum of the first ",
+          "target_response": "last term = first + (n - 1) x difference, 18 - 1 = 17, 17 x 14 = 238, 27 + 238 = 265, sum = n x (first + last)",
+          "model_reply": "last term = first + (n - 1) x difference, 18 - 1 = 17, 17 x 14 = 238, 27 + 238 = 265, sum = n x (first + last)",
+          "expected": 2628.0,
+          "predicted": 3148.0
+        }
+      },
+      "combination": {
+        "correct": 0,
+        "n": 12,
+        "accuracy": 0.0,
+        "sample": {
+          "prompt": "How many combinations are there of 16 choose 5?",
+          "target_response": "combinations = n choose k, 16 choose 5 = 4368, there are 4368 ways, total 4368",
+          "model_reply": "combinations = n choose k, 16 choose 5 = 365, there are 365 ways, total 365",
+          "expected": 4368.0,
+          "predicted": 365.0
+        }
+      },
+      "kinetic_energy": {
+        "correct": 2,
+        "n": 12,
+        "accuracy": 0.1667,
+        "sample": {
+          "prompt": "What is the kinetic energy of a 142 kg body at 74 m/s?",
+          "target_response": "kinetic energy = half x mass x velocity squared, velocity squared = 74 x 74 = 5476, 142 x 5476 = 777592, half ",
+          "model_reply": "kinetic energy = half x mass x velocity squared, velocity squared = 74 x 74 = 5476, 142 x 5476 = 716008, half ",
+          "expected": 388796.0,
+          "predicted": 358004.0
+        }
+      },
+      "average": null,
+      "algebra_one_step": null,
+      "force": {
+        "correct": 11,
+        "n": 12,
+        "accuracy": 0.9167,
+        "sample": {
+          "prompt": "Find the force on a 34 kg mass accelerating at 7 m/s^2.",
+          "target_response": "force = mass x acceleration, 30 x 7 = 210, 4 x 7 = 28, the force is 238 newtons, total 238",
+          "model_reply": "force = mass x acceleration, 30 x 7 = 210, 4 x 7 = 28, 210 + 28 = 238, the force is 238 newtons, total 238",
+          "expected": 238.0,
+          "predicted": 238.0
+        }
+      },
+      "multiplication": null
+    },
+    "c7041897_current": {
+      "arithmetic_series": {
+        "correct": 6,
+        "n": 12,
+        "accuracy": 0.5,
+        "sample": {
+          "prompt": "An arithmetic series starts at 14 with common difference 5. What is the sum of the first 1",
+          "target_response": "last term = first + (n - 1) x difference, 10 - 1 = 9, 9 x 5 = 45, 14 + 45 = 59, sum = half of n x (first + las",
+          "model_reply": "last term = first + (n - 1) x difference, 10 - 1 = 9, 9 x 5 = 45, 14 + 45 = 69, sum = n x (first + last) / 2, ",
+          "expected": 365.0,
+          "predicted": 415.0
+        }
+      },
+      "combination": {
+        "correct": 0,
+        "n": 12,
+        "accuracy": 0.0,
+        "sample": {
+          "prompt": "In how many ways can 2 items be chosen from 18?",
+          "target_response": "combinations = n x (n - 1) / 2, 18 - 1 = 17, 10 x 17 = 170, 8 x 17 = 136, half of 306 = 153, there are 153 way",
+          "model_reply": "combinations = n choose k, 18 choose 2 = 164, there are 164 ways, total 164",
+          "expected": 153.0,
+          "predicted": 164.0
+        }
+      },
+      "kinetic_energy": {
+        "correct": 10,
+        "n": 12,
+        "accuracy": 0.8333,
+        "sample": {
+          "prompt": "mass 10 kg velocity 7 m/s kinetic energy",
+          "target_response": "kinetic energy = half x mass x velocity squared, half of 10 = 5, velocity squared = 7 x 7 = 49, 40 x 5 = 200, ",
+          "model_reply": "kinetic energy = half x mass x velocity squared, velocity squared = 7 x 7 = 49, 10 x 49 = 490, half of 490 = 2",
+          "expected": 245.0,
+          "predicted": 245.0
+        }
+      },
+      "average": null,
+      "algebra_one_step": null,
+      "force": {
+        "correct": 12,
+        "n": 12,
+        "accuracy": 1.0,
+        "sample": {
+          "prompt": "A body of mass 45 kg has an acceleration of 5 m/s^2. What is the force?",
+          "target_response": "force = mass x acceleration, 40 x 5 = 200, 5 x 5 = 25, the force is 225 newtons, total 225",
+          "model_reply": "force = mass x acceleration, 40 x 5 = 200, 5 x 5 = 25, 200 + 25 = 225, the force is 225 newtons, total 225",
+          "expected": 225.0,
+          "predicted": 225.0
+        }
+      },
+      "multiplication": null
+    }
+  },
+  "n_per_task": 12,
+  "cap": 128,
+  "seed": 8202,
+  "table": {
+    "a5bd5bf2_what_v80_trained_on": {
+      "arithmetic_series": 0.0,
+      "combination": 0.0,
+      "kinetic_energy": 0.1667,
+      "average": null,
+      "algebra_one_step": null,
+      "force": 0.9167,
+      "multiplication": null
+    },
+    "74642029_v81_corrections": {
+      "arithmetic_series": 0.1667,
+      "combination": 0.0,
+      "kinetic_energy": 0.1667,
+      "average": null,
+      "algebra_one_step": null,
+      "force": 0.9167,
+      "multiplication": null
+    },
+    "c7041897_current": {
+      "arithmetic_series": 0.5,
+      "combination": 0.0,
+      "kinetic_energy": 0.8333,
+      "average": null,
+      "algebra_one_step": null,
+      "force": 1.0,
+      "multiplication": null
+    }
+  },
+  "non_claims": [
+    "n=12 per task per era. The Wilson 95% interval on a single cell is +-25 points at p=0.5 (computed: [0.254, 0.746]). An earlier version of this receipt said +-28, which is the normal approximation 1.96*sqrt(0.25/12); Wilson is what eval_problem_solving.wilson_interval reports and what the write-up quotes. Only large moves are readable either way.",
+    "Answer extraction takes the last number in a reply, so every cell is a lower bound.",
+    "This compares one checkpoint across three question formats. It says nothing about what a model trained on any of these formats would score."
+  ]
+}

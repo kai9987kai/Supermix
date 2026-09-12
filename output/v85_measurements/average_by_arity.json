@@ -1,0 +1,1255 @@
+{
+  "schema": "supermix-v86-average-by-arity-v1",
+  "question": "Does `average` accuracy fall with the number of values? Every proposed format arm assumes it does.",
+  "checkpoint": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\output\\v80_omni\\v80_omni.pt",
+  "settings": {
+    "per_arity": 40,
+    "cap": 96,
+    "seed": 8600
+  },
+  "by_arity": {
+    "4": {
+      "n": 40,
+      "correct": 2,
+      "accuracy": 0.05,
+      "wilson95": [
+        0.0138,
+        0.165
+      ],
+      "reached_correct_sum": 0.05,
+      "division_consistent": 0.05
+    },
+    "5": {
+      "n": 40,
+      "correct": 0,
+      "accuracy": 0.0,
+      "wilson95": [
+        0.0,
+        0.0876
+      ],
+      "reached_correct_sum": 0.0,
+      "division_consistent": 0.0
+    },
+    "6": {
+      "n": 40,
+      "correct": 0,
+      "accuracy": 0.0,
+      "wilson95": [
+        0.0,
+        0.0876
+      ],
+      "reached_correct_sum": 0.025,
+      "division_consistent": 0.0
+    }
+  },
+  "accuracy_spread": 0.05,
+  "widest_interval": 0.1512,
+  "flat_across_chain_length": true,
+  "rows": [
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 48, 98, 18, 82",
+      "reply": "sum: 48 then 137 then 170 then 240, total 240, divide by 4, total 60.0",
+      "expected": 61.5,
+      "predicted": 60.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 84, 68, 96, 77",
+      "reply": "sum: 84 then 167 then 240 then 309, total 309, divide by 4, total 77.25",
+      "expected": 81.25,
+      "predicted": 77.25,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 26, 35, 69, 9",
+      "reply": "sum: 26 then 64 then 107 then 148, total 148, divide by 4, total 37.0",
+      "expected": 34.75,
+      "predicted": 37.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 87, 91, 71, 73",
+      "reply": "sum: 87 then 170 then 240 then 314, total 314, divide by 4, total 76.0",
+      "expected": 80.5,
+      "predicted": 76.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 77, 24, 50, 90",
+      "reply": "sum: 77 then 107 then 160 then 230, total 230, divide by 4, total 57.5",
+      "expected": 60.25,
+      "predicted": 57.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 21, 94, 42, 41",
+      "reply": "sum: 21 then 100 then 124 then 190, total 190, divide by 4, total 47.5",
+      "expected": 49.5,
+      "predicted": 47.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 24, 67, 84, 65",
+      "reply": "sum: 24 then 101 then 140 then 238, total 238, divide by 4, total 59.5",
+      "expected": 60.0,
+      "predicted": 59.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 43, 33, 73, 91",
+      "reply": "sum: 43 then 100 then 140 then 218, total 218, divide by 4, total 54.5",
+      "expected": 60.0,
+      "predicted": 54.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 78, 40, 50, 61",
+      "reply": "sum: 78 then 137 then 180 then 230, total 230, divide by 4, total 57.5",
+      "expected": 57.25,
+      "predicted": 57.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 40, 38, 74, 82",
+      "reply": "sum: 40 then 107 then 148 then 228, total 228, divide by 4, total 57.0",
+      "expected": 58.5,
+      "predicted": 57.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 53, 46, 21, 22",
+      "reply": "sum: 53 then 100 then 114 then 144, total 144, divide by 4, total 36.0",
+      "expected": 35.5,
+      "predicted": 36.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 81, 26, 77, 75",
+      "reply": "sum: 81 then 117 then 190 then 260, total 260, divide by 4, total 60.0",
+      "expected": 64.75,
+      "predicted": 60.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 41, 64, 61, 33",
+      "reply": "sum: 41 then 100 then 150 then 204, total 204, divide by 4, total 51.0",
+      "expected": 49.75,
+      "predicted": 51.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 91, 76, 95, 13",
+      "reply": "sum: 91 then 177 then 240 then 304, total 304, divide by 4, total 75.5",
+      "expected": 68.75,
+      "predicted": 75.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 70, 92, 21, 73",
+      "reply": "sum: 70 then 147 then 190 then 248, total 248, divide by 4, total 63.0",
+      "expected": 64.0,
+      "predicted": 63.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 46, 96, 92, 60",
+      "reply": "sum: 46 then 127 then 204 then 284, total 284, divide by 4, total 76.0",
+      "expected": 73.5,
+      "predicted": 76.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 85, 71, 14, 78",
+      "reply": "sum: 85 then 167 then 204 then 230, total 230, divide by 4, total 57.5",
+      "expected": 62.0,
+      "predicted": 57.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 95, 35, 80, 39",
+      "reply": "sum: 95 then 130 then 204 then 230, total 230, divide by 4, total 57.5",
+      "expected": 62.25,
+      "predicted": 57.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 48, 34, 62, 63",
+      "reply": "sum: 48 then 107 then 148 then 217, total 217, divide by 4, total 54.25",
+      "expected": 51.75,
+      "predicted": 54.25,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 90, 20, 61, 60",
+      "reply": "sum: 90 then 118 then 190 then 249, total 249, divide by 4, total 64.75",
+      "expected": 57.75,
+      "predicted": 64.75,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 18, 17, 46, 51",
+      "reply": "sum: 18 then 47 then 100 then 118, total 118, divide by 4, total 29.5",
+      "expected": 33.0,
+      "predicted": 29.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 57, 22, 60, 92",
+      "reply": "sum: 57 then 107 then 148 then 217, total 217, divide by 4, total 54.25",
+      "expected": 57.75,
+      "predicted": 54.25,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 81, 17, 57, 14",
+      "reply": "sum: 81 then 100 then 140 then 160, total 160, divide by 4, total 40.0",
+      "expected": 42.25,
+      "predicted": 40.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 48, 24, 56, 16",
+      "reply": "sum: 48 then 77 then 116 then 144, total 144, divide by 4, total 36.0",
+      "expected": 36.0,
+      "predicted": 36.0,
+      "correct": true,
+      "reached_correct_sum": true,
+      "division_consistent": true
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 58, 78, 52, 44",
+      "reply": "sum: 58 then 127 then 180 then 248, total 248, divide by 4, total 63.0",
+      "expected": 58.0,
+      "predicted": 63.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 49, 31, 58, 42",
+      "reply": "sum: 49 then 100 then 140 then 190, total 190, divide by 4, total 47.5",
+      "expected": 45.0,
+      "predicted": 47.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 43, 89, 12, 46",
+      "reply": "sum: 43 then 100 then 140 then 190, total 190, divide by 4, total 47.5",
+      "expected": 47.5,
+      "predicted": 47.5,
+      "correct": true,
+      "reached_correct_sum": true,
+      "division_consistent": true
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 12, 20, 94, 83",
+      "reply": "sum: 12 then 100 then 118 then 190, total 190, divide by 4, total 47.5",
+      "expected": 52.25,
+      "predicted": 47.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 97, 30, 54, 91",
+      "reply": "sum: 97 then 158 then 204 then 230, total 230, divide by 4, total 57.5",
+      "expected": 68.0,
+      "predicted": 57.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 75, 78, 92, 19",
+      "reply": "sum: 75 then 157 then 230 then 290, total 290, divide by 4, total 75.0",
+      "expected": 66.0,
+      "predicted": 75.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 65, 48, 16, 8",
+      "reply": "sum: 65 then 104 then 144 then 174, total 174, divide by 4, total 43.5",
+      "expected": 34.25,
+      "predicted": 43.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 92, 98, 26, 42",
+      "reply": "sum: 92 then 158 then 224 then 260, total 260, divide by 4, total 60.0",
+      "expected": 64.5,
+      "predicted": 60.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 72, 15, 47, 36",
+      "reply": "sum: 72 then 100 then 124 then 140, total 140, divide by 4, total 36.5",
+      "expected": 42.5,
+      "predicted": 36.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 71, 68, 59, 98",
+      "reply": "sum: 71 then 157 then 204 then 289, total 289, divide by 4, total 74.75",
+      "expected": 74.0,
+      "predicted": 74.75,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 63, 20, 85, 69",
+      "reply": "sum: 63 then 113 then 148 then 218, total 218, divide by 4, total 54.5",
+      "expected": 59.25,
+      "predicted": 54.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 16, 47, 6, 82",
+      "reply": "sum: 16 then 100 then 110 then 148, total 148, divide by 4, total 37.0",
+      "expected": 37.75,
+      "predicted": 37.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 27, 52, 18, 25",
+      "reply": "sum: 27 then 59 then 100 then 128, total 128, divide by 4, total 31.5",
+      "expected": 30.5,
+      "predicted": 31.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 31, 18, 99, 45",
+      "reply": "sum: 31 then 79 then 128 then 158, total 158, divide by 4, total 39.5",
+      "expected": 48.25,
+      "predicted": 39.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 32, 67, 79, 65",
+      "reply": "sum: 32 then 107 then 158 then 230, total 230, divide by 4, total 57.5",
+      "expected": 60.75,
+      "predicted": 57.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 4,
+      "prompt": "Find the average (mean) of these numbers: 67, 53, 74, 61",
+      "reply": "sum: 67 then 137 then 198 then 260, total 260, divide by 4, total 60.0",
+      "expected": 63.75,
+      "predicted": 60.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 82, 42, 67, 86, 64",
+      "reply": "sum: 82 then 158 then 210 then 290 then 350, total 350, divide by 5, total 70.0",
+      "expected": 68.2,
+      "predicted": 70.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 65, 31, 93, 40, 98",
+      "reply": "sum: 65 then 130 then 188 then 260 then 345, total 345, divide by 5, total 69.0",
+      "expected": 65.4,
+      "predicted": 69.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 56, 10, 61, 79, 41",
+      "reply": "sum: 56 then 109 then 128 then 198 then 260, total 260, divide by 5, total 52.0",
+      "expected": 49.4,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 66, 40, 60, 91, 52",
+      "reply": "sum: 66 then 130 then 188 then 260 then 345, total 345, divide by 5, total 69.0",
+      "expected": 61.8,
+      "predicted": 69.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 64, 30, 80, 5, 90",
+      "reply": "sum: 64 then 104 then 140 then 190 then 260, total 260, divide by 5, total 52.0",
+      "expected": 53.8,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 70, 95, 26, 17, 93",
+      "reply": "sum: 70 then 138 then 198 then 218 then 260, total 260, divide by 5, total 52.0",
+      "expected": 60.2,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 20, 70, 64, 25, 16",
+      "reply": "sum: 20 then 64 then 115 then 140 then 170, total 170, divide by 5, total 34.0",
+      "expected": 39.0,
+      "predicted": 34.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 96, 7, 58, 12, 74",
+      "reply": "sum: 96 then 155 then 174 then 209 then 264, total 264, divide by 5, total 52.8",
+      "expected": 49.4,
+      "predicted": 52.8,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 73, 92, 44, 8, 29",
+      "reply": "sum: 73 then 124 then 198 then 217 then 260, total 260, divide by 5, total 52.0",
+      "expected": 49.2,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 25, 37, 78, 42, 46",
+      "reply": "sum: 25 then 64 then 125 then 190 then 224, total 224, divide by 5, total 44.8",
+      "expected": 45.6,
+      "predicted": 44.8,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 16, 46, 45, 84, 56",
+      "reply": "sum: 16 then 64 then 130 then 190 then 260, total 260, divide by 5, total 52.0",
+      "expected": 49.4,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 56, 63, 14, 54, 95",
+      "reply": "sum: 56 then 104 then 158 then 204 then 250, total 250, divide by 5, total 50.0",
+      "expected": 56.4,
+      "predicted": 50.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 79, 63, 65, 99, 89",
+      "reply": "sum: 79 then 167 then 254 then 330 then 417, total 417, divide by 5, total 83.4",
+      "expected": 79.0,
+      "predicted": 83.4,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 96, 20, 37, 36, 19",
+      "reply": "sum: 96 then 104 then 124 then 190 then 218, total 218, divide by 5, total 43.6",
+      "expected": 41.6,
+      "predicted": 43.6,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 52, 23, 12, 98, 58",
+      "reply": "sum: 52 then 70 then 125 then 150 then 230, total 230, divide by 5, total 46.0",
+      "expected": 48.6,
+      "predicted": 46.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 76, 8, 65, 31, 20",
+      "reply": "sum: 76 then 113 then 148 then 198 then 217, total 217, divide by 5, total 43.4",
+      "expected": 40.0,
+      "predicted": 43.4,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 88, 54, 65, 86, 77",
+      "reply": "sum: 88 then 167 then 244 then 310 then 319, total 319, divide by 5, total 63.8",
+      "expected": 74.0,
+      "predicted": 63.8,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 77, 64, 44, 34, 66",
+      "reply": "sum: 77 then 130 then 188 then 240 then 308, total 308, divide by 5, total 61.6",
+      "expected": 57.0,
+      "predicted": 61.6,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 55, 26, 78, 53, 46",
+      "reply": "sum: 55 then 104 then 158 then 230 then 275, total 275, divide by 5, total 55.0",
+      "expected": 51.6,
+      "predicted": 55.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 62, 29, 98, 18, 47",
+      "reply": "sum: 62 then 101 then 158 then 230 then 255, total 255, divide by 5, total 51.0",
+      "expected": 50.8,
+      "predicted": 51.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 69, 68, 66, 70, 49",
+      "reply": "sum: 69 then 147 then 218 then 290 then 355, total 355, divide by 5, total 70.0",
+      "expected": 64.4,
+      "predicted": 70.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 99, 29, 97, 82, 63",
+      "reply": "sum: 99 then 167 then 218 then 290 then 364, total 364, divide by 5, total 72.8",
+      "expected": 74.0,
+      "predicted": 72.8,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 63, 56, 30, 81, 36",
+      "reply": "sum: 63 then 101 then 158 then 230 then 275, total 275, divide by 5, total 55.0",
+      "expected": 53.2,
+      "predicted": 55.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 20, 90, 41, 34, 90",
+      "reply": "sum: 20 then 104 then 140 then 210 then 290, total 290, divide by 5, total 58.0",
+      "expected": 55.0,
+      "predicted": 58.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 77, 37, 8, 12, 55",
+      "reply": "sum: 77 then 107 then 128 then 198 then 217, total 217, divide by 5, total 43.4",
+      "expected": 37.8,
+      "predicted": 43.4,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 16, 33, 77, 9, 94",
+      "reply": "sum: 16 then 101 then 118 then 198 then 260, total 260, divide by 5, total 52.0",
+      "expected": 45.8,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 30, 79, 58, 81, 23",
+      "reply": "sum: 30 then 104 then 174 then 230 then 250, total 250, divide by 5, total 50.0",
+      "expected": 54.2,
+      "predicted": 50.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 24, 60, 18, 41, 53",
+      "reply": "sum: 24 then 64 then 125 then 140 then 190, total 190, divide by 5, total 38.0",
+      "expected": 39.2,
+      "predicted": 38.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 61, 60, 78, 38, 91",
+      "reply": "sum: 61 then 130 then 209 then 284 then 304, total 304, divide by 5, total 60.8",
+      "expected": 65.6,
+      "predicted": 60.8,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 42, 12, 30, 32, 89",
+      "reply": "sum: 42 then 60 then 100 then 124 then 190, total 190, divide by 5, total 38.0",
+      "expected": 41.0,
+      "predicted": 38.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 24, 17, 63, 97, 50",
+      "reply": "sum: 24 then 64 then 125 then 190 then 260, total 260, divide by 5, total 52.0",
+      "expected": 50.2,
+      "predicted": 52.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 8, 56, 43, 7, 98",
+      "reply": "sum: 8 then 10 then 117 then 148 then 217, total 217, divide by 5, total 43.4",
+      "expected": 42.4,
+      "predicted": 43.4,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 16, 95, 35, 55, 42",
+      "reply": "sum: 16 then 100 then 124 then 190 then 224, total 224, divide by 5, total 44.8",
+      "expected": 48.6,
+      "predicted": 44.8,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 59, 90, 98, 85, 36",
+      "reply": "sum: 59 then 147 then 230 then 309 then 390, total 390, divide by 5, total 78.0",
+      "expected": 73.6,
+      "predicted": 78.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 53, 35, 77, 73, 58",
+      "reply": "sum: 53 then 109 then 178 then 240 then 316, total 316, divide by 5, total 63.2",
+      "expected": 59.2,
+      "predicted": 63.2,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 55, 12, 82, 18, 15",
+      "reply": "sum: 55 then 104 then 114 then 140 then 170, total 170, divide by 5, total 34.0",
+      "expected": 36.4,
+      "predicted": 34.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 21, 27, 23, 52, 8",
+      "reply": "sum: 21 then 49 then 70 then 108 then 148, total 148, divide by 5, total 29.6",
+      "expected": 26.2,
+      "predicted": 29.6,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 28, 72, 49, 37, 90",
+      "reply": "sum: 28 then 107 then 158 then 230 then 275, total 275, divide by 5, total 55.0",
+      "expected": 55.2,
+      "predicted": 55.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 32, 82, 78, 56, 33",
+      "reply": "sum: 32 then 101 then 174 then 240 then 275, total 275, divide by 5, total 55.0",
+      "expected": 56.2,
+      "predicted": 55.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 5,
+      "prompt": "Find the average (mean) of these numbers: 87, 46, 50, 28, 50",
+      "reply": "sum: 87 then 130 then 158 then 230 then 275, total 275, divide by 5, total 55.0",
+      "expected": 52.2,
+      "predicted": 55.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 96, 59, 38, 62, 73, 83",
+      "reply": "sum: 96 then 175 then 210 then 299 then 360 then 490, total 490, divide by 6, total 95.0",
+      "expected": 68.5,
+      "predicted": 95.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 32, 85, 79, 7, 99, 9",
+      "reply": "sum: 32 then 108 then 182 then 250 then 330, total 330, divide by 6, total 57.0",
+      "expected": 51.833333333333336,
+      "predicted": 57.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 64, 79, 10, 19, 8, 68",
+      "reply": "sum: 64 then 104 then 124 then 148 then 198 then 285, total 285, divide by 6, total 47.5",
+      "expected": 41.333333333333336,
+      "predicted": 47.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 92, 6, 66, 45, 22, 87",
+      "reply": "sum: 92 then 138 then 158 then 230 then 275 then 354, total 354, divide by 6, total 59.0",
+      "expected": 53.0,
+      "predicted": 59.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 34, 65, 7, 49, 64, 18",
+      "reply": "sum: 34 then 100 then 124 then 180 then 204 then 230, total 230, divide by 6, total 38.666667",
+      "expected": 39.5,
+      "predicted": 38.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 40, 12, 9, 69, 71, 36",
+      "reply": "sum: 40 then 70 then 108 then 188 then 220 then 268, total 268, divide by 6, total 44.666667",
+      "expected": 39.5,
+      "predicted": 44.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 83, 60, 87, 54, 10, 27",
+      "reply": "sum: 83 then 158 then 210 then 230 then 250 then 338, total 338, divide by 6, total 56.333333",
+      "expected": 53.5,
+      "predicted": 56.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 97, 88, 53, 73, 31, 23",
+      "reply": "sum: 97 then 175 then 230 then 270 then 306 then 390, total 390, divide by 6, total 65.0",
+      "expected": 60.833333333333336,
+      "predicted": 65.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 48, 34, 38, 61, 70, 69",
+      "reply": "sum: 48 then 108 then 158 then 230 then 275 then 338, total 338, divide by 6, total 55.666667",
+      "expected": 53.333333333333336,
+      "predicted": 55.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 86, 24, 28, 66, 86, 90",
+      "reply": "sum: 86 then 105 then 158 then 240 then 314 then 390, total 390, divide by 6, total 65.0",
+      "expected": 63.333333333333336,
+      "predicted": 65.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 40, 34, 41, 19, 91, 21",
+      "reply": "sum: 40 then 70 then 100 then 148 then 190 then 228, total 228, divide by 6, total 30.666667",
+      "expected": 41.0,
+      "predicted": 30.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 40, 99, 62, 28, 84, 63",
+      "reply": "sum: 40 then 128 then 180 then 254 then 334 then 390, total 390, divide by 6, total 65.0",
+      "expected": 62.666666666666664,
+      "predicted": 65.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 32, 13, 5, 69, 64, 51",
+      "reply": "sum: 32 then 60 then 100 then 120 then 198 then 228, total 228, divide by 6, total 36.666667",
+      "expected": 39.0,
+      "predicted": 36.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 96, 71, 54, 39, 84, 78",
+      "reply": "sum: 96 then 175 then 230 then 309 then 390 then 439, total 439, divide by 6, total 72.166667",
+      "expected": 70.33333333333333,
+      "predicted": 72.166667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 12, 58, 46, 34, 81, 24",
+      "reply": "sum: 12 then 44 then 100 then 148 then 215 then 235, total 235, divide by 6, total 39.166667",
+      "expected": 42.5,
+      "predicted": 39.166667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 71, 45, 8, 71, 14, 5",
+      "reply": "sum: 71 then 117 then 148 then 198 then 208 then 230, total 230, divide by 6, total 38.666667",
+      "expected": 35.666666666666664,
+      "predicted": 38.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 67, 38, 44, 75, 50, 82",
+      "reply": "sum: 67 then 138 then 198 then 260 then 334 then 390, total 390, divide by 6, total 65.0",
+      "expected": 59.333333333333336,
+      "predicted": 65.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 10, 91, 57, 14, 28, 55",
+      "reply": "sum: 10 then 104 then 110 then 140 then 190 then 208, total 208, divide by 6, total 33.333333",
+      "expected": 42.5,
+      "predicted": 33.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 34, 26, 64, 26, 9, 16",
+      "reply": "sum: 34 then 64 then 100 then 140 then 178 then 208, total 208, divide by 6, total 33.333333",
+      "expected": 29.166666666666668,
+      "predicted": 33.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 54, 69, 73, 84, 68, 15",
+      "reply": "sum: 54 then 130 then 213 then 284 then 304 then 330, total 330, divide by 6, total 55.0",
+      "expected": 60.5,
+      "predicted": 55.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 31, 69, 89, 15, 29, 33",
+      "reply": "sum: 31 then 110 then 148 then 178 then 200 then 230, total 230, divide by 6, total 38.666667",
+      "expected": 44.333333333333336,
+      "predicted": 38.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 97, 68, 80, 28, 52, 12",
+      "reply": "sum: 97 then 175 then 200 then 244 then 274 then 350, total 350, divide by 6, total 58.666667",
+      "expected": 56.166666666666664,
+      "predicted": 58.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 14, 10, 20, 12, 37, 40",
+      "reply": "sum: 14 then 30 then 48 then 40 then 70 then 140, total 140, divide by 6, total 21.666667",
+      "expected": 22.166666666666668,
+      "predicted": 21.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 25, 21, 53, 68, 94, 7",
+      "reply": "sum: 25 then 64 then 115 then 190 then 260 then 334, total 334, divide by 6, total 55.666667",
+      "expected": 44.666666666666664,
+      "predicted": 55.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 97, 35, 74, 63, 80, 56",
+      "reply": "sum: 97 then 158 then 230 then 309 then 390 then 439, total 439, divide by 6, total 72.166667",
+      "expected": 67.5,
+      "predicted": 72.166667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 90, 76, 40, 90, 85, 66",
+      "reply": "sum: 90 then 178 then 244 then 304 then 394 then 430, total 430, divide by 6, total 71.666667",
+      "expected": 74.5,
+      "predicted": 71.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 44, 11, 42, 10, 72, 81",
+      "reply": "sum: 44 then 64 then 100 then 128 then 190 then 266, total 266, divide by 6, total 44.0",
+      "expected": 43.333333333333336,
+      "predicted": 44.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 28, 23, 29, 94, 39, 21",
+      "reply": "sum: 28 then 56 then 100 then 140 then 170 then 208, total 208, divide by 6, total 33.333333",
+      "expected": 39.0,
+      "predicted": 33.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 35, 83, 73, 10, 13, 9",
+      "reply": "sum: 35 then 104 then 130 then 150 then 180 then 208, total 208, divide by 6, total 33.333333",
+      "expected": 37.166666666666664,
+      "predicted": 33.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 23, 91, 25, 36, 16, 58",
+      "reply": "sum: 23 then 64 then 108 then 148 then 178 then 228, total 228, divide by 6, total 37.333333",
+      "expected": 41.5,
+      "predicted": 37.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 15, 51, 68, 50, 68, 25",
+      "reply": "sum: 15 then 110 then 148 then 198 then 225 then 245, total 245, divide by 6, total 40.5",
+      "expected": 46.166666666666664,
+      "predicted": 40.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 19, 38, 43, 58, 52, 38",
+      "reply": "sum: 19 then 66 then 108 then 158 then 210 then 248, total 248, divide by 6, total 41.666667",
+      "expected": 41.333333333333336,
+      "predicted": 41.666667,
+      "correct": false,
+      "reached_correct_sum": true,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 61, 77, 92, 99, 25, 69",
+      "reply": "sum: 61 then 148 then 213 then 290 then 362 then 403, total 403, divide by 6, total 67.5",
+      "expected": 70.5,
+      "predicted": 67.5,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 6, 96, 36, 22, 82, 63",
+      "reply": "sum: 6 then 64 then 115 then 148 then 218 then 266, total 266, divide by 6, total 44.333333",
+      "expected": 50.833333333333336,
+      "predicted": 44.333333,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 35, 22, 78, 34, 85, 91",
+      "reply": "sum: 35 then 104 then 154 then 230 then 304 then 338, total 338, divide by 6, total 55.666667",
+      "expected": 57.5,
+      "predicted": 55.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 39, 6, 30, 12, 41, 14",
+      "reply": "sum: 39 then 64 then 108 then 128 then 140 then 178, total 178, divide by 6, total 29.666667",
+      "expected": 23.666666666666668,
+      "predicted": 29.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 38, 47, 30, 12, 83, 68",
+      "reply": "sum: 38 then 78 then 108 then 138 then 220 then 288, total 288, divide by 6, total 47.0",
+      "expected": 46.333333333333336,
+      "predicted": 47.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 32, 9, 7, 56, 97, 47",
+      "reply": "sum: 32 then 64 then 125 then 190 then 260 then 334, total 334, divide by 6, total 55.666667",
+      "expected": 41.333333333333336,
+      "predicted": 55.666667,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 86, 40, 62, 7, 8, 14",
+      "reply": "sum: 86 then 104 then 130 then 190 then 218 then 240, total 240, divide by 6, total 40.0",
+      "expected": 36.166666666666664,
+      "predicted": 40.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    },
+    {
+      "arity": 6,
+      "prompt": "Find the average (mean) of these numbers: 22, 63, 90, 11, 28, 75",
+      "reply": "sum: 22 then 100 then 120 then 140 then 190 then 240, total 240, divide by 6, total 40.0",
+      "expected": 48.166666666666664,
+      "predicted": 40.0,
+      "correct": false,
+      "reached_correct_sum": false,
+      "division_consistent": false
+    }
+  ],
+  "non_claims": [
+    "n=40 per arity; the 95% half-width at that size is in each row's wilson95 field. A spread smaller than one interval decides nothing.",
+    "`reached_correct_sum` looks for the true total anywhere in the reply, so it is an upper bound: a reply could contain the right number by coincidence.",
+    "This measures one checkpoint on one task. It says where to aim, not what any arm would score."
+  ]
+}

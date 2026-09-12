@@ -1,0 +1,36 @@
+seen arm skipped: not requested
+checkpoint  output\v86_corpus\v86_corpus.pt
+dev loss    0.062027
+problems    630   unparsed 0   truncated 0
+settings    seed 65  max_new_tokens 96  shared_rng False
+fingerprint 4077062251bc762c9716a730f3818ad2
+
+source   task                   n  corr     acc            95% CI  trunc   abst
+-------------------------------------------------------------------------------
+novel    acceleration          30    22   0.733 [ 0.555, 0.858]      0      0
+novel    algebra_one_step      30    13   0.433 [ 0.274, 0.608]      0      0
+novel    arithmetic            30    19   0.633 [ 0.455, 0.781]      0      0
+novel    arithmetic_series     30    30   1.000 [ 0.886, 1.000]      0      0
+novel    average               30     1   0.033 [ 0.006, 0.167]      0      0
+novel    combination           30    28   0.933 [ 0.787, 0.982]      0      0
+novel    division              30    30   1.000 [ 0.886, 1.000]      0      0
+novel    electrical_power      30    30   1.000 [ 0.886, 1.000]      0      0
+novel    force                 30    30   1.000 [ 0.886, 1.000]      0      0
+novel    kinetic_energy        30    30   1.000 [ 0.886, 1.000]      0      0
+novel    molarity              30    20   0.667 [ 0.488, 0.808]      0      0
+novel    momentum              30    30   1.000 [ 0.886, 1.000]      0      0
+novel    multiplication        30    30   1.000 [ 0.886, 1.000]      0      0
+novel    percent               30    16   0.533 [ 0.361, 0.698]      0      0
+novel    power                 30    12   0.400 [ 0.246, 0.577]      0      0
+novel    sequence              30    30   1.000 [ 0.886, 1.000]      0      0
+novel    two_step              30     9   0.300 [ 0.167, 0.479]      0      0
+novel    voltage               30    30   1.000 [ 0.886, 1.000]      0      0
+novel    wave_speed            30    30   1.000 [ 0.886, 1.000]      0      0
+novel    word_problem          30    21   0.700 [ 0.521, 0.833]      0      0
+novel    work                  30    30   1.000 [ 0.886, 1.000]      0      0
+novel    ALL                  630   491   0.779 [ 0.745, 0.810]      0      0
+                            abstention score +0.5587   acc excl. truncated 0.779   median rel.err 0.000   within10% 0.882
+
+replies -> output\v87_measurements\v86_replies.jsonl (630 rows)
+
+receipt -> output\v87_measurements\v86_audit_run.json

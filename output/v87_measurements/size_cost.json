@@ -1,0 +1,74 @@
+{
+  "schema": "supermix-v88-size-cost-v1",
+  "batch_size": 16,
+  "sequence_length": 128,
+  "threads": 8,
+  "candidates": {
+    "v87 h256 L4 E48": {
+      "total_parameters": 11383605,
+      "active_parameters": 4404021,
+      "seconds_per_step": 1.9298631999999998,
+      "ratio_to_v87": 1.0,
+      "samples": [
+        1.9298631999999998,
+        2.057283100000177,
+        2.0574936999998954
+      ]
+    },
+    "h256 L4 E96": {
+      "total_parameters": 18498357,
+      "active_parameters": 4440885,
+      "seconds_per_step": 2.2579298000000563,
+      "ratio_to_v87": 1.1699947436689069,
+      "samples": [
+        2.2579298000000563,
+        2.2919802000001255,
+        2.3050949999999375
+      ]
+    },
+    "h320 L4 E64": {
+      "total_parameters": 17573621,
+      "active_parameters": 5900021,
+      "seconds_per_step": 2.492430999999897,
+      "ratio_to_v87": 1.2915065689629694,
+      "samples": [
+        2.492430999999897,
+        2.49595330000011,
+        2.5781136999999035
+      ]
+    },
+    "h320 L5 E64": {
+      "total_parameters": 21844349,
+      "active_parameters": 6238589,
+      "seconds_per_step": 2.7279232999999294,
+      "ratio_to_v87": 1.4135319539747324,
+      "samples": [
+        2.7279232999999294,
+        2.7486063000001195,
+        2.7692824999999175
+      ]
+    },
+    "h320 L6 E64": {
+      "total_parameters": 26115077,
+      "active_parameters": 6577157,
+      "seconds_per_step": 2.971644999999853,
+      "ratio_to_v87": 1.5398215790631447,
+      "samples": [
+        2.971644999999853,
+        3.0209162000001015,
+        3.251234199999999
+      ]
+    },
+    "h384 L6 E64": {
+      "total_parameters": 31920325,
+      "active_parameters": 8474821,
+      "seconds_per_step": 3.3487194000001637,
+      "ratio_to_v87": 1.7352107651983644,
+      "samples": [
+        3.3487194000001637,
+        3.372583200000008,
+        3.3806529000000864
+      ]
+    }
+  }
+}

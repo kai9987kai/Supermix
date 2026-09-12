@@ -1,0 +1,259 @@
+{
+  "schema": "supermix-v85-flag-smoke-v1",
+  "purpose": "gate, not experiment: does each new flag train, and what does it cost",
+  "settings": {
+    "steps": 40,
+    "batch": 16,
+    "seq": 128,
+    "lr": 0.003,
+    "seed": 85,
+    "threads": 8,
+    "shape": "v80"
+  },
+  "arms": {
+    "baseline": {
+      "arm": "baseline",
+      "overrides": {},
+      "params_total": 15274549,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9128,
+      "loss_last3": 11.4448,
+      "loss_drop": 0.468,
+      "learned": true,
+      "median_s_per_step": 2.1365
+    },
+    "qk_norm": {
+      "arm": "qk_norm",
+      "overrides": {
+        "qk_norm": true
+      },
+      "params_total": 15274933,
+      "params_active_per_token": 3918117,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9131,
+      "loss_last3": 11.5561,
+      "loss_drop": 0.357,
+      "learned": true,
+      "median_s_per_step": 2.2795
+    },
+    "attention_output_gate": {
+      "arm": "attention_output_gate",
+      "overrides": {
+        "attention_output_gate": true
+      },
+      "params_total": 15669301,
+      "params_active_per_token": 4181029,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9066,
+      "loss_last3": 11.3694,
+      "loss_drop": 0.5372,
+      "learned": true,
+      "median_s_per_step": 2.7907
+    },
+    "sink_swa_only": {
+      "arm": "sink_swa_only",
+      "overrides": {
+        "attention_sink_kinds": "swa"
+      },
+      "params_total": 15274525,
+      "params_active_per_token": 3917853,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9131,
+      "loss_last3": 11.4153,
+      "loss_drop": 0.4978,
+      "learned": true,
+      "median_s_per_step": 3.0983
+    },
+    "rotary_dim_half": {
+      "arm": "rotary_dim_half",
+      "overrides": {
+        "rotary_dim": 16
+      },
+      "params_total": 15274549,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9123,
+      "loss_last3": 11.4459,
+      "loss_drop": 0.4663,
+      "learned": true,
+      "median_s_per_step": 3.0351
+    },
+    "global_layers_final_only": {
+      "arm": "global_layers_final_only",
+      "overrides": {
+        "global_layers": [
+          3
+        ]
+      },
+      "params_total": 15274549,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9128,
+      "loss_last3": 11.4448,
+      "loss_drop": 0.468,
+      "learned": true,
+      "median_s_per_step": 2.762
+    },
+    "router_sigmoid": {
+      "arm": "router_sigmoid",
+      "overrides": {
+        "router_score_function": "sigmoid"
+      },
+      "params_total": 15274549,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 12.0557,
+      "loss_last3": 11.0096,
+      "loss_drop": 1.0461,
+      "learned": true,
+      "median_s_per_step": 3.0685
+    },
+    "balance_sequence_scope": {
+      "arm": "balance_sequence_scope",
+      "overrides": {
+        "moe_balance_scope": "sequence"
+      },
+      "params_total": 15274549,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9147,
+      "loss_last3": 11.4682,
+      "loss_drop": 0.4465,
+      "learned": true,
+      "median_s_per_step": 3.3858
+    },
+    "no_shared_expert": {
+      "arm": "no_shared_expert",
+      "overrides": {
+        "n_shared_experts": 0
+      },
+      "params_total": 15053365,
+      "params_active_per_token": 3696677,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.8994,
+      "loss_last3": 11.2893,
+      "loss_drop": 0.6101,
+      "learned": true,
+      "median_s_per_step": 2.8063
+    },
+    "top_k_4": {
+      "arm": "top_k_4",
+      "overrides": {
+        "moe_top_k": 4
+      },
+      "params_total": 15274549,
+      "params_active_per_token": 4360229,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9204,
+      "loss_last3": 11.4036,
+      "loss_drop": 0.5168,
+      "learned": true,
+      "median_s_per_step": 3.1598
+    },
+    "one_mtp_depth": {
+      "arm": "one_mtp_depth",
+      "overrides": {
+        "n_mtp_layers": 1
+      },
+      "params_total": 14683437,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9048,
+      "loss_last3": 11.1676,
+      "loss_drop": 0.7372,
+      "learned": true,
+      "median_s_per_step": 2.3074
+    },
+    "no_mtp": {
+      "arm": "no_mtp",
+      "overrides": {
+        "n_mtp_layers": 0
+      },
+      "params_total": 14092325,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 9.1781,
+      "loss_last3": 9.2325,
+      "loss_drop": -0.0545,
+      "learned": false,
+      "median_s_per_step": 1.6585
+    },
+    "warm_gate": {
+      "arm": "warm_gate",
+      "overrides": {
+        "thinking_residual_init": 0.1
+      },
+      "params_total": 15274549,
+      "params_active_per_token": 3917861,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9132,
+      "loss_last3": 11.3917,
+      "loss_drop": 0.5215,
+      "learned": true,
+      "median_s_per_step": 3.114
+    },
+    "differential": {
+      "arm": "differential",
+      "overrides": {
+        "use_differential_attention": true
+      },
+      "params_total": 15274837,
+      "params_active_per_token": 3918053,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9008,
+      "loss_last3": 11.7133,
+      "loss_drop": 0.1875,
+      "learned": true,
+      "median_s_per_step": 3.7324
+    },
+    "mla": {
+      "arm": "mla",
+      "overrides": {
+        "use_mla": true
+      },
+      "params_total": 15360661,
+      "params_active_per_token": 3946565,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.91,
+      "loss_last3": 11.3614,
+      "loss_drop": 0.5486,
+      "learned": true,
+      "median_s_per_step": 3.1805
+    },
+    "mod": {
+      "arm": "mod",
+      "overrides": {
+        "use_mod": true
+      },
+      "params_total": 15276088,
+      "params_active_per_token": 3919400,
+      "steps_completed": 40,
+      "all_finite": true,
+      "loss_first3": 11.9101,
+      "loss_last3": 8.7158,
+      "loss_drop": 3.1943,
+      "learned": true,
+      "median_s_per_step": 3.8293
+    }
+  },
+  "non_claims": [
+    "40 steps on a synthetic copy task says nothing about quality on the real corpus. A flag that trains here can still be useless or harmful.",
+    "Step times are from one machine under whatever else was running; treat ratios to baseline as the signal, not absolute seconds."
+  ]
+}

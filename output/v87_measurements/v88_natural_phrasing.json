@@ -1,0 +1,27 @@
+{
+  "schema": "supermix-v88-natural-phrasing-v1",
+  "checkpoint": "output/v88_corpus/v88_corpus.pt",
+  "n": 300,
+  "held_out_per_task": 3,
+  "trained": {
+    "correct": 279,
+    "accuracy": 0.93,
+    "wilson95": [
+      0.8953632441625534,
+      0.953763406039394
+    ]
+  },
+  "held_out": {
+    "correct": 209,
+    "accuracy": 0.6966666666666667,
+    "wilson95": [
+      0.6424305301606226,
+      0.7459297207069346
+    ]
+  },
+  "mcnemar": {
+    "trained_only": 74,
+    "held_out_only": 4,
+    "p_value": 9.9631125455154e-18
+  }
+}

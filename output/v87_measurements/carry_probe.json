@@ -1,0 +1,2319 @@
+{
+  "schema": "supermix-v88-carry-probe-v2",
+  "checkpoint": "output/v87_corpus/v87_corpus.pt",
+  "n": 120,
+  "note": "in-distribution: three-digit subtractions whose written remainder step does or does not borrow",
+  "borrows": {
+    "correct": 59,
+    "accuracy": 0.49166666666666664,
+    "wilson95": [
+      0.4038741586989492,
+      0.5799761791519831
+    ]
+  },
+  "carry_free": {
+    "correct": 103,
+    "accuracy": 0.8583333333333333,
+    "wilson95": [
+      0.7848035127258367,
+      0.9096319596840804
+    ]
+  },
+  "written_step": {
+    "borrows": {
+      "correct": 59,
+      "scored": 120
+    },
+    "free": {
+      "correct": 106,
+      "scored": 120
+    }
+  },
+  "mcnemar": {
+    "borrowing_only": 5,
+    "carry_free_only": 49,
+    "p_value": 3.8913883226854296e-10
+  },
+  "cases": [
+    {
+      "borrows_left": 860,
+      "free_left": 868,
+      "right": 253,
+      "borrows_remainder": [
+        60,
+        53
+      ],
+      "free_remainder": [
+        68,
+        53
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 200 = 600, 60 - 53 = 17, total 617",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 200 = 600, 68 - 53 = 15, total 615"
+    },
+    {
+      "borrows_left": 475,
+      "free_left": 477,
+      "right": 126,
+      "borrows_remainder": [
+        75,
+        26
+      ],
+      "free_remainder": [
+        77,
+        26
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 100 = 300, 75 - 26 = 49, total 349",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 100 = 300, 77 - 26 = 51, total 351"
+    },
+    {
+      "borrows_left": 481,
+      "free_left": 488,
+      "right": 263,
+      "borrows_remainder": [
+        81,
+        63
+      ],
+      "free_remainder": [
+        88,
+        63
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 200 = 200, 81 - 63 = 28, total 228",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 200 = 200, 88 - 63 = 25, total 225"
+    },
+    {
+      "borrows_left": 460,
+      "free_left": 468,
+      "right": 231,
+      "borrows_remainder": [
+        60,
+        31
+      ],
+      "free_remainder": [
+        68,
+        31
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 200 = 200, 60 - 31 = 29, total 229",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 200 = 200, 68 - 31 = 37, total 237"
+    },
+    {
+      "borrows_left": 261,
+      "free_left": 265,
+      "right": 142,
+      "borrows_remainder": [
+        61,
+        42
+      ],
+      "free_remainder": [
+        65,
+        42
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 61 - 42 = 19, total 119",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 65 - 42 = 23, total 123"
+    },
+    {
+      "borrows_left": 450,
+      "free_left": 459,
+      "right": 141,
+      "borrows_remainder": [
+        50,
+        41
+      ],
+      "free_remainder": [
+        59,
+        41
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 100 = 300, 50 - 41 = 1, total 301",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 100 = 300, 59 - 41 = 18, total 318"
+    },
+    {
+      "borrows_left": 983,
+      "free_left": 989,
+      "right": 776,
+      "borrows_remainder": [
+        83,
+        76
+      ],
+      "free_remainder": [
+        89,
+        76
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 700 = 200, 83 - 76 = 17, total 217",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "900 - 700 = 200, 89 - 76 = 23, total 223"
+    },
+    {
+      "borrows_left": 970,
+      "free_left": 979,
+      "right": 359,
+      "borrows_remainder": [
+        70,
+        59
+      ],
+      "free_remainder": [
+        79,
+        59
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 300 = 600, 70 - 59 = 1, total 601",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 300 = 600, 79 - 59 = 20, total 620"
+    },
+    {
+      "borrows_left": 830,
+      "free_left": 833,
+      "right": 313,
+      "borrows_remainder": [
+        30,
+        13
+      ],
+      "free_remainder": [
+        33,
+        13
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 300 = 500, 30 - 13 = 17, total 517",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "800 - 300 = 500, 33 - 13 = 10, total 510"
+    },
+    {
+      "borrows_left": 881,
+      "free_left": 887,
+      "right": 354,
+      "borrows_remainder": [
+        81,
+        54
+      ],
+      "free_remainder": [
+        87,
+        54
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 300 = 500, 81 - 54 = 27, total 527",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 300 = 500, 87 - 54 = 33, total 533"
+    },
+    {
+      "borrows_left": 294,
+      "free_left": 298,
+      "right": 156,
+      "borrows_remainder": [
+        94,
+        56
+      ],
+      "free_remainder": [
+        98,
+        56
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 94 - 56 = 38, total 138",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 98 - 56 = 42, total 142"
+    },
+    {
+      "borrows_left": 892,
+      "free_left": 897,
+      "right": 584,
+      "borrows_remainder": [
+        92,
+        84
+      ],
+      "free_remainder": [
+        97,
+        84
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 500 = 300, 92 - 84 = 18, total 318",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 500 = 300, 97 - 84 = 13, total 313"
+    },
+    {
+      "borrows_left": 281,
+      "free_left": 289,
+      "right": 166,
+      "borrows_remainder": [
+        81,
+        66
+      ],
+      "free_remainder": [
+        89,
+        66
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 81 - 66 = 15, total 115",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 89 - 66 = 23, total 123"
+    },
+    {
+      "borrows_left": 280,
+      "free_left": 289,
+      "right": 152,
+      "borrows_remainder": [
+        80,
+        52
+      ],
+      "free_remainder": [
+        89,
+        52
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 80 - 52 = 28, total 128",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 89 - 52 = 37, total 137"
+    },
+    {
+      "borrows_left": 474,
+      "free_left": 477,
+      "right": 156,
+      "borrows_remainder": [
+        74,
+        56
+      ],
+      "free_remainder": [
+        77,
+        56
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 100 = 300, 74 - 56 = 18, total 318",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 100 = 300, 77 - 56 = 21, total 321"
+    },
+    {
+      "borrows_left": 280,
+      "free_left": 287,
+      "right": 171,
+      "borrows_remainder": [
+        80,
+        71
+      ],
+      "free_remainder": [
+        87,
+        71
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 80 - 71 = 19, total 119",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 87 - 71 = 16, total 116"
+    },
+    {
+      "borrows_left": 481,
+      "free_left": 486,
+      "right": 372,
+      "borrows_remainder": [
+        81,
+        72
+      ],
+      "free_remainder": [
+        86,
+        72
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 300 = 100, 81 - 72 = 19, total 119",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 300 = 100, 86 - 72 = 14, total 114"
+    },
+    {
+      "borrows_left": 691,
+      "free_left": 694,
+      "right": 583,
+      "borrows_remainder": [
+        91,
+        83
+      ],
+      "free_remainder": [
+        94,
+        83
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "600 - 500 = 100, 91 - 83 = 18, total 118",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 500 = 100, 94 - 83 = 11, total 111"
+    },
+    {
+      "borrows_left": 290,
+      "free_left": 295,
+      "right": 152,
+      "borrows_remainder": [
+        90,
+        52
+      ],
+      "free_remainder": [
+        95,
+        52
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 90 - 52 = 38, total 138",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 95 - 52 = 43, total 143"
+    },
+    {
+      "borrows_left": 486,
+      "free_left": 489,
+      "right": 278,
+      "borrows_remainder": [
+        86,
+        78
+      ],
+      "free_remainder": [
+        89,
+        78
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 200 = 200, 86 - 78 = 18, total 218",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 200 = 200, 89 - 78 = 11, total 211"
+    },
+    {
+      "borrows_left": 282,
+      "free_left": 288,
+      "right": 157,
+      "borrows_remainder": [
+        82,
+        57
+      ],
+      "free_remainder": [
+        88,
+        57
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 82 - 57 = 25, total 125",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 88 - 57 = 31, total 131"
+    },
+    {
+      "borrows_left": 780,
+      "free_left": 789,
+      "right": 461,
+      "borrows_remainder": [
+        80,
+        61
+      ],
+      "free_remainder": [
+        89,
+        61
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 400 = 300, 80 - 61 = 29, total 329",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 400 = 300, 89 - 61 = 28, total 328"
+    },
+    {
+      "borrows_left": 562,
+      "free_left": 567,
+      "right": 334,
+      "borrows_remainder": [
+        62,
+        34
+      ],
+      "free_remainder": [
+        67,
+        34
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 300 = 200, 62 - 34 = 28, total 228",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 300 = 200, 67 - 34 = 33, total 233"
+    },
+    {
+      "borrows_left": 893,
+      "free_left": 896,
+      "right": 585,
+      "borrows_remainder": [
+        93,
+        85
+      ],
+      "free_remainder": [
+        96,
+        85
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 500 = 300, 93 - 85 = 18, total 318",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 500 = 300, 96 - 85 = 11, total 311"
+    },
+    {
+      "borrows_left": 790,
+      "free_left": 793,
+      "right": 213,
+      "borrows_remainder": [
+        90,
+        13
+      ],
+      "free_remainder": [
+        93,
+        13
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 200 = 500, 90 - 13 = 77, total 577",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 200 = 500, 93 - 13 = 80, total 580"
+    },
+    {
+      "borrows_left": 883,
+      "free_left": 889,
+      "right": 649,
+      "borrows_remainder": [
+        83,
+        49
+      ],
+      "free_remainder": [
+        89,
+        49
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 600 = 200, 83 - 49 = 34, total 234",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 600 = 200, 89 - 49 = 40, total 240"
+    },
+    {
+      "borrows_left": 470,
+      "free_left": 473,
+      "right": 241,
+      "borrows_remainder": [
+        70,
+        41
+      ],
+      "free_remainder": [
+        73,
+        41
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 200 = 200, 70 - 41 = 29, total 229",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 200 = 200, 73 - 41 = 32, total 232"
+    },
+    {
+      "borrows_left": 462,
+      "free_left": 468,
+      "right": 353,
+      "borrows_remainder": [
+        62,
+        53
+      ],
+      "free_remainder": [
+        68,
+        53
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 300 = 100, 62 - 53 = 19, total 119",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 300 = 100, 68 - 53 = 15, total 115"
+    },
+    {
+      "borrows_left": 360,
+      "free_left": 365,
+      "right": 232,
+      "borrows_remainder": [
+        60,
+        32
+      ],
+      "free_remainder": [
+        65,
+        32
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "300 - 200 = 100, 60 - 32 = 28, total 128",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "300 - 200 = 100, 65 - 32 = 33, total 133"
+    },
+    {
+      "borrows_left": 883,
+      "free_left": 889,
+      "right": 349,
+      "borrows_remainder": [
+        83,
+        49
+      ],
+      "free_remainder": [
+        89,
+        49
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 300 = 500, 83 - 49 = 34, total 534",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 300 = 500, 89 - 49 = 40, total 540"
+    },
+    {
+      "borrows_left": 822,
+      "free_left": 829,
+      "right": 119,
+      "borrows_remainder": [
+        22,
+        19
+      ],
+      "free_remainder": [
+        29,
+        19
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 100 = 700, 22 - 19 = 4, total 704",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 100 = 700, 29 - 19 = 10, total 710"
+    },
+    {
+      "borrows_left": 593,
+      "free_left": 599,
+      "right": 364,
+      "borrows_remainder": [
+        93,
+        64
+      ],
+      "free_remainder": [
+        99,
+        64
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "500 - 300 = 200, 93 - 64 = 39, total 239",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 300 = 200, 99 - 64 = 35, total 235"
+    },
+    {
+      "borrows_left": 961,
+      "free_left": 966,
+      "right": 726,
+      "borrows_remainder": [
+        61,
+        26
+      ],
+      "free_remainder": [
+        66,
+        26
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "900 - 700 = 200, 61 - 26 = 35, total 235",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 700 = 200, 66 - 26 = 40, total 240"
+    },
+    {
+      "borrows_left": 676,
+      "free_left": 679,
+      "right": 248,
+      "borrows_remainder": [
+        76,
+        48
+      ],
+      "free_remainder": [
+        79,
+        48
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 200 = 400, 76 - 48 = 28, total 428",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 200 = 400, 79 - 48 = 31, total 431"
+    },
+    {
+      "borrows_left": 781,
+      "free_left": 789,
+      "right": 133,
+      "borrows_remainder": [
+        81,
+        33
+      ],
+      "free_remainder": [
+        89,
+        33
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 100 = 600, 81 - 33 = 48, total 648",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 100 = 600, 89 - 33 = 56, total 656"
+    },
+    {
+      "borrows_left": 992,
+      "free_left": 998,
+      "right": 487,
+      "borrows_remainder": [
+        92,
+        87
+      ],
+      "free_remainder": [
+        98,
+        87
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 400 = 500, 92 - 87 = 15, total 515",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 400 = 500, 98 - 87 = 11, total 511"
+    },
+    {
+      "borrows_left": 742,
+      "free_left": 749,
+      "right": 638,
+      "borrows_remainder": [
+        42,
+        38
+      ],
+      "free_remainder": [
+        49,
+        38
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 600 = 100, 42 - 38 = 7, total 108",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "700 - 600 = 100, 49 - 38 = 1, total 101"
+    },
+    {
+      "borrows_left": 870,
+      "free_left": 878,
+      "right": 266,
+      "borrows_remainder": [
+        70,
+        66
+      ],
+      "free_remainder": [
+        78,
+        66
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 200 = 600, 70 - 66 = 14, total 614",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 200 = 600, 78 - 66 = 12, total 612"
+    },
+    {
+      "borrows_left": 954,
+      "free_left": 959,
+      "right": 548,
+      "borrows_remainder": [
+        54,
+        48
+      ],
+      "free_remainder": [
+        59,
+        48
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 500 = 400, 54 - 48 = 16, total 416",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "900 - 500 = 400, 59 - 48 = 1, total 401"
+    },
+    {
+      "borrows_left": 980,
+      "free_left": 987,
+      "right": 452,
+      "borrows_remainder": [
+        80,
+        52
+      ],
+      "free_remainder": [
+        87,
+        52
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "900 - 400 = 500, 80 - 52 = 28, total 528",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 400 = 500, 87 - 52 = 35, total 535"
+    },
+    {
+      "borrows_left": 681,
+      "free_left": 686,
+      "right": 572,
+      "borrows_remainder": [
+        81,
+        72
+      ],
+      "free_remainder": [
+        86,
+        72
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "600 - 500 = 100, 81 - 72 = 19, total 119",
+      "free_ok": false,
+      "free_step_ok": true,
+      "free_reply": "600 - 500 = 100, 86 - 72 = 14, total 111"
+    },
+    {
+      "borrows_left": 792,
+      "free_left": 799,
+      "right": 367,
+      "borrows_remainder": [
+        92,
+        67
+      ],
+      "free_remainder": [
+        99,
+        67
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 300 = 400, 92 - 67 = 25, total 425",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 300 = 400, 99 - 67 = 32, total 432"
+    },
+    {
+      "borrows_left": 444,
+      "free_left": 448,
+      "right": 338,
+      "borrows_remainder": [
+        44,
+        38
+      ],
+      "free_remainder": [
+        48,
+        38
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 300 = 100, 44 - 38 = 6, total 106",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 300 = 100, 48 - 38 = 10, total 110"
+    },
+    {
+      "borrows_left": 643,
+      "free_left": 647,
+      "right": 416,
+      "borrows_remainder": [
+        43,
+        16
+      ],
+      "free_remainder": [
+        47,
+        16
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 400 = 200, 43 - 16 = 27, total 227",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 400 = 200, 47 - 16 = 31, total 231"
+    },
+    {
+      "borrows_left": 392,
+      "free_left": 396,
+      "right": 265,
+      "borrows_remainder": [
+        92,
+        65
+      ],
+      "free_remainder": [
+        96,
+        65
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "300 - 200 = 100, 92 - 65 = 27, total 127",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "300 - 200 = 100, 96 - 65 = 31, total 131"
+    },
+    {
+      "borrows_left": 981,
+      "free_left": 984,
+      "right": 443,
+      "borrows_remainder": [
+        81,
+        43
+      ],
+      "free_remainder": [
+        84,
+        43
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "900 - 400 = 500, 81 - 43 = 38, total 538",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 400 = 500, 84 - 43 = 41, total 541"
+    },
+    {
+      "borrows_left": 591,
+      "free_left": 599,
+      "right": 173,
+      "borrows_remainder": [
+        91,
+        73
+      ],
+      "free_remainder": [
+        99,
+        73
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "500 - 100 = 400, 91 - 73 = 28, total 428",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 100 = 400, 99 - 73 = 26, total 426"
+    },
+    {
+      "borrows_left": 581,
+      "free_left": 587,
+      "right": 132,
+      "borrows_remainder": [
+        81,
+        32
+      ],
+      "free_remainder": [
+        87,
+        32
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 100 = 400, 81 - 32 = 49, total 449",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 100 = 400, 87 - 32 = 55, total 455"
+    },
+    {
+      "borrows_left": 766,
+      "free_left": 768,
+      "right": 458,
+      "borrows_remainder": [
+        66,
+        58
+      ],
+      "free_remainder": [
+        68,
+        58
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 400 = 300, 66 - 58 = 18, total 318",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 400 = 300, 68 - 58 = 10, total 310"
+    },
+    {
+      "borrows_left": 992,
+      "free_left": 998,
+      "right": 883,
+      "borrows_remainder": [
+        92,
+        83
+      ],
+      "free_remainder": [
+        98,
+        83
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 800 = 100, 92 - 83 = 19, total 119",
+      "free_ok": false,
+      "free_step_ok": true,
+      "free_reply": "900 - 800 = 100, 98 - 83 = 15, total 111"
+    },
+    {
+      "borrows_left": 591,
+      "free_left": 598,
+      "right": 418,
+      "borrows_remainder": [
+        91,
+        18
+      ],
+      "free_remainder": [
+        98,
+        18
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 400 = 100, 91 - 18 = 73, total 173",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 400 = 100, 98 - 18 = 80, total 180"
+    },
+    {
+      "borrows_left": 896,
+      "free_left": 898,
+      "right": 728,
+      "borrows_remainder": [
+        96,
+        28
+      ],
+      "free_remainder": [
+        98,
+        28
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 700 = 100, 96 - 28 = 78, total 178",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 700 = 100, 98 - 28 = 70, total 170"
+    },
+    {
+      "borrows_left": 561,
+      "free_left": 569,
+      "right": 145,
+      "borrows_remainder": [
+        61,
+        45
+      ],
+      "free_remainder": [
+        69,
+        45
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 100 = 400, 61 - 45 = 16, total 416",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 100 = 400, 69 - 45 = 24, total 424"
+    },
+    {
+      "borrows_left": 481,
+      "free_left": 488,
+      "right": 363,
+      "borrows_remainder": [
+        81,
+        63
+      ],
+      "free_remainder": [
+        88,
+        63
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 300 = 100, 81 - 63 = 28, total 128",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 300 = 100, 88 - 63 = 25, total 125"
+    },
+    {
+      "borrows_left": 773,
+      "free_left": 778,
+      "right": 135,
+      "borrows_remainder": [
+        73,
+        35
+      ],
+      "free_remainder": [
+        78,
+        35
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 100 = 600, 73 - 35 = 48, total 648",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 100 = 600, 78 - 35 = 43, total 643"
+    },
+    {
+      "borrows_left": 796,
+      "free_left": 799,
+      "right": 589,
+      "borrows_remainder": [
+        96,
+        89
+      ],
+      "free_remainder": [
+        99,
+        89
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 500 = 200, 96 - 89 = 17, total 217",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 500 = 200, 99 - 89 = 10, total 210"
+    },
+    {
+      "borrows_left": 296,
+      "free_left": 298,
+      "right": 178,
+      "borrows_remainder": [
+        96,
+        78
+      ],
+      "free_remainder": [
+        98,
+        78
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 96 - 78 = 18, total 118",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 98 - 78 = 20, total 120"
+    },
+    {
+      "borrows_left": 851,
+      "free_left": 858,
+      "right": 313,
+      "borrows_remainder": [
+        51,
+        13
+      ],
+      "free_remainder": [
+        58,
+        13
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 300 = 500, 51 - 13 = 38, total 538",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 300 = 500, 58 - 13 = 45, total 545"
+    },
+    {
+      "borrows_left": 691,
+      "free_left": 699,
+      "right": 482,
+      "borrows_remainder": [
+        91,
+        82
+      ],
+      "free_remainder": [
+        99,
+        82
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "600 - 400 = 200, 91 - 82 = 19, total 219",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "600 - 400 = 200, 99 - 82 = 11, total 211"
+    },
+    {
+      "borrows_left": 291,
+      "free_left": 299,
+      "right": 186,
+      "borrows_remainder": [
+        91,
+        86
+      ],
+      "free_remainder": [
+        99,
+        86
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 91 - 86 = -15, total 85",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 99 - 86 = 13, total 113"
+    },
+    {
+      "borrows_left": 990,
+      "free_left": 993,
+      "right": 761,
+      "borrows_remainder": [
+        90,
+        61
+      ],
+      "free_remainder": [
+        93,
+        61
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 700 = 200, 90 - 61 = 39, total 239",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 700 = 200, 93 - 61 = 32, total 232"
+    },
+    {
+      "borrows_left": 651,
+      "free_left": 659,
+      "right": 517,
+      "borrows_remainder": [
+        51,
+        17
+      ],
+      "free_remainder": [
+        59,
+        17
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 500 = 100, 51 - 17 = 34, total 134",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 500 = 100, 59 - 17 = 42, total 142"
+    },
+    {
+      "borrows_left": 866,
+      "free_left": 869,
+      "right": 149,
+      "borrows_remainder": [
+        66,
+        49
+      ],
+      "free_remainder": [
+        69,
+        49
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 100 = 700, 66 - 49 = 17, total 717",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 100 = 700, 69 - 49 = 20, total 720"
+    },
+    {
+      "borrows_left": 552,
+      "free_left": 558,
+      "right": 147,
+      "borrows_remainder": [
+        52,
+        47
+      ],
+      "free_remainder": [
+        58,
+        47
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "500 - 100 = 400, 52 - 47 = 65, total 465",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "500 - 100 = 400, 58 - 47 = 1, total 401"
+    },
+    {
+      "borrows_left": 542,
+      "free_left": 544,
+      "right": 413,
+      "borrows_remainder": [
+        42,
+        13
+      ],
+      "free_remainder": [
+        44,
+        13
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 400 = 100, 42 - 13 = 29, total 129",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 400 = 100, 44 - 13 = 31, total 131"
+    },
+    {
+      "borrows_left": 741,
+      "free_left": 744,
+      "right": 234,
+      "borrows_remainder": [
+        41,
+        34
+      ],
+      "free_remainder": [
+        44,
+        34
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 200 = 500, 41 - 34 = 7, total 507",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 200 = 500, 44 - 34 = 10, total 510"
+    },
+    {
+      "borrows_left": 261,
+      "free_left": 265,
+      "right": 154,
+      "borrows_remainder": [
+        61,
+        54
+      ],
+      "free_remainder": [
+        65,
+        54
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 61 - 54 = 17, total 117",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 65 - 54 = 11, total 111"
+    },
+    {
+      "borrows_left": 836,
+      "free_left": 838,
+      "right": 218,
+      "borrows_remainder": [
+        36,
+        18
+      ],
+      "free_remainder": [
+        38,
+        18
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 200 = 600, 36 - 18 = 18, total 618",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "800 - 200 = 600, 38 - 18 = 10, total 610"
+    },
+    {
+      "borrows_left": 894,
+      "free_left": 895,
+      "right": 585,
+      "borrows_remainder": [
+        94,
+        85
+      ],
+      "free_remainder": [
+        95,
+        85
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 500 = 300, 94 - 85 = 1, total 301",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 500 = 300, 95 - 85 = 10, total 310"
+    },
+    {
+      "borrows_left": 671,
+      "free_left": 673,
+      "right": 533,
+      "borrows_remainder": [
+        71,
+        33
+      ],
+      "free_remainder": [
+        73,
+        33
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 500 = 100, 71 - 33 = 38, total 138",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 500 = 100, 73 - 33 = 40, total 140"
+    },
+    {
+      "borrows_left": 482,
+      "free_left": 483,
+      "right": 143,
+      "borrows_remainder": [
+        82,
+        43
+      ],
+      "free_remainder": [
+        83,
+        43
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 100 = 300, 82 - 43 = 39, total 339",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "400 - 100 = 300, 83 - 43 = 30, total 330"
+    },
+    {
+      "borrows_left": 277,
+      "free_left": 279,
+      "right": 169,
+      "borrows_remainder": [
+        77,
+        69
+      ],
+      "free_remainder": [
+        79,
+        69
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 77 - 69 = 18, total 118",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 79 - 69 = 10, total 110"
+    },
+    {
+      "borrows_left": 374,
+      "free_left": 377,
+      "right": 147,
+      "borrows_remainder": [
+        74,
+        47
+      ],
+      "free_remainder": [
+        77,
+        47
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "300 - 100 = 200, 74 - 47 = 27, total 227",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "300 - 100 = 200, 77 - 47 = 20, total 220"
+    },
+    {
+      "borrows_left": 990,
+      "free_left": 999,
+      "right": 681,
+      "borrows_remainder": [
+        90,
+        81
+      ],
+      "free_remainder": [
+        99,
+        81
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 600 = 300, 90 - 81 = 19, total 319",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "900 - 600 = 300, 99 - 81 = 78, total 378"
+    },
+    {
+      "borrows_left": 881,
+      "free_left": 889,
+      "right": 163,
+      "borrows_remainder": [
+        81,
+        63
+      ],
+      "free_remainder": [
+        89,
+        63
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 100 = 700, 81 - 63 = 28, total 728",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 100 = 700, 89 - 63 = 26, total 726"
+    },
+    {
+      "borrows_left": 482,
+      "free_left": 488,
+      "right": 325,
+      "borrows_remainder": [
+        82,
+        25
+      ],
+      "free_remainder": [
+        88,
+        25
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 300 = 100, 82 - 25 = 57, total 157",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 300 = 100, 88 - 25 = 63, total 163"
+    },
+    {
+      "borrows_left": 898,
+      "free_left": 899,
+      "right": 619,
+      "borrows_remainder": [
+        98,
+        19
+      ],
+      "free_remainder": [
+        99,
+        19
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 600 = 200, 98 - 19 = 89, total 289",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 600 = 200, 99 - 19 = 80, total 280"
+    },
+    {
+      "borrows_left": 790,
+      "free_left": 791,
+      "right": 681,
+      "borrows_remainder": [
+        90,
+        81
+      ],
+      "free_remainder": [
+        91,
+        81
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 600 = 100, 90 - 81 = 19, total 119",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 600 = 100, 91 - 81 = 10, total 110"
+    },
+    {
+      "borrows_left": 390,
+      "free_left": 398,
+      "right": 276,
+      "borrows_remainder": [
+        90,
+        76
+      ],
+      "free_remainder": [
+        98,
+        76
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "300 - 200 = 100, 90 - 76 = 14, total 114",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "300 - 200 = 100, 98 - 76 = 22, total 122"
+    },
+    {
+      "borrows_left": 920,
+      "free_left": 922,
+      "right": 311,
+      "borrows_remainder": [
+        20,
+        11
+      ],
+      "free_remainder": [
+        22,
+        11
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 300 = 600, 20 - 11 = 19, total 619",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "900 - 300 = 600, 22 - 11 = 1, total 601"
+    },
+    {
+      "borrows_left": 741,
+      "free_left": 746,
+      "right": 525,
+      "borrows_remainder": [
+        41,
+        25
+      ],
+      "free_remainder": [
+        46,
+        25
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 500 = 200, 41 - 25 = 16, total 216",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 500 = 200, 46 - 25 = 21, total 221"
+    },
+    {
+      "borrows_left": 694,
+      "free_left": 699,
+      "right": 258,
+      "borrows_remainder": [
+        94,
+        58
+      ],
+      "free_remainder": [
+        99,
+        58
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 200 = 400, 94 - 58 = 36, total 436",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 200 = 400, 99 - 58 = 41, total 441"
+    },
+    {
+      "borrows_left": 660,
+      "free_left": 667,
+      "right": 521,
+      "borrows_remainder": [
+        60,
+        21
+      ],
+      "free_remainder": [
+        67,
+        21
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "600 - 500 = 100, 60 - 21 = 49, total 149",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 500 = 100, 67 - 21 = 46, total 146"
+    },
+    {
+      "borrows_left": 991,
+      "free_left": 996,
+      "right": 272,
+      "borrows_remainder": [
+        91,
+        72
+      ],
+      "free_remainder": [
+        96,
+        72
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 200 = 700, 91 - 72 = 29, total 729",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 200 = 700, 96 - 72 = 24, total 724"
+    },
+    {
+      "borrows_left": 990,
+      "free_left": 996,
+      "right": 284,
+      "borrows_remainder": [
+        90,
+        84
+      ],
+      "free_remainder": [
+        96,
+        84
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 200 = 700, 90 - 84 = 16, total 716",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 200 = 700, 96 - 84 = 12, total 712"
+    },
+    {
+      "borrows_left": 982,
+      "free_left": 987,
+      "right": 874,
+      "borrows_remainder": [
+        82,
+        74
+      ],
+      "free_remainder": [
+        87,
+        74
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 800 = 100, 82 - 74 = 18, total 118",
+      "free_ok": false,
+      "free_step_ok": true,
+      "free_reply": "900 - 800 = 100, 87 - 74 = 13, total 111"
+    },
+    {
+      "borrows_left": 698,
+      "free_left": 699,
+      "right": 479,
+      "borrows_remainder": [
+        98,
+        79
+      ],
+      "free_remainder": [
+        99,
+        79
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "600 - 400 = 200, 98 - 79 = 29, total 229",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 400 = 200, 99 - 79 = 20, total 220"
+    },
+    {
+      "borrows_left": 245,
+      "free_left": 246,
+      "right": 126,
+      "borrows_remainder": [
+        45,
+        26
+      ],
+      "free_remainder": [
+        46,
+        26
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 45 - 26 = 29, total 129",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 46 - 26 = 20, total 120"
+    },
+    {
+      "borrows_left": 792,
+      "free_left": 799,
+      "right": 464,
+      "borrows_remainder": [
+        92,
+        64
+      ],
+      "free_remainder": [
+        99,
+        64
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 400 = 300, 92 - 64 = 28, total 328",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 400 = 300, 99 - 64 = 35, total 335"
+    },
+    {
+      "borrows_left": 891,
+      "free_left": 896,
+      "right": 463,
+      "borrows_remainder": [
+        91,
+        63
+      ],
+      "free_remainder": [
+        96,
+        63
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 400 = 400, 91 - 63 = 28, total 428",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 400 = 400, 96 - 63 = 33, total 433"
+    },
+    {
+      "borrows_left": 674,
+      "free_left": 679,
+      "right": 326,
+      "borrows_remainder": [
+        74,
+        26
+      ],
+      "free_remainder": [
+        79,
+        26
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "600 - 300 = 300, 74 - 26 = 58, total 358",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 300 = 300, 79 - 26 = 53, total 353"
+    },
+    {
+      "borrows_left": 893,
+      "free_left": 898,
+      "right": 187,
+      "borrows_remainder": [
+        93,
+        87
+      ],
+      "free_remainder": [
+        98,
+        87
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 100 = 700, 93 - 87 = 14, total 714",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 100 = 700, 98 - 87 = 11, total 711"
+    },
+    {
+      "borrows_left": 374,
+      "free_left": 379,
+      "right": 267,
+      "borrows_remainder": [
+        74,
+        67
+      ],
+      "free_remainder": [
+        79,
+        67
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "300 - 200 = 100, 74 - 67 = 17, total 117",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "300 - 200 = 100, 79 - 67 = 12, total 112"
+    },
+    {
+      "borrows_left": 465,
+      "free_left": 468,
+      "right": 357,
+      "borrows_remainder": [
+        65,
+        57
+      ],
+      "free_remainder": [
+        68,
+        57
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 300 = 100, 65 - 57 = 18, total 118",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "400 - 300 = 100, 68 - 57 = 1, total 101"
+    },
+    {
+      "borrows_left": 576,
+      "free_left": 577,
+      "right": 317,
+      "borrows_remainder": [
+        76,
+        17
+      ],
+      "free_remainder": [
+        77,
+        17
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 300 = 200, 76 - 17 = 59, total 259",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 300 = 200, 77 - 17 = 60, total 260"
+    },
+    {
+      "borrows_left": 582,
+      "free_left": 587,
+      "right": 133,
+      "borrows_remainder": [
+        82,
+        33
+      ],
+      "free_remainder": [
+        87,
+        33
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 100 = 400, 82 - 33 = 49, total 449",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 100 = 400, 87 - 33 = 54, total 454"
+    },
+    {
+      "borrows_left": 590,
+      "free_left": 598,
+      "right": 347,
+      "borrows_remainder": [
+        90,
+        47
+      ],
+      "free_remainder": [
+        98,
+        47
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 300 = 200, 90 - 47 = 43, total 243",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 300 = 200, 98 - 47 = 51, total 251"
+    },
+    {
+      "borrows_left": 770,
+      "free_left": 778,
+      "right": 228,
+      "borrows_remainder": [
+        70,
+        28
+      ],
+      "free_remainder": [
+        78,
+        28
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 200 = 500, 70 - 28 = 42, total 542",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "700 - 200 = 500, 78 - 28 = 40, total 540"
+    },
+    {
+      "borrows_left": 260,
+      "free_left": 265,
+      "right": 131,
+      "borrows_remainder": [
+        60,
+        31
+      ],
+      "free_remainder": [
+        65,
+        31
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 60 - 31 = 39, total 139",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 65 - 31 = 34, total 134"
+    },
+    {
+      "borrows_left": 790,
+      "free_left": 793,
+      "right": 661,
+      "borrows_remainder": [
+        90,
+        61
+      ],
+      "free_remainder": [
+        93,
+        61
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 600 = 100, 90 - 61 = 39, total 139",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 600 = 100, 93 - 61 = 32, total 132"
+    },
+    {
+      "borrows_left": 683,
+      "free_left": 688,
+      "right": 415,
+      "borrows_remainder": [
+        83,
+        15
+      ],
+      "free_remainder": [
+        88,
+        15
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 400 = 200, 83 - 15 = 68, total 268",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 400 = 200, 88 - 15 = 73, total 273"
+    },
+    {
+      "borrows_left": 394,
+      "free_left": 399,
+      "right": 147,
+      "borrows_remainder": [
+        94,
+        47
+      ],
+      "free_remainder": [
+        99,
+        47
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "300 - 100 = 200, 94 - 47 = 47, total 247",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "300 - 100 = 200, 99 - 47 = 52, total 252"
+    },
+    {
+      "borrows_left": 270,
+      "free_left": 279,
+      "right": 119,
+      "borrows_remainder": [
+        70,
+        19
+      ],
+      "free_remainder": [
+        79,
+        19
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 70 - 19 = 51, total 151",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 79 - 19 = 60, total 160"
+    },
+    {
+      "borrows_left": 891,
+      "free_left": 898,
+      "right": 786,
+      "borrows_remainder": [
+        91,
+        86
+      ],
+      "free_remainder": [
+        98,
+        86
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 700 = 100, 91 - 86 = -15, total 85",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 700 = 100, 98 - 86 = 12, total 112"
+    },
+    {
+      "borrows_left": 490,
+      "free_left": 496,
+      "right": 173,
+      "borrows_remainder": [
+        90,
+        73
+      ],
+      "free_remainder": [
+        96,
+        73
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "400 - 100 = 300, 90 - 73 = 27, total 327",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 100 = 300, 96 - 73 = 23, total 323"
+    },
+    {
+      "borrows_left": 965,
+      "free_left": 969,
+      "right": 759,
+      "borrows_remainder": [
+        65,
+        59
+      ],
+      "free_remainder": [
+        69,
+        59
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "900 - 700 = 200, 65 - 59 = 16, total 216",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "900 - 700 = 200, 69 - 59 = 10, total 210"
+    },
+    {
+      "borrows_left": 298,
+      "free_left": 299,
+      "right": 189,
+      "borrows_remainder": [
+        98,
+        89
+      ],
+      "free_remainder": [
+        99,
+        89
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 98 - 89 = 19, total 119",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 99 - 89 = 10, total 110"
+    },
+    {
+      "borrows_left": 270,
+      "free_left": 275,
+      "right": 132,
+      "borrows_remainder": [
+        70,
+        32
+      ],
+      "free_remainder": [
+        75,
+        32
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "200 - 100 = 100, 70 - 32 = 38, total 138",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 75 - 32 = 43, total 143"
+    },
+    {
+      "borrows_left": 784,
+      "free_left": 787,
+      "right": 566,
+      "borrows_remainder": [
+        84,
+        66
+      ],
+      "free_remainder": [
+        87,
+        66
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "700 - 500 = 200, 84 - 66 = 28, total 228",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 500 = 200, 87 - 66 = 21, total 221"
+    },
+    {
+      "borrows_left": 580,
+      "free_left": 589,
+      "right": 344,
+      "borrows_remainder": [
+        80,
+        44
+      ],
+      "free_remainder": [
+        89,
+        44
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 300 = 200, 80 - 44 = 36, total 236",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 300 = 200, 89 - 44 = 45, total 245"
+    },
+    {
+      "borrows_left": 670,
+      "free_left": 675,
+      "right": 333,
+      "borrows_remainder": [
+        70,
+        33
+      ],
+      "free_remainder": [
+        75,
+        33
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "600 - 300 = 300, 70 - 33 = 37, total 337",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "600 - 300 = 300, 75 - 33 = 42, total 342"
+    },
+    {
+      "borrows_left": 860,
+      "free_left": 861,
+      "right": 641,
+      "borrows_remainder": [
+        60,
+        41
+      ],
+      "free_remainder": [
+        61,
+        41
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 600 = 200, 60 - 41 = 29, total 229",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 600 = 200, 61 - 41 = 20, total 220"
+    },
+    {
+      "borrows_left": 291,
+      "free_left": 295,
+      "right": 174,
+      "borrows_remainder": [
+        91,
+        74
+      ],
+      "free_remainder": [
+        95,
+        74
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 91 - 74 = 27, total 127",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 95 - 74 = 21, total 121"
+    },
+    {
+      "borrows_left": 875,
+      "free_left": 879,
+      "right": 429,
+      "borrows_remainder": [
+        75,
+        29
+      ],
+      "free_remainder": [
+        79,
+        29
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "800 - 400 = 400, 75 - 29 = 46, total 446",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 400 = 400, 79 - 29 = 50, total 450"
+    },
+    {
+      "borrows_left": 464,
+      "free_left": 469,
+      "right": 229,
+      "borrows_remainder": [
+        64,
+        29
+      ],
+      "free_remainder": [
+        69,
+        29
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "400 - 200 = 200, 64 - 29 = 35, total 235",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "400 - 200 = 200, 69 - 29 = 40, total 240"
+    },
+    {
+      "borrows_left": 222,
+      "free_left": 229,
+      "right": 119,
+      "borrows_remainder": [
+        22,
+        19
+      ],
+      "free_remainder": [
+        29,
+        19
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 22 - 19 = 4, total 104",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "200 - 100 = 100, 29 - 19 = 10, total 110"
+    },
+    {
+      "borrows_left": 793,
+      "free_left": 798,
+      "right": 276,
+      "borrows_remainder": [
+        93,
+        76
+      ],
+      "free_remainder": [
+        98,
+        76
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "700 - 200 = 500, 93 - 76 = 17, total 517",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "700 - 200 = 500, 98 - 76 = 22, total 522"
+    },
+    {
+      "borrows_left": 867,
+      "free_left": 869,
+      "right": 159,
+      "borrows_remainder": [
+        67,
+        59
+      ],
+      "free_remainder": [
+        69,
+        59
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "800 - 100 = 700, 67 - 59 = 18, total 718",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "800 - 100 = 700, 69 - 59 = 10, total 710"
+    },
+    {
+      "borrows_left": 596,
+      "free_left": 598,
+      "right": 357,
+      "borrows_remainder": [
+        96,
+        57
+      ],
+      "free_remainder": [
+        98,
+        57
+      ],
+      "borrows_ok": true,
+      "borrows_step_ok": true,
+      "borrows_reply": "500 - 300 = 200, 96 - 57 = 39, total 239",
+      "free_ok": true,
+      "free_step_ok": true,
+      "free_reply": "500 - 300 = 200, 98 - 57 = 41, total 241"
+    },
+    {
+      "borrows_left": 250,
+      "free_left": 258,
+      "right": 147,
+      "borrows_remainder": [
+        50,
+        47
+      ],
+      "free_remainder": [
+        58,
+        47
+      ],
+      "borrows_ok": false,
+      "borrows_step_ok": false,
+      "borrows_reply": "200 - 100 = 100, 50 - 47 = -13, total 87",
+      "free_ok": false,
+      "free_step_ok": false,
+      "free_reply": "200 - 100 = 100, 58 - 47 = 1, total 101"
+    }
+  ]
+}

@@ -1,0 +1,210 @@
+{
+  "schema": "supermix-v85-natural-phrasing-v1",
+  "checkpoint": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\output\\v80_omni\\v80_omni.pt",
+  "n": 18,
+  "raw": {
+    "correct": 10,
+    "accuracy": 0.5556,
+    "wilson95": [
+      0.3372,
+      0.7544
+    ]
+  },
+  "normalised": {
+    "correct": 14,
+    "accuracy": 0.7778,
+    "wilson95": [
+      0.5478,
+      0.91
+    ]
+  },
+  "questions_rewritten": 16,
+  "rows": [
+    {
+      "question": "If something weighs 25 kg and speeds up at 4 metres per second squared, what force is that?",
+      "truth": 100.0,
+      "raw_prompt_answer": 153.0,
+      "raw_correct": false,
+      "normalised_prompt": "Given mass 25 kg and acceleration 4 m/s^2, compute the force.",
+      "rule": "force",
+      "normalised_answer": 90.0,
+      "normalised_correct": false
+    },
+    {
+      "question": "what's the force on a 12 kg object accelerating at 3 m/s^2",
+      "truth": 36.0,
+      "raw_prompt_answer": 36.0,
+      "raw_correct": true,
+      "normalised_prompt": "Given mass 12 kg and acceleration 3 m/s^2, compute the force.",
+      "rule": "force",
+      "normalised_answer": 36.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "A 30 kg mass is pushed with 90 N. How fast does it accelerate?",
+      "truth": 3.0,
+      "raw_prompt_answer": 2700.0,
+      "raw_correct": false,
+      "normalised_prompt": "force 90 N mass 30 kg find acceleration",
+      "rule": "acceleration",
+      "normalised_answer": 3.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "A force of 84 N acts on 21 kg. How fast does it accelerate?",
+      "truth": 4.0,
+      "raw_prompt_answer": 1764.0,
+      "raw_correct": false,
+      "normalised_prompt": "force 84 N mass 21 kg find acceleration",
+      "rule": "acceleration",
+      "normalised_answer": 4.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "how much momentum does a 14 kg trolley moving at 5 m/s have?",
+      "truth": 70.0,
+      "raw_prompt_answer": 70.0,
+      "raw_correct": true,
+      "normalised_prompt": "mass 14 kg velocity 5 m/s find momentum",
+      "rule": "momentum",
+      "normalised_answer": 70.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "What's the momentum of a 32 kg cart rolling at 4 m/s?",
+      "truth": 128.0,
+      "raw_prompt_answer": 128.0,
+      "raw_correct": true,
+      "normalised_prompt": "mass 32 kg velocity 4 m/s find momentum",
+      "rule": "momentum",
+      "normalised_answer": 128.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "Work done pushing with 20 N over 7 metres?",
+      "truth": 140.0,
+      "raw_prompt_answer": 140.0,
+      "raw_correct": true,
+      "normalised_prompt": "force 20 N distance 7 m work done",
+      "rule": "work",
+      "normalised_answer": 140.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "How much work is done by 15 N across 6 m?",
+      "truth": 90.0,
+      "raw_prompt_answer": 90.0,
+      "raw_correct": true,
+      "normalised_prompt": "force 15 N distance 6 m work done",
+      "rule": "work",
+      "normalised_answer": 90.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "A 9 volt battery drives 3 amps. What's the power?",
+      "truth": 27.0,
+      "raw_prompt_answer": 27.0,
+      "raw_correct": true,
+      "normalised_prompt": "voltage 9 V current 3 A electrical power",
+      "rule": "electrical_power",
+      "normalised_answer": 27.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "Electrical power at 12 volts and 5 amps?",
+      "truth": 60.0,
+      "raw_prompt_answer": 60.0,
+      "raw_correct": true,
+      "normalised_prompt": "voltage 12 V current 5 A electrical power",
+      "rule": "electrical_power",
+      "normalised_answer": 60.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "kinetic energy of a 10 kg body at 7 m/s",
+      "truth": 245.0,
+      "raw_prompt_answer": 400.0,
+      "raw_correct": false,
+      "normalised_prompt": "mass 10 kg velocity 7 m/s kinetic energy",
+      "rule": "kinetic_energy",
+      "normalised_answer": 245.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "what voltage drives 3 A through a 5 ohm resistor",
+      "truth": 15.0,
+      "raw_prompt_answer": 15.0,
+      "raw_correct": true,
+      "normalised_prompt": "current 3 A resistance 5 ohm find voltage",
+      "rule": "voltage",
+      "normalised_answer": 15.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "what is 47 times 6",
+      "truth": 282.0,
+      "raw_prompt_answer": null,
+      "raw_correct": false,
+      "normalised_prompt": "What is 47 x 6?",
+      "rule": "multiplication",
+      "normalised_answer": 282.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "What is 47 x 6?",
+      "truth": 282.0,
+      "raw_prompt_answer": 282.0,
+      "raw_correct": true,
+      "normalised_prompt": null,
+      "rule": "multiplication",
+      "normalised_answer": 282.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "whats 36 multiplied by 4",
+      "truth": 144.0,
+      "raw_prompt_answer": 144.0,
+      "raw_correct": true,
+      "normalised_prompt": "What is 36 x 4?",
+      "rule": "multiplication",
+      "normalised_answer": 144.0,
+      "normalised_correct": true
+    },
+    {
+      "question": "Find the average of 61, 63, 72 and 61.",
+      "truth": 64.25,
+      "raw_prompt_answer": null,
+      "raw_correct": false,
+      "normalised_prompt": "Find the average (mean) of these numbers: 61, 63, 72, 61",
+      "rule": "average",
+      "normalised_answer": 60.0,
+      "normalised_correct": false
+    },
+    {
+      "question": "what's the mean of 10, 20, 30 and 40",
+      "truth": 25.0,
+      "raw_prompt_answer": 0.0,
+      "raw_correct": false,
+      "normalised_prompt": "Find the average (mean) of these numbers: 10, 20, 30, 40",
+      "rule": "average",
+      "normalised_answer": 11.5,
+      "normalised_correct": false
+    },
+    {
+      "question": "Solve for x: x + 29 = 34",
+      "truth": 5.0,
+      "raw_prompt_answer": 4.0,
+      "raw_correct": false,
+      "normalised_prompt": null,
+      "rule": "algebra_one_step",
+      "normalised_answer": 4.0,
+      "normalised_correct": false
+    }
+  ],
+  "non_claims": [
+    "n=18. The Wilson intervals overlap unless the change is large; this is an indication, not a rate.",
+    "The normaliser computes nothing. It rewrites the question into the shape the corpus uses, so any gain is the model answering a question it was trained on the form of.",
+    "A question the model gets wrong in the trained format stays wrong.",
+    "These questions were written by hand to probe known failure modes, so they are not a random sample of what a user would ask."
+  ]
+}

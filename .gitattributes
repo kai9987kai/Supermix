@@ -15,3 +15,8 @@ tokenizer.json filter=lfs diff=lfs merge=lfs -text
 bundles/*.zip filter=lfs diff=lfs merge=lfs -text
 *.dll filter=lfs diff=lfs merge=lfs -text
 *.lib filter=lfs diff=lfs merge=lfs -text
+
+# Reply dumps under output/v87_measurements are evidence receipts, 150-190 KB
+# each, and belong in git proper. The *.jsonl LFS rule above was written for
+# multi-gigabyte corpora under datasets/, which still go to LFS.
+output/v87_measurements/*.jsonl -filter -diff -merge text
