@@ -35,11 +35,14 @@ multiple of three, so 22% of its problems demand a value like
 `59.333333333333336` -- exactly what its v88 failures are. The arm moves one
 value by at most two so no mean repeats.
 
-**This one narrows the benchmark as well as the corpus**, because
-`eval_problem_solving` calls the same generator. v89's `average` score is not
-comparable with v88's 0.714 and that must be said whenever it is quoted. The
-paired evaluator handles it correctly by construction: changed prompts simply
-fail to pair and drop out of the shared set.
+**Correction, written at step 15,000 of the run this built.** The line that
+stood here said this narrows the benchmark too. It does not.
+`eval_problem_solving._average` is its own generator and was untouched, so the
+model trained on terminating means and is tested on the original distribution.
+`average` sat at 0/4 on every probe. The flag's own comment in
+`build_scratchpad_math.py` now records the full account; the short version is
+that the omni tasks share generators with the benchmark and the scratchpad
+tasks do not, and I assumed the former held for both.
 
 Everything else is v88 unchanged -- natural phrasings, the paraphrases, the
 algebra word-sign, the average binary steps, the percent coverage fix, and the

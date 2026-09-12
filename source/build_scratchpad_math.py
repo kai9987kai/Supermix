@@ -106,10 +106,23 @@ DECOMPOSE_INNER = False
 #: gives `.25` -- which is exactly representable and is not what this fixes. No
 #: randomness is consumed, so the arm cannot shift any later row.
 #:
-#: **This narrows the benchmark too**, because `eval_problem_solving` calls the
-#: same generator. An `average` score measured with this on is not comparable
-#: with v88's 0.714, and that has to be said every time the number is quoted --
-#: the same trade `COMBINATION_IN_ENVELOPE` takes in `build_omni_corpus`.
+#: **It does NOT narrow the benchmark, and v89 paid for my believing it did.**
+#: The omni tasks share their generators with `eval_problem_solving`, so a flag
+#: there changes both sides together. The scratchpad tasks do not:
+#: `eval_problem_solving._average` is its own function and still asks for
+#: repeating means. Turning this on therefore trains the model on a narrower
+#: distribution than it is tested on -- a train/eval mismatch of exactly the
+#: kind `coverage_audit.py` exists to catch, except that audit compares operand
+#: value sets and this is a difference in the shape of the answer.
+#:
+#: v89 ran with it on. `average` sat at **0/4 on every probe for the whole run**
+#: where v88 had reached 0.714, and the replies show structural errors -- an
+#: operand added twice, dividing four numbers by five -- that v88 did not make.
+#: The mechanism is not understood and is not guessed at here.
+#:
+#: If this is ever used again, `eval_problem_solving._average` must apply the
+#: same constraint, which is the declared benchmark-narrowing
+#: `COMBINATION_IN_ENVELOPE` documents. Until then, leave it off.
 AVERAGE_TERMINATES = False
 
 #: Whether `average` writes its running total as explicit binary additions.
