@@ -23,3 +23,15 @@ output/v87_measurements/*.jsonl -filter -diff -merge text
 
 # Neurogenesis event logs (v93) are ~10 KB receipts, not corpora: git proper.
 output/*/neurogenesis.jsonl -filter -diff -merge text
+
+# v91/v93 evidence and reproducible data in git proper (the account's LFS
+# quota is exhausted; nothing here is over GitHub's 100 MB file limit):
+# reply dumps (~200 KB each), and the v93 generated task corpora, which are
+# rebuilt by build_v93_corpus.py at seed 93. The combined/mix corpora
+# (373 MB / 555 MB) stay local.
+output/v91_malecns/*.jsonl -filter -diff -merge text
+output/v93_neurogenesis/*.jsonl -filter -diff -merge text
+datasets/v93/v93_omni.jsonl -filter -diff -merge text
+datasets/v93/v93_code.jsonl -filter -diff -merge text
+datasets/v93/v93_connectome.jsonl -filter -diff -merge text
+datasets/v93/v93_english_foundations.jsonl -filter -diff -merge text
