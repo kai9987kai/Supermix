@@ -48,11 +48,12 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
 
@@ -65,7 +66,7 @@ import mimomix_text as text_utils  # noqa: E402
 import eval_problem_solving as solving  # noqa: E402
 import recall_index  # noqa: E402
 from device_utils import resolve_device  # noqa: E402
-from mimomix_core import MiMoMixModel  # noqa: E402
+from mimomix_core import MiMoMixModel, SparseMoEFeedForward, pin_layout_for_growth  # noqa: E402
 from train_mimomix_talk import (  # noqa: E402
     DEFAULT_PROBE_MAX_NEW_TOKENS,
     PROBE_PROMPTS,
@@ -147,8 +148,184 @@ def load_corpus_pairs(
     return list(corpus.train) + list(corpus.validation)
 
 
+#: Parameter-name prefixes of modules grafted onto a trained checkpoint. They
+#: start untrained while everything else is converged, so they may take a
+#: larger learning rate (`--new_param_lr_mult`). This is the v91 value and
+#: the default of `split_new_parameter_groups`; a v93 run derives its own
+#: list with `new_parameter_prefixes(config)`.
+NEW_PARAMETER_PREFIXES = ("cns_core.",)
+#: Grafted parameters that are gains, gates, biases or logits rather than
+#: matrices. Decaying `edge_logit` toward 0 would pull every connectome edge
+#: toward softplus(0) = 0.69 -- a strength nobody measured -- so they are not
+#: decayed. `read_in`/`read_out` are ordinary matrices and are. The v93 sites
+#: need no new entries: `extra_gates.<j>` and `thinking_gate` are 1-D and
+#: `split_new_parameter_groups` already leaves every 1-D tensor undecayed,
+#: while `extra_read_in`/`extra_read_out`/`to_thinking` are matrices.
+NEW_UNDECAYED_LEAVES = ("edge_logit", "node_bias", "leak_logit", "gate", "weight_norm")
+
+
+def new_parameter_prefixes(config: Any) -> Tuple[str, ...]:
+    """Grafted-parameter prefixes for this config: the core plus grown blocks.
+
+    A block appended by `--grow_layers` (v93 D4) is as untrained as the
+    connectome graft -- its `o_proj`/`down_proj` are zeroed after the warm
+    start -- so it takes the same `--new_param_lr_mult` and the same
+    decayed/undecayed split. With `grow_layers == 0` this is exactly
+    `NEW_PARAMETER_PREFIXES`, so a v91 command builds the v91 optimiser.
+    """
+
+    grown = int(getattr(config, "grow_layers", 0) or 0)
+    n_layers = int(getattr(config, "n_layers", 0) or 0)
+    return NEW_PARAMETER_PREFIXES + tuple(
+        f"layers.{index}." for index in range(n_layers - grown, n_layers)
+    )
+
+
+def split_new_parameter_groups(
+    model: torch.nn.Module,
+    groups: List[Dict[str, Any]],
+    prefixes: Sequence[str] = NEW_PARAMETER_PREFIXES,
+    lr_mult: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """Move grafted parameters into their own AdamW groups.
+
+    A model without grafted modules gets `groups` back unchanged -- same
+    tensors, same order, same group count -- so the v89 control arm builds the
+    identical optimiser it would have built before v91. Grafted parameters are
+    removed from the existing groups and appended as a decayed group and an
+    undecayed group, each carrying `_lr_mult` for the per-group OneCycle peak.
+    """
+
+    names = {id(p): n for n, p in model.named_parameters()}
+    new_ids = {
+        id(p) for n, p in model.named_parameters()
+        if p.requires_grad and any(n.startswith(prefix) for prefix in prefixes)
+    }
+    if not new_ids:
+        return groups
+    kept = []
+    for group in groups:
+        params = [p for p in group["params"] if id(p) not in new_ids]
+        if params:
+            kept.append({**group, "params": params})
+    decayed, undecayed = [], []
+    for name, parameter in model.named_parameters():
+        if id(parameter) not in new_ids:
+            continue
+        leaf = name.rsplit(".", 1)[-1]
+        is_norm_gain = name.endswith("norm.weight")
+        if leaf in NEW_UNDECAYED_LEAVES or is_norm_gain or parameter.ndim <= 1:
+            undecayed.append(parameter)
+        else:
+            decayed.append(parameter)
+    weight_decay = float(groups[0].get("weight_decay", 0.0)) if groups else 0.0
+    lr_note = float(lr_mult)
+    for params, decay in ((decayed, weight_decay), (undecayed, 0.0)):
+        if params:
+            kept.append({
+                "params": params,
+                "weight_decay": decay,
+                "_lr_mult": lr_note,
+                "_names": [names[id(p)] for p in params],
+            })
+    return kept
+
+
+#: Fraction of the old embedding's scalar std used for a new token's row
+#: (v93 D5). Small enough that a new id starts as "the average token" rather
+#: than as noise the trunk has never seen, non-zero so that two new rows are
+#: distinguishable from the first gradient step.
+NEW_TOKEN_NOISE_SCALE = 0.1
+
+#: Tensors that carry one row per expert *slot* and therefore grow by
+#: `--moe_spare_experts` while every other MoE tensor keeps its shape (v93 D3).
+#: A checkpoint row is copied into the leading slice; the spare rows keep the
+#: construction init, which is what a dead slot is (its logit is -inf'd).
+#: `expert_alive` is absent from every checkpoint written before v93 (the
+#: module fills it as all-alive) and present at the live count in one written
+#: since; padding it keeps the source's mask and leaves the spares dead.
+SLOT_GROWN_LEAF_SUFFIXES = ("mlp.gate.weight", "mlp.expert_bias", "mlp.expert_alive")
+
+
+def _grow_rows(matrix: torch.Tensor, new_rows: int, generator: torch.Generator) -> torch.Tensor:
+    """Append ``new_rows - rows`` rows of ``mean(old) + 0.1 std(old) N(0,1)``."""
+
+    old = matrix.detach().float()
+    mean = old.mean(dim=0, keepdim=True)
+    std = float(old.std()) if old.numel() > 1 else 0.0
+    noise = torch.randn(int(new_rows) - old.shape[0], old.shape[1], generator=generator)
+    fresh = mean + NEW_TOKEN_NOISE_SCALE * std * noise
+    return torch.cat([matrix.detach(), fresh.to(matrix.dtype)], dim=0)
+
+
+def grow_embedding_rows(
+    state: Dict[str, torch.Tensor], old_rows: int, new_rows: int, seed: int
+) -> Dict[str, Any]:
+    """Grow the tied embedding of a checkpoint state to ``new_rows`` (v93 D5).
+
+    Writes ``embed_tokens.weight`` and ``lm_head.weight`` in ``state`` in
+    place. With tied weights the two keys hold the same values, so the head
+    receives the *same* grown tensor rather than a second noise draw; an
+    untied head (``--no_tie_word_embeddings``) is grown with its own draw from
+    the same generator. Returns the receipt block.
+    """
+
+    embed = state["embed_tokens.weight"]
+    if int(embed.shape[0]) != int(old_rows):
+        raise ValueError(
+            f"checkpoint embedding has {embed.shape[0]} rows but its tokenizer has "
+            f"{old_rows} tokens; the checkpoint is internally inconsistent"
+        )
+    generator = torch.Generator().manual_seed(int(seed))
+    grown = _grow_rows(embed, new_rows, generator)
+    state["embed_tokens.weight"] = grown
+    tied = None
+    head = state.get("lm_head.weight")
+    if head is not None and int(head.shape[0]) == int(old_rows):
+        tied = bool(head.shape == embed.shape and torch.equal(head, embed))
+        state["lm_head.weight"] = grown if tied else _grow_rows(head, new_rows, generator)
+    new = grown[int(old_rows):].float()
+    old = embed.detach().float()
+    return {
+        "old": int(old_rows),
+        "new": int(new_rows),
+        "added": int(new_rows) - int(old_rows),
+        "seed": int(seed),
+        "init": f"mean(old rows) + {NEW_TOKEN_NOISE_SCALE} * std(old) * N(0, 1)",
+        "head_tied_to_embedding": tied,
+        "old_row_std": round(float(old.std()), 6),
+        "new_row_distance_from_mean": round(float((new - old.mean(dim=0)).norm(dim=1).mean()), 6),
+    }
+
+
+def _vocabulary_mismatch(source_tokens: List[str], tokenizer: text_utils.WordTokenizer) -> str:
+    if len(source_tokens) != tokenizer.vocab_size:
+        return (
+            f"sizes differ: {len(source_tokens)} tokens against "
+            f"{tokenizer.vocab_size}"
+        )
+    differing = [
+        index
+        for index, (a, b) in enumerate(zip(source_tokens, tokenizer.tokens))
+        if a != b
+    ]
+    first = differing[0] if differing else None
+    return (
+        f"same size ({tokenizer.vocab_size}) but {len(differing)} ids denote "
+        f"different words, first at id {first}: "
+        f"{source_tokens[first]!r} against {tokenizer.tokens[first]!r}"
+    )
+
+
 def load_initial_weights(
-    model: MiMoMixModel, tokenizer: text_utils.WordTokenizer, checkpoint: str
+    model: MiMoMixModel,
+    tokenizer: text_utils.WordTokenizer,
+    checkpoint: str,
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+    extend_vocab: bool = False,
+    seed: int = 0,
+    grow_layers: int = 0,
 ) -> Dict[str, Any]:
     """Continue training from an existing checkpoint instead of from scratch.
 
@@ -163,44 +340,96 @@ def load_initial_weights(
     meaningless. That is checked here rather than trusted, and the mismatch
     raises.
 
-    Returns provenance for the receipt: a checkpoint trained in two legs is not
-    the same artifact as one trained in a single run, and the receipt should say
-    so.
+    **v93 growth (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md D3-D5).** Three
+    departures from identity are accepted, each only in its named case, and
+    everything else keeps the identical-shape rule:
+
+    * ``extend_vocab``: the checkpoint's token list may be a byte-identical
+      *prefix* of the live one (same ``digit_tokens``/``reverse_digits``); the
+      tied embedding is grown with `grow_embedding_rows` before the shape
+      scan, seeded by ``seed`` so the receipt can reproduce the new rows.
+    * spare expert slots: ``mlp.gate.weight`` / ``mlp.expert_bias`` whose
+      live dim 0 is larger get the checkpoint rows in the leading slice.
+    * missing keys are allowed only under ``cns_core.`` (the graft),
+      ``layers.<k>.`` for the ``grow_layers`` appended blocks and
+      ``mlp.experts.<j>.`` for the spare slots; any other missing key raises,
+      because a tensor that trains from random init while the receipt says
+      "warm start" is exactly the kind of silent difference the vocabulary
+      check exists to catch. Appended blocks whose keys were missing are
+      zeroed into identity (:meth:`MiMoMixModel.zero_new_blocks`); on a crash
+      resume they are present, trained, and left alone.
+
+    ``payload`` lets the caller pass an already-loaded checkpoint (the trainer
+    reads it once for the tokenizer when extending). Returns provenance for
+    the receipt: a checkpoint trained in two legs is not the same artifact as
+    one trained in a single run, and the receipt should say so.
     """
 
-    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    if payload is None:
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
 
-    source_tokens = list(payload.get("tokenizer", {}).get("tokens", []))
+    source_tokenizer = payload.get("tokenizer", {}) or {}
+    source_tokens = list(source_tokenizer.get("tokens", []))
+    # A shallow copy: grown tensors replace entries here and never touch the
+    # caller's payload (a resume test compares against it later).
+    state: Dict[str, torch.Tensor] = dict(payload["state_dict"])
+    grown_vocab: Optional[Dict[str, Any]] = None
     if source_tokens != tokenizer.tokens:
-        if len(source_tokens) != tokenizer.vocab_size:
-            detail = (
-                f"sizes differ: {len(source_tokens)} tokens against "
-                f"{tokenizer.vocab_size}"
-            )
-        else:
-            differing = [
-                index
-                for index, (a, b) in enumerate(zip(source_tokens, tokenizer.tokens))
-                if a != b
-            ]
-            first = differing[0] if differing else None
-            detail = (
-                f"same size ({tokenizer.vocab_size}) but {len(differing)} ids denote "
-                f"different words, first at id {first}: "
-                f"{source_tokens[first]!r} against {tokenizer.tokens[first]!r}"
-            )
-        raise ValueError(
-            f"{checkpoint} has a different vocabulary -- {detail}. Token ids would "
-            "denote different words, so continuing from it would train on a "
-            "silently corrupted embedding. This usually means the corpus, "
-            "--pairs, --max_vocab or the split seed differs from the source run; "
-            "match them exactly, or train fresh."
+        same_flags = (
+            bool(source_tokenizer.get("digit_tokens", False)) == bool(tokenizer.digit_tokens)
+            and bool(source_tokenizer.get("reverse_digits", False)) == bool(tokenizer.reverse_digits)
         )
+        is_prefix = (
+            0 < len(source_tokens) < tokenizer.vocab_size
+            and tokenizer.tokens[: len(source_tokens)] == source_tokens
+        )
+        if extend_vocab and is_prefix and not same_flags:
+            detail = (
+                f"the {len(source_tokens)} checkpoint tokens are a prefix of the live "
+                f"{tokenizer.vocab_size} but digit_tokens/reverse_digits differ "
+                f"({source_tokenizer.get('digit_tokens', False)}/"
+                f"{source_tokenizer.get('reverse_digits', False)} against "
+                f"{tokenizer.digit_tokens}/{tokenizer.reverse_digits}), so numbers "
+                "would be segmented differently"
+            )
+        elif extend_vocab and is_prefix:
+            detail = None
+        else:
+            detail = _vocabulary_mismatch(source_tokens, tokenizer)
+            if not extend_vocab and is_prefix and same_flags:
+                detail += " (a prefix: pass --extend_vocab to grow the embedding instead)"
+        if detail is not None:
+            raise ValueError(
+                f"{checkpoint} has a different vocabulary -- {detail}. Token ids would "
+                "denote different words, so continuing from it would train on a "
+                "silently corrupted embedding. This usually means the corpus, "
+                "--pairs, --max_vocab or the split seed differs from the source run; "
+                "match them exactly, or train fresh."
+            )
+        grown_vocab = grow_embedding_rows(state, len(source_tokens), tokenizer.vocab_size, seed)
+
+    live_state = model.state_dict()
+    grown_experts: List[Dict[str, Any]] = []
+    for key, value in list(state.items()):
+        live = live_state.get(key)
+        if live is None or value.shape == live.shape:
+            continue
+        slot_grown = (
+            key.endswith(SLOT_GROWN_LEAF_SUFFIXES)
+            and value.ndim == live.ndim
+            and tuple(value.shape[1:]) == tuple(live.shape[1:])
+            and int(value.shape[0]) < int(live.shape[0])
+        )
+        if slot_grown:
+            padded = live.detach().clone()
+            padded[: value.shape[0]] = value
+            state[key] = padded
+            grown_experts.append({"key": key, "rows": [int(value.shape[0]), int(live.shape[0])]})
 
     incompatible = {
-        key: (tuple(value.shape), tuple(model.state_dict()[key].shape))
-        for key, value in payload["state_dict"].items()
-        if key in model.state_dict() and value.shape != model.state_dict()[key].shape
+        key: (tuple(value.shape), tuple(live_state[key].shape))
+        for key, value in state.items()
+        if key in live_state and value.shape != live_state[key].shape
     }
     if incompatible:
         raise ValueError(
@@ -208,7 +437,74 @@ def load_initial_weights(
             f"this architecture, e.g. {next(iter(incompatible.items()))}"
         )
 
-    missing, unexpected = model.load_state_dict(payload["state_dict"], strict=False)
+    missing, unexpected = model.load_state_dict(state, strict=False)
+
+    grow_layers = int(grow_layers or 0)
+    n_layers = int(model.config.n_layers)
+    first_new_layer = n_layers - grow_layers
+    live_experts = int(model.config.n_routed_experts)
+    spare_experts = int(getattr(model.config, "moe_spare_experts", 0) or 0)
+
+    def allowed_group(key: str) -> Optional[str]:
+        if key.startswith("cns_core."):
+            return "cns_core"
+        block = re.match(r"layers\.(\d+)\.", key)
+        if block and grow_layers > 0 and int(block.group(1)) >= first_new_layer:
+            return "grown_layers"
+        expert = re.match(r"layers\.\d+\.mlp\.experts\.(\d+)\.", key)
+        if expert and spare_experts > 0 and int(expert.group(1)) >= live_experts:
+            return "spare_experts"
+        return None
+
+    allowed_missing: Dict[str, int] = {}
+    disallowed: List[str] = []
+    for key in sorted(missing):
+        group = allowed_group(key)
+        if group is None:
+            disallowed.append(key)
+        else:
+            allowed_missing[group] = allowed_missing.get(group, 0) + 1
+    if disallowed:
+        raise ValueError(
+            f"{checkpoint} lacks {len(disallowed)} tensor(s) this architecture needs, "
+            f"e.g. {disallowed[0]!r}. Only the connectome graft (cns_core.*), blocks "
+            f"appended by --grow_layers (layers.{{k}}.* for k >= {first_new_layer}) and "
+            f"spare expert slots (mlp.experts.{{j}}.* for j >= {live_experts} under "
+            "--moe_spare_experts) may be absent from a warm start; anything else "
+            "would train from random weights while the receipt calls it continued."
+        )
+
+    grown_layers: Optional[Dict[str, Any]] = None
+    if grow_layers > 0:
+        grown_keys = [
+            key for key in live_state
+            if re.match(r"layers\.(\d+)\.", key) and int(key.split(".")[1]) >= first_new_layer
+        ]
+        absent = allowed_missing.get("grown_layers", 0)
+        if absent == len(grown_keys):
+            zeroed: Optional[Dict[str, int]] = model.zero_new_blocks(first_new_layer)
+            source_had_blocks = False
+        elif absent == 0:
+            # A crash resume: the appended blocks are in the checkpoint,
+            # trained, and must not be reset.
+            zeroed = None
+            source_had_blocks = True
+        else:
+            raise ValueError(
+                f"{checkpoint} carries {len(grown_keys) - absent} of the {len(grown_keys)} "
+                f"tensors of the appended blocks (layers.{first_new_layer}+); a block "
+                "that is half loaded is neither the source's nor an identity"
+            )
+        grown_layers = {
+            "first_new_layer": first_new_layer,
+            "count": grow_layers,
+            "source_had_blocks": source_had_blocks,
+            "zeroed": zeroed,
+        }
+
+    if bool(model.config.tie_word_embeddings) and model.lm_head.weight is not model.embed_tokens.weight:
+        raise RuntimeError("embedding tie lost during load: lm_head.weight is no longer embed_tokens.weight")
+
     extra = payload.get("extra") or {}
     return {
         "checkpoint": str(checkpoint),
@@ -222,6 +518,11 @@ def load_initial_weights(
         "source_dev_loss": extra.get("best_dev_loss"),
         "missing_keys": sorted(missing),
         "unexpected_keys": sorted(unexpected),
+        # v93 growth provenance (all None/empty for a v89/v91 warm start).
+        "grown_vocab": grown_vocab,
+        "grown_experts": grown_experts or None,
+        "grown_layers": grown_layers,
+        "allowed_missing": allowed_missing,
         # Held for the caller to apply once the optimiser exists. Checkpoints
         # written before v63 have neither key, so continuing from one still
         # works and simply pays the re-warm cost it always did.
@@ -235,6 +536,9 @@ def load_initial_weights(
             for key in SELECTION_STATE_KEYS
             if extra.get(key) is not None
         },
+        # The neurogenesis controller's apoptosis counters (v93 D6), restored
+        # by the trainer on a crash resume; popped before the receipt.
+        "_neurogenesis_state": extra.get("neurogenesis_state"),
         "note": (
             "weights continued from a prior run; this checkpoint was not trained "
             "in a single leg and its step count is this leg only"
@@ -822,9 +1126,209 @@ def generalisation_gap(scored: Dict[str, Any]) -> Dict[str, Any]:
     return gaps
 
 
+# ---------------------------------------------------------------------------
+# v93 neurogenesis instruments (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md D6, D8)
+# ---------------------------------------------------------------------------
+
+#: Counters of a neurogenesis event record that the per-eval history keeps.
+#: The full record (per-pair lists, seconds, by-block detail) lives in
+#: output/<run>/neurogenesis.jsonl; the history carries enough to read the
+#: training curve against what grew at that step.
+EVENT_COUNT_KEYS = (
+    "modules_split", "modules_killed", "edges_opened", "edges_pruned",
+    "taps_opened", "experts_born", "experts_killed",
+)
+
+
+def _count(value: Any) -> int:
+    """An event field as one integer: a list's length, a dict's ``count`` or
+    the sum of its integer entries, an int itself."""
+
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, (list, tuple)):
+        return len(value)
+    if isinstance(value, Mapping):
+        if "count" in value:
+            return _count(value["count"])
+        return sum(_count(v) for v in value.values() if isinstance(v, (int, float, list, tuple)))
+    return 0
+
+
+def event_counts(event: Mapping[str, Any]) -> Dict[str, Any]:
+    """The compact history form of one controller event record."""
+
+    summary: Dict[str, Any] = {key: _count(event.get(key)) for key in EVENT_COUNT_KEYS}
+    for key in ("witness_loss_before", "witness_loss_after", "witness_delta"):
+        if event.get(key) is not None:
+            summary[key] = round(float(event[key]), 6)
+    if "flagged" in event:
+        summary["flagged"] = bool(event["flagged"])
+    for key in ("alive_modules", "alive_edges"):
+        if event.get(key) is not None:
+            summary[key] = int(event[key])
+    if event.get("alive_experts_per_layer") is not None:
+        summary["alive_experts_per_layer"] = [int(v) for v in event["alive_experts_per_layer"]]
+    return summary
+
+
+def growth_telemetry(model: MiMoMixModel) -> Optional[Dict[str, Any]]:
+    """Alive counts and gate sizes per site, for the history and the receipt.
+
+    ``None`` for a model with neither a connectome core nor spare expert
+    slots, so a v89/v91 history entry keeps its exact keys.
+    """
+
+    core = getattr(model, "cns_core", None)
+    moe_layers = [m for m in model.modules() if isinstance(m, SparseMoEFeedForward)]
+    spares = any(int(getattr(m, "n_spare", 0)) > 0 for m in moe_layers)
+    if core is None and not spares:
+        return None
+    snapshot: Dict[str, Any] = {}
+    if core is not None:
+        t = core.telemetry()
+        gates: List[Dict[str, Any]] = [{
+            "site": int(t["write_layers"][0]),
+            "gate_mean_abs": round(float(t["gate_mean_abs"]), 8),
+            "gate_max_abs": round(float(t["gate_max_abs"]), 8),
+        }]
+        for extra in t.get("extra_gates", []):
+            gates.append({
+                "site": int(extra["layer"]),
+                "gate_mean_abs": round(float(extra["gate_mean_abs"]), 8),
+                "gate_max_abs": round(float(extra["gate_max_abs"]), 8),
+            })
+        if "thinking_gate_mean_abs" in t:
+            gates.append({
+                "site": "thinking",
+                "gate_mean_abs": round(float(t["thinking_gate_mean_abs"]), 8),
+                "gate_max_abs": round(float(t["thinking_gate_max_abs"]), 8),
+            })
+        snapshot.update({
+            "alive_modules": int(t["alive_nodes"]),
+            "grown_modules": int(t["grown_nodes"]),
+            "hemisphere_modules": list(t["hemisphere_nodes"]),
+            "alive_edges": int(t["edges_installed"]),
+            "edges_by_block": dict(t["edges_by_block"]),
+            "grown_edges": int(t["grown_edges"]),
+            "taps": {
+                "in": int(t["taps_in"]), "out": int(t["taps_out"]),
+                "in_grown": int(t["taps_in_grown"]), "out_grown": int(t["taps_out_grown"]),
+            },
+            "gates": gates,
+        })
+    if moe_layers:
+        snapshot["alive_experts_per_layer"] = [int(m.alive_count()) for m in moe_layers]
+    return snapshot
+
+
+def v93_ablation_report(
+    model: MiMoMixModel,
+    dev_x: torch.Tensor,
+    dev_y: torch.Tensor,
+    batch_size: int,
+    rows: int,
+    *,
+    grown: bool,
+    reference_loss: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Dev-loss cost of each v93 wiring element on the same weights and rows.
+
+    ``rows`` limits the dev rows (0 = all); each ablation is one extra dev
+    pass, ~15 min each on the full v89 dev set, which is why the cap exists.
+    With ``rows == 0`` the unablated reference is ``reference_loss`` when the
+    caller measured it on the full set already (the v91 block's
+    ``dev_loss_core_on``), so nothing is scored twice. Every switch is
+    restored afterwards, whatever happens in between.
+    """
+
+    core = model.cns_core
+    x, y = (dev_x[:rows], dev_y[:rows]) if rows > 0 else (dev_x, dev_y)
+    if rows <= 0 and reference_loss is not None:
+        base = float(reference_loss)
+    else:
+        base = float(evaluate(model, x, y, batch_size)["loss"])
+    alive = core.alive.bool()
+    sides = sorted(set(int(s) for s in core.hemisphere[alive].tolist()))
+    two_sided = sides == [0, 1]
+    ablations: Dict[str, Dict[str, Any]] = {}
+
+    def measure(name: str, detail: Optional[Dict[str, Any]] = None) -> None:
+        loss = float(evaluate(model, x, y, batch_size)["loss"])
+        ablations[name] = {
+            "dev_loss": round(loss, 6),
+            "cost_nats": round(loss - base, 6),
+            **(detail or {}),
+        }
+
+    gates = [core.gate, *list(core.extra_gates)]
+    if core.thinking_gate is not None:
+        gates.append(core.thinking_gate)
+    saved = [g.detach().clone() for g in gates]
+    try:
+        with torch.no_grad():
+            for gate in gates:
+                gate.zero_()
+        measure("gates_off", {"gates": len(gates), "note": "every write site and the thinking bond shut"})
+    finally:
+        with torch.no_grad():
+            for gate, value in zip(gates, saved):
+                gate.copy_(value)
+
+    if two_sided:
+        try:
+            core.ablate_cross = True
+            measure("cross_off", {"note": "LR and RL (commissural) blocks masked"})
+        finally:
+            core.ablate_cross = False
+        # ablate_side removes the named side, so "left only" masks side 1.
+        for name, removed in (("left_only", 1), ("right_only", 0)):
+            try:
+                core.ablate_side = removed
+                measure(name, {"masked_hemisphere": "R" if removed == 1 else "L"})
+            finally:
+                core.ablate_side = None
+    else:
+        skipped = {"skipped": "single hemisphere graph", "hemispheres": sides}
+        ablations["cross_off"] = dict(skipped)
+        ablations["left_only"] = dict(skipped)
+        ablations["right_only"] = dict(skipped)
+
+    if grown:
+        try:
+            core.ablate_grown = True
+            measure("grown_off", {"note": "every grown module, edge and tap returned to its birth state"})
+        finally:
+            core.ablate_grown = False
+    else:
+        ablations["grown_off"] = {"skipped": "neurogenesis was off (--grow_every 0)"}
+
+    if core.ablate_cross or core.ablate_grown or core.ablate_side is not None:
+        raise RuntimeError("v93 ablation switches were not restored")
+    return {
+        "rows": int(x.shape[0]),
+        "rows_note": "first --ablation_rows dev rows" if rows > 0 else "full dev set",
+        "dev_loss": round(base, 6),
+        "reference": (
+            "reused cns_core.dev_loss_core_on (same rows)"
+            if rows <= 0 and reference_loss is not None else "measured on these rows"
+        ),
+        "ablations": ablations,
+        "note": (
+            "cost_nats = ablated dev loss - unablated dev loss on the same rows; "
+            "> 0 means the selected weights rely on that element"
+        ),
+    }
+
+
 def run(args: argparse.Namespace) -> Dict[str, Any]:
     validate_resume_settings(args)
     validate_selection_settings(args)
+    validate_growth_settings(args)
     torch.manual_seed(args.seed)
     if args.torch_threads:
         torch.set_num_threads(max(1, args.torch_threads))
@@ -864,11 +1368,66 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # Vocabulary from the training rows only. Building it over the whole corpus
     # would leak the held-out sentences' surface forms into the model's
     # expressible language and quietly make tier 3 easier.
-    tokenizer = text_utils.WordTokenizer.build(
-        (field for pair in split.train for field in pair),
-        max_vocab=args.max_vocab,
-        **tokenizer_options(args),
-    )
+    initialised_from = getattr(args, "init_from", None)
+    init_payload: Optional[Dict[str, Any]] = None
+    vocabulary_provenance: Optional[Dict[str, Any]] = None
+    if getattr(args, "extend_vocab", False):
+        # v93 D5. `build` orders ids by frequency, so a corpus that differs
+        # by one row from the source run's renumbers the vocabulary and the
+        # warm start is (correctly) refused. Extending keeps the checkpoint's
+        # ids as a prefix and appends only what the new corpus adds. The
+        # digit settings come from the checkpoint, not the flags: a tokenizer
+        # reloaded under the other setting segments every number differently.
+        if not initialised_from:
+            raise SystemExit("--extend_vocab appends to a checkpoint's vocabulary and needs --init_from")
+        init_payload = torch.load(initialised_from, map_location="cpu", weights_only=False)
+        base_tokenizer = text_utils.WordTokenizer.from_dict(init_payload["tokenizer"])
+        wanted = tokenizer_options(args)
+        for flag in ("digit_tokens", "reverse_digits"):
+            if bool(wanted.get(flag, False)) != bool(getattr(base_tokenizer, flag)):
+                raise SystemExit(
+                    f"--extend_vocab takes {flag} from {initialised_from} "
+                    f"({getattr(base_tokenizer, flag)}), but the command says "
+                    f"{bool(wanted.get(flag, False))}; numbers would be segmented "
+                    "differently from the embedding that was trained on them. "
+                    "Match the checkpoint's setting."
+                )
+        max_new = int(getattr(args, "max_new_tokens_vocab", 4000))
+        if args.start_step > 0:
+            # A crash resume rebuilds the crashed leg's model exactly. The
+            # recovery checkpoint already carries the extended token list, and
+            # extending it again would append whatever `max_new` had cut off
+            # in the first leg -- a different vocabulary, a different
+            # embedding shape, and an optimiser state that no longer fits.
+            tokenizer = base_tokenizer
+            vocabulary_provenance = {
+                "source": "checkpoint",
+                "base_vocab": base_tokenizer.vocab_size,
+                "added": 0,
+                "max_new": max_new,
+                "reason": "crash resume takes the recovery checkpoint's token list verbatim",
+            }
+        else:
+            tokenizer = text_utils.WordTokenizer.extend(
+                base_tokenizer,
+                (field for pair in split.train for field in pair),
+                max_new=max_new,
+            )
+            vocabulary_provenance = {
+                "source": "extended",
+                "base_vocab": base_tokenizer.vocab_size,
+                "added": tokenizer.vocab_size - base_tokenizer.vocab_size,
+                "max_new": max_new,
+                "capped": tokenizer.vocab_size - base_tokenizer.vocab_size >= max_new,
+            }
+        print(f"  vocabulary   {vocabulary_provenance['source']}: {base_tokenizer.vocab_size} from "
+              f"{initialised_from} + {vocabulary_provenance['added']} new ids", flush=True)
+    else:
+        tokenizer = text_utils.WordTokenizer.build(
+            (field for pair in split.train for field in pair),
+            max_vocab=args.max_vocab,
+            **tokenizer_options(args),
+        )
     text_utils.assert_roundtrip(tokenizer, [a for _, a in split.dev[:200]])
 
     # CONFIRMED BUG E's guard. Run before a single step is taken, because the
@@ -896,17 +1455,74 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # which is what the old straight assignment did. Both now mean off.
     args.no_thinking_core = bool(args.no_thinking_core) or args.arm == "ablation"
     config = build_config(args, tokenizer.vocab_size)
+    grow_layers = int(getattr(args, "grow_layers", 0) or 0)
+    if grow_layers > 0:
+        # v93 D4. Applied to the built config rather than through the config
+        # table: it changes n_layers and pins global_layers to the existing
+        # layout, which is a transformation of a config, not a field of one.
+        if not initialised_from:
+            raise SystemExit(
+                "--grow_layers appends identity blocks to a warm-started model and "
+                "needs --init_from; to train a deeper model from scratch raise --n_layers"
+            )
+        config = pin_layout_for_growth(config, grow_layers)
     model = MiMoMixModel(config).to(device)
+    cns_graph_info: Optional[Dict[str, Any]] = None
+    if getattr(model, "cns_core", None) is not None:
+        if not getattr(args, "cns_graph", ""):
+            raise SystemExit("--cns_core needs --cns_graph (see source/malecns_connectome.py)")
+        # Installed before --init_from: the source checkpoint has no cns_core
+        # keys, so the non-strict load below leaves this wiring untouched.
+        # (A crash resume's checkpoint does carry them, grown state included,
+        # and overwrites this install -- which is the point of the resume.)
+        # v93: load_graph fills the leading `cns_nodes - cns_spare_nodes`
+        # slots from the npz and leaves the spares dead.
+        cns_graph_info = model.cns_core.load_graph(
+            args.cns_graph, wiring=args.cns_wiring,
+            spectral_radius=float(getattr(args, "cns_spectral_radius", 0.9)),
+        )
+        cns_snapshot = model.cns_core.telemetry()
+        print(f"  cns core     {cns_graph_info['wiring']} | {cns_graph_info['nodes']} modules, "
+              f"{cns_graph_info['edges']:,} edges, {cns_graph_info['input_nodes']} in / "
+              f"{cns_graph_info['output_nodes']} out, after block {config.cns_run_after_layer}")
+        if cns_snapshot.get("dead_nodes") or len(cns_snapshot.get("read_layers", [])) > 1 \
+                or len(cns_snapshot.get("write_layers", [])) > 1 or "hemisphere_nodes" in cns_graph_info:
+            blocks = cns_snapshot["edges_by_block"]
+            print(f"  cns v93      capacity {model.cns_core.n_nodes} ({cns_snapshot['dead_nodes']} spare) | "
+                  f"hemispheres L {cns_snapshot['hemisphere_nodes'][0]} / R {cns_snapshot['hemisphere_nodes'][1]} | "
+                  f"edges LL {blocks['LL']:,} RR {blocks['RR']:,} LR {blocks['LR']:,} RL {blocks['RL']:,} | "
+                  f"reads {cns_snapshot['read_layers']} writes {cns_snapshot['write_layers']}"
+                  f"{' + thinking' if 'thinking_gate_mean_abs' in cns_snapshot else ''}"
+                  f"{' | temporal' if cns_snapshot.get('temporal') else ''}", flush=True)
     parameters = model.parameter_report()
 
-    initialised_from = getattr(args, "init_from", None)
     init_provenance: Optional[Dict[str, Any]] = None
     if initialised_from:
-        init_provenance = load_initial_weights(model, tokenizer, initialised_from)
+        init_provenance = load_initial_weights(
+            model, tokenizer, initialised_from,
+            payload=init_payload,
+            extend_vocab=bool(getattr(args, "extend_vocab", False)),
+            seed=int(args.seed),
+            grow_layers=grow_layers,
+        )
+        init_payload = None  # the 121-500 MB payload is not needed past this point
+        if vocabulary_provenance is not None:
+            init_provenance["vocabulary"] = vocabulary_provenance
         if args.start_step > 0 and frozen_split != init_provenance.get("source_frozen_split"):
             raise ValueError("crash recovery requires the identical frozen split and corpus receipt")
         print(f"  init_from    {initialised_from} "
               f"({init_provenance['source_steps']} prior steps)")
+        if init_provenance.get("grown_vocab"):
+            grown = init_provenance["grown_vocab"]
+            print(f"  grown vocab  {grown['old']} -> {grown['new']} rows (seed {grown['seed']})")
+        if init_provenance.get("grown_layers"):
+            grown = init_provenance["grown_layers"]
+            print(f"  grown depth  {grown['count']} block(s) from layer {grown['first_new_layer']}"
+                  f"{' zeroed to identity' if grown['zeroed'] else ' restored from checkpoint'}")
+        if init_provenance.get("grown_experts"):
+            print(f"  grown moe    {len(init_provenance['grown_experts'])} router tensors padded "
+                  f"for {int(getattr(config, 'moe_spare_experts', 0))} spare slots per layer")
+    neurogenesis_state = (init_provenance or {}).pop("_neurogenesis_state", None)
 
     print(f"v58 generalisation | arm {args.arm} | thinking core {not args.no_thinking_core}")
     print(f"  train        {len(split.train):,} rows, dev {len(split.dev):,}")
@@ -921,9 +1537,23 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # Resolved before the loop so mid-run checkpoints have somewhere to go.
     output_dir = Path(args.output_dir)
 
-    decay_groups = parameter_groups(model, args.weight_decay, args.decay_mode)
+    decay_groups = split_new_parameter_groups(
+        model,
+        parameter_groups(model, args.weight_decay, args.decay_mode),
+        prefixes=new_parameter_prefixes(config),
+        lr_mult=float(getattr(args, "new_param_lr_mult", 1.0)),
+    )
+    group_max_lr = [args.lr * float(g.get("_lr_mult", 1.0)) for g in decay_groups]
     optimiser = torch.optim.AdamW(
-        [{k: v for k, v in g.items() if not k.startswith("_")} for g in decay_groups],
+        [
+            {
+                **{k: v for k, v in g.items() if not k.startswith("_")},
+                # Only grafted groups carry a rate; the rest inherit args.lr
+                # exactly as before v91.
+                **({"lr": args.lr * float(g["_lr_mult"])} if "_lr_mult" in g else {}),
+            }
+            for g in decay_groups
+        ],
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
@@ -939,7 +1569,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     total_steps = max(1, args.steps)
     if args.pct_start * total_steps > 1.0:
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimiser, max_lr=args.lr, total_steps=total_steps, pct_start=args.pct_start
+            optimiser,
+            # A scalar when every group shares the rate, exactly as before v91,
+            # so an unchanged command builds an unchanged scheduler.
+            max_lr=group_max_lr if len(set(group_max_lr)) > 1 else args.lr,
+            total_steps=total_steps,
+            pct_start=args.pct_start,
         )
     else:
         # No warmup phase can exist: `pct_start * total_steps <= 1` collapses the
@@ -1047,6 +1682,37 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     best_state, best_step = resumed["best_state"], resumed["best_step"]
     last_accuracy = resumed["last_accuracy"]
 
+    # v93 D6: the neurogenesis controller. Built after every restore so it
+    # sees the model the loop will train, and only when growth is on, so a
+    # v89/v91 command never imports it. Its witness batch is the first
+    # --witness_rows dev rows, fixed for the run.
+    controller = None
+    grow_every = int(getattr(args, "grow_every", 0) or 0)
+    if grow_every > 0:
+        if args.eval_every <= 0 or grow_every % int(args.eval_every) != 0:
+            raise SystemExit(
+                f"--grow_every {grow_every} must be a positive multiple of --eval_every "
+                f"{args.eval_every}: growth decisions use the statistics of the dev "
+                "pass that precedes them, so an event can only sit on an eval step."
+            )
+        import neurogenesis  # noqa: E402  (source/neurogenesis.py; lazy so v91 commands never need it)
+
+        witness_rows = max(1, int(getattr(args, "witness_rows", 8) or 8))
+        witness = (dev_x[:witness_rows].long(), dev_y[:witness_rows].long())
+        controller = neurogenesis.NeurogenesisController(
+            model,
+            neurogenesis.build_settings_from_args(args),
+            str(output_dir / "neurogenesis.jsonl"),
+            witness,
+        )
+        if args.start_step > 0 and neurogenesis_state is not None:
+            controller.load_state_dict(neurogenesis_state)
+        print(f"  neurogenesis every {grow_every} steps | witness {int(witness[0].shape[0])} rows | "
+              f"log {output_dir / 'neurogenesis.jsonl'}"
+              f"{' | counters restored' if args.start_step > 0 and neurogenesis_state is not None else ''}",
+              flush=True)
+    growth_watch = growth_telemetry(model) is not None
+
     # `--start_step` resumes mid-curve: the run keeps the *same* `--steps`
     # OneCycle schedule and simply picks up where the crashed leg stopped, so
     # the learning rate continues down the curve instead of warming up again.
@@ -1088,7 +1754,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         seen += 1
 
         if step % args.eval_every == 0 or step == args.steps:
+            # The dev pass doubles as the statistics pass for growth (D6):
+            # module rates, rate covariance and expert load accumulate only in
+            # eval mode between begin/end, so the numbers are exactly the ones
+            # the reported dev loss was measured on.
+            if controller is not None:
+                controller.begin_dev_pass()
             dev_metrics = evaluate(model, dev_x, dev_y, args.eval_batch_size)
+            if controller is not None:
+                controller.end_dev_pass()
             verbatim = probe_verbatim_rate(model, tokenizer, recall)
             accuracy = None
             if accuracy_probes and (
@@ -1098,6 +1772,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     model, tokenizer, accuracy_probes, max_new_tokens=probe_cap
                 )
                 accuracy = accuracy_report["accuracy"]
+            # One growth event, after every measurement of these weights and
+            # before anything is written: the recovery checkpoint then holds
+            # the post-event slots, moments and counters, which is what makes
+            # a crash resume replay the continuous run exactly.
+            event = controller.maybe_grow(step, optimiser) if controller is not None else None
             entry = {
                 "step": step,
                 "train_lm_loss": round(running / max(1, seen), 6),
@@ -1110,6 +1789,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             if accuracy is not None:
                 entry["probe_accuracy"] = round(accuracy, 4)
                 entry["probe_by_task"] = accuracy_report["by_task"]
+            if event is not None:
+                entry["neurogenesis"] = event_counts(event)
+            if growth_watch:
+                entry["growth"] = growth_telemetry(model)
             history.append(entry)
             running, seen = 0.0, 0
 
@@ -1169,6 +1852,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                         "corpus_jsonl": str(corpus_jsonl) if corpus_jsonl else None,
                         "frozen_split": frozen_split,
                         "database": str(args.database) if args.database else None,
+                        # v93 D6: the apoptosis counters, so a resumed leg
+                        # continues "two consecutive events" where the
+                        # crashed one left it. None when growth is off.
+                        "neurogenesis_state": (
+                            controller.state_dict() if controller is not None else None
+                        ),
                         **selection_state_payload(
                             select_on=args.select_on,
                             checkpoint_step=step,
@@ -1204,6 +1893,53 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         model.load_state_dict(best_state)
     train_seconds = round(time.perf_counter() - started, 1)
 
+    # v91 mechanism test. A grafted branch can train, move the loss, and still
+    # be doing nothing -- v58's thinking-core gate reached 6.4e-4 and closing
+    # it changed none of 12,192 predictions. So the selected weights are scored
+    # on dev twice: as trained, and with the connectome core's gate forced shut.
+    cns_report: Optional[Dict[str, Any]] = None
+    core = getattr(model, "cns_core", None)
+    if core is not None:
+        dev_on = evaluate(model, dev_x, dev_y, args.eval_batch_size)["loss"]
+        saved_gate = core.gate.detach().clone()
+        with torch.no_grad():
+            core.gate.zero_()
+        dev_off = evaluate(model, dev_x, dev_y, args.eval_batch_size)["loss"]
+        with torch.no_grad():
+            core.gate.copy_(saved_gate)
+        cns_report = {
+            **core.telemetry(),
+            "graph": cns_graph_info,
+            "dev_loss_core_on": round(float(dev_on), 6),
+            "dev_loss_core_off": round(float(dev_off), 6),
+            "ablation_cost_nats": round(float(dev_off - dev_on), 6),
+            "note": (
+                "ablation_cost_nats > 0 means the trained model relies on the "
+                "connectome branch; ~0 means the gate never became load-bearing"
+            ),
+        }
+        print(f"  cns ablation dev {dev_on:.5f} with core, {dev_off:.5f} without "
+              f"({dev_off - dev_on:+.5f} nats)", flush=True)
+
+    # v93 mechanism tests (the pre-registered readout): every write site and
+    # the thinking bond shut at once, the commissure alone, each hemisphere
+    # alone, and everything neurogenesis grew returned to its birth state.
+    # Same weights, same rows, each a dev-loss difference against the
+    # unablated pass on those rows. The v91 block above is left byte-identical
+    # (primary gate only, full dev set) so v91 receipts still compare.
+    v93_ablations: Optional[Dict[str, Any]] = None
+    if core is not None:
+        ablation_rows = int(getattr(args, "ablation_rows", 0) or 0)
+        v93_ablations = v93_ablation_report(
+            model, dev_x, dev_y, args.eval_batch_size, ablation_rows,
+            grown=controller is not None,
+            reference_loss=cns_report["dev_loss_core_on"] if cns_report else None,
+        )
+        for name, result in v93_ablations["ablations"].items():
+            if "cost_nats" in result:
+                print(f"  v93 ablation {name:<11} dev {result['dev_loss']:.5f} "
+                      f"({result['cost_nats']:+.5f} nats over {v93_ablations['rows']} rows)", flush=True)
+
     # Only now, once and never again, are the tiers touched.
     scored = score_tiers(
         model, split, tokenizer, args.sequence_length, args.eval_batch_size,
@@ -1216,6 +1952,30 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     speculative = [c for c in conversations if c["prompt"] == PROBE_PROMPTS[1]][0]
 
     checkpoint_path = output_dir / f"{args.run_name}.pt"
+    v93_active = any((
+        int(getattr(config, "cns_spare_nodes", 0) or 0) > 0,
+        len(getattr(config, "cns_read_layers", ()) or ()) > 0,
+        len(getattr(config, "cns_write_layers", ()) or ()) > 0,
+        bool(getattr(config, "cns_to_thinking", False)),
+        bool(getattr(config, "cns_temporal", False)),
+        int(getattr(config, "moe_spare_experts", 0) or 0) > 0,
+        grow_layers > 0,
+        controller is not None,
+        bool(getattr(args, "extend_vocab", False)),
+    ))
+    neurogenesis_report: Optional[Dict[str, Any]] = None
+    if controller is not None:
+        log_path = output_dir / "neurogenesis.jsonl"
+        neurogenesis_report = {
+            **controller.summary(),
+            "log": str(log_path),
+            # The controller only knows the events of this leg; the log holds
+            # every leg's (append-only), so a resumed run's count is read here.
+            "events_logged": (
+                sum(1 for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip())
+                if log_path.exists() else 0
+            ),
+        }
     report: Dict[str, Any] = {
         "schema": RECEIPT_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1227,14 +1987,36 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         # checkpoint trained in two legs is not the artifact its step count
         # suggests.
         "initialised_from": init_provenance,
-        "architecture": "mimomix_core.MiMoMixModel (v53), unmodified",
+        "architecture": (
+            "mimomix_core.MiMoMixModel (v53) + v91 ConnectomeCore + v93 neurogenesis"
+            if v93_active and cns_report is not None
+            else "mimomix_core.MiMoMixModel (v53) + v93 neurogenesis"
+            if v93_active
+            else "mimomix_core.MiMoMixModel (v53) + v91 ConnectomeCore"
+            if cns_report is not None
+            else "mimomix_core.MiMoMixModel (v53), unmodified"
+        ),
+        "cns_core": cns_report,
+        "v93_ablations": v93_ablations,
+        "neurogenesis": neurogenesis_report,
+        "optimiser_groups": [
+            {"params": len(g["params"]), "weight_decay": g.get("weight_decay"),
+             "lr_mult": g.get("_lr_mult", 1.0)}
+            for g in decay_groups
+        ],
         "split": split.report(tokenizer),
         "split_verification": verification,
         "frozen_split": frozen_split,
         "held_out_sentences": split.held_out_sentences,
         "tokenizer": tokenizer.vocabulary_report([a for _, a in split.dev]),
         "config": config.to_dict(),
-        "parameters": parameters,
+        # Recomputed on the selected weights, after every growth event.
+        # Slot-based growth never changes a tensor's shape, so the total
+        # equals the construction-time count; the alive counts that did
+        # change are in `growth` (final telemetry) and per eval in `history`.
+        "parameters": model.parameter_report(),
+        "parameters_at_construction": parameters,
+        "growth": growth_telemetry(model),
         # Provenance, not decoration. `--compare` diffs this block to decide
         # whether two arms are comparable, so a setting that is missing here is
         # a setting that can differ silently between them. Everything below
@@ -1260,6 +2042,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "frozen_split_sha256": frozen_split["receipt_sha256"] if frozen_split else None,
             "amp": getattr(args, "amp", None),
             "decay_mode": getattr(args, "decay_mode", None),
+            "new_param_lr_mult": getattr(args, "new_param_lr_mult", 1.0),
+            "cns_core": bool(getattr(args, "cns_core", False)),
+            "cns_wiring": getattr(args, "cns_wiring", None) if getattr(args, "cns_core", False) else None,
+            "cns_graph": getattr(args, "cns_graph", None) if getattr(args, "cns_core", False) else None,
             "repeat_subset_fraction": getattr(args, "repeat_subset_fraction", None),
             "repeat_subset_prob": getattr(args, "repeat_subset_prob", None),
             "mtp_loss_weight_final": getattr(args, "mtp_loss_weight_final", None),
@@ -1268,6 +2054,26 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             # see cannot be read: a task truncated by the cap and a task the
             # model never learned produce the same 0.00.
             "probe_max_new_tokens": probe_cap,
+            # v93 neurogenesis (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md). Every
+            # one changes what grew, so two arms differing in any of them are
+            # not a matched pair.
+            "extend_vocab": bool(getattr(args, "extend_vocab", False)),
+            "max_new_tokens_vocab": getattr(args, "max_new_tokens_vocab", None),
+            "cns_spare_nodes": getattr(args, "cns_spare_nodes", None),
+            "cns_read_layers": list(getattr(args, "cns_read_layers", None) or []) or None,
+            "cns_write_layers": list(getattr(args, "cns_write_layers", None) or []) or None,
+            "cns_to_thinking": bool(getattr(args, "cns_to_thinking", False)),
+            "cns_temporal": bool(getattr(args, "cns_temporal", False)),
+            "moe_spare_experts": getattr(args, "moe_spare_experts", None),
+            "grow_layers": grow_layers,
+            "grow_every": getattr(args, "grow_every", None),
+            "grow_modules": getattr(args, "grow_modules", None),
+            "grow_edges": getattr(args, "grow_edges", None),
+            "grow_taps": getattr(args, "grow_taps", None),
+            "grow_experts": bool(getattr(args, "grow_experts", False)),
+            "prune_threshold": getattr(args, "prune_threshold", None),
+            "witness_rows": getattr(args, "witness_rows", None),
+            "ablation_rows": getattr(args, "ablation_rows", None),
         },
         "probe_token_budget": token_budget,
         "accuracy_probe": probe_manifest,
@@ -1559,7 +2365,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "continue training from this checkpoint instead of from random "
             "weights. The vocabulary must be byte-identical, which is verified; "
-            "a mismatch raises rather than silently training a wrong embedding"
+            "a mismatch raises rather than silently training a wrong embedding "
+            "(with --extend_vocab the checkpoint's list may be a prefix instead)"
+        ),
+    )
+    parser.add_argument(
+        "--new_param_lr_mult",
+        type=float,
+        default=1.0,
+        help=(
+            "peak-LR multiplier for grafted modules (parameters under "
+            "NEW_PARAMETER_PREFIXES, i.e. the v91 cns_core). 1.0 (default) "
+            "changes nothing; a model with no grafted modules is unaffected"
         ),
     )
     parser.add_argument(
@@ -1591,6 +2408,59 @@ def build_parser() -> argparse.ArgumentParser:
             "instead of --database. Use this to run the ladder on a corpus with "
             "measured diversity beyond the 292 word types of llm_chat.db, which "
             "v58 names as an unmet promotion gate"
+        ),
+    )
+    # v93 neurogenesis (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md D5, D6, D8).
+    # Every flag is inert at its default; the capacity flags they act on
+    # (--cns_spare_nodes, --moe_spare_experts, --grow_layers ...) are on the
+    # shared talk parser because they map to config fields.
+    neuro = parser.add_argument_group("v93 neurogenesis")
+    neuro.add_argument(
+        "--extend_vocab",
+        action="store_true",
+        help=(
+            "take the tokenizer from --init_from and APPEND the new corpus's "
+            "tokens after its ids instead of rebuilding by frequency (which "
+            "renumbers ids and is refused as a different vocabulary). The tied "
+            "embedding grows by mean(old) + 0.1 std(old) N(0,1) rows, seeded "
+            "by --seed. digit_tokens/reverse_digits are taken from the "
+            "checkpoint and must match the flags"
+        ),
+    )
+    neuro.add_argument(
+        "--max_new_tokens_vocab", type=int, default=4000,
+        help="cap on the ids --extend_vocab may append (both spacing forms count)",
+    )
+    neuro.add_argument(
+        "--grow_every", type=int, default=0,
+        help=(
+            "run one neurogenesis event every N steps, from the statistics of "
+            "the dev pass at that step; must be a multiple of --eval_every. "
+            "0 (default) is off"
+        ),
+    )
+    neuro.add_argument("--grow_modules", type=int, default=0,
+                       help="module splits per event (into --cns_spare_nodes slots)")
+    neuro.add_argument("--grow_edges", type=int, default=0,
+                       help="synapses opened per event at logit -7; at least half cross-hemisphere")
+    neuro.add_argument("--grow_taps", type=int, default=0,
+                       help="afferent taps and efferent taps opened per event (each)")
+    neuro.add_argument("--grow_experts", action="store_true",
+                       help="allow expert births into --moe_spare_experts slots")
+    neuro.add_argument(
+        "--prune_threshold", type=float, default=1e-4,
+        help="softplus edge strength below which a grown edge is pruned after 2 consecutive events",
+    )
+    neuro.add_argument(
+        "--witness_rows", type=int, default=8,
+        help="dev rows of the fixed witness batch whose loss is measured before and after each event",
+    )
+    neuro.add_argument(
+        "--ablation_rows", type=int, default=0,
+        help=(
+            "dev rows for the end-of-run v93 ablations (gates, commissure, each "
+            "hemisphere, grown elements); each is one dev pass. 0 (default) "
+            "uses the whole dev set"
         ),
     )
     parser.add_argument("--compare", nargs=2, metavar=("FULL_DIR", "ABLATION_DIR"),
@@ -1654,6 +2524,38 @@ def validate_resume_settings(args) -> None:
         )
 
 
+def validate_growth_settings(args) -> None:
+    """Refuse v93 growth settings that cannot mean what they say.
+
+    Checked before the corpus is read for the same reason the selection
+    settings are: a growth schedule that never fires, or a vocabulary
+    extension with nothing to extend, should cost seconds, not a run.
+    """
+
+    grow_every = int(getattr(args, "grow_every", 0) or 0)
+    eval_every = int(getattr(args, "eval_every", 0) or 0)
+    if grow_every < 0:
+        raise SystemExit(f"--grow_every must be >= 0, got {grow_every}")
+    if grow_every > 0 and (eval_every <= 0 or grow_every % eval_every != 0):
+        raise SystemExit(
+            f"--grow_every {grow_every} must be a positive multiple of --eval_every "
+            f"{eval_every}: growth decisions use the statistics of the dev pass "
+            "that precedes them, so an event can only sit on an eval step."
+        )
+    if getattr(args, "extend_vocab", False) and not getattr(args, "init_from", None):
+        raise SystemExit("--extend_vocab appends to a checkpoint's vocabulary and needs --init_from")
+    if int(getattr(args, "grow_layers", 0) or 0) > 0 and not getattr(args, "init_from", None):
+        raise SystemExit(
+            "--grow_layers appends identity blocks to a warm-started model and "
+            "needs --init_from; to train a deeper model from scratch raise --n_layers"
+        )
+    for name in ("grow_modules", "grow_edges", "grow_taps", "witness_rows", "ablation_rows",
+                 "max_new_tokens_vocab", "cns_spare_nodes", "moe_spare_experts"):
+        value = getattr(args, name, None)
+        if value is not None and int(value) < 0:
+            raise SystemExit(f"--{name} must be >= 0, got {value}")
+
+
 def validate_selection_settings(args) -> None:
     """Refuse a selection criterion the run cannot measure well enough.
 
@@ -1683,6 +2585,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     validate_selection_settings(args)
     validate_resume_settings(args)
+    validate_growth_settings(args)
     if args.compare:
         result = compare(args.compare)
         print(json.dumps(result, indent=2))

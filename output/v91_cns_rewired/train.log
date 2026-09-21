@@ -1,0 +1,42 @@
+
+=== leg 1 from step 0 ===
+  cns core     rewired | 512 modules, 10,509 edges, 138 in / 34 out, after block 2
+  init_from    output/v89_corpus/v89_corpus.pt (24250 prior steps)
+v58 generalisation | arm full | thinking core True
+  train        1,098,171 rows, dev 11,230
+  tier1_seen_response      16,307 rows
+  tier2_unseen_response    396 rows
+  tier3_unseen_sentence    30,004 rows
+  withheld     5707 sentences (288284 remain in training)
+  vocabulary   8679 types
+  parameters   30,805,757 total / 6,287,981 active
+  device       cpu
+  restored     optimiser=False scheduler=False
+step   625/2500  train 0.0226  dev 0.0268  ppl 1.03  2446s
+step  1250/2500  train 0.0239  dev 0.0261  ppl 1.03  6054s
+step  1875/2500  train 0.0242  dev 0.0248  ppl 1.03  8771s
+step  2500/2500  train 0.0231  dev 0.0245  ppl 1.02  acc 0.93  11619s
+  cns ablation dev 0.02449 with core, 0.02449 without (+0.00000 nats)
+
+== v58 generalisation ladder | arm full ==
+  parameters      30,805,757 (6,287,981 active/token)
+  selected        step 2500 on accuracy (probe 0.93, dev loss 0.0245)
+
+  tier                         rows     loss      ppl
+  tier1_seen_response         16307   0.0116   1.0117
+  tier2_unseen_response         396   0.1893   1.2084
+  tier3_unseen_sentence       30004   0.2512   1.2856
+
+  recombination_cost_nats          +0.1777
+  unseen_sentence_cost_nats        +0.0620
+  total_cost_nats                  +0.2396
+  perplexity ratio tier3/tier1     1.271x
+
+  [PASS] split_verified
+  [PASS] learned_something
+  [PASS] produces_non_empty_replies
+  [PASS] speculative_matches_greedy
+  [PASS] selection_never_read_a_tier
+
+  checkpoint  output\v91_cns_rewired\v91_cns_rewired.pt
+=== finished after 1 leg(s) ===

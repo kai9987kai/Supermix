@@ -1,0 +1,106 @@
+{
+  "schema": "supermix-v79-omni-corpus-v1",
+  "seed": 93,
+  "rows": 200000,
+  "per_task": {
+    "impulse": 40000,
+    "ohms_current": 40000,
+    "spring_energy": 40000,
+    "permutations": 40000,
+    "final_velocity": 40000
+  },
+  "dropped_failing_verification": {},
+  "tasks": 5,
+  "short_of_requested": {},
+  "distinct_prompts": {
+    "impulse": 2999,
+    "ohms_current": 1719,
+    "spring_energy": 256,
+    "permutations": 23,
+    "final_velocity": 10953
+  },
+  "repetition": {
+    "impulse": 13.3,
+    "ohms_current": 23.3,
+    "spring_energy": 156.2,
+    "permutations": 1739.1,
+    "final_velocity": 3.7
+  },
+  "verified_by": "nexus_solver.solve_problem",
+  "tolerance": 1e-06,
+  "options": {
+    "repeat": true,
+    "retry_rate": 0.0,
+    "balanced_operands": false,
+    "priming_fraction": 0.0,
+    "keep_canonical": false,
+    "combination_in_envelope": false,
+    "natural_phrasings": true,
+    "decompose_quotient": false,
+    "long_division": true
+  },
+  "token_budget": {
+    "sequence_length": 128,
+    "digit_tokens": true,
+    "tasks": {
+      "final_velocity": {
+        "rows": 40000,
+        "response_median": 39,
+        "response_p95": 42,
+        "response_max": 42,
+        "turn_median": 67,
+        "turn_p95": 70,
+        "turn_max": 73,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "impulse": {
+        "rows": 40000,
+        "response_median": 35,
+        "response_p95": 35,
+        "response_max": 35,
+        "turn_median": 51,
+        "turn_p95": 54,
+        "turn_max": 55,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "ohms_current": {
+        "rows": 40000,
+        "response_median": 50,
+        "response_p95": 52,
+        "response_max": 52,
+        "turn_median": 67,
+        "turn_p95": 71,
+        "turn_max": 74,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "permutations": {
+        "rows": 40000,
+        "response_median": 32,
+        "response_p95": 40,
+        "response_max": 40,
+        "turn_median": 50,
+        "turn_p95": 57,
+        "turn_max": 60,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "spring_energy": {
+        "rows": 40000,
+        "response_median": 55,
+        "response_p95": 57,
+        "response_max": 57,
+        "turn_median": 75,
+        "turn_p95": 80,
+        "turn_max": 80,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      }
+    },
+    "worst_dropped_fraction": 0.0,
+    "note": "turn-aligned packing drops a turn longer than sequence_length rather than truncating it; the dropped rows are a task's longest, so any non-zero fraction here biases that task toward its easiest instances"
+  },
+  "output": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\datasets\\v93\\v93_omni.jsonl"
+}

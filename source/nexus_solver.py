@@ -217,6 +217,31 @@ class NexusSolver:
         s = f"{val_float:.{max_decimals}f}".rstrip("0").rstrip(".")
         return s
 
+    @staticmethod
+    def _bridge_answer_value(ans_dict: Dict[str, Any]) -> Optional[float]:
+        """The numeric answer of a `science_plan` result, or None.
+
+        `science_plan.solve_science_scenario` writes its answer under
+        ``"exact"`` as a fraction string (``"32"``, ``"161/5"``); this bridge
+        read only ``"fraction"``, a key that result never carries, so every
+        query the v71 path solved came back with ``answer_value=None``. Nothing
+        noticed until v93 added `final_velocity` (``v = u + a t``, the one
+        registry formula `build_omni_corpus` uses): `verify` compares
+        ``answer_value`` to the generator's answer, so a None dropped 100% of
+        the task at build time -- 0 of 200 smoke draws verified before this
+        line, 200 of 200 after. Both keys are read so a result that carries
+        either still bridges; an unparseable value stays None rather than
+        raising, which keeps the fall-through to the extended solvers intact.
+        """
+
+        for key in ("fraction", "exact"):
+            if key in ans_dict:
+                try:
+                    return float(Fraction(str(ans_dict[key])))
+                except (ValueError, ZeroDivisionError, TypeError):
+                    return None
+        return None
+
     def solve(self, query: str) -> SolverResult:
         """Master solve dispatcher across all scientific and mathematical domains."""
         query_clean = query.strip()
@@ -233,7 +258,7 @@ class NexusSolver:
                 scenario=v71_res.get("scenario", ""),
                 target=v71_res.get("target", ""),
                 formula_id=v71_res.get("formula_id", ""),
-                answer_value=float(ans_dict.get("fraction", 0.0)) if "fraction" in ans_dict else None,
+                answer_value=self._bridge_answer_value(ans_dict),
                 display_answer=ans_dict.get("display", ""),
                 unit=ans_dict.get("unit", ""),
                 steps=[

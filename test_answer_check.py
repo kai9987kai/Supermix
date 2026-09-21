@@ -467,12 +467,28 @@ def test_supported_shapes_advertises_every_task_family():
     `code_trace`, because a single parser covers all nine code tasks: it does
     not re-implement each one, it runs the snippet the question contains. So
     the shape count grows by three while the task set grows by one.
+
+    v93 adds eleven shapes, one per new benchmark task: five science and
+    mathematics forms, three code forms (again all `code_trace`) and three
+    connectome lookups. 24 + 11 = 35 shapes; the task set grows by eight.
+    The three connectome shapes parse only where the CC-BY male-CNS tables
+    are on disk, so on a checkout without `datasets/v91_malecns` this test
+    skips rather than pins a smaller set.
     """
 
     shapes = check.supported_shapes()
-    tasks = {check.parse_question(shape)[0] for shape in shapes}
+    parsed = [check.parse_question(shape) for shape in shapes]
+    if any(p is None for p in parsed):
+        try:
+            import build_connectome_corpus as cns
+            data_present = cns.data_available()
+        except Exception:  # noqa: BLE001
+            data_present = False
+        if not data_present:
+            pytest.skip("connectome tables not present; the cns_* shapes cannot parse here")
+    tasks = {p[0] for p in parsed}
 
-    assert len(shapes) == 24
+    assert len(shapes) == 35
     assert tasks == {
         "arithmetic", "percent", "algebra_one_step", "word_problem", "average",
         "multiplication", "division", "sequence", "two_step",
@@ -480,6 +496,9 @@ def test_supported_shapes_advertises_every_task_family():
         "voltage", "electrical_power", "wave_speed", "molarity",
         "combination", "arithmetic_series",
         "code_trace",
+        # v93
+        "impulse", "ohms_current", "spring_energy", "permutations", "final_velocity",
+        "cns_type_count", "cns_side_count", "cns_pair_synapses",
     }
 
 

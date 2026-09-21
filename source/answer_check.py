@@ -36,6 +36,20 @@ and `eval_problem_solving.GENERATORS` at seed 4242: 799/840 = 0.951 before the
 v82 widening, 840/840 = 1.000 after, with zero confident-wrong verdicts in
 either. Coverage is not accuracy of the *model*; it is only the fraction of
 questions this module is willing to judge at all.
+
+v93 adds eleven benchmark tasks and this module gains a parser for every
+shape among them: five science and mathematics forms re-derived from the
+question (`impulse`, `ohms_current`, `spring_energy`, `permutations`,
+`final_velocity`), three code forms the existing `_code_trace` already runs
+once its snippet-start pattern admits `r = sum(range(3, 9))`, and three
+connectome lookups (`cns_type_count`, `cns_side_count`, `cns_pair_synapses`)
+whose "re-derivation" is the same table lookup the corpus builder did, from
+the CC-BY male-CNS arrays. Measured at seed 4242 over all 41 registered tasks:
+1,640/1,640 narrow-template prompts parsed and 4,920/4,920 prompts over the
+full natural-phrasing bank (held-out forms included), zero confident-wrong
+verdicts in either. `_permutations` runs before `_combination_choose` because
+"permutations of 9 things taken 2 at a time" contains `taken`, and the
+combination reading would have returned 36 for an answer of 72.
 """
 
 from __future__ import annotations
@@ -336,10 +350,24 @@ _PRODUCT_LAWS = (
     ("molarity", r"molarity|concentration|molar",
      (r"mol|moles|solute|of", r"mol|moles"),
      (r"volume|litres?|liters?|dissolved|in", r"L|litres?|liters?")),
+    # -- v93 --
+    # Placed after the nine above on purpose. `impulse` prompts always name a
+    # force, and `ohms_current` prompts always say "current" and usually
+    # "voltage", so the `force`, `voltage` and `electrical_power` laws see them
+    # first; each then fails on a quantity it needs (kg, amps) and falls
+    # through. The reverse cannot happen: a `voltage` prompt carries no number
+    # in volts and a `force` prompt no time in seconds, so neither of these
+    # can claim one of theirs.
+    ("impulse", r"impulse",
+     (r"force|push|delivered by|acting|acts|by|from|:", _FORCE),
+     (r"time|for|over|lasting|during|in|,", r"s|seconds?")),
+    ("ohms_current", r"current",
+     (r"voltage|volts?|at|drives|across|applied|when|:", r"V|volts?"),
+     (r"resistance|resistor|ohms?|through|across|drives|,", r"ohms?")),
 )
 
 
-_DIVISION_LAWS = frozenset({"acceleration", "power", "molarity"})
+_DIVISION_LAWS = frozenset({"acceleration", "power", "molarity", "ohms_current"})
 
 
 def _science(question: str) -> Optional[Tuple[str, float]]:
@@ -366,6 +394,188 @@ def _kinetic_energy(question: str) -> Optional[Tuple[str, float]]:
     if mass is None or velocity is None:
         return None
     return ("kinetic_energy", 0.5 * mass * velocity * velocity)
+
+
+def _spring_energy(question: str) -> Optional[Tuple[str, float]]:
+    """`E = k x^2 / 2` (v93). Runs before `_science`, as `_kinetic_energy` does.
+
+    The spring constant is the number carrying `N/m`, which is unambiguous;
+    the extension is the number in metres that is *not* part of `N/m`, read
+    after an extension word so the `m` of `N/m` cannot be taken for it.
+    """
+
+    if not re.search(r"spring energy|elastic potential energy|energy (?:is )?stored",
+                     question, re.I):
+        return None
+    constant = re.search(r"(-?\d+(?:\.\d+)?)\s*N/m\b", question, re.I)
+    extension = _quantity(
+        question,
+        r"extension|extended|stretched|pulled|stretch|by|is",
+        r"m|metres?|meters?",
+    )
+    if constant is None or extension is None:
+        return None
+    k, x = float(constant.group(1)), float(extension)
+    return ("spring_energy", 0.5 * k * x * x)
+
+
+def _final_velocity(question: str) -> Optional[Tuple[str, float]]:
+    """`v = u + a t` (v93). Runs before `_science`.
+
+    Three numbers, three units, and the units tell them apart: the
+    acceleration carries `m/s^2`, the initial velocity `m/s` with no `^2`
+    after it, and the time a bare `s` or `seconds`. Nothing is read by
+    position, so any order of the three clauses parses the same way.
+    """
+
+    if not re.search(r"final velocity|final speed|velocity after|going after",
+                     question, re.I):
+        return None
+    accel = re.search(r"(-?\d+(?:\.\d+)?)\s*m/s\^?2\b", question, re.I)
+    initial = re.search(r"(-?\d+(?:\.\d+)?)\s*m/s\b(?!\^?2)", question, re.I)
+    # `(?<![/^])` keeps the `s` of `m/s` and the `2` of `m/s^2` out of it.
+    time = re.search(r"(?<![/^\w])(-?\d+(?:\.\d+)?)\s*(?:s|seconds?)\b(?!/|\^)",
+                     question, re.I)
+    if accel is None or initial is None or time is None:
+        return None
+    u, a, t = (float(m.group(1)) for m in (initial, accel, time))
+    return ("final_velocity", u + a * t)
+
+
+def _permutations(question: str) -> Optional[Tuple[str, float]]:
+    """`P(n, k)`, however the corpus words it (v93).
+
+    Must run before `_combination_choose`: "permutations of 9 things taken 2
+    at a time" contains `taken`, and that parser would return C(9, 2) = 36
+    for a question whose answer is 72 -- the confident wrong verdict this
+    module exists to avoid. So any question that says permutation, arrange or
+    ordered is claimed here first, and a form this cannot read returns None
+    rather than falling through to the combination reading.
+    """
+
+    if not re.search(r"permutation|arrang|ordered|line up", question, re.I):
+        return None
+    number = r"(\d+)"
+    # (pattern, reversed) -- `reversed` says the phrasing states k before n,
+    # as `_combination_choose` does. Every corpus and natural form is listed;
+    # the order matters only where two could match, and none do.
+    for pattern, reverse in (
+        (rf"n\s*=\s*{number}\s*k\s*=\s*{number}", False),
+        (rf"n\s*{number}\s*,?\s*k\s*{number}", False),
+        (rf"of\s*{number}\s*things taken\s*{number}", False),
+        (rf"of\s*{number}\s*(?:taken|take)\s*{number}", False),
+        (rf"{number}\s*things and line up\s*{number}", False),
+        (rf"can\s*{number}\s*items? be arranged in order from\s*{number}", True),
+        (rf"arrangements? of\s*{number}\s*(?:are there )?from\s*{number}", True),
+        (rf"arrange\s*{number}\s*out of\s*{number}", True),
+        (rf"arranging\s*{number}\s*out of\s*{number}", True),
+        (rf"{number}\s*items? can be picked from\s*{number}", True),
+        (rf"selections? of\s*{number}\s*from\s*{number}", True),
+    ):
+        match = re.search(pattern, question, re.I)
+        if not match:
+            continue
+        a, b = int(match.group(1)), int(match.group(2))
+        n, k = (b, a) if reverse else (a, b)
+        if k > n:
+            return None   # far more likely misread than genuinely 0
+        import math as _math
+
+        return ("permutations", float(_math.perm(n, k)))
+    return None
+
+
+# -- connectome lookups (v93) ------------------------------------------------
+#
+# The three cns_* shapes ask for a fact, not a computation, so the only honest
+# re-derivation is the same lookup the corpus builder did: the answer comes
+# from `build_connectome_corpus.population()`, built from the CC-BY male-CNS
+# tables. A type or pair outside that population returns None (not checked)
+# rather than 0, because "not in the table we teach from" is not "zero
+# neurons". Where the tables are absent the parsers are inert.
+
+#: A type name as the corpus writes it: letters, digits, `_` and `-`. The
+#: trailing `[A-Za-z0-9_]` keeps a sentence-final hyphen or the `?` out.
+_TYPE = r"([A-Za-z][A-Za-z0-9_\-]*[A-Za-z0-9_]|[A-Za-z])"
+
+
+def _connectome_population():
+    try:
+        import build_connectome_corpus as cns
+    except Exception:  # noqa: BLE001 - the checker degrades, it does not break
+        return None
+    try:
+        if not cns.data_available():
+            return None
+        return cns.population()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _cns_pair_synapses(question: str) -> Optional[Tuple[str, float]]:
+    if not re.search(r"synapse", question, re.I) or not re.search(r"male CNS", question, re.I):
+        return None
+    for pattern in (
+        rf"from (?:cell )?type {_TYPE} (?:to|onto) (?:cell )?type {_TYPE}",
+        rf"type {_TYPE} makes? onto type {_TYPE}",
+        rf"from {_TYPE} to {_TYPE}\b",
+    ):
+        match = re.search(pattern, question)
+        if match:
+            break
+    else:
+        return None
+    pop = _connectome_population()
+    if pop is None:
+        return None
+    pre, post = match.group(1), match.group(2)
+    for a, b, weight in pop.pairs:
+        if a == pre and b == post:
+            return ("cns_pair_synapses", float(weight))
+    return None
+
+
+def _cns_side_count(question: str) -> Optional[Tuple[str, float]]:
+    if not re.search(r"neurons?", question, re.I) or not re.search(r"male CNS", question, re.I):
+        return None
+    side = re.search(r"\b(left|right)\b", question, re.I)
+    if side is None:
+        return None
+    name = _cns_type_name(question)
+    if name is None:
+        return None
+    pop = _connectome_population()
+    if pop is None or name not in pop.n_neurons:
+        return None
+    table = pop.left if side.group(1).lower() == "left" else pop.right
+    return ("cns_side_count", float(table[name]))
+
+
+def _cns_type_count(question: str) -> Optional[Tuple[str, float]]:
+    if not re.search(r"neurons?", question, re.I) or not re.search(r"male CNS", question, re.I):
+        return None
+    if re.search(r"\b(left|right|side|hemisphere|synapse)", question, re.I):
+        return None   # a side count or a pair count, not this shape
+    name = _cns_type_name(question)
+    if name is None:
+        return None
+    pop = _connectome_population()
+    if pop is None or name not in pop.n_neurons:
+        return None
+    return ("cns_type_count", float(pop.n_neurons[name]))
+
+
+def _cns_type_name(question: str) -> Optional[str]:
+    """The one type a count question names, or None when the form is unknown."""
+
+    for pattern in (
+        rf"(?:cell )?type {_TYPE}",
+        rf"(?:the |many )?{_TYPE} neurons",
+    ):
+        match = re.search(pattern, question)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _combination_choose(question: str) -> Optional[Tuple[str, float]]:
@@ -489,7 +699,11 @@ def _code_trace(question: str) -> Optional[Tuple[str, float]]:
     # spans rather than pattern-matching the wrapper means a new phrasing cannot
     # silently produce a wrong value: a mis-trimmed span fails to parse, and a
     # span that parses but never assigns the target is rejected below.
-    start = re.search(r"[A-Za-z_]\w*\s*=\s*[\[\-\d]", question)
+    # The right-hand side of the first assignment is a literal (list, number,
+    # negative number) or, since v93's `code_range_sum` (`r = sum(range(3,
+    # 9))`), a call to a lower-case name. Which names are callable is the
+    # executor's decision, not this pattern's: anything else is refused there.
+    start = re.search(r"[A-Za-z_]\w*\s*=\s*(?:[\[\-\d]|[a-z]+\()", question)
     if start is None:
         return None
     body = question[start.start():]
@@ -516,10 +730,25 @@ PARSERS: Tuple[Callable[[str], Optional[Tuple[str, float]]], ...] = (
     # parsers below would happily misread as arithmetic. `x = 5` and
     # `range(4)` look like a binary expression to `_binary`.
     _code_trace,
+    # v93: the connectome lookups key on "male CNS" and refuse everything
+    # else, and a type name such as `5-HTPLP01` or `IN17A052` is exactly the
+    # kind of string `_binary` and `_multiplication` would misread as an
+    # expression, so they run before any numeric parser.
+    _cns_pair_synapses,
+    _cns_side_count,
+    _cns_type_count,
     _word_problem,
+    # v93: before `_combination_choose`, which would otherwise read
+    # "permutations of 9 things taken 2 at a time" as C(9, 2).
+    _permutations,
     _combination_choose,
     _arithmetic_series,
     _kinetic_energy,
+    # v93: before `_science`, whose `acceleration` law matches "accelerates"
+    # and whose `work` law matches "work out the spring energy"; both fall
+    # through on a missing quantity today, and these make that not matter.
+    _spring_energy,
+    _final_velocity,
     _science,
     _sequence,
     _average,
@@ -611,4 +840,23 @@ def supported_shapes() -> List[str]:
         "What does x hold at the end? x = 2\nfor i in range(6): x = x + 8",
         "nums = [4, 10, 15]\nr = sum(nums) Give r.",
         "nums = [8, 3, 4]\nr = nums[0] + nums[2] What is r?",
+        # v93 science and mathematics (build_omni_corpus.V93_TASKS)
+        "A force of 80 N acts for 6 s. What is the impulse?",
+        "A voltage of 376 V is applied across 8 ohm. What is the current?",
+        "A spring of constant 18 N/m is stretched 4 m. Find the spring energy.",
+        "Find the number of permutations of 9 things taken 2 at a time.",
+        "A body moving at 12 m/s accelerates at 3 m/s^2 for 8 s. "
+        "What is its final velocity?",
+        # v93 code tracing (build_code_corpus.V93_TASKS): still one parser,
+        # `_code_trace`, which now also runs `range(a, b)`, `.count` and a
+        # negative index because the executor's allowlist admits them.
+        "Trace this Python and give r. r = sum(range(3, 9))",
+        "nums = [2, 4, 7, 4]\nr = nums.count(4) What is r?",
+        "nums = [13, 8, 10]\nr = nums[-2] Give r.",
+        # v93 connectome lookups (build_connectome_corpus.TASKS): the truth is
+        # read from the CC-BY male-CNS tables the corpus was built from, so
+        # these parse only where `datasets/v91_malecns` is on disk.
+        "How many neurons of type KCg-m are in the male CNS?",
+        "How many neurons of type KCg-m are on the left side of the male CNS?",
+        "How many synapses go from type KCg-m to type PAM08 in the male CNS?",
     ]

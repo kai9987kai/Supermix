@@ -193,6 +193,60 @@ class WordTokenizer:
         return cls(kept[:max_vocab], digit_tokens=digit_tokens,
                    reverse_digits=reverse_digits)
 
+    @classmethod
+    def extend(cls, base: "WordTokenizer", texts: Iterable[str], max_new: int,
+               min_count: int = 1) -> "WordTokenizer":
+        """Append new tokens to ``base`` without moving any existing id (v93 D5).
+
+        `build` orders ids by frequency, so building over a corpus that differs
+        by a single row can renumber thousands of tokens, and
+        `load_initial_weights` then refuses the checkpoint ("different
+        vocabulary") -- correctly, because id *n* would denote a different
+        word. A warm start on a bigger corpus therefore cannot rebuild; it has
+        to *extend*: ``base.tokens`` is copied as an exact prefix (same ids,
+        same order, the specials included) and only tokens the base lacks are
+        appended, in the same most-common order and with the same
+        both-spacing-forms admission `build` uses, up to ``max_new`` of them.
+
+        Segmentation follows ``base.pattern`` and ``base.reverse_digits``, so
+        the new tokens are counted over the strings the encoder will actually
+        produce. ``to_dict``/``from_dict`` are untouched: an extended
+        tokenizer serialises exactly like a built one, and nothing records
+        where the prefix ended -- the checkpoint it was extended from does.
+
+        A corpus the base already covers adds nothing, which is what makes a
+        crash resume of an extended run rebuild the identical token list.
+        """
+
+        counter: Counter = Counter()
+        for text in texts:
+            if base.reverse_digits:
+                text = reverse_digit_runs(text)
+            counter.update(base.pattern.findall(text))
+
+        kept: List[str] = list(base.tokens)
+        seen = set(kept)
+        added = 0
+        max_new = max(0, int(max_new))
+        for token, count in counter.most_common():
+            if count < min_count or added >= max_new:
+                break
+            for variant in (token, token.lstrip()):
+                if variant and variant not in seen and added < max_new:
+                    seen.add(variant)
+                    kept.append(variant)
+                    added += 1
+
+        # Built the way `from_dict` builds, not through `__init__`: the
+        # constructor re-derives the special-token prefix, and the contract
+        # here is that the id list is a byte-identical prefix copy.
+        instance = cls.__new__(cls)
+        instance.tokens = kept
+        instance.index = {token: i for i, token in enumerate(kept)}
+        instance.digit_tokens = bool(base.digit_tokens)
+        instance.reverse_digits = bool(base.reverse_digits)
+        return instance
+
     @property
     def vocab_size(self) -> int:
         return len(self.tokens)

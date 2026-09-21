@@ -1,0 +1,51 @@
+
+=== leg 1 from step 0 ===
+  vocabulary   extended: 8679 from output/v89_corpus/v89_corpus.pt + 736 new ids
+  cns core     connectome | 768 modules, 16,373 edges, 208 in / 54 out, after block 2
+  cns v93      capacity 832 (64 spare) | hemispheres L 384 / R 384 | edges LL 5,391 RR 5,336 LR 2,820 RL 2,826 | reads [0, 1, 2] writes [2, 3, 4] + thinking | temporal
+  init_from    output/v89_corpus/v89_corpus.pt (24250 prior steps)
+  grown vocab  8679 -> 9415 rows (seed 57)
+  grown depth  1 block(s) from layer 5 zeroed to identity
+  grown moe    8 router tensors padded for 8 spare slots per layer
+v58 generalisation | arm full | thinking core True
+  train        2,310,767 rows, dev 5,441
+  tier1_seen_response      4,397 rows
+  tier2_unseen_response    50 rows
+  tier3_unseen_sentence    5,402 rows
+  withheld     780 sentences (320506 remain in training)
+  vocabulary   9415 types
+  parameters   36,594,245 total / 9,127,349 active
+  device       cpu
+  restored     optimiser=False scheduler=False
+  neurogenesis every 20 steps | witness 8 rows | log output\v93_preflight\neurogenesis.jsonl
+step    20/40  train 1.2906  dev 1.0478  ppl 2.85  446s
+step    40/40  train 1.1232  dev 0.9301  ppl 2.53  acc 0.67  1581s
+  cns ablation dev 0.93806 with core, 0.93805 without (-0.00001 nats)
+  v93 ablation gates_off   dev 0.93866 (-0.00001 nats over 800 rows)
+  v93 ablation cross_off   dev 0.93867 (-0.00001 nats over 800 rows)
+  v93 ablation left_only   dev 0.93867 (-0.00001 nats over 800 rows)
+  v93 ablation right_only  dev 0.93867 (-0.00001 nats over 800 rows)
+  v93 ablation grown_off   dev 0.93871 (+0.00003 nats over 800 rows)
+
+== v58 generalisation ladder | arm full ==
+  parameters      36,594,245 (9,127,349 active/token)
+  selected        step 40 on accuracy (probe 0.67, dev loss 0.9301)
+
+  tier                         rows     loss      ppl
+  tier1_seen_response          4397   1.2834   3.6088
+  tier2_unseen_response          50   0.2187   1.2444
+  tier3_unseen_sentence        5402   0.8082   2.2438
+
+  recombination_cost_nats          -1.0647
+  unseen_sentence_cost_nats        +0.5895
+  total_cost_nats                  -0.4752
+  perplexity ratio tier3/tier1     0.622x
+
+  [PASS] split_verified
+  [PASS] learned_something
+  [PASS] produces_non_empty_replies
+  [PASS] speculative_matches_greedy
+  [PASS] selection_never_read_a_tier
+
+  checkpoint  output\v93_preflight\v93_preflight.pt
+=== finished after 1 leg(s) ===

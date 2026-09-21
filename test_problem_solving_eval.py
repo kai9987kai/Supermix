@@ -85,8 +85,12 @@ def test_every_generator_states_a_true_answer(name):
         problem = solving.GENERATORS[name](rng)
         assert problem.source == "novel"
         assert isinstance(problem.answer, float)
-        # Every generated prompt must contain the operands it asks about.
-        assert any(ch.isdigit() for ch in problem.prompt)
+        # Every generated prompt must contain the operands it asks about. The
+        # v93 connectome lookups (cns_*) ask about a cell type by name, and a
+        # name such as "Tm" carries no digit: their operand is the type, and
+        # test_v93_corpus checks the answer against the data instead.
+        if not name.startswith("cns_"):
+            assert any(ch.isdigit() for ch in problem.prompt)
 
 
 def test_arithmetic_ground_truth_is_computed_not_asserted():

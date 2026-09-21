@@ -1,0 +1,25 @@
+=== 2026-09-20T13:10:37+01:00 watcher start
+=== 2026-09-20T13:25:42+01:00 mis-scoped C/B files set aside
+=== 2026-09-20T13:25:42+01:00 run_remaining_primary.sh patched with --task_set v89
+=== 2026-09-21T13:33:05+01:00 chain done seen; pairing v93 with the corrected C and B
+{
+  "n": 628,
+  "baseline_correct": 580,
+  "candidate_correct": 569,
+  "accuracy_delta": -0.01751592356687898,
+  "candidate_only_correct": 16,
+  "baseline_only_correct": 27,
+  "mcnemar_exact_two_sided_p": 0.12628947438543037
+}
+=== 2026-09-21T13:33:10+01:00 compared v93 vs C rc 0
+{
+  "n": 628,
+  "baseline_correct": 592,
+  "candidate_correct": 569,
+  "accuracy_delta": -0.03662420382165605,
+  "candidate_only_correct": 8,
+  "baseline_only_correct": 31,
+  "mcnemar_exact_two_sided_p": 0.0002940768754342571
+}
+=== 2026-09-21T13:33:15+01:00 compared v93 vs B rc 0
+=== 2026-09-21T13:33:16+01:00 watcher done

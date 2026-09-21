@@ -1,0 +1,108 @@
+{
+  "schema": "supermix-v91-malecns-modules-v1",
+  "types": "datasets/v91_malecns/malecns_types.npz",
+  "n_modules": 512,
+  "min_input_fraction": 0.01,
+  "edges": 10509,
+  "density": 0.04009,
+  "self_loops": 467,
+  "rewired_self_loops": 467,
+  "rewire": {
+    "swaps_accepted": 100420,
+    "swap_attempts": 114377,
+    "edges_rewired": 10042,
+    "self_loops_held": 467
+  },
+  "excitatory_modules": 294,
+  "inhibitory_modules": 218,
+  "groups": [
+    {
+      "role": "sensory",
+      "sign": 1,
+      "types": 354,
+      "modules": 18
+    },
+    {
+      "role": "sensory",
+      "sign": -1,
+      "types": 14,
+      "modules": 2
+    },
+    {
+      "role": "visual",
+      "sign": 1,
+      "types": 394,
+      "modules": 52
+    },
+    {
+      "role": "visual",
+      "sign": -1,
+      "types": 331,
+      "modules": 40
+    },
+    {
+      "role": "central",
+      "sign": 1,
+      "types": 3687,
+      "modules": 139
+    },
+    {
+      "role": "central",
+      "sign": -1,
+      "types": 2918,
+      "modules": 102
+    },
+    {
+      "role": "vnc",
+      "sign": 1,
+      "types": 1198,
+      "modules": 44
+    },
+    {
+      "role": "vnc",
+      "sign": -1,
+      "types": 1579,
+      "modules": 55
+    },
+    {
+      "role": "ascending",
+      "sign": 1,
+      "types": 369,
+      "modules": 17
+    },
+    {
+      "role": "ascending",
+      "sign": -1,
+      "types": 199,
+      "modules": 9
+    },
+    {
+      "role": "descending",
+      "sign": 1,
+      "types": 353,
+      "modules": 16
+    },
+    {
+      "role": "descending",
+      "sign": -1,
+      "types": 128,
+      "modules": 7
+    },
+    {
+      "role": "output",
+      "sign": 1,
+      "types": 173,
+      "modules": 8
+    },
+    {
+      "role": "output",
+      "sign": -1,
+      "types": 54,
+      "modules": 3
+    }
+  ],
+  "mean_hops_sensory_to_output": 3.026923076923077,
+  "mean_hops_sensory_to_output_rewired": 2.598076923076923,
+  "seed": 0,
+  "output": "datasets/v91_malecns/malecns_modules_512.npz"
+}

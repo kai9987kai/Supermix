@@ -1,0 +1,99 @@
+=== 2026-09-20T12:38:28+01:00 chain start
+=== 2026-09-20T13:25:24+01:00 v91 remaining primary done
+=== 2026-09-20T13:25:25+01:00 start v93_neurogenesis
+=== 2026-09-21T08:59:34+01:00 end v93_neurogenesis exit 0
+seen arm skipped: not requested
+checkpoint  output\v93_neurogenesis\v93_neurogenesis.pt
+dev loss    0.06235
+problems    630   unparsed 0   truncated 0
+settings    seed 65  max_new_tokens 96  shared_rng False
+fingerprint 3b99a446cd533be9bc5f8ae57d1310b4
+
+source   task                   n  corr     acc            95% CI  trunc   abst
+-------------------------------------------------------------------------------
+novel    acceleration          21    10   0.476 [ 0.283, 0.676]      0      0
+novel    algebra_one_step      21    21   1.000 [ 0.845, 1.000]      0      0
+novel    arithmetic            21    17   0.809 [ 0.600, 0.923]      0      0
+novel    arithmetic_series     21    21   1.000 [ 0.845, 1.000]      0      0
+novel    average               21    10   0.476 [ 0.283, 0.676]      0      0
+novel    code_conditional      21    20   0.952 [ 0.773, 0.992]      0      0
+novel    code_divmod           21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_index            21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_list_extreme     21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_list_sum         21    20   0.952 [ 0.773, 0.992]      0      0
+novel    code_loop_add         21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_loop_subtract    21    20   0.952 [ 0.773, 0.992]      0      0
+novel    code_nested_loop      21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_while_accumulate    21    19   0.905 [ 0.711, 0.974]      0      0
+novel    combination           21    20   0.952 [ 0.773, 0.992]      0      0
+novel    division              21    21   1.000 [ 0.845, 1.000]      0      0
+novel    electrical_power      21    21   1.000 [ 0.845, 1.000]      0      0
+novel    force                 21    21   1.000 [ 0.845, 1.000]      0      0
+novel    kinetic_energy        21    21   1.000 [ 0.845, 1.000]      0      0
+novel    molarity              21    18   0.857 [ 0.654, 0.950]      0      0
+novel    momentum              21    21   1.000 [ 0.845, 1.000]      0      0
+novel    multiplication        21    21   1.000 [ 0.845, 1.000]      0      0
+novel    percent               21    16   0.762 [ 0.549, 0.894]      0      0
+novel    power                 21    14   0.667 [ 0.454, 0.828]      0      0
+novel    sequence              21    21   1.000 [ 0.845, 1.000]      0      0
+novel    two_step              21    12   0.571 [ 0.365, 0.755]      0      0
+novel    voltage               21    21   1.000 [ 0.845, 1.000]      0      0
+novel    wave_speed            21    21   1.000 [ 0.845, 1.000]      0      0
+novel    word_problem          21    18   0.857 [ 0.654, 0.950]      0      0
+novel    work                  21    21   1.000 [ 0.845, 1.000]      0      0
+novel    ALL                  630   571   0.906 [ 0.881, 0.927]      0      0
+                            abstention score +0.8127   acc excl. truncated 0.906   median rel.err 0.000   within10% 0.959
+
+replies -> output\v93_neurogenesis\v93_v89tasks_replies.jsonl (630 rows)
+
+receipt -> output\v93_neurogenesis\v93_v89tasks_replies.run.json
+=== 2026-09-21T09:30:30+01:00 evaluated v93 on the v89 task set rc 0
+seen arm skipped: not requested
+checkpoint  output\v93_neurogenesis\v93_neurogenesis.pt
+dev loss    0.06235
+problems    231   unparsed 0   truncated 0
+settings    seed 65  max_new_tokens 96  shared_rng False
+fingerprint c1966c748de79c473219a692df1426c0
+
+source   task                   n  corr     acc            95% CI  trunc   abst
+-------------------------------------------------------------------------------
+novel    cns_pair_synapses     21     0   0.000 [ 0.000, 0.155]      0      0
+novel    cns_side_count        21     4   0.191 [ 0.077, 0.400]      0      0
+novel    cns_type_count        21     4   0.191 [ 0.077, 0.400]      0      0
+novel    code_list_count       21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_neg_index        21    21   1.000 [ 0.845, 1.000]      0      0
+novel    code_range_sum        21    18   0.857 [ 0.654, 0.950]      0      0
+novel    final_velocity        21    21   1.000 [ 0.845, 1.000]      0      0
+novel    impulse               21    21   1.000 [ 0.845, 1.000]      0      0
+novel    ohms_current          21    21   1.000 [ 0.845, 1.000]      0      0
+novel    permutations          21    21   1.000 [ 0.845, 1.000]      0      0
+novel    spring_energy         21    21   1.000 [ 0.845, 1.000]      0      0
+novel    ALL                  231   173   0.749 [ 0.689, 0.800]      0      0
+                            abstention score +0.4978   acc excl. truncated 0.749   median rel.err 0.000   within10% 0.792
+
+replies -> output\v93_neurogenesis\v93_newtasks_replies.jsonl (231 rows)
+
+receipt -> output\v93_neurogenesis\v93_newtasks_replies.run.json
+=== 2026-09-21T09:40:17+01:00 evaluated v93 on the new task set rc 0
+{
+  "n": 628,
+  "baseline_correct": 577,
+  "candidate_correct": 569,
+  "accuracy_delta": -0.012738853503184714,
+  "candidate_only_correct": 17,
+  "baseline_only_correct": 25,
+  "mcnemar_exact_two_sided_p": 0.27995623852893914
+}
+=== 2026-09-21T09:40:22+01:00 compared v93 vs v89 rc 0
+=== 2026-09-21T09:40:23+01:00 skip compare vs C: no output/v91_malecns/C_replies.jsonl
+{
+  "n": 628,
+  "baseline_correct": 587,
+  "candidate_correct": 569,
+  "accuracy_delta": -0.028662420382165606,
+  "candidate_only_correct": 10,
+  "baseline_only_correct": 28,
+  "mcnemar_exact_two_sided_p": 0.0050976432976312935
+}
+=== 2026-09-21T09:40:28+01:00 compared v93 vs A rc 0
+=== 2026-09-21T13:32:34+01:00 chain done

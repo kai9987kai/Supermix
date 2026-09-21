@@ -1,0 +1,61 @@
+{
+  "schema": "supermix-v91-malecns-types-v1",
+  "source": "Janelia FlyEM male-cns v1.0 flat connectome, minconf 0.5 (CC-BY)",
+  "source_url": "https://storage.googleapis.com/flyem-male-cns/v1.0/connectome-data/flat-connectome/",
+  "files_md5_b64": {
+    "body-annotations-male-cns-v1.0-minconf-0.5.feather": "UKdxh3DFciDxYLpPQxq4ng==",
+    "body-neurotransmitters-male-cns-v1.0.feather": "PYQrEv5cSe763lKNfdJKHw==",
+    "connectome-weights-male-cns-v1.0-minconf-0.5.feather": "8w6dzKJc/QIb8eez2XVZng=="
+  },
+  "typed_neurons": 164506,
+  "cell_types": 11751,
+  "type_edges": 3830931,
+  "body_edge_rows": 151856684,
+  "body_edge_rows_kept": 25135616,
+  "synapses_total": 311833243,
+  "synapses_kept": 122318556,
+  "synapse_fraction_kept": 0.39225630604111056,
+  "nt_counts_by_type": {
+    "glutamate": 2429,
+    "serotonin": 86,
+    "acetylcholine": 5983,
+    "unclear": 363,
+    "gaba": 2778,
+    "histamine": 16,
+    "dopamine": 44,
+    "octopamine": 52
+  },
+  "superclass_counts_by_type": {
+    "cb_intrinsic": 6605,
+    "visual_centrifugal": 108,
+    "visual_projection": 346,
+    "vnc_motor": 142,
+    "ascending_neuron": 563,
+    "vnc_intrinsic": 2777,
+    "ol_intrinsic": 271,
+    "cb_sensory": 158,
+    "cb_endocrine": 10,
+    "vnc_endocrine": 4,
+    "descending_neuron": 480,
+    "cb_motor": 43,
+    "efferent_descending": 1,
+    "sensory_descending": 4,
+    "efferent_ascending": 5,
+    "vnc_efferent": 27,
+    "cb_efferent": 1,
+    "ol_sensory": 11,
+    "sensory_ascending": 26,
+    "vnc_sensory": 169
+  },
+  "sign_convention": {
+    "acetylcholine": 1,
+    "glutamate": -1,
+    "gaba": -1,
+    "histamine": -1,
+    "dopamine": 1,
+    "serotonin": 1,
+    "octopamine": 1,
+    "unclear": 1
+  },
+  "output": "datasets/v91_malecns/malecns_types.npz"
+}

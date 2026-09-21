@@ -231,6 +231,82 @@ EXTRA_PHRASINGS: Dict[str, Tuple[str, ...]] = {
         "if a series starts at {a} and rises by {d}, what do {n} terms add to",
         "total of {n} terms from {a} with common difference {d}",
     ),
+    # -- v93 tasks (build_omni_corpus.V93_TASKS) -------------------------------
+    #
+    # Same register and the same held-out rule as the twelve above: the last
+    # three of each tuple never reach a corpus, so `eval_natural_phrasing` has
+    # a phrasing the model has not seen for every new task as well. Placeholders
+    # are the `_pick` keyword names of each generator; `test_v93_corpus.py`
+    # renders every form through its generator to pin that.
+    "impulse": (
+        "whats the impulse from {f} N acting for {t} s",
+        "how much impulse does a {f} newton force give in {t} seconds",
+        "hey can you work out the impulse for {f} N over {t} s",
+        "please could you find the impulse when {f} newtons acts for {t} seconds",
+        "work out the impulse: force {f} N, time {t} s",
+        "a {f} N push lasting {t} s, whats the impulse",
+        "{f} newtons for {t} seconds, what is the impulse",
+        "if the force is {f} N and it acts for {t} s what is the impulse",
+        "impulse please: {f} N for {t} s",
+        "the force is {f} N and the time is {t} s so what is the impulse",
+    ),
+    "ohms_current": (
+        "whats the current through {r} ohm at {v} V",
+        "how much current flows when {v} volts is put across {r} ohms",
+        "hey can you work out the current for {v} V and {r} ohm",
+        "please could you find the current when {v} volts drives {r} ohms",
+        "work out the current: voltage {v} V, resistance {r} ohm",
+        "a {r} ohm resistor at {v} V, whats the current",
+        "{v} volts across {r} ohms, what is the current",
+        "if the voltage is {v} V and the resistance is {r} ohm what is the current",
+        "current please: {v} V across {r} ohm",
+        "the voltage is {v} V and the resistance is {r} ohm so what is the current",
+    ),
+    "spring_energy": (
+        "whats the spring energy of a {k} N/m spring stretched {x} m",
+        "how much energy is stored in a {k} N/m spring pulled {x} metres",
+        "hey can you work out the spring energy for {k} N/m and {x} m",
+        "please could you find the elastic potential energy of a {k} N/m "
+        "spring extended {x} metres",
+        "work out the spring energy: spring constant {k} N/m, extension {x} m",
+        "a spring with constant {k} N/m stretched by {x} m, whats its spring energy",
+        "spring constant {k} N/m and extension {x} m, what is the spring energy",
+        "if k is {k} N/m and the extension is {x} m what is the spring energy",
+        "spring energy please: {k} N/m stretched {x} m",
+        "the spring constant is {k} N/m and it is stretched {x} m so what is "
+        "the spring energy",
+    ),
+    "permutations": (
+        "how many ways can i arrange {k} out of {n} in order",
+        "whats the number of permutations of {n} taken {k}",
+        "hey can you work out the permutations of {n} take {k}",
+        "please could you find how many ordered ways {k} items can be picked from {n}",
+        "permutations: n {n}, k {k}",
+        "if i have {n} things and line up {k} of them, how many permutations",
+        "how many ordered selections of {k} from {n} are there",
+        "number of permutations of {n} take {k} please",
+        "arranging {k} out of {n} in order, how many ways is that",
+    ),
+    "final_velocity": (
+        "whats the final velocity if it starts at {u} m/s and accelerates "
+        "at {a} m/s^2 for {t} s",
+        "how fast is it going after {t} s from {u} m/s at {a} m/s^2",
+        "hey can you work out the final velocity for {u} m/s, {a} m/s^2, {t} s",
+        "please could you find the final speed from {u} m/s after {t} s "
+        "at {a} m/s^2",
+        "work out the final velocity: initial {u} m/s, acceleration {a} m/s^2, "
+        "time {t} s",
+        "a car at {u} m/s speeds up at {a} m/s^2 for {t} s, whats its final velocity",
+        "{u} m/s plus {a} m/s^2 for {t} s, what is the final velocity",
+        "if it starts at {u} m/s and gains {a} m/s^2 for {t} s what is the "
+        "final velocity",
+        "final velocity please: {u} m/s, {a} m/s^2, {t} s",
+        # Kept under the 32-token prompt ceiling with room to spare: the
+        # longest form here is 26 tokens, so 26 + 96 generated stays inside the
+        # 128-position context the model was trained to.
+        "initial velocity {u} m/s, acceleration {a} m/s^2, time {t} s, "
+        "so what is the final velocity",
+    ),
 }
 
 
@@ -244,9 +320,10 @@ EXTRA_PHRASINGS: Dict[str, Tuple[str, ...]] = {
 #: rather than the one that flatters it.
 #:
 #: Three per task leaves seven or eight for training and gives the benchmark
-#: 36 held-out forms across twelve tasks. Taken from the end of each tuple, so
-#: appending a phrasing extends the training set and never silently moves a form
-#: out of the benchmark.
+#: 36 held-out forms across twelve tasks (51 across seventeen once the five v93
+#: tasks are counted). Taken from the end of each tuple, so appending a
+#: phrasing extends the training set and never silently moves a form out of
+#: the benchmark.
 HELD_OUT_PER_TASK = 3
 
 
