@@ -201,15 +201,15 @@ class ConnectomeAtlasVerifier:
 
     _PAIR_PATTERNS = (
         re.compile(
-            r"how many synapses\s+(?:does|do)\s+type\s+(?P<pre>[A-Za-z0-9_\-]+)\s+make\s+onto\s+type\s+(?P<post>[A-Za-z0-9_\-]+)",
+            r"how many synapses\s+(?:does|do)\s+(?:cell\s+)?type\s+(?P<pre>[A-Za-z0-9_\-]+)\s+make\s+onto\s+(?:cell\s+)?type\s+(?P<post>[A-Za-z0-9_\-]+)",
             re.IGNORECASE,
         ),
         re.compile(
-            r"how many synapses go from\s+(?:type\s+)?(?P<pre>[A-Za-z0-9_\-]+)\s+to\s+(?:type\s+)?(?P<post>[A-Za-z0-9_\-]+)",
+            r"how many synapses go from\s+(?:(?:cell\s+)?type\s+)?(?P<pre>[A-Za-z0-9_\-]+)\s+to\s+(?:(?:cell\s+)?type\s+)?(?P<post>[A-Za-z0-9_\-]+)",
             re.IGNORECASE,
         ),
         re.compile(
-            r"synapses\s+from\s+(?:type\s+)?(?P<pre>[A-Za-z0-9_\-]+)\s+(?:to|onto)\s+(?:type\s+)?(?P<post>[A-Za-z0-9_\-]+)",
+            r"(?:synapses|synapse\s+count)\s+from\s+(?:(?:cell\s+)?type\s+)?(?P<pre>[A-Za-z0-9_\-]+)\s+(?:to|onto)\s+(?:(?:cell\s+)?type\s+)?(?P<post>[A-Za-z0-9_\-]+)",
             re.IGNORECASE,
         ),
     )
@@ -219,11 +219,19 @@ class ConnectomeAtlasVerifier:
             re.IGNORECASE,
         ),
         re.compile(
-            r"\bneurons\s+of\s+type\s+(?P<cell>[A-Za-z0-9_\-]+)\s+are\s+on\s+the\s+(?P<side>left|right)\s+side",
+            r"\bneurons\s+of\s+(?:cell\s+)?type\s+(?P<cell>[A-Za-z0-9_\-]+)\s+are\s+on\s+the\s+(?P<side>left|right)\s+side",
             re.IGNORECASE,
         ),
         re.compile(
-            r"\b(?P<side>left|right)\s+side\s+neurons\s+(?:of|for)\s+type\s+(?P<cell>[A-Za-z0-9_\-]+)",
+            r"\b(?P<side>left|right)\s+(?:side|hemisphere)\s+neurons\s+(?:of|for)\s+(?:cell\s+)?type\s+(?P<cell>[A-Za-z0-9_\-]+)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<cell>[A-Za-z][A-Za-z0-9_\-]{0,31})\s+neurons\s+have\s+(?:their|its)\s+soma\s+on\s+the\s+(?P<side>left|right)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bhow many\s+(?P<cell>[A-Za-z][A-Za-z0-9_\-]{0,31})\s+neurons\s+are\s+(?:in|on)\s+the\s+(?P<side>left|right)\s+(?:side|hemisphere)\b",
             re.IGNORECASE,
         ),
     )
@@ -233,7 +241,11 @@ class ConnectomeAtlasVerifier:
             re.IGNORECASE,
         ),
         re.compile(
-            r"count\s+the\s+neurons\s+of\s+cell\s+type\s+(?P<cell>[A-Za-z0-9_\-]+)",
+            r"how many\s+neurons\s+(?:have|are\s+of)\s+(?:the\s+)?(?:cell\s+)?type\s+(?P<cell>[A-Za-z0-9_\-]+)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"count\s+the\s+neurons\s+of\s+(?:cell\s+)?type\s+(?P<cell>[A-Za-z0-9_\-]+)",
             re.IGNORECASE,
         ),
         re.compile(

@@ -353,9 +353,12 @@ class NexusSolver:
                 receipt = self._build_receipt("combinatorics", "mathematics", "permutations", "math.permutations", {"n": str(n_val), "k": str(k_val)}, str(val), disp, "dimensionless", steps)
                 return SolverResult(True, q, "mathematics", "combinatorics", "permutations", "math.permutations", float(val), disp, "", steps, receipt, f"Permutations P({n_val}, {k_val}) = {disp}.")
 
-        # Natural permutation: "arranged (in order) from N"
-        if re.search(r"\b(?:permut\w*|arrang(?:e|ed|ing|ements?)|in\s+order)\b", lower):
-            m = re.search(r"\b(\d+)\s+items?\b.*?\b(?:from|of)\s+(\d+)\b", lower)
+        # Natural permutation: "arranged (in order) from N" or "ordered arrangements of K ... from N"
+        if re.search(r"\b(?:permut\w*|arrang(?:e|ed|ing|ements?)|in\s+order|ordered)\b", lower):
+            m = re.search(r"\b(\d+)\s+items?\b.*?\b(?:from|of)\s+(\d+)\b", lower) or re.search(
+                r"\b(?:arrangements?|permutations?|ordered)\s+of\s+(\d+)\b.*?\bfrom\s+(\d+)\b",
+                lower,
+            )
             if m:
                 k_val, n_val = int(m.group(1)), int(m.group(2))
                 if 0 <= k_val <= n_val <= 1000:
@@ -768,8 +771,8 @@ class NexusSolver:
         v_m = re.search(r"(?:velocity|speed|v)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*m/s\b", q, re.I)
         t_m = re.search(r"(?:time|t|duration)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*s\b", q, re.I)
         w_m = re.search(r"(?:work|W|energy)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(J|kJ)\b", q, re.I)
-        k_m = re.search(r"(?:spring constant|k)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*N/m\b", q, re.I)
-        x_m = re.search(r"(?:compression|extension|stretch|x)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(m|cm)\b", q, re.I)
+        k_m = re.search(r"(?:spring\s+(?:of\s+)?constant|k)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*N/m\b", q, re.I)
+        x_m = re.search(r"(?:compression|compressed|extension|extended|stretched?|x)\s*(?:=|is|of|by)?\s*(\d+(?:\.\d+)?)\s*(m|cm)\b", q, re.I)
 
         # Kinetic Energy: Ek = 1/2 * m * v^2
         if m_m and v_m and ("kinetic energy" in q.lower() or "ke" in q.lower()):
@@ -1053,8 +1056,8 @@ class NexusSolver:
         v1_m = re.search(r"(?:initial volume|V1)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(mL|L|liters)\b", q, re.I)
         m2_m = re.search(r"(?:target concentration|final concentration|M2|C2)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(?:M|mol/L)\b", q, re.I)
         _chem_ctx = "molar" in q.lower() or "concentration" in q.lower()
-        n_m = re.search(r"(?:moles|amount|n)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*mol\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*mol\b", q) if _chem_ctx else None)
-        vol_m = re.search(r"(?:volume|V)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(L|mL)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(L|mL)\b", q) if _chem_ctx else None)
+        n_m = re.search(r"(?:moles|amount|n)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(?:moles?|mol)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(?:moles?|mol)\b", q, re.I) if _chem_ctx else None)
+        vol_m = re.search(r"(?:volume|V)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(litres|litre|liters|liter|L|mL)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(litres|litre|liters|liter|L|mL)\b", q, re.I) if _chem_ctx else None)
 
         # Molarity: M = n / V
         if n_m and vol_m and ("molarity" in q.lower() or "concentration" in q.lower()) and not m1_m:

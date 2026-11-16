@@ -51,15 +51,30 @@ class SCFCollectiveOrchestrator:
             raw.setdefault("verified", False)
             candidates.append(raw)
 
+        def _canonical_value(raw_ans: str) -> str:
+            text = str(raw_ans or "").strip()
+            if not text:
+                return ""
+            try:
+                import eval_problem_solving as ep
+
+                num = ep.extract_answer(text)
+                if num is not None:
+                    return f"num:{float(num):.8g}"
+            except Exception:
+                pass
+            return " ".join(text.lower().split())
+
         answers = [
-            str(c.get("answer") or "").strip()
+            _canonical_value(str(c.get("answer") or ""))
             for c in candidates
             if str(c.get("answer") or "").strip()
         ]
         critiqued: List[Dict[str, Any]] = []
         for cand in candidates:
             ans = str(cand.get("answer") or "").strip()
-            agree_count = sum(1 for a in answers if a == ans and ans != "")
+            canon = _canonical_value(ans)
+            agree_count = sum(1 for a in answers if a == canon and canon != "")
             consensus_bonus = 0.15 * max(0, agree_count - 1)
             verified_bonus = 0.35 if bool(cand.get("verified")) else 0.0
             conf = max(0.0, min(1.0, float(cand.get("confidence", 0.0))))
@@ -68,6 +83,7 @@ class SCFCollectiveOrchestrator:
             critiqued.append(
                 {
                     **cand,
+                    "canonical_answer": canon,
                     "consensus_agreement": agree_count,
                     "composite_score": total_score,
                     "critique_notes": (

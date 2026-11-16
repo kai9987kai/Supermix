@@ -411,6 +411,7 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "cns_homeostatic_radius": "cns_homeostatic_radius",
     "cns_hebbian_trace": "cns_hebbian_trace",
     "cns_predictive_error": "cns_predictive_error",
+    "cns_divisive_norm": "cns_divisive_norm",
     "moe_spare_experts": "moe_spare_experts",
 }
 
@@ -779,6 +780,7 @@ RECORDED_HYPERPARAMETERS: Tuple[str, ...] = (
     "cns_homeostatic_radius",
     "cns_hebbian_trace",
     "cns_predictive_error",
+    "cns_divisive_norm",
     "thinking_entropy_halt",
     "freeze_trunk_steps",
     "witness_rollback_tolerance",
@@ -1361,6 +1363,10 @@ def build_parser() -> argparse.ArgumentParser:
     growth.add_argument(
         "--cns_predictive_error", action="store_true",
         help="enable bounded recurrent predictive-coding sensory error modulation (v98, default off)",
+    )
+    growth.add_argument(
+        "--cns_divisive_norm", action="store_true",
+        help="enable Carandini-Heeger E/I divisive rate normalization on connectome modules (v100, default off)",
     )
 
     # --- v82: the 33 MiMoMixConfig fields no trainer could previously set ---

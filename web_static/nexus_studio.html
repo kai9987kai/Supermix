@@ -1448,7 +1448,9 @@ function refreshChatCheckpoints() {
     var mimo = (d.families && d.families.MiMoMix && d.families.MiMoMix.details && d.families.MiMoMix.details.talk_checkpoints_available) || [];
     if (!mimo.length) return;
     sel.innerHTML = mimo.map(function(path){
-      var label = path.indexOf('v99_scf_evolution') >= 0
+      var label = path.indexOf('v100_scf_balanced') >= 0
+        ? 'v100_scf_balanced (Exp: DivNorm+PredErr+Hebbian)'
+        : path.indexOf('v99_scf_evolution') >= 0
         ? 'v99_scf_evolution (Exp: Latest 41-Task+PredErr)'
         : path.indexOf('v98_scf_predictive') >= 0
         ? 'v98_scf_predictive (Exp: Hebbian+PredErr+Halt)'

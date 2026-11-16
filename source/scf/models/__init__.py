@@ -294,6 +294,7 @@ class MiMoMixAdapter(BaseModelAdapter):
     def discover_talk_checkpoints(self) -> List[str]:
         candidates = (
             "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt",
+            "output/v100_scf_balanced/v100_scf_balanced.selected.pt",
             "output/v98_scf_predictive/v98_scf_predictive.selected.pt",
             "output/v99_scf_evolution/v99_scf_evolution.selected.pt",
             "output/v97_scf_connectome/v97_scf_connectome.selected.pt",
@@ -319,6 +320,7 @@ class MiMoMixAdapter(BaseModelAdapter):
                 "output/v97_scf_connectome/v97_scf_connectome.selected.pt",
                 "output/v98_scf_predictive/v98_scf_predictive.selected.pt",
                 "output/v99_scf_evolution/v99_scf_evolution.selected.pt",
+                "output/v100_scf_balanced/v100_scf_balanced.selected.pt",
             )
             if (ROOT / rel).is_file()
         ]

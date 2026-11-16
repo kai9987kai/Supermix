@@ -336,6 +336,10 @@ class MiMoMixConfig:
     #: internal recurrent prediction ``0.25 * tanh(strength) * rec.detach()`` from
     #: incoming sensory drive (v98, default off, zero perturbation at init).
     cns_predictive_error: bool = False
+    #: Carandini-Heeger E/I divisive normalization on active connectome rates:
+    #: rescales rate / (1 + clamp(softplus(strength) - ln(2), 0, 2) * mean_inhib_pool)
+    #: (v100, default off, exact identity at init).
+    cns_divisive_norm: bool = False
 
     # --- v93 MoE expert slots ---------------------------------------------
     #: Dead expert slots per MoE layer, appended after ``n_routed_experts``.
@@ -2574,6 +2578,12 @@ class ConnectomeCore(nn.Module):
             self.pred_error_strength = nn.Parameter(torch.zeros(n))
         else:
             self.pred_error_strength = None
+        self.divisive_norm = bool(getattr(config, "cns_divisive_norm", False))
+        self.register_buffer("last_div_norm_factor", torch.ones(()), persistent=False)
+        if self.divisive_norm:
+            self.div_norm_strength = nn.Parameter(torch.zeros(n))
+        else:
+            self.div_norm_strength = None
         #: What the most recent growth primitive changed, for the event log.
         self.last_event: Dict[str, object] = {}
         self.graph_info: Dict[str, object] = {"loaded": False}
@@ -2644,6 +2654,8 @@ class ConnectomeCore(nn.Module):
                 self.hebbian_strength.zero_()
             if self.pred_error_strength is not None:
                 self.pred_error_strength.zero_()
+            if self.div_norm_strength is not None:
+                self.div_norm_strength.zero_()
             target = (self.init_fraction * self.spectral_scale).clamp_min(1e-6)
             # softplus^-1(y) = log(expm1(y)); masked entries sit far below zero.
             inverse = torch.log(torch.expm1(target))
@@ -2880,6 +2892,20 @@ class ConnectomeCore(nn.Module):
         self.last_pred_error_norm = (err_drive - drive).detach().pow(2).mean().sqrt()
         return err_drive
 
+    def _divisive_normalize(self, rate: torch.Tensor) -> torch.Tensor:
+        if not self.divisive_norm or self.div_norm_strength is None:
+            return rate
+        scale = (F.softplus(self.div_norm_strength.to(rate.dtype)) - math.log(2.0)).clamp(0.0, 2.0)
+        inhib_mask = (self.sign < 0).to(rate.dtype)
+        denom_count = inhib_mask.sum()
+        if float(denom_count) > 0.0:
+            inhib_pool = (rate * inhib_mask).sum(dim=-1, keepdim=True) / denom_count
+        else:
+            inhib_pool = rate.mean(dim=-1, keepdim=True)
+        denom = 1.0 + scale * inhib_pool.detach()
+        self.last_div_norm_factor = denom.detach().mean()
+        return rate / denom
+
     def _per_token_rates(
         self,
         drive: torch.Tensor,
@@ -2921,6 +2947,7 @@ class ConnectomeCore(nn.Module):
             heb_gain = self._hebbian_modulation(rate)
             if heb_gain is not None:
                 rate = rate * heb_gain
+            rate = self._divisive_normalize(rate)
             if active is not None:
                 rate = rate * active
         return rate
@@ -2984,6 +3011,7 @@ class ConnectomeCore(nn.Module):
                 heb_gain = self._hebbian_modulation(state)
                 if heb_gain is not None:
                     state = state * heb_gain
+                state = self._divisive_normalize(state)
                 if active is not None:
                     state = state * active
             states.append(state)
@@ -3232,6 +3260,8 @@ class ConnectomeCore(nn.Module):
             self.hebbian_strength[child] = self.hebbian_strength[parent]
         if self.pred_error_strength is not None:
             self.pred_error_strength[child] = self.pred_error_strength[parent]
+        if self.div_norm_strength is not None:
+            self.div_norm_strength[child] = self.div_norm_strength[parent]
         self.alive[child] = 1
         self.born_step[child] = int(step)
         # taps: afferent rows copied, efferent columns halved and shared
@@ -3384,6 +3414,8 @@ class ConnectomeCore(nn.Module):
             self.hebbian_strength[index] = 0.0
         if self.pred_error_strength is not None:
             self.pred_error_strength[index] = 0.0
+        if self.div_norm_strength is not None:
+            self.div_norm_strength[index] = 0.0
         slot = torch.zeros(self.n_nodes, dtype=torch.bool, device=self.alive.device)
         slot[index] = True
         self._zero_slot_taps(slot)
@@ -3641,6 +3673,10 @@ class ConnectomeCore(nn.Module):
             snapshot["predictive_error"] = True
             snapshot["pred_error_strength_mean_abs"] = float(self.pred_error_strength.detach().abs().mean())
             snapshot["pred_error_norm"] = float(self.last_pred_error_norm.detach())
+        if self.divisive_norm and self.div_norm_strength is not None:
+            snapshot["divisive_norm"] = True
+            snapshot["div_norm_strength_mean_abs"] = float(self.div_norm_strength.detach().abs().mean())
+            snapshot["div_norm_factor_mean"] = float(self.last_div_norm_factor.detach())
         return snapshot
 
 

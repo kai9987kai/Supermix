@@ -57,6 +57,7 @@ V85_ADDED_FIELDS = {
     "attention_output_gate": False,
     "attention_sink_kinds": "all",
     "cns_commissural_gate": False,
+    "cns_divisive_norm": False,
     "cns_dual_soma": False,
     "cns_glial_homeostasis": False,
     "cns_hebbian_trace": False,

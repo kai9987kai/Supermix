@@ -147,3 +147,16 @@ Combining `SCFVerificationGate` (extending deterministic verification with `Conn
   - `seed=83` (`82` tasks): standalone neural **`67/82 (0.817)`** vs promoted `v96_physio_neurogenesis.selected.pt` **`72/82 (0.878)`**.
   - `v96_physio_neurogenesis.selected.pt` remains the promoted default baseline; `v99_scf_evolution.selected.pt` is wired cleanly as an experimental latest checkpoint (`[v99 PredErr]`) in [`source/scf/models/__init__.py`](../source/scf/models/__init__.py), [`source/supermix_chat_server.py`](../source/supermix_chat_server.py), and [`web_static/nexus_studio.html`](../web_static/nexus_studio.html).
 - **Upgraded Chat Interface**: added `GET /api/scf_status`, optional `scf_runtime` Cognitive Fabric routing in `POST /api/chat` and `POST /api/compare`, `scf_hybrid_accuracy` in `POST /api/benchmark`, `PredErr` / `Hebbian` / `Thinking` live telemetry + proof drawers, multiline Enter/Shift+Enter composer, and Markdown transcript export.
+
+### 4. `v100_scf_balanced` (`cns_divisive_norm`) & `533/533` 13-Seed Verification
+- **Carandini-Heeger E/I Divisive Normalization** (`cns_divisive_norm: bool = False` in [`source/mimomix_core.py`](../source/mimomix_core.py)): rescales active connectome rates by `1 / (1 + clamp(softplus(strength) - ln(2), 0, 2) * mean_inhib_pool)` using Dale inhibitory neuron masks (`sign < 0`), preserving bit-for-bit forward identity at birth and neurogenesis slot inheritance.
+- **13-Seed `533/533 (100%)` Deterministic Audit (`seeds 82..94`)**: extended `ConnectomeAtlasVerifier` (soma-side, hemisphere, and `cell type` phrasings) and [`source/nexus_solver.py`](../source/nexus_solver.py) (`ordered arrangements of K ... from N`, `spring of constant`, `moles`/`litres`) from `516/533` to **`533/533 (100.0%)`**.
+- **Semantic Numerical Consensus** ([`source/scf/collective/__init__.py`](../source/scf/collective/__init__.py)): `SCFCollectiveOrchestrator` now extracts canonical numerical values across candidate replies so formatted explanations and bare numbers recognize cross-model agreement.
+- **64-Step Trunk-Protected Training from `v96` (`output/v100_scf_balanced/`, CPU-only host)** on `8,470`-row `datasets/v100/v100_precision_mix.jsonl` (`--freeze_trunk_steps 12 --decay_mode no_norm_bias --mtp_loss_weight_final 0.1 --repeat_subset_fraction 0.12 --cns_hebbian_trace --cns_predictive_error --cns_divisive_norm --thinking_entropy_halt`):
+  - Selected at step 16 with lowest lineage `dev_loss = 0.023837` (`ppl = 1.02`, `tier3/tier1 = 1.009x`, all 5 `v58` checks `[PASS]`, positive connectome ablation delta `+0.00003 nats`).
+  - Paired benchmark comparison across `3` seeds (`205` total novel tasks):
+    - `seed=82` (`41`): **`35 / 41 (0.854)`** (ties `v96`)
+    - `seed=83` (`82`): **`72 / 82 (0.878)`** (ties `v96`, `code_conditional 2/2`, `percent 2/2`)
+    - `seed=84` (`82`): **`72 / 82 (0.878)`** vs `v96` **`73 / 82 (0.890)`** (`v100` final step 64 checkpoint also `72 / 82`)
+    - Combined: `v100` **`179 / 205 (87.3%)`** vs promoted `v96` **`180 / 205 (87.8%)`**, `SCF Hybrid (seed=82)`: **`41 / 41 (1.0000)`**.
+  - Per Rule 9, `v96_physio_neurogenesis.selected.pt` stays the promoted baseline (`#1`) while `v100_scf_balanced.selected.pt` (`[v100 DivNorm]`) is promoted ahead of prior experimental candidates (`v98`, `v99`, `v97`) in the registry and chat UIs.

@@ -136,6 +136,7 @@ class ModelRegistry:
                             "cns_dual_soma": bool(getattr(cfg, "cns_dual_soma", False)),
                             "cns_hebbian_trace": bool(getattr(cfg, "cns_hebbian_trace", False)),
                             "cns_predictive_error": bool(getattr(cfg, "cns_predictive_error", False)),
+                            "cns_divisive_norm": bool(getattr(cfg, "cns_divisive_norm", False)),
                             "thinking_entropy_halt": bool(getattr(cfg, "thinking_entropy_halt", False)),
                             "run_name": loaded.extra.get("run_name"),
                         }
@@ -229,6 +230,9 @@ def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
                 "predictive_error": cns.get("predictive_error", False),
                 "pred_error_norm": cns.get("pred_error_norm"),
                 "pred_error_strength_mean_abs": cns.get("pred_error_strength_mean_abs"),
+                "divisive_norm": cns.get("divisive_norm", False),
+                "div_norm_factor_mean": cns.get("div_norm_factor_mean"),
+                "div_norm_strength_mean_abs": cns.get("div_norm_strength_mean_abs"),
                 "spectral_radius_est": cns.get("spectral_radius_est"),
             }
         thk = tele.get("thinking")
@@ -1010,13 +1014,16 @@ const transcript = [];
 function saveTranscript(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(transcript.slice(-40))); }catch(_e){} }
 function usePrompt(t){ el('input').value = t; el('input').focus(); }
 async function loadModels(){
+  const prev = el('model').value;
   const r = await fetch('/api/models'); const d = await r.json();
   el('model').innerHTML = d.models.map(m => {
     const a = m.architecture || {};
-    const tag = a.cns_predictive_error ? (String(a.run_name||m.name).includes('v99') ? ' [v99 PredErr]' : ' [v98 PredErr]')
+    const tag = a.cns_divisive_norm ? ' [v100 DivNorm]'
+      : a.cns_predictive_error ? (String(a.run_name||m.name).includes('v99') ? ' [v99 PredErr]' : ' [v98 PredErr]')
       : a.cns_hebbian_trace ? ' [v97 Hebbian]' : a.cns_core ? ' [CNS]' : '';
     return `<option value="${m.name}">${m.name}${tag}${m.resident?' •':''}</option>`;
   }).join('');
+  if(prev && Array.from(el('model').options).some(o => o.value === prev)){ el('model').value = prev; }
   el('status').textContent = `${d.models.length} models · max ${d.max_resident} resident`;
 }
 function add(cls, text){
@@ -1049,6 +1056,7 @@ function renderAnnotations(bot, data){
       bits.push(`CNS alive=${t.cns_core.alive_nodes}/${t.cns_core.alive_edges||'?'}`);
       if(t.cns_core.hebbian_trace) bits.push(`Hebbian gain=${Number(t.cns_core.hebbian_gain_mean||1).toFixed(3)}`);
       if(t.cns_core.predictive_error) bits.push(`PredErr norm=${Number(t.cns_core.pred_error_norm||0).toFixed(4)}`);
+      if(t.cns_core.divisive_norm) bits.push(`DivNorm=${Number(t.cns_core.div_norm_factor_mean||1).toFixed(3)}`);
       if(t.cns_core.spectral_radius_est!==undefined && t.cns_core.spectral_radius_est!==null) bits.push(`ρ=${Number(t.cns_core.spectral_radius_est).toFixed(3)}`);
     }
     if(t.thinking){
@@ -1151,7 +1159,7 @@ async function compareAll(ev){
       }
       if(res.architecture_telemetry && res.architecture_telemetry.cns_core){
         const c=res.architecture_telemetry.cns_core;
-        col.appendChild(badge('tele', `CNS=${c.alive_nodes}` + (c.hebbian_trace?` Hebb=${Number(c.hebbian_gain_mean||1).toFixed(3)}`:'') + (c.predictive_error?` PE=${Number(c.pred_error_norm||0).toFixed(4)}`:'')));
+        col.appendChild(badge('tele', `CNS=${c.alive_nodes}` + (c.hebbian_trace?` Hebb=${Number(c.hebbian_gain_mean||1).toFixed(3)}`:'') + (c.predictive_error?` PE=${Number(c.pred_error_norm||0).toFixed(4)}`:'') + (c.divisive_norm?` DN=${Number(c.div_norm_factor_mean||1).toFixed(3)}`:'')));
       }
       if(res.recall){ const rv=res.recall.verdict;
         col.appendChild(badge('recall ' + (rv==='largely_recalled'?'recalled':rv==='part_recalled'?'partial':'novel'),
@@ -1227,6 +1235,7 @@ def discover_default_models(root: Optional[Path] = None) -> Dict[str, str]:
     base = Path(root) if root is not None else Path(__file__).resolve().parents[1]
     candidates = (
         ("v96_physio_neurogenesis", "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt"),
+        ("v100_scf_balanced", "output/v100_scf_balanced/v100_scf_balanced.selected.pt"),
         ("v98_scf_predictive", "output/v98_scf_predictive/v98_scf_predictive.selected.pt"),
         ("v99_scf_evolution", "output/v99_scf_evolution/v99_scf_evolution.selected.pt"),
         ("v97_scf_connectome", "output/v97_scf_connectome/v97_scf_connectome.selected.pt"),
