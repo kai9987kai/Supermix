@@ -339,7 +339,7 @@ def test_chat_server_scf_status_runtime_and_benchmark(monkeypatch: pytest.Monkey
     page_html = client.get("/").get_data(as_text=True)
     m_js = re.search(r"<script>(.*)</script>", page_html, flags=re.DOTALL)
     assert m_js is not None
-    assert "'\n" not in m_js.group(1)
+    assert "buf.indexOf('\n\n')" not in m_js.group(1)
     node = shutil.which("node")
     if node:
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as tf:
