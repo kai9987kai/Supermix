@@ -1,0 +1,139 @@
+{
+  "schema": "supermix-v93-connectome-corpus-v1",
+  "seed": 93,
+  "rows": 120000,
+  "task_rows": 90000,
+  "language_rows": 30000,
+  "language_kinds": {
+    "profile": 7749,
+    "partner": 7396,
+    "superclass": 7481,
+    "nt": 7374
+  },
+  "language_distinct_prompts": 12606,
+  "per_task": {
+    "cns_type_count": 30000,
+    "cns_side_count": 30000,
+    "cns_pair_synapses": 30000
+  },
+  "dropped_failing_lookup": {},
+  "distinct_prompts": {
+    "cns_type_count": 4983,
+    "cns_side_count": 9520,
+    "cns_pair_synapses": 9499
+  },
+  "distinct_facts": {
+    "cns_type_count": 1000,
+    "cns_side_count": 2000,
+    "cns_pair_synapses": 2000
+  },
+  "repetition": {
+    "cns_type_count": 30.0,
+    "cns_side_count": 15.0,
+    "cns_pair_synapses": 15.0
+  },
+  "majority_answer_share": {
+    "cns_type_count": 0.1447,
+    "cns_side_count": 0.2028,
+    "cns_pair_synapses": 0.0022
+  },
+  "answer_digits_max": {
+    "cns_type_count": 4,
+    "cns_side_count": 4,
+    "cns_pair_synapses": 6
+  },
+  "population": {
+    "types_path": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\datasets\\v91_malecns\\malecns_types.npz",
+    "types_total": 11751,
+    "types_eligible": 11215,
+    "eligibility": "n_neurons >= 2 and name matches [A-Za-z][A-Za-z0-9_\\-]{0,15}",
+    "max_types": 1000,
+    "population_size": 1000,
+    "smallest_type_in_population": 11,
+    "largest_type_in_population": 3377,
+    "neurons_typed": 164506,
+    "neurons_covered": 124783,
+    "coverage_fraction": 0.7585,
+    "sides": {
+      "source": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\datasets\\v93_malecns\\malecns_sided_types.npz",
+      "kind": "malecns_sided_types.npz (D1 hemisphere build)",
+      "sided_nodes": 22871,
+      "neurons_left": 80786,
+      "neurons_right": 82932
+    },
+    "types_with_zero_on_one_side": 5,
+    "min_pair_weight": 50,
+    "pairs_available": 21143,
+    "max_pairs": 2000,
+    "pairs_kept": 2000,
+    "pair_weight_range": [
+      3731,
+      260568
+    ],
+    "types_with_partner": 926,
+    "types_with_unclear_nt": 21
+  },
+  "verified_by": "lookup in the population built from malecns_types.npz and the side source",
+  "options": {
+    "keep_canonical": false
+  },
+  "non_claims": [
+    "The three cns_* tasks are recall. Their benchmark draws from the same population of types and pairs the corpus was built from, so a score measures how much of the table the model retained, not whether it knows anything about a type it never saw. There is no held-out population.",
+    "The population is the largest types by neuron count, capped, and pairs are the strongest connections within it; the receipt states the caps and the neuron coverage they give. Nothing here says anything about the 10,000-odd smaller types.",
+    "Per-side counts follow the somaSide-else-rootSide rule and drop midline and unknown-side neurons, so left + right can be less than the type's neuron count. The counts are facts about the v1.0 release at minconf 0.5, not about the animal.",
+    "The language rows are not scored anywhere. They are there so the new vocabulary appears in sentences; whether the model learns them is not measured by any receipt in this repository."
+  ],
+  "token_budget": {
+    "sequence_length": 128,
+    "digit_tokens": true,
+    "tasks": {
+      "cns_pair_synapses": {
+        "rows": 30000,
+        "response_median": 21,
+        "response_p95": 23,
+        "response_max": 27,
+        "turn_median": 43,
+        "turn_p95": 48,
+        "turn_max": 58,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "cns_side_count": {
+        "rows": 30000,
+        "response_median": 16,
+        "response_p95": 18,
+        "response_max": 22,
+        "turn_median": 38,
+        "turn_p95": 44,
+        "turn_max": 48,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "cns_type_count": {
+        "rows": 30000,
+        "response_median": 13,
+        "response_p95": 16,
+        "response_max": 18,
+        "turn_median": 32,
+        "turn_p95": 39,
+        "turn_max": 44,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "connectome_language": {
+        "rows": 30000,
+        "response_median": 23,
+        "response_p95": 59,
+        "response_max": 64,
+        "turn_median": 40,
+        "turn_p95": 77,
+        "turn_max": 87,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      }
+    },
+    "worst_dropped_fraction": 0.0,
+    "note": "turn-aligned packing drops a turn longer than sequence_length rather than truncating it; the dropped rows are a task's longest, so any non-zero fraction here biases that task toward its easiest instances"
+  },
+  "output": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\datasets\\v93\\v93_connectome.jsonl"
+}

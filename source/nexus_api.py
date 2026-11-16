@@ -108,6 +108,12 @@ __all__ = [
     "ConformalStoppingResponse",
     "CausalDAGRequest",
     "CausalDAGResponse",
+    "TetherGeometryRequest",
+    "FaultlinePanelRequest",
+    "CrosswireSynthesizeRequest",
+    "MnemorphAssayRequest",
+    "ConformalCRCRequest",
+    "SCFRunRequest",
     "NexusApiService",
     "create_app",
     "main",
@@ -707,6 +713,76 @@ class CausalDAGResponse:
 
 
 @dataclass
+class TetherGeometryRequest:
+    expert_probs: List[List[float]] = field(
+        default_factory=lambda: [[0.75, 0.20, 0.05], [0.65, 0.25, 0.10], [0.80, 0.12, 0.08]]
+    )
+    weights: Optional[List[float]] = None
+    target_class: Optional[int] = None
+    reference_probs: Optional[List[List[float]]] = None
+
+
+@dataclass
+class FaultlinePanelRequest:
+    failure_matrix: List[List[float]] = field(
+        default_factory=lambda: [
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    panel_size: int = 3
+    expert_names: Optional[List[str]] = None
+    condition_names: Optional[List[str]] = None
+    condition_weights: Optional[List[float]] = None
+
+
+@dataclass
+class CrosswireSynthesizeRequest:
+    hypotheses: Optional[List[Dict[str, Any]]] = None
+    observed_trace: Optional[List[Dict[str, Any]]] = None
+    candidate_action: Optional[str] = "EXEC"
+    unsafe_outputs: Optional[List[str]] = None
+    unsafe_states: Optional[List[str]] = None
+
+
+@dataclass
+class MnemorphAssayRequest:
+    assay_observations: List[Dict[str, Any]] = field(default_factory=list)
+    recovery_trajectory: Optional[List[float]] = None
+    prior: Optional[Dict[str, float]] = None
+
+
+@dataclass
+class ConformalCRCRequest:
+    margins: List[float] = field(
+        default_factory=lambda: [0.15, 0.28, 0.42, 0.55, 0.68, 0.80, 0.91]
+    )
+    losses: List[float] = field(
+        default_factory=lambda: [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    b_max: float = 1.0
+    target_risk_alpha: Optional[float] = 0.25
+
+
+@dataclass
+class SCFRunRequest:
+    query: str
+    enable_scf: bool = False
+    enable_router: bool = True
+    enable_verification: bool = True
+    enable_collective: bool = False
+    enable_latent_memory: bool = False
+    enable_adaptive_compute: bool = False
+    enable_speculative_decoding: bool = False
+    enable_neural_candidates: bool = False
+    max_neural_tokens: int = 64
+    adaptive_thinking: bool = False
+
+
+@dataclass
 class ThinkResponse:
     model: str
     mode_selected: str
@@ -742,6 +818,10 @@ class ChatTurnRequest:
     message: str
     persona: Optional[str] = None
     request_nonce: str = ""
+    use_neural_model: bool = False
+    model_checkpoint: Optional[str] = None
+    speculative: bool = True
+    max_new_tokens: int = 96
 
 
 @dataclass
@@ -1652,6 +1732,95 @@ class NexusApiService:
                 ),
             }
 
+        if req.use_neural_model:
+            from scf import SCFFeatureFlags
+            from scf.models import MiMoMixAdapter
+
+            adapter = MiMoMixAdapter()
+            allowed = adapter.discover_talk_checkpoints()
+            chosen_ckpt: Optional[str] = None
+            if req.model_checkpoint:
+                raw_sel = str(req.model_checkpoint).replace("\\", "/").strip()
+                for cand in allowed:
+                    if cand == raw_sel or Path(cand).name == raw_sel or cand.startswith(f"output/{raw_sel}/"):
+                        chosen_ckpt = cand
+                        break
+                if chosen_ckpt is None:
+                    raise ValueError(f"Unknown or unavailable neural checkpoint: {req.model_checkpoint!r}")
+
+            neural_out = adapter.infer_text(
+                query,
+                flags=SCFFeatureFlags(
+                    SCF_ENABLED=True,
+                    SCF_SPECULATIVE_DECODING_ENABLED=bool(req.speculative),
+                ),
+                checkpoint_path=chosen_ckpt,
+                max_new_tokens=max(1, min(160, int(req.max_new_tokens))),
+            )
+            if not neural_out.get("generated"):
+                return {
+                    "status": "analysis_only",
+                    "answer_authority": False,
+                    "confidence": None,
+                    "reply": "No local MiMoMix checkpoint was available to generate a neural reply.",
+                    "intent_detected": "neural_unavailable",
+                    "persona_used": {"persona_type": "neural_mimomix", "display_name": "MiMoMix Neural"},
+                    "thought_steps": ["Attempted checkpoint lookup for MiMoMix generation."],
+                    "epistemics": _analysis_epistemics(
+                        reason="neural_checkpoint_unavailable",
+                        claim_scope="Model unavailability fallback.",
+                        limitations=("No local trained MiMoMix checkpoint was found on disk.",),
+                    ),
+                }
+            run_label = str(neural_out.get("run_name") or "MiMoMix")
+            arch_tele = dict(neural_out.get("architecture_telemetry") or {})
+            cns_info = dict(arch_tele.get("cns_core") or {})
+            think_info = dict(arch_tele.get("thinking") or {})
+            thought_notes = [
+                f"Checkpoint: {run_label} ({Path(str(neural_out.get('checkpoint', ''))).name})",
+                f"Decode: {neural_out.get('policy', {}).get('mode', 'greedy')} | accept_len={neural_out.get('acceptance_length', 1.0):.2f} | {neural_out.get('latency_ms', 0.0):.1f} ms",
+            ]
+            if cns_info:
+                thought_notes.append(
+                    f"Connectome: alive={cns_info.get('alive_nodes', '?')}, hebbian_gain={cns_info.get('hebbian_gain_mean', 'off')}"
+                )
+            if think_info and think_info.get("cycle_entropies"):
+                thought_notes.append(f"Thinking cycle entropies: {think_info['cycle_entropies']}")
+            return {
+                "status": "analysis_only",
+                "answer_authority": False,
+                "confidence": None,
+                "reply": str(neural_out.get("answer") or "(empty reply)"),
+                "intent_detected": f"neural_{run_label}",
+                "persona_used": {
+                    "persona_type": "neural_mimomix",
+                    "display_name": f"MiMoMix ({run_label})",
+                },
+                "extracted_entities": {
+                    "checkpoint": Path(str(neural_out.get("checkpoint", ""))).name,
+                    "tokens": neural_out.get("tokens", 0),
+                    "acceptance_length": neural_out.get("acceptance_length", 1.0),
+                    "latency_ms": neural_out.get("latency_ms", 0.0),
+                },
+                "thought_steps": thought_notes,
+                "neural_telemetry": {
+                    "run_name": run_label,
+                    "checkpoint": neural_out.get("checkpoint"),
+                    "decoding_policy": neural_out.get("policy"),
+                    "tokens": neural_out.get("tokens"),
+                    "acceptance_length": neural_out.get("acceptance_length"),
+                    "latency_ms": neural_out.get("latency_ms"),
+                    "architecture_telemetry": arch_tele,
+                },
+                "epistemics": _analysis_epistemics(
+                    reason="neural_checkpoint_generation_without_verifier_authority",
+                    claim_scope="Checkpoint-backed neural token generation (model-conditional, unverified).",
+                    limitations=(
+                        "Neural checkpoint outputs are unverified guesses unless independently proven by a closed-world solver.",
+                    ),
+                ),
+            }
+
         with self._lock:
             res = self.engine.chat_engine.chat(
                 session_id=req.session_id,
@@ -2140,6 +2309,118 @@ class NexusApiService:
             )
         return res.to_dict()
 
+    # ------------------------------------------------------------------ #
+    #  v95 Unified Frontier Ecosystem handlers                             #
+    # ------------------------------------------------------------------ #
+
+    def handle_tether_geometry(self, req: TetherGeometryRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.analyze_tether_geometry(
+                expert_probs=req.expert_probs,
+                weights=req.weights,
+                target_class=req.target_class,
+                reference_probs=req.reference_probs,
+            )
+        res.update({"answer_authority": False, "status": "analysis_only"})
+        return res
+
+    def handle_faultline_panel(self, req: FaultlinePanelRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.select_faultline_panel(
+                failure_matrix=req.failure_matrix,
+                panel_size=req.panel_size,
+                expert_names=req.expert_names,
+                condition_names=req.condition_names,
+                condition_weights=req.condition_weights,
+            )
+        res.update({"answer_authority": False, "status": "analysis_only"})
+        return res
+
+    def handle_crosswire_synthesize(self, req: CrosswireSynthesizeRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.verify_crosswire_interface(
+                hypotheses=req.hypotheses,
+                observed_trace=req.observed_trace,
+                candidate_action=req.candidate_action,
+                unsafe_outputs=req.unsafe_outputs,
+                unsafe_states=req.unsafe_states,
+            )
+        res.update({"answer_authority": False, "status": "analysis_only"})
+        return res
+
+    def handle_mnemorph_assay(self, req: MnemorphAssayRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.run_mnemorph_assay(
+                assay_observations=req.assay_observations,
+                recovery_trajectory=req.recovery_trajectory,
+                prior=req.prior,
+            )
+        res.update({"answer_authority": False, "status": "analysis_only"})
+        return res
+
+    def handle_conformal_crc(self, req: ConformalCRCRequest) -> Dict[str, Any]:
+        with self._lock:
+            res = self.engine.calibrate_conformal_crc(
+                margins=req.margins,
+                losses=req.losses,
+                b_max=req.b_max,
+                target_risk_alpha=req.target_risk_alpha,
+            )
+        res.update({"answer_authority": False, "status": "analysis_only"})
+        return res
+
+    # ------------------------------------------------------------------ #
+    #  SCF v91.5 Cognitive Fabric endpoints                                #
+    # ------------------------------------------------------------------ #
+
+    def handle_scf_status(self) -> Dict[str, Any]:
+        from scf import SCF_INTERNAL_NAME, SCF_VERSION, SCFFeatureFlags, SCFModelRegistry
+        from scf.learning import SCFLearningGate
+
+        registry = SCFModelRegistry()
+        flags = SCFFeatureFlags.from_env()
+        return {
+            "version": SCF_VERSION,
+            "internal_name": SCF_INTERNAL_NAME,
+            "default_flags": SCFFeatureFlags().to_dict(),
+            "env_flags": flags.to_dict(),
+            "automatic_promotion_enabled": SCFLearningGate().automatic_promotion_enabled,
+            "families": registry.summary(),
+            "answer_authority": False,
+            "status": "analysis_only",
+        }
+
+    def handle_scf_run(self, req: SCFRunRequest) -> Dict[str, Any]:
+        from scf import CognitiveFabricRuntime, SCFConfig, SCFFeatureFlags
+
+        if req.enable_scf:
+            flags = SCFFeatureFlags(
+                SCF_ENABLED=True,
+                SCF_ROUTER_ENABLED=bool(req.enable_router),
+                SCF_VERIFICATION_ENABLED=bool(req.enable_verification),
+                SCF_COLLECTIVE_REASONING_ENABLED=bool(req.enable_collective),
+                SCF_LATENT_MEMORY_ENABLED=bool(req.enable_latent_memory),
+                SCF_ADAPTIVE_COMPUTE_ENABLED=bool(req.enable_adaptive_compute),
+                SCF_SPECULATIVE_DECODING_ENABLED=bool(req.enable_speculative_decoding),
+            )
+        else:
+            flags = SCFFeatureFlags()
+
+        runtime = CognitiveFabricRuntime(SCFConfig(flags=flags))
+        out = runtime.run_task(
+            req.query,
+            adaptive_thinking=bool(req.adaptive_thinking),
+            enable_neural_candidates=bool(req.enable_neural_candidates),
+            max_neural_tokens=max(1, min(112, int(req.max_neural_tokens))),
+            legacy_fallback_fn=lambda q: f"SCF disabled (baseline fallback for: {q})",
+        )
+        is_verified = bool(out.get("verified", False))
+        return {
+            **out,
+            "answer_authority": is_verified,
+            "status": "verified_deterministic" if is_verified else "advisory_or_fallback",
+        }
+
     def handle_signals(self) -> Dict[str, Any]:
         with self._lock:
             q_summary = self.engine.q_policy.get_policy_summary()
@@ -2184,6 +2465,14 @@ class NexusApiService:
                 "reflexive_correction_engine": True,
                 "conformal_stopping_controller": True,
                 "causal_dag_engine": True,
+            },
+            "v95_frontier_ecosystem": {
+                "tether_forensics_engine": True,
+                "faultline_ensemble_engine": True,
+                "crosswire_interface_engine": True,
+                "mnemorph_archaeology_engine": True,
+                "labeled_conformal_risk_control": True,
+                "cns_v95_physiological_gates": True,
             },
         }
 
@@ -2472,6 +2761,64 @@ def create_app(service: Optional[NexusApiService] = None):
             do_value: float = 10.0
             observed_context: Optional[Dict[str, Any]] = None
 
+        class PyTetherGeometryRequest(BaseModel):
+            expert_probs: List[List[float]] = Field(
+                default_factory=lambda: [[0.75, 0.20, 0.05], [0.65, 0.25, 0.10], [0.80, 0.12, 0.08]]
+            )
+            weights: Optional[List[float]] = None
+            target_class: Optional[int] = None
+            reference_probs: Optional[List[List[float]]] = None
+
+        class PyFaultlinePanelRequest(BaseModel):
+            failure_matrix: List[List[float]] = Field(
+                default_factory=lambda: [
+                    [1.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
+            )
+            panel_size: int = 3
+            expert_names: Optional[List[str]] = None
+            condition_names: Optional[List[str]] = None
+            condition_weights: Optional[List[float]] = None
+
+        class PyCrosswireSynthesizeRequest(BaseModel):
+            hypotheses: Optional[List[Dict[str, Any]]] = None
+            observed_trace: Optional[List[Dict[str, Any]]] = None
+            candidate_action: Optional[str] = "EXEC"
+            unsafe_outputs: Optional[List[str]] = None
+            unsafe_states: Optional[List[str]] = None
+
+        class PyMnemorphAssayRequest(BaseModel):
+            assay_observations: List[Dict[str, Any]] = Field(default_factory=list)
+            recovery_trajectory: Optional[List[float]] = None
+            prior: Optional[Dict[str, float]] = None
+
+        class PyConformalCRCRequest(BaseModel):
+            margins: List[float] = Field(
+                default_factory=lambda: [0.15, 0.28, 0.42, 0.55, 0.68, 0.80, 0.91]
+            )
+            losses: List[float] = Field(
+                default_factory=lambda: [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            )
+            b_max: float = 1.0
+            target_risk_alpha: Optional[float] = 0.25
+
+        class PySCFRunRequest(BaseModel):
+            query: str
+            enable_scf: bool = False
+            enable_router: bool = True
+            enable_verification: bool = True
+            enable_collective: bool = False
+            enable_latent_memory: bool = False
+            enable_adaptive_compute: bool = False
+            enable_speculative_decoding: bool = False
+            enable_neural_candidates: bool = False
+            max_neural_tokens: int = 64
+            adaptive_thinking: bool = False
+
         class PyEntropyRequest(BaseModel):
             source: str = "crypto"
             count: int = 16
@@ -2493,6 +2840,10 @@ def create_app(service: Optional[NexusApiService] = None):
             message: str
             persona: Optional[str] = None
             request_nonce: str = ""
+            use_neural_model: bool = False
+            model_checkpoint: Optional[str] = None
+            speculative: bool = True
+            max_new_tokens: int = 96
 
         class PySwarmRequest(BaseModel):
             query: str
@@ -2830,6 +3181,96 @@ def create_app(service: Optional[NexusApiService] = None):
             )
             return svc.handle_causal_dag(cq_req)
 
+        @app.post("/v1/tether/geometry")
+        async def tether_geometry_endpoint(req: PyTetherGeometryRequest):
+            t_req = TetherGeometryRequest(
+                expert_probs=req.expert_probs,
+                weights=req.weights,
+                target_class=req.target_class,
+                reference_probs=req.reference_probs,
+            )
+            try:
+                return svc.handle_tether_geometry(t_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/faultline/panel")
+        async def faultline_panel_endpoint(req: PyFaultlinePanelRequest):
+            f_req = FaultlinePanelRequest(
+                failure_matrix=req.failure_matrix,
+                panel_size=req.panel_size,
+                expert_names=req.expert_names,
+                condition_names=req.condition_names,
+                condition_weights=req.condition_weights,
+            )
+            try:
+                return svc.handle_faultline_panel(f_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/crosswire/synthesize")
+        async def crosswire_synthesize_endpoint(req: PyCrosswireSynthesizeRequest):
+            c_req = CrosswireSynthesizeRequest(
+                hypotheses=req.hypotheses,
+                observed_trace=req.observed_trace,
+                candidate_action=req.candidate_action,
+                unsafe_outputs=req.unsafe_outputs,
+                unsafe_states=req.unsafe_states,
+            )
+            try:
+                return svc.handle_crosswire_synthesize(c_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/mnemorph/assay")
+        async def mnemorph_assay_endpoint(req: PyMnemorphAssayRequest):
+            m_req = MnemorphAssayRequest(
+                assay_observations=req.assay_observations,
+                recovery_trajectory=req.recovery_trajectory,
+                prior=req.prior,
+            )
+            try:
+                return svc.handle_mnemorph_assay(m_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/conformal/crc")
+        async def conformal_crc_endpoint(req: PyConformalCRCRequest):
+            crc_req = ConformalCRCRequest(
+                margins=req.margins,
+                losses=req.losses,
+                b_max=req.b_max,
+                target_risk_alpha=req.target_risk_alpha,
+            )
+            try:
+                return svc.handle_conformal_crc(crc_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.get("/v1/scf/status")
+        async def scf_status_endpoint():
+            return svc.handle_scf_status()
+
+        @app.post("/v1/scf/run")
+        async def scf_run_endpoint(req: PySCFRunRequest):
+            s_req = SCFRunRequest(
+                query=req.query,
+                enable_scf=req.enable_scf,
+                enable_router=req.enable_router,
+                enable_verification=req.enable_verification,
+                enable_collective=req.enable_collective,
+                enable_latent_memory=req.enable_latent_memory,
+                enable_adaptive_compute=req.enable_adaptive_compute,
+                enable_speculative_decoding=req.enable_speculative_decoding,
+                enable_neural_candidates=req.enable_neural_candidates,
+                max_neural_tokens=req.max_neural_tokens,
+                adaptive_thinking=req.adaptive_thinking,
+            )
+            try:
+                return svc.handle_scf_run(s_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         @app.get("/v1/signals")
         async def signals_endpoint():
             return svc.handle_signals()
@@ -2851,8 +3292,15 @@ def create_app(service: Optional[NexusApiService] = None):
                 message=req.message,
                 persona=req.persona,
                 request_nonce=req.request_nonce,
+                use_neural_model=req.use_neural_model,
+                model_checkpoint=req.model_checkpoint,
+                speculative=req.speculative,
+                max_new_tokens=req.max_new_tokens,
             )
-            return svc.handle_chat(c_req)
+            try:
+                return svc.handle_chat(c_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         @app.get("/v1/personas")
         async def personas_endpoint():

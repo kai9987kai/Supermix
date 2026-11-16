@@ -1,0 +1,48 @@
+[
+  {
+    "checkpoint": "output/v91_cns_connectome/v91_cns_connectome.pt",
+    "cns_core": true,
+    "gate_mean_abs": 0.013998406891157522,
+    "gate_max_abs": 0.18028248846530914,
+    "gate_l2": 0.5968944125090474,
+    "edge_strength_ratio_median": 0.9999999923313679,
+    "edge_strength_ratio_p05_p95": [
+      0.997381439810668,
+      1.002004704728719
+    ],
+    "edges_grown_2x": 0,
+    "edges_shrunk_half": 0,
+    "abs_spectral_radius": 0.8999458334295463,
+    "signed_spectral_radius": 0.5473490977024077,
+    "signed_max_real_eigenvalue": 0.5208179255066476,
+    "leak_mean": 0.5003740908500577,
+    "leak_min_max": [
+      0.45710413839754827,
+      0.6180404932024277
+    ],
+    "node_bias_mean_abs": 0.030399227514863014
+  },
+  {
+    "checkpoint": "output/v91_cns_rewired/v91_cns_rewired.pt",
+    "cns_core": true,
+    "gate_mean_abs": 0.0033295227702971886,
+    "gate_max_abs": 0.11359250545501709,
+    "gate_l2": 0.21991009054543523,
+    "edge_strength_ratio_median": 1.0000000011144974,
+    "edge_strength_ratio_p05_p95": [
+      0.9989566674087573,
+      1.0006419989957458
+    ],
+    "edges_grown_2x": 0,
+    "edges_shrunk_half": 0,
+    "abs_spectral_radius": 0.8998433995234368,
+    "signed_spectral_radius": 0.7130453653118851,
+    "signed_max_real_eigenvalue": 0.7130453653118851,
+    "leak_mean": 0.49962070727542585,
+    "leak_min_max": [
+      0.440974206148283,
+      0.5795021703990448
+    ],
+    "node_bias_mean_abs": 0.020885460078716278
+  }
+]

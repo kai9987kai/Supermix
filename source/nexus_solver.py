@@ -32,14 +32,16 @@ Available pattern families include:
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import math
+import operator as _op
 import re
 from dataclasses import asdict, dataclass, field
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import science_plan as v71_science
 
@@ -217,6 +219,31 @@ class NexusSolver:
         s = f"{val_float:.{max_decimals}f}".rstrip("0").rstrip(".")
         return s
 
+    @staticmethod
+    def _bridge_answer_value(ans_dict: Dict[str, Any]) -> Optional[float]:
+        """The numeric answer of a `science_plan` result, or None.
+
+        `science_plan.solve_science_scenario` writes its answer under
+        ``"exact"`` as a fraction string (``"32"``, ``"161/5"``); this bridge
+        read only ``"fraction"``, a key that result never carries, so every
+        query the v71 path solved came back with ``answer_value=None``. Nothing
+        noticed until v93 added `final_velocity` (``v = u + a t``, the one
+        registry formula `build_omni_corpus` uses): `verify` compares
+        ``answer_value`` to the generator's answer, so a None dropped 100% of
+        the task at build time -- 0 of 200 smoke draws verified before this
+        line, 200 of 200 after. Both keys are read so a result that carries
+        either still bridges; an unparseable value stays None rather than
+        raising, which keeps the fall-through to the extended solvers intact.
+        """
+
+        for key in ("fraction", "exact"):
+            if key in ans_dict:
+                try:
+                    return float(Fraction(str(ans_dict[key])))
+                except (ValueError, ZeroDivisionError, TypeError):
+                    return None
+        return None
+
     def solve(self, query: str) -> SolverResult:
         """Master solve dispatcher across all scientific and mathematical domains."""
         query_clean = query.strip()
@@ -233,7 +260,7 @@ class NexusSolver:
                 scenario=v71_res.get("scenario", ""),
                 target=v71_res.get("target", ""),
                 formula_id=v71_res.get("formula_id", ""),
-                answer_value=float(ans_dict.get("fraction", 0.0)) if "fraction" in ans_dict else None,
+                answer_value=self._bridge_answer_value(ans_dict),
                 display_answer=ans_dict.get("display", ""),
                 unit=ans_dict.get("unit", ""),
                 steps=[
@@ -278,6 +305,9 @@ class NexusSolver:
             self._solve_series_progressions,
             self._solve_geometry_trig,
             self._solve_combinatorics_stats,
+            self._solve_natural_combinatorics,
+            self._solve_code_expression,
+            self._solve_python_ast_trace,
         ]
 
         for s_func in solvers:
@@ -300,6 +330,304 @@ class NexusSolver:
             unit="",
             explanation="Could not match deterministic formula pattern with complete parameters.",
         )
+
+    def _solve_natural_combinatorics(self, q: str) -> Optional[SolverResult]:
+        """Solve natural-language C(n, k) and P(n, k) combinatorics queries."""
+        lower = q.lower()
+        if any(neg in lower for neg in ("do not", "don't", "check proof", "verify proof")):
+            return None
+
+        # Explicit permutations: "permutations n=5 k=2"
+        perm_explicit = re.fullmatch(
+            r"\s*(?:please\s+)?permutations\s+n\s*=\s*(\d+)\s*(?:,\s*)?k\s*=\s*(\d+)\s*[?.!]?",
+            lower,
+        )
+        if perm_explicit:
+            n_val, k_val = int(perm_explicit.group(1)), int(perm_explicit.group(2))
+            if 0 <= k_val <= n_val <= 1000:
+                val = Fraction(math.perm(n_val, k_val))
+                disp = self._format_fraction(val)
+                steps = [
+                    DerivationStep(1, "Compute permutations P(n, k)", "P(n, k) = \\frac{n!}{(n-k)!}", f"P({n_val}, {k_val}) = {disp}", disp)
+                ]
+                receipt = self._build_receipt("combinatorics", "mathematics", "permutations", "math.permutations", {"n": str(n_val), "k": str(k_val)}, str(val), disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "combinatorics", "permutations", "math.permutations", float(val), disp, "", steps, receipt, f"Permutations P({n_val}, {k_val}) = {disp}.")
+
+        # Natural permutation: "arranged (in order) from N"
+        if re.search(r"\b(?:permut\w*|arrang(?:e|ed|ing|ements?)|in\s+order)\b", lower):
+            m = re.search(r"\b(\d+)\s+items?\b.*?\b(?:from|of)\s+(\d+)\b", lower)
+            if m:
+                k_val, n_val = int(m.group(1)), int(m.group(2))
+                if 0 <= k_val <= n_val <= 1000:
+                    val = Fraction(math.perm(n_val, k_val))
+                    disp = self._format_fraction(val)
+                    steps = [
+                        DerivationStep(1, "Compute permutations P(n, k)", "P(n, k) = \\frac{n!}{(n-k)!}", f"P({n_val}, {k_val}) = {disp}", disp)
+                    ]
+                    receipt = self._build_receipt("combinatorics", "mathematics", "permutations", "math.permutations", {"n": str(n_val), "k": str(k_val)}, str(val), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "combinatorics", "permutations", "math.permutations", float(val), disp, "", steps, receipt, f"Permutations P({n_val}, {k_val}) = {disp}.")
+
+        # Natural combination: "Choosing K out of N" / "K items be chosen from N"
+        m = re.search(r"\bchoosing\s+(\d+)\s+(?:out\s+of|from)\s+(\d+)\b", lower) or re.search(
+            r"\b(\d+)\s+items?\b.*?\b(?:chosen|selected|picked)\s+from\s+(\d+)\b",
+            lower,
+        )
+        if m:
+            k_val, n_val = int(m.group(1)), int(m.group(2))
+            if 0 <= k_val <= n_val <= 1000:
+                val = Fraction(math.comb(n_val, k_val))
+                disp = self._format_fraction(val)
+                steps = [
+                    DerivationStep(1, "Compute combinations C(n, k)", "\\binom{n}{k} = \\frac{n!}{k!(n-k)!}", f"C({n_val}, {k_val}) = {disp}", disp)
+                ]
+                receipt = self._build_receipt("combinatorics", "mathematics", "combinations", "math.combinations", {"n": str(n_val), "k": str(k_val)}, str(val), disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "combinatorics", "combinations", "math.combinations", float(val), disp, "", steps, receipt, f"Combinations C({n_val}, {k_val}) = {disp}.")
+
+        return None
+
+    def _solve_python_ast_trace(self, q: str) -> Optional[SolverResult]:
+        """Safely execute bounded straight-line/loop Python snippets using AST interpretation (no eval/exec)."""
+        lower = q.lower()
+        if any(tok in lower for tok in ("do not", "don't", "check proof", "verify proof", "denoise thought", "import ", "__", "eval", "exec", "lambda", "solve for ")):
+            return None
+
+        # Require recognizable assignment syntax plus a code structural clue
+        if not re.search(r"\b[a-zA-Z_]\w*\s*=\s*", q):
+            return None
+        if not any(tok in q for tok in ("\n", ";", "for ", "while ", "range(", "sum(", "min(", "max(", ".count(", "nums[", "%", "//")):
+            return None
+
+        target_var: Optional[str] = None
+        body = q.strip()
+
+        # Strip common leading instruction wrappers
+        lead_patterns = [
+            re.compile(r"^\s*Python\s*:\s*", re.IGNORECASE),
+            re.compile(r"^\s*What\s+does\s+([a-zA-Z_]\w*)\s+hold(?:\s+at\s+the\s+end)?\s*\?\s*", re.IGNORECASE),
+            re.compile(r"^\s*Trace\s+this(?:\s+Python)?(?:\s+and\s+give\s+([a-zA-Z_]\w*))?\s*[.:]?\s*", re.IGNORECASE),
+        ]
+        for pat in lead_patterns:
+            m = pat.match(body)
+            if m:
+                if m.lastindex and m.group(1):
+                    target_var = m.group(1)
+                body = body[m.end():].strip()
+
+        # Strip common trailing question wrappers
+        trail_patterns = [
+            re.compile(r"[\s.]*What\s+is\s+([a-zA-Z_]\w*)\s+after\s+this\s+runs\s*\?\s*$", re.IGNORECASE),
+            re.compile(r"[\s.]*(?:What\s+is|Final|Give(?:\s+the\s+value\s+of)?)\s+([a-zA-Z_]\w*)\s*[?.!]?\s*$", re.IGNORECASE),
+            re.compile(r"[\s.]+([a-zA-Z_]\w*)\s*\?\s*$"),
+        ]
+        for pat in trail_patterns:
+            m = pat.search(body)
+            if m:
+                target_var = m.group(1)
+                body = body[:m.start()].rstrip()
+
+        if not body or len(body) > 800:
+            return None
+
+        try:
+            tree = ast.parse(body, mode="exec")
+        except SyntaxError:
+            return None
+        if not tree.body:
+            return None
+
+        env: Dict[str, Any] = {}
+        budget = [500]
+        last_assigned: Optional[str] = None
+
+        _BIN_OPS = {
+            ast.Add: _op.add,
+            ast.Sub: _op.sub,
+            ast.Mult: _op.mul,
+            ast.FloorDiv: _op.floordiv,
+            ast.Mod: _op.mod,
+            ast.Div: _op.truediv,
+        }
+        _CMP_OPS = {
+            ast.Eq: _op.eq,
+            ast.NotEq: _op.ne,
+            ast.Lt: _op.lt,
+            ast.LtE: _op.le,
+            ast.Gt: _op.gt,
+            ast.GtE: _op.ge,
+            ast.In: lambda a, b: a in b,
+            ast.NotIn: lambda a, b: a not in b,
+        }
+
+        def _tick() -> None:
+            budget[0] -= 1
+            if budget[0] <= 0:
+                raise ValueError("AST step limit exceeded")
+
+        def _eval_expr(node: ast.AST) -> Any:
+            _tick()
+            if isinstance(node, ast.Constant):
+                if isinstance(node.value, (int, float, bool)) and not isinstance(node.value, bool):
+                    return node.value
+                if isinstance(node.value, bool):
+                    return node.value
+                raise ValueError("Unsupported constant")
+            if isinstance(node, ast.Name):
+                if node.id not in env:
+                    raise ValueError(f"Unbound name {node.id}")
+                return env[node.id]
+            if isinstance(node, ast.List):
+                if len(node.elts) > 256:
+                    raise ValueError("List literal too large")
+                return [_eval_expr(e) for e in node.elts]
+            if isinstance(node, ast.Tuple):
+                if len(node.elts) > 256:
+                    raise ValueError("Tuple literal too large")
+                return tuple(_eval_expr(e) for e in node.elts)
+            if isinstance(node, ast.UnaryOp):
+                v = _eval_expr(node.operand)
+                if isinstance(node.op, ast.USub):
+                    return -v
+                if isinstance(node.op, ast.UAdd):
+                    return +v
+                if isinstance(node.op, ast.Not):
+                    return not v
+                raise ValueError("Unsupported unary op")
+            if isinstance(node, ast.BinOp):
+                fn = _BIN_OPS.get(type(node.op))
+                if fn is None:
+                    raise ValueError("Unsupported binary op")
+                l_val = _eval_expr(node.left)
+                r_val = _eval_expr(node.right)
+                res = fn(l_val, r_val)
+                if isinstance(res, (int, float)) and abs(res) > 10**9:
+                    raise ValueError("Numeric bound exceeded")
+                return res
+            if isinstance(node, ast.Compare):
+                left = _eval_expr(node.left)
+                for cmp_op, comp_node in zip(node.ops, node.comparators):
+                    fn = _CMP_OPS.get(type(cmp_op))
+                    if fn is None:
+                        raise ValueError("Unsupported compare")
+                    right = _eval_expr(comp_node)
+                    if not fn(left, right):
+                        return False
+                    left = right
+                return True
+            if isinstance(node, ast.BoolOp):
+                if isinstance(node.op, ast.And):
+                    for v in node.values:
+                        if not _eval_expr(v):
+                            return False
+                    return True
+                if isinstance(node.op, ast.Or):
+                    for v in node.values:
+                        if _eval_expr(v):
+                            return True
+                    return False
+                raise ValueError("Unsupported bool op")
+            if isinstance(node, ast.IfExp):
+                return _eval_expr(node.body) if _eval_expr(node.test) else _eval_expr(node.orelse)
+            if isinstance(node, ast.Subscript):
+                seq = _eval_expr(node.value)
+                if not isinstance(seq, (list, tuple)):
+                    raise ValueError("Subscript target must be sequence")
+                idx = _eval_expr(node.slice)
+                if not isinstance(idx, int) or isinstance(idx, bool):
+                    raise ValueError("Subscript index must be int")
+                return seq[idx]
+            if isinstance(node, ast.Call):
+                if node.keywords:
+                    raise ValueError("Keyword arguments unsupported")
+                if isinstance(node.func, ast.Name):
+                    fname = node.func.id
+                    args = [_eval_expr(a) for a in node.args]
+                    if fname == "range":
+                        if not (1 <= len(args) <= 3) or any(not isinstance(a, int) or isinstance(a, bool) for a in args):
+                            raise ValueError("Invalid range")
+                        r_obj = range(*args)
+                        if len(r_obj) > 500:
+                            raise ValueError("Range too long")
+                        return list(r_obj)
+                    if fname in {"sum", "min", "max", "len"} and len(args) == 1:
+                        seq = args[0]
+                        if not isinstance(seq, (list, tuple)):
+                            raise ValueError("Expected sequence")
+                        return {"sum": sum, "min": min, "max": max, "len": len}[fname](seq)
+                    if fname == "abs" and len(args) == 1 and isinstance(args[0], (int, float)):
+                        return abs(args[0])
+                    raise ValueError(f"Unsupported call {fname}")
+                if isinstance(node.func, ast.Attribute) and node.func.attr == "count" and len(node.args) == 1:
+                    recv = _eval_expr(node.func.value)
+                    if not isinstance(recv, (list, tuple)):
+                        raise ValueError("Count target must be sequence")
+                    return recv.count(_eval_expr(node.args[0]))
+                raise ValueError("Unsupported call target")
+            raise ValueError(f"Unsupported AST expression {type(node).__name__}")
+
+        def _exec_stmt(stmt: ast.stmt) -> None:
+            nonlocal last_assigned
+            _tick()
+            if isinstance(stmt, ast.Assign):
+                if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                    raise ValueError("Single variable assign only")
+                val = _eval_expr(stmt.value)
+                name = stmt.targets[0].id
+                env[name] = val
+                last_assigned = name
+            elif isinstance(stmt, ast.AugAssign):
+                if not isinstance(stmt.target, ast.Name):
+                    raise ValueError("Single variable augassign only")
+                fn = _BIN_OPS.get(type(stmt.op))
+                if fn is None or stmt.target.id not in env:
+                    raise ValueError("Invalid augassign")
+                env[stmt.target.id] = fn(env[stmt.target.id], _eval_expr(stmt.value))
+                last_assigned = stmt.target.id
+            elif isinstance(stmt, ast.For):
+                if stmt.orelse or not isinstance(stmt.target, ast.Name):
+                    raise ValueError("Invalid for loop")
+                seq = _eval_expr(stmt.iter)
+                if not isinstance(seq, (list, tuple)) or len(seq) > 500:
+                    raise ValueError("Invalid loop iterable")
+                loop_var = stmt.target.id
+                for item in seq:
+                    _tick()
+                    env[loop_var] = item
+                    for sub in stmt.body:
+                        _exec_stmt(sub)
+            elif isinstance(stmt, ast.While):
+                if stmt.orelse:
+                    raise ValueError("While-else unsupported")
+                while _eval_expr(stmt.test):
+                    _tick()
+                    for sub in stmt.body:
+                        _exec_stmt(sub)
+            elif isinstance(stmt, ast.If):
+                branch = stmt.body if _eval_expr(stmt.test) else stmt.orelse
+                for sub in branch:
+                    _exec_stmt(sub)
+            else:
+                raise ValueError(f"Unsupported AST statement {type(stmt).__name__}")
+
+        try:
+            for stmt in tree.body:
+                _exec_stmt(stmt)
+        except Exception:
+            return None
+
+        out_name = target_var if target_var in env else ("r" if "r" in env else last_assigned)
+        if not out_name or out_name not in env:
+            return None
+        val = env[out_name]
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return None
+
+        frac = self._normalize_num(str(val))
+        disp = self._format_fraction(frac)
+        steps = [
+            DerivationStep(1, f"Execute bounded Python AST trace ({500 - budget[0]} ops)", out_name, f"{out_name} = {disp}", disp)
+        ]
+        receipt = self._build_receipt("python_trace", "computer_science", out_name, "code.ast_trace", {"target": out_name}, str(frac), disp, "dimensionless", steps)
+        return SolverResult(True, q, "computer_science", "python_trace", out_name, "code.ast_trace", float(frac), disp, "", steps, receipt, f"Result for {out_name} is {disp}.")
 
     # --------------------------------------------------------------------------
     # 1. Kinematics Extended Solver
@@ -326,6 +654,19 @@ class NexusSolver:
                 ]
                 receipt = self._build_receipt("kinematics", "physics", "final_velocity", "torricelli.final_velocity", {"u": str(u), "a": str(a), "s": str(s)}, str(v_frac), disp, "m/s", steps)
                 return SolverResult(True, q, "physics", "kinematics", "final_velocity", "torricelli.final_velocity", v_val, disp, "m/s", steps, receipt, f"Final velocity is {disp} m/s.")
+
+        # Constant acceleration final velocity: v = u + a * t
+        if u_m and a_m and t_m and not s_m and ("final velocity" in q.lower() or "velocity after" in q.lower() or "velocity" in q.lower()):
+            u = self._normalize_num(u_m.group(1))
+            a = self._normalize_num(a_m.group(1))
+            t = self._normalize_num(t_m.group(1))
+            v = u + a * t
+            disp = self._format_fraction(v)
+            steps = [
+                DerivationStep(1, "Apply first kinematic equation for constant acceleration", "v = u + a t", f"v = {u} + ({a})({t}) = {disp}", disp, "m/s")
+            ]
+            receipt = self._build_receipt("kinematics", "physics", "final_velocity", "kinematics.final_velocity", {"u": str(u), "a": str(a), "t": str(t)}, str(v), disp, "m/s", steps)
+            return SolverResult(True, q, "physics", "kinematics", "final_velocity", "kinematics.final_velocity", float(v), disp, "m/s", steps, receipt, f"Final velocity is {disp} m/s.")
 
         # Average velocity: v_avg = (u + v) / 2
         v_m = re.search(r"(?:final velocity|v)\s*(?:=|is|of)?\s*(-?\d+(?:\.\d+)?)\s*m/s", q, re.I)
@@ -610,9 +951,9 @@ class NexusSolver:
     # 7. Electromagnetism & Circuits (V=IR, P=VI=I^2R=V^2/R, Req series/parallel)
     # --------------------------------------------------------------------------
     def _solve_circuits_electromagnetism(self, q: str) -> Optional[SolverResult]:
-        v_m = re.search(r"(?:voltage|V|potential difference)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(V|mV|kV)\b", q, re.I)
+        v_m = re.search(r"(?:voltage|V|potential difference)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(V|mV|kV)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(V|mV|kV)\b", q, re.I) if any(k in q.lower() for k in ("current", "ohm", "resistor", "power")) else None)
         i_m = re.search(r"(?:current|I)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(A|mA)\b", q, re.I)
-        r_m = re.search(r"(?:resistance|R)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(ohm|ohms|Ω|kohm|kΩ)\b", q, re.I)
+        r_m = re.search(r"(?:resistance|R)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(ohm|ohms|Ω|kohm|kΩ)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(ohm|ohms|Ω|kohm|kΩ)\b", q, re.I) if any(k in q.lower() for k in ("current", "voltage", "potential difference", "resistor")) else None)
         r1_m = re.search(r"R1\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(ohm|ohms|Ω|kohm|kΩ)\b", q, re.I)
         r2_m = re.search(r"R2\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(ohm|ohms|Ω|kohm|kΩ)\b", q, re.I)
 
@@ -671,12 +1012,12 @@ class NexusSolver:
     # 8. Waves & Optics (v = f * lambda, T = 1/f, E = hf)
     # --------------------------------------------------------------------------
     def _solve_waves_optics(self, q: str) -> Optional[SolverResult]:
-        f_m = re.search(r"(?:frequency|f)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(Hz|kHz|MHz|GHz)\b", q, re.I)
-        lam_m = re.search(r"(?:wavelength|lambda)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(m|cm|mm|nm)\b", q, re.I)
-        v_m = re.search(r"(?:wave speed|speed|v)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*m/s\b", q, re.I)
+        _wave_ctx = "wave" in q.lower() or "wavelength" in q.lower()
+        f_m = re.search(r"(?:frequency|f)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(Hz|kHz|MHz|GHz)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(Hz|kHz|MHz|GHz)\b", q, re.I) if _wave_ctx else None)
+        lam_m = re.search(r"(?:wavelength|lambda)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(m|cm|mm|nm)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(m|cm|mm|nm)\b", q, re.I) if _wave_ctx else None)
 
         # Wave Speed: v = f * lambda
-        if f_m and lam_m and ("wave speed" in q.lower() or "speed of wave" in q.lower() or "velocity" in q.lower()):
+        if f_m and lam_m and ("wave speed" in q.lower() or "speed of wave" in q.lower() or "speed of a wave" in q.lower() or "velocity" in q.lower() or ("wave" in q.lower() and "speed" in q.lower())):
             f_scale = {"hz": Fraction(1), "khz": Fraction(1000), "mhz": Fraction(1000000), "ghz": Fraction(10**9)}
             lam_scale = {"m": Fraction(1), "cm": Fraction(1, 100), "mm": Fraction(1, 1000), "nm": Fraction(1, 10**9)}
             freq = self._normalize_num(f_m.group(1)) * f_scale[f_m.group(2).lower()]
@@ -711,9 +1052,9 @@ class NexusSolver:
         m1_m = re.search(r"(?:initial concentration|M1|C1)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(?:M|mol/L)\b", q, re.I)
         v1_m = re.search(r"(?:initial volume|V1)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(mL|L|liters)\b", q, re.I)
         m2_m = re.search(r"(?:target concentration|final concentration|M2|C2)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(?:M|mol/L)\b", q, re.I)
-        v2_m = re.search(r"(?:final volume|V2)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(mL|L|liters)\b", q, re.I)
-        n_m = re.search(r"(?:moles|amount|n)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*mol\b", q, re.I)
-        vol_m = re.search(r"(?:volume|V)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(L|mL)\b", q, re.I)
+        _chem_ctx = "molar" in q.lower() or "concentration" in q.lower()
+        n_m = re.search(r"(?:moles|amount|n)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*mol\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*mol\b", q) if _chem_ctx else None)
+        vol_m = re.search(r"(?:volume|V)\s*(?:=|is|of)?\s*(\d+(?:\.\d+)?)\s*(L|mL)\b", q, re.I) or (re.search(r"\b(\d+(?:\.\d+)?)\s*(L|mL)\b", q) if _chem_ctx else None)
 
         # Molarity: M = n / V
         if n_m and vol_m and ("molarity" in q.lower() or "concentration" in q.lower()) and not m1_m:
@@ -862,15 +1203,32 @@ class NexusSolver:
     # --------------------------------------------------------------------------
     def _solve_series_progressions(self, q: str) -> Optional[SolverResult]:
         # Arithmetic: Sn = n/2 * (2a + (n-1)d)
-        a_m = re.search(r"(?:first term|a1|a)\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
-        d_m = re.search(r"(?:common difference|difference|d)\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
-        r_m = re.search(r"(?:common ratio|ratio|r)\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
-        n_m = re.search(r"(?:number of terms|terms|n)\s*(?:=|is)?\s*(\d+)", q, re.I)
+        a_m = re.search(
+            r"(?:first\s+term|starts?\s+at|starting\s+at|a1|a)\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)",
+            q,
+            re.I,
+        )
+        d_m = re.search(
+            r"(?:common\s+difference|difference|d)\s*(?:=|is|of)?\s*(-?\d+(?:\.\d+)?)",
+            q,
+            re.I,
+        )
+        r_m = re.search(r"(?:common\s+ratio|ratio|r)\s*(?:=|is|of)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
+        n_m = re.search(
+            r"(?:(?:number\s+of\s+terms|n)\s*(?:=|is)?\s*(\d+)|(?:sum\s+of\s+(?:the\s+)?first\s+|first\s+)(\d+)\s+terms?\b|\b(\d+)\s+terms?\b)",
+            q,
+            re.I,
+        )
+        n_group = next((g for g in n_m.groups() if g is not None), None) if n_m else None
 
-        if a_m and d_m and n_m and ("arithmetic series" in q.lower() or "arithmetic progression" in q.lower() or "sum of arithmetic" in q.lower()):
+        if a_m and d_m and n_group and (
+            "arithmetic series" in q.lower()
+            or "arithmetic progression" in q.lower()
+            or "sum of arithmetic" in q.lower()
+        ):
             a = self._normalize_num(a_m.group(1))
             d = self._normalize_num(d_m.group(1))
-            n = self._normalize_num(n_m.group(1))
+            n = self._normalize_num(n_group)
             # Sn = n/2 * (2a + (n-1)d)
             sn = (n / 2) * (2*a + (n-1)*d)
             disp = self._format_fraction(sn)
@@ -880,10 +1238,10 @@ class NexusSolver:
             receipt = self._build_receipt("series", "mathematics", "arithmetic_sum", "math.arithmetic_series", {"a": str(a), "d": str(d), "n": str(n)}, str(sn), disp, "dimensionless", steps)
             return SolverResult(True, q, "mathematics", "series", "arithmetic_sum", "math.arithmetic_series", float(sn), disp, "", steps, receipt, f"Sum of arithmetic series is {disp}.")
 
-        if a_m and r_m and n_m and ("geometric series" in q.lower() or "geometric progression" in q.lower() or "sum of geometric" in q.lower()):
+        if a_m and r_m and n_group and ("geometric series" in q.lower() or "geometric progression" in q.lower() or "sum of geometric" in q.lower()):
             a = self._normalize_num(a_m.group(1))
             r = self._normalize_num(r_m.group(1))
-            n = int(n_m.group(1))
+            n = int(n_group)
             if r != 1:
                 sn = a * (1 - r**n) / (1 - r)
                 disp = self._format_fraction(sn)
@@ -977,6 +1335,67 @@ class NexusSolver:
                 ]
                 receipt = self._build_receipt("combinatorics", "mathematics", "permutations", "math.permutations", {"n": str(n), "k": str(k)}, str(ans), disp, "dimensionless", steps)
                 return SolverResult(True, q, "mathematics", "combinatorics", "permutations", "math.permutations", float(ans), disp, "", steps, receipt, f"Number of permutations P({n},{k}) = {disp}.")
+
+        return None
+
+    # --------------------------------------------------------------------------
+    # 16. Bounded Python Expression Evaluation (v93 Code Families, Zero eval())
+    # --------------------------------------------------------------------------
+    def _solve_code_expression(self, q: str) -> Optional[SolverResult]:
+        # code_range_sum: r = sum(range(stop)) or r = sum(range(start, stop))
+        range_m = re.search(r"\bsum\s*\(\s*range\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+)\s*)?\)\s*\)", q)
+        if range_m:
+            if range_m.group(2) is None:
+                start, stop = 0, int(range_m.group(1))
+            else:
+                start, stop = int(range_m.group(1)), int(range_m.group(2))
+            if abs(stop - start) <= 10000:
+                total = sum(range(start, stop))
+                disp = str(total)
+                steps = [
+                    DerivationStep(1, "Evaluate integer arithmetic range summation", f"\\sum_{{i={start}}}^{{{stop - 1}}} i", f"sum(range({start}, {stop})) = {disp}", disp)
+                ]
+                receipt = self._build_receipt("code", "programming", "code_range_sum", "code.range_sum", {"start": str(start), "stop": str(stop)}, str(total), disp, "dimensionless", steps)
+                return SolverResult(True, q, "programming", "code", "code_range_sum", "code.range_sum", float(total), disp, "", steps, receipt, f"Range sum evaluates to {disp}.")
+
+        # code_list_count: nums = [a, b, c, ...] ... nums.count(v) or [...].count(v)
+        count_m = re.search(
+            r"(?:nums\s*=\s*\[([^\]]+)\].*?nums|[(\[]\s*([^\]]+)\s*\])\.count\s*\(\s*(-?\d+)\s*\)",
+            q,
+            flags=re.DOTALL,
+        )
+        if count_m:
+            raw_list = count_m.group(1) or count_m.group(2) or ""
+            target_val = int(count_m.group(3))
+            if re.fullmatch(r"\s*-?\d+(?:\s*,\s*-?\d+)*\s*", raw_list):
+                items = [int(x.strip()) for x in raw_list.split(",")]
+                hits = sum(1 for item in items if item == target_val)
+                disp = str(hits)
+                steps = [
+                    DerivationStep(1, "Count occurrences in integer list literal", f"[{raw_list}].count({target_val})", f"count = {disp}", disp)
+                ]
+                receipt = self._build_receipt("code", "programming", "code_list_count", "code.list_count", {"items": raw_list, "value": str(target_val)}, str(hits), disp, "dimensionless", steps)
+                return SolverResult(True, q, "programming", "code", "code_list_count", "code.list_count", float(hits), disp, "", steps, receipt, f"List count evaluates to {disp}.")
+
+        # code_neg_index: nums = [a, b, ...] ... r = nums[-k] (single RHS subscript only,
+        # so multi-term expressions like `r = nums[1] + nums[2]` fall through to AST trace).
+        neg_m = re.search(
+            r"nums\s*=\s*\[([^\]]+)\][\s;,\n]*r\s*=\s*nums\s*\[\s*(-\d+)\s*\]\s*(?:$|(?:Final|What|Give)\b|[?.!])",
+            q,
+            flags=re.IGNORECASE,
+        )
+        if neg_m:
+            raw_list, idx_raw = neg_m.group(1), int(neg_m.group(2))
+            if re.fullmatch(r"\s*-?\d+(?:\s*,\s*-?\d+)*\s*", raw_list):
+                items = [int(x.strip()) for x in raw_list.split(",")]
+                if -len(items) <= idx_raw < len(items):
+                    val = items[idx_raw]
+                    disp = str(val)
+                    steps = [
+                        DerivationStep(1, "Index sequence element", f"nums[{idx_raw}]", f"[{raw_list}][{idx_raw}] = {disp}", disp)
+                    ]
+                    receipt = self._build_receipt("code", "programming", "code_neg_index", "code.neg_index", {"items": raw_list, "index": str(idx_raw)}, str(val), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "programming", "code", "code_neg_index", "code.neg_index", float(val), disp, "", steps, receipt, f"Indexed element is {disp}.")
 
         return None
 

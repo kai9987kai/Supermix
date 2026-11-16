@@ -1,0 +1,116 @@
+{
+  "schema": "supermix-scf91-model-compatibility-v1",
+  "generated_at": "2026-11-16T11:04:03+00:00",
+  "global_invariants": {
+    "speculative_with_adaptive_thinking_allowed": false,
+    "unverified_weights_claimed_trained": false,
+    "silent_tensor_mutation_allowed": false
+  },
+  "families": [
+    {
+      "family": "MiMoMix_v80_to_v96",
+      "class": "source/mimomix_core.py::MiMoMixModel",
+      "checkpoint_format": ".pt",
+      "on_disk_weights": [
+        "output/v80_omni/v80_omni.pt",
+        "output/v89_corpus/v89_corpus.pt",
+        "output/v91_cns_connectome/v91_cns_connectome.selected.pt",
+        "output/v93_neurogenesis/v93_neurogenesis.selected.pt",
+        "output/v96_physio_neurogenesis/v96_physio_neurogenesis.pt"
+      ],
+      "tensor_contract": "hidden=320 (v89/v91/v93/v96), 5-6 layers, 64+spare MoE top-2, vocab 8679->9415, cns_nodes=832 (64 spare)",
+      "decoding_policy": "speculative_generate allowed only when adaptive_thinking=False",
+      "maturity_status": "trained_checkpoint_present",
+      "production_authority": "experimental_connectome_extension_verified_in_eval"
+    },
+    {
+      "family": "MiMoMix_v53_v56_LatentReasoner",
+      "class": "source/mimomix_reasoner.py::LatentStateReasoner",
+      "checkpoint_format": ".pt",
+      "on_disk_weights": [
+        "output/hf_v56_publish/v56b_randslots_entropy.pt"
+      ],
+      "tensor_contract": "222 discrete reasoning state slots",
+      "decoding_policy": "latent slot transition forward (non-speculative)",
+      "maturity_status": "trained_checkpoint_present",
+      "production_authority": "promotion_gated"
+    },
+    {
+      "family": "ChampionNet_Legacy_and_CognitiveLeap_v50_v52",
+      "class": "source/model_variants.py::build_model",
+      "checkpoint_format": ".pth",
+      "on_disk_weights": [
+        "artifacts/v52_initialization/champion_model_chat_v50_cognitive_leap.pth",
+        "artifacts/v52_initialization/champion_model_chat_v52_initialized.pth",
+        "output/benchmark_v51_cognitive_leap_ultra/cognitive_leap_ultra_v51_trained.pth"
+      ],
+      "tensor_contract": "256-dim / expanded feature backbones with detect_model_size_from_state_dict inference",
+      "decoding_policy": "progressive_auto_compute_forward with prediction stability guard",
+      "maturity_status": "mixed_trained_and_experimental",
+      "experimental_subclasses": [
+        "LiquidSpikingTensorExpertHead",
+        "OmniversalQuantumExpertHead",
+        "FractalGenesisExpertHead"
+      ]
+    },
+    {
+      "family": "Qwen_LoRA_Adapters",
+      "class": "source/qwen_adapter_promotion.py",
+      "checkpoint_format": ".safetensors",
+      "on_disk_weights": [
+        "artifacts/autoresearch/continue_verify_20260320/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/distill_rank_iter_20260321/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/paper_iter_20260321/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/pref_len_ctrl_iter_20260321/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/pref_stop_iter_20260321/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/scoped_token_budget_iter_20260321/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/self_play_iter_20260321/adapter/adapter_model.safetensors",
+        "artifacts/autoresearch/token_budget_iter_20260321_c/adapter/adapter_model.safetensors",
+        "artifacts/qwen_supermix_auto_verify_20260320/adapter/adapter_model.safetensors",
+        "dist/SupermixStudioDesktop/_internal/bundled_base_model/model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v1_seed5201/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00016/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00024/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v2_seed5202/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00048/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00072/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00096/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/checkpoints/sft_step_00016/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/checkpoints/sft_step_00016/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v5_hardened_seed5204/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00048/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00072/adapter/adapter_model.safetensors",
+        "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00096/adapter/adapter_model.safetensors"
+      ],
+      "tensor_contract": "PEFT LoRA adapter + bundled Qwen2.5/Qwen base model",
+      "decoding_policy": "Attested runtime adapter only after validate_promoted_adapter",
+      "maturity_status": "adapter_checkpoints_present_promotion_gated"
+    },
+    {
+      "family": "OmniCollective_Multimodal",
+      "class": "source/omni_collective_v42_model.py::OmniCollectiveEngineV42",
+      "checkpoint_format": ".pth (optional external bundles in DEFAULT_MODELS_DIR)",
+      "on_disk_weights": [],
+      "tensor_contract": "Text + image feature vectors with domain routing heads",
+      "decoding_policy": "Multi-pass budget routing (short/medium/deep); degrades gracefully if .pth absent",
+      "maturity_status": "source_present_external_weights_optional"
+    },
+    {
+      "family": "NexusMind_Symbolic_and_Epistemic",
+      "class": "source/nexus_engine.py::NexusEngine",
+      "checkpoint_format": "deterministic_python_plus_numpy",
+      "on_disk_weights": [
+        "built_in_no_external_weights_required"
+      ],
+      "tensor_contract": "Structured request/receipt dataclasses + NumPy distributions",
+      "decoding_policy": "Independent deterministic verifier + advisory answer_authority=False diagnostics",
+      "maturity_status": "production_verified_deterministic_core_plus_experimental_diagnostics"
+    }
+  ]
+}

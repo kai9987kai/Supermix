@@ -129,6 +129,16 @@ class ModelRegistry:
                     entry["vocab_size"] = loaded.tokenizer.vocab_size
                     entry["parameters"] = sum(p.numel() for p in loaded.model.parameters())
                     entry["dev_loss"] = loaded.extra.get("best_dev_loss")
+                    cfg = getattr(loaded.model, "config", None)
+                    if cfg is not None:
+                        entry["architecture"] = {
+                            "cns_core": bool(getattr(cfg, "use_cns_core", False)),
+                            "cns_dual_soma": bool(getattr(cfg, "cns_dual_soma", False)),
+                            "cns_hebbian_trace": bool(getattr(cfg, "cns_hebbian_trace", False)),
+                            "cns_predictive_error": bool(getattr(cfg, "cns_predictive_error", False)),
+                            "thinking_entropy_halt": bool(getattr(cfg, "thinking_entropy_halt", False)),
+                            "run_name": loaded.extra.get("run_name"),
+                        }
                 except Exception:  # noqa: BLE001 - detail is optional, listing is not
                     entry["detail_unavailable"] = True
             out.append(entry)
@@ -174,16 +184,195 @@ class ModelRegistry:
 class GenerationProgress:
     tokens: int = 0
     finish_reason: str = "length"
+    acceptance_length: Optional[float] = None
+    drafted_tokens: int = 0
+    accepted_draft_tokens: int = 0
+    verify_forwards: int = 0
 
 
 def generation_details(reply: str, progress: GenerationProgress, cap: int) -> Dict[str, Any]:
-    return {
+    out = {
         "tokens": progress.tokens,
         "max_new_tokens": cap,
         "finish_reason": progress.finish_reason,
         "hit_token_cap": progress.finish_reason == "length",
         "truncated": solving.is_truncated(reply, progress.tokens, cap),
     }
+    if progress.acceptance_length is not None:
+        out["speculative_stats"] = {
+            "acceptance_length": round(float(progress.acceptance_length), 4),
+            "drafted_tokens": int(progress.drafted_tokens),
+            "accepted_draft_tokens": int(progress.accepted_draft_tokens),
+            "verify_forwards": int(progress.verify_forwards),
+        }
+    return out
+
+
+def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
+    fn = getattr(model, "telemetry", None)
+    if not callable(fn):
+        return None
+    try:
+        tele = fn()
+        summary: Dict[str, Any] = {}
+        cns = tele.get("cns_core")
+        if isinstance(cns, dict):
+            summary["cns_core"] = {
+                "alive_nodes": cns.get("alive_nodes"),
+                "alive_edges": cns.get("edges_installed"),
+                "active_fraction": cns.get("active_fraction"),
+                "dual_soma": cns.get("dual_soma", False),
+                "glial_homeostasis": cns.get("glial_homeostasis", False),
+                "hebbian_trace": cns.get("hebbian_trace", False),
+                "hebbian_gain_mean": cns.get("hebbian_gain_mean"),
+                "hebbian_strength_mean_abs": cns.get("hebbian_strength_mean_abs"),
+                "predictive_error": cns.get("predictive_error", False),
+                "pred_error_norm": cns.get("pred_error_norm"),
+                "pred_error_strength_mean_abs": cns.get("pred_error_strength_mean_abs"),
+                "spectral_radius_est": cns.get("spectral_radius_est"),
+            }
+        thk = tele.get("thinking")
+        if isinstance(thk, dict):
+            summary["thinking"] = {
+                "cycles_used": thk.get("cycles_used"),
+                "exit_reason": thk.get("exit_reason"),
+                "cycle_entropies": thk.get("cycle_entropies"),
+            }
+        return summary or None
+    except Exception:
+        return None
+
+
+def _scf_verify_reply(asked: str, normalised_query: str, reply: str) -> Optional[Dict[str, Any]]:
+    try:
+        from scf.verification import SCFVerificationGate
+
+        res = SCFVerificationGate().verify(
+            query=asked,
+            candidate_answer=reply,
+            normalised_query=normalised_query,
+        )
+        if not res.get("verified"):
+            return {
+                "verified": False,
+                "verifier_source": res.get("verifier_source", "none"),
+            }
+        expected = res.get("verified_answer")
+        predicted_num = solving.extract_answer(reply)
+        agrees: Optional[bool] = None
+        if expected is not None and predicted_num is not None:
+            try:
+                agrees = solving.is_correct(predicted_num, float(expected))
+            except Exception:
+                agrees = None
+        return {
+            "verified": True,
+            "verified_answer": expected,
+            "verifier_source": res.get("verifier_source"),
+            "model_agrees": agrees,
+            "independent_certificate": res.get("independent_certificate"),
+            "proof_capsule": res.get("proof_capsule"),
+        }
+    except Exception:
+        return None
+
+
+def _scf_runtime_trace(
+    asked: str,
+    reply: str,
+    model_name: str,
+    mode: str,
+    recent_turns: Sequence[Tuple[str, str]] = (),
+) -> Optional[Dict[str, Any]]:
+    try:
+        from scf import CognitiveFabricRuntime, SCFFeatureFlags
+
+        flags = SCFFeatureFlags.all_enabled(speculative_decoding=(mode == "speculative"))
+        runtime = CognitiveFabricRuntime()
+        res = runtime.run_task(
+            asked,
+            flags_override=flags,
+            recent_turns=list(recent_turns),
+            adaptive_thinking=(mode != "speculative"),
+            candidate_generators={
+                "MiMoMix": lambda _q: {
+                    "family": "MiMoMix",
+                    "model_name": model_name,
+                    "answer": reply,
+                    "confidence": 0.62,
+                    "verified": False,
+                    "model_conditional": True,
+                }
+            },
+            enable_neural_candidates=False,
+        )
+        rec = res.get("receipt") or {}
+        routing = res.get("routing") or {}
+        return {
+            "scf_active": bool(res.get("scf_active")),
+            "verified": bool(res.get("verified")),
+            "final_answer": res.get("final_answer"),
+            "selected_family": routing.get("selected_family"),
+            "domain": (routing.get("assessment") or {}).get("domain"),
+            "decoding_policy": (res.get("adaptive_budget") or {}).get("decoding_policy"),
+            "experimental_components_used": rec.get("experimental_components_used") or [],
+            "production_ready_claim": bool(rec.get("production_ready_claim", False)),
+            "total_latency_ms": rec.get("total_latency_ms"),
+            "evidence_links": rec.get("evidence_links") or [],
+        }
+    except Exception:
+        return None
+
+
+def stream_speculative_tokens(
+    loaded: LoadedModel,
+    message: str,
+    history: Sequence[Tuple[str, str]],
+    max_new_tokens: int,
+    should_stop,
+    progress: Optional[GenerationProgress] = None,
+) -> Iterator[str]:
+    """Run exact greedy MTP self-speculative decode and yield word chunks."""
+    import mimomix_decoding as decoding
+
+    progress = progress if progress is not None else GenerationProgress()
+    tokenizer = loaded.tokenizer
+    ids: List[int] = []
+    for past_user, past_reply in history:
+        turn, _ = tokenizer.encode_turn(past_user, past_reply)
+        ids.extend(turn)
+    prompt, _ = tokenizer.encode_turn(message, None)
+    ids.extend(prompt)
+    prompt_tensor = torch.tensor([ids[-MAX_CONTEXT:]], dtype=torch.long)
+
+    with torch.no_grad():
+        res = decoding.speculative_generate(
+            loaded.model,
+            prompt_tensor,
+            max_new_tokens=max_new_tokens,
+            eos_token_id=text_utils.EOS,
+        )
+    new_toks = res.new_tokens[0].tolist()
+    progress.tokens = len(new_toks)
+    progress.finish_reason = "eos" if (new_toks and new_toks[-1] == text_utils.EOS) else (
+        "length" if len(new_toks) >= max_new_tokens else "eos"
+    )
+    if new_toks and new_toks[-1] == text_utils.EOS:
+        new_toks = new_toks[:-1]
+    progress.acceptance_length = float(getattr(res.stats, "acceptance_length", 1.0))
+    progress.drafted_tokens = int(getattr(res.stats, "drafted_tokens", 0))
+    progress.accepted_draft_tokens = int(getattr(res.stats, "accepted_draft_tokens", 0))
+    progress.verify_forwards = int(getattr(res.stats, "verify_forwards", 0))
+
+    emitted = ""
+    for i in range(1, len(new_toks) + 1):
+        if should_stop():
+            progress.finish_reason = "cancelled"
+            break
+        full = tokenizer.decode(new_toks[:i])
+        if len(full) > len(emitted):
+            yield full[len(emitted):]
+            emitted = full
 
 
 def check_reply(message: str, reply: str):
@@ -343,19 +532,19 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             return {}, "session_id must be a string"
         if type(payload.get("check", True)) is not bool:
             return {}, "check must be a boolean"
-        if payload.get("mode", "greedy") not in ("greedy", "sample"):
-            return {}, "mode must be greedy or sample"
+        if type(payload.get("scf_verify", False)) is not bool:
+            return {}, "scf_verify must be a boolean"
+        if type(payload.get("scf_runtime", False)) is not bool:
+            return {}, "scf_runtime must be a boolean"
+        mode = payload.get("mode", "greedy")
+        if mode not in ("greedy", "sample", "speculative"):
+            return {}, "mode must be greedy, speculative, or sample"
         try:
             cap = integer_option(payload, "max_new_tokens", DEFAULT_MAX_NEW_TOKENS, 1, MAX_NEW_TOKENS)
             temperature = float_option(payload, "temperature", 0.9, 0.05, 2.0)
             top_p = float_option(payload, "top_p", 0.9, 0.05, 1.0)
         except ValueError as exc:
             return {}, str(exc)
-        # Map how a person writes an operation onto the token v74 was trained
-        # on. Measured: "what is 47 times 6" answers 242, "What is 47 x 6?"
-        # answers 282. The rewrite is reported back so the interface can show
-        # what was actually asked rather than implying the model parsed the
-        # original.
         rewrite = prompt_normaliser.normalise(message) if normalise_prompts \
             else prompt_normaliser.Normalised(message, None, message)
         return {
@@ -365,10 +554,13 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             "model": name,
             "session_id": session_id if isinstance(session_id, str) and session_id else "default",
             "check": bool(payload.get("check", True)),
+            "scf_verify": bool(payload.get("scf_verify", False)),
+            "scf_runtime": bool(payload.get("scf_runtime", False)),
+            "mode": mode,
             "max_new_tokens": cap,
             "temperature": temperature,
             "top_p": top_p,
-            "greedy": payload.get("mode", "greedy") == "greedy",
+            "greedy": mode in ("greedy", "speculative"),
         }, None
 
     @app.get("/")
@@ -379,6 +571,37 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
     @app.get("/api/models")
     def models():
         return no_store({"models": registry.describe(), "max_resident": registry.max_resident})
+
+    @app.get("/api/scf_status")
+    def scf_status():
+        try:
+            from scf import SCF_INTERNAL_NAME, SCF_VERSION, SCFFeatureFlags
+            from scf.models import MiMoMixAdapter, SCFModelRegistry
+            from scf.verification import SCFVerificationGate
+
+            summary = SCFModelRegistry().summary()
+            atlas_probe = SCFVerificationGate().connectome_atlas.verify_query(
+                "How many Li20 neurons does the male CNS contain?"
+            )
+            return no_store({
+                "version": SCF_VERSION,
+                "name": SCF_INTERNAL_NAME,
+                "default_flags": SCFFeatureFlags().to_dict(),
+                "all_enabled_flags": SCFFeatureFlags.all_enabled().to_dict(),
+                "connectome_atlas_ready": bool(atlas_probe and atlas_probe.get("solved")),
+                "talk_checkpoints": MiMoMixAdapter().discover_talk_checkpoints(),
+                "families": {
+                    k: {
+                        "maturity_status": v.get("maturity_status"),
+                        "weights": len(v.get("available_weights") or []),
+                        "experimental_isolated": bool(v.get("experimental_isolated", False)),
+                    }
+                    for k, v in summary.items()
+                },
+                "server_models": registry.describe(),
+            })
+        except Exception as exc:  # noqa: BLE001
+            return no_store({"error": str(exc)}, 500)
 
     @app.get("/api/stats")
     def statistics():
@@ -392,12 +615,19 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
         pieces: List[str] = []
         progress = GenerationProgress()
         with loaded.lock:
-            for chunk in stream_tokens(
-                loaded, message, [], options["max_new_tokens"],
-                options["temperature"], options["top_p"], options["greedy"],
-                should_stop=lambda: False,
-                progress=progress,
-            ):
+            if options.get("mode") == "speculative":
+                gen_iter = stream_speculative_tokens(
+                    loaded, message, [], options["max_new_tokens"],
+                    should_stop=lambda: False, progress=progress,
+                )
+            else:
+                gen_iter = stream_tokens(
+                    loaded, message, [], options["max_new_tokens"],
+                    options["temperature"], options["top_p"], options["greedy"],
+                    should_stop=lambda: False,
+                    progress=progress,
+                )
+            for chunk in gen_iter:
                 pieces.append(chunk)
         elapsed = time.perf_counter() - started
         reply = "".join(pieces).strip()
@@ -407,11 +637,23 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             "latency_ms": round(elapsed * 1000, 2),
             **generation_details(reply, progress, options["max_new_tokens"]),
         }
+        arch_tele = _architecture_telemetry_snapshot(loaded.model)
+        if arch_tele is not None:
+            result["architecture_telemetry"] = arch_tele
         if loaded.recall is not None:
             result["recall"] = loaded.recall.score(reply).to_dict()
         if options.get("check", True):
             verdict = check_reply(message, reply)
             result["check"] = verdict.to_dict() if verdict else None
+        if options.get("scf_verify", False):
+            result["scf_check"] = _scf_verify_reply(options.get("asked", message), message, reply)
+        if options.get("scf_runtime", False):
+            result["scf_runtime"] = _scf_runtime_trace(
+                options.get("asked", message),
+                reply,
+                loaded.name,
+                options.get("mode", "greedy"),
+            )
         return result
 
     @app.post("/api/compare")
@@ -492,23 +734,36 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             return response
         try:
             loaded = registry.acquire(name)
+            use_scf = bool(payload.get("scf_verify", False))
             problems = solving.generate_novel(count, seed=seed)
             per_task: Dict[str, Dict[str, int]] = {}
+            scf_hybrid_correct = 0
             for problem in problems:
                 out = generate_once(
                     loaded, problem.prompt,
                     {"max_new_tokens": cap, "temperature": 0.9, "top_p": 0.9,
                      "greedy": True, "check": False},
                 )
-                bucket = per_task.setdefault(problem.task, {"n": 0, "correct": 0, "truncated": 0})
+                bucket = per_task.setdefault(problem.task, {"n": 0, "correct": 0, "truncated": 0, "scf_correct": 0})
                 bucket["n"] += 1
                 bucket["truncated"] += int(out["truncated"])
-                bucket["correct"] += int(
+                is_neural_ok = bool(
                     solving.is_correct(solving.extract_answer(out["reply"]), problem.answer)
                 )
+                bucket["correct"] += int(is_neural_ok)
+                is_hyb_ok = is_neural_ok
+                if use_scf:
+                    sc = _scf_verify_reply(problem.prompt, prompt_normaliser.normalise(problem.prompt).prompt, out["reply"])
+                    if sc and sc.get("verified") and sc.get("verified_answer") is not None:
+                        try:
+                            is_hyb_ok = bool(solving.is_correct(solving.extract_answer(str(sc["verified_answer"])), problem.answer))
+                        except Exception:
+                            pass
+                bucket["scf_correct"] += int(is_hyb_ok)
+                scf_hybrid_correct += int(is_hyb_ok)
             total = sum(b["n"] for b in per_task.values())
             correct = sum(b["correct"] for b in per_task.values())
-            return no_store({
+            resp_payload: Dict[str, Any] = {
                 "model": name,
                 "problems": total,
                 "correct": correct,
@@ -542,7 +797,11 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                     "noisy and may omit task families. This is not sealed holdout "
                     "or model-promotion evidence."
                 ),
-            })
+            }
+            if use_scf:
+                resp_payload["scf_hybrid_correct"] = scf_hybrid_correct
+                resp_payload["scf_hybrid_accuracy"] = round(scf_hybrid_correct / max(1, total), 4)
+            return no_store(resp_payload)
         finally:
             admission.release()
 
@@ -593,13 +852,21 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             progress = GenerationProgress()
             try:
                 with loaded.lock:
-                    for chunk in stream_tokens(
-                        loaded, options["message"], history,
-                        options["max_new_tokens"],
-                        options["temperature"], options["top_p"], options["greedy"],
-                        should_stop=cancelled.is_set,
-                        progress=progress,
-                    ):
+                    if options.get("mode") == "speculative":
+                        gen_iter = stream_speculative_tokens(
+                            loaded, options["message"], history,
+                            options["max_new_tokens"],
+                            should_stop=cancelled.is_set, progress=progress,
+                        )
+                    else:
+                        gen_iter = stream_tokens(
+                            loaded, options["message"], history,
+                            options["max_new_tokens"],
+                            options["temperature"], options["top_p"], options["greedy"],
+                            should_stop=cancelled.is_set,
+                            progress=progress,
+                        )
+                    for chunk in gen_iter:
                         pieces.append(chunk)
                         yield f"event: token\ndata: {json.dumps({'text': chunk})}\n\n"
                 elapsed = time.perf_counter() - started
@@ -607,8 +874,6 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                 summary: Dict[str, Any] = {
                     "model": loaded.name,
                     "reply": reply,
-                    # What the model was actually given. When these differ the
-                    # interface shows both, so a rewrite is never invisible.
                     "asked": options["asked"],
                     "asked_as": options["message"],
                     "normalised_rule": options["normalised_rule"],
@@ -616,15 +881,26 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                     "latency_ms": round(elapsed * 1000, 2),
                     "tokens_per_second": round(progress.tokens / max(1e-6, elapsed), 2),
                 }
+                arch_tele = _architecture_telemetry_snapshot(loaded.model)
+                if arch_tele is not None:
+                    summary["architecture_telemetry"] = arch_tele
                 if loaded.recall is not None:
                     summary["recall"] = loaded.recall.score(reply).to_dict()
                 if options["check"]:
-                    # Independently re-derive the answer from the question. A
-                    # `None` here means the question was not one of the shapes
-                    # this can verify, and the interface must show that as
-                    # "not checked" rather than as a pass.
                     verdict = check_reply(options["message"], reply)
                     summary["check"] = verdict.to_dict() if verdict else None
+                if options.get("scf_verify", False):
+                    summary["scf_check"] = _scf_verify_reply(
+                        options["asked"], options["message"], reply
+                    )
+                if options.get("scf_runtime", False):
+                    summary["scf_runtime"] = _scf_runtime_trace(
+                        options["asked"],
+                        reply,
+                        loaded.name,
+                        options.get("mode", "greedy"),
+                        history,
+                    )
                 remember(options["session_id"], options["message"], reply)
                 with stats_guard:
                     stats["requests"] += 1
@@ -647,128 +923,203 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
     return app
 
 
-PAGE = """<!doctype html><meta charset="utf-8">
-<title>Supermix chat</title>
+PAGE = r"""<!doctype html><meta charset="utf-8">
+<title>Supermix Chat · v99 / SCF Cognitive Fabric</title>
 <style>
-:root{--bg:#12141a;--panel:#191c24;--ink:#e8eaf0;--dim:#9aa2b4;--line:#2a2f3c;--accent:#7aa2f7}
+:root{--bg:#0b101b;--panel:#131b2b;--card:#182236;--ink:#e9eff8;--dim:#8ea0be;--line:#26344f;--accent:#60a5fa;--accent2:#a78bfa;--ok:#34d399;--bad:#f87171}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
-header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-h1{font-size:14px;margin:0;font-weight:600}
-select,input,button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit}
-button{cursor:pointer}button:hover{border-color:var(--accent)}
-main{max-width:860px;margin:0 auto;padding:16px}
-.msg{padding:10px 12px;border-radius:8px;margin:10px 0;white-space:pre-wrap}
-.user{background:#1d2330;border:1px solid var(--line)}
-.bot{background:var(--panel);border:1px solid var(--line)}
-.rewrite{color:#9aa0a6;font-style:italic}
-    .meta{margin-top:7px;font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
-.recall{margin-top:5px;padding:3px 8px;border-radius:4px;font-size:11.5px;font-weight:600;display:inline-block}
-.check{margin-top:5px;padding:3px 8px;border-radius:4px;font-size:11.5px;font-weight:600;display:inline-block;margin-right:6px}
-.ok{background:#14432a;color:#9ae6b4}.bad{background:#5a1d1d;color:#ffb4b4}.unknown{background:#2a2f3c;color:#9aa2b4}
-.recalled{background:#5a1d1d;color:#ffb4b4}.partial{background:#5a4a1d;color:#ffe0a0}.novel{background:#1d4a2a;color:#a8e6b8}
-form{display:flex;gap:8px;margin-top:14px}form input{flex:1}
-.note{color:var(--dim);font-size:12px;margin:6px 0 0}
-.cursor{opacity:.55}
-.tog{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px}
+body{margin:0;background:radial-gradient(circle at top,#111a2e 0%,var(--bg) 60%);color:var(--ink);font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+header{padding:12px 18px;border-bottom:1px solid var(--line);background:rgba(13,19,31,0.92);backdrop-filter:blur(10px);display:flex;gap:9px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+h1{font-size:15px;margin:0;font-weight:700;background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+select,input,button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font:inherit}
+button{cursor:pointer;transition:border-color .15s,background .15s}button:hover:not(:disabled){border-color:var(--accent);background:#1b263c}button:disabled{opacity:.5;cursor:not-allowed}
+main{max-width:980px;width:100%;margin:0 auto;padding:18px;flex:1;display:flex;flex-direction:column}
+#log{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{font-size:11.5px;padding:4px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--dim);cursor:pointer}
+.chip:hover{color:var(--ink);border-color:var(--accent)}
+.msg{padding:12px 14px;border-radius:10px;margin:10px 0;white-space:pre-wrap;position:relative}
+.user{background:#18263e;border:1px solid #2b4269;margin-left:42px}
+.bot{background:var(--card);border:1px solid var(--line);margin-right:24px}
+.rewrite{color:#9aa8bf;font-style:italic}
+.meta{margin-top:8px;font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.copy-btn{font-size:11px;padding:2px 7px;border-radius:5px;margin-left:auto}
+.recall,.check{margin-top:6px;padding:3px 9px;border-radius:5px;font-size:11.5px;font-weight:600;display:inline-block;margin-right:6px}
+.ok{background:#123d2a;color:#86efac;border:1px solid #1e6243}.bad{background:#4f1919;color:#fca5a5;border:1px solid #7f2929}.unknown{background:#232d42;color:#9eb0cc}
+.recalled{background:#4f1919;color:#fca5a5}.partial{background:#4a3c16;color:#fde68a}.novel{background:#123d2a;color:#86efac}
+.tele{margin-top:6px;padding:6px 10px;border-radius:6px;background:#0e1524;border:1px solid var(--line);font-size:11.5px;color:#b8c7e0;font-variant-numeric:tabular-nums}
+details.proof{margin-top:6px;font-size:11.5px;color:var(--dim)}details.proof summary{cursor:pointer;color:var(--accent)}details.proof pre{margin:6px 0 0;padding:8px;border-radius:6px;background:#0b101b;border:1px solid var(--line);overflow:auto;color:#cfe0fa;font-size:11px}
+form{display:flex;gap:8px;margin-top:14px;align-items:flex-end}form input,form textarea{flex:1}
+textarea{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font:inherit;resize:vertical;min-height:36px}
+#send{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#07101f;font-weight:700;border:none}
+#stop{display:none;border-color:#7f2929;color:#fca5a5}
+.note{color:var(--dim);font-size:12px;margin:7px 0 0}
+.cursor{opacity:.65}
+.tog{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px;cursor:pointer}
 .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:10px 0}
 .col{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
 .col h3{margin:0 0 6px;font-size:12px;color:var(--accent);font-weight:600}
-.agree{margin:4px 0 0;font-size:12px;font-weight:600}
-.agree.yes{color:#9ae6b4}.agree.no{color:#ffb4b4}
+.agree{margin:4px 0 0;font-size:12px;font-weight:600}.agree.yes{color:var(--ok)}.agree.no{color:var(--bad)}
 .bench{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:10px 0}
 .bench td{padding:2px 10px 2px 0;font-size:12px;font-variant-numeric:tabular-nums}
 </style>
 <header>
-  <h1>Supermix chat</h1>
+  <h1>Supermix Chat</h1>
   <select id="model"></select>
-  <select id="mode"><option value="greedy">greedy</option><option value="sample">sample</option></select>
-  <input id="ntok" type="number" value="__DEFAULT_MAX_NEW_TOKENS__" min="1" max="256" style="width:80px" title="max tokens">
+  <select id="mode">
+    <option value="speculative">speculative (MTP)</option>
+    <option value="greedy">greedy</option>
+    <option value="sample">sample</option>
+  </select>
+  <input id="ntok" type="number" value="__DEFAULT_MAX_NEW_TOKENS__" min="1" max="256" style="width:72px" title="max tokens">
+  <input id="temp" type="number" value="0.7" min="0.05" max="2.0" step="0.05" style="width:66px" title="temperature (sample mode)">
+  <label class="tog"><input type="checkbox" id="scf" checked> SCF verify</label>
+  <label class="tog"><input type="checkbox" id="fabric" checked> Cognitive Fabric</label>
   <label class="tog"><input type="checkbox" id="cmp"> compare all</label>
   <button id="bench" type="button">Benchmark</button>
+  <button id="scfstatus" type="button">SCF Status</button>
+  <button id="exportmd" type="button">Export</button>
   <button id="reset" type="button">Clear</button>
   <span class="note" id="status"></span>
 </header>
 <main>
+  <div class="chips">
+    <button type="button" class="chip" onclick="usePrompt('nums = [10, 12, 4]\nr = nums[1] + nums[2] Final r?')">Code AST index</button>
+    <button type="button" class="chip" onclick="usePrompt('x = 0\nwhile x <= 40: x = x + 11 Give the value of x.')">While loop trace</button>
+    <button type="button" class="chip" onclick="usePrompt('In how many ways can 2 items be arranged in order from 5?')">Permutations P(5,2)</button>
+    <button type="button" class="chip" onclick="usePrompt('What is 20% of 275, then add 46?')">Two-step 20%+46</button>
+    <button type="button" class="chip" onclick="usePrompt('How many Li20 neurons does the male CNS contain?')">Connectome Li20</button>
+    <button type="button" class="chip" onclick="usePrompt('In the male CNS, how many synapses does type Tm2 make onto type Dm3c?')">Connectome Tm2-&gt;Dm3c</button>
+    <button type="button" class="chip" onclick="usePrompt('Find the impulse delivered by 41 N applied for 5 s.')">Physics impulse</button>
+    <button type="button" class="chip" onclick="usePrompt('can you help me with tests')">Coding chat</button>
+  </div>
   <div id="log"></div>
-  <form id="form"><input id="input" placeholder="say something…" autocomplete="off"><button id="send">Send</button></form>
-  <p class="note">Replies stream as they are generated. Models load on first use and the least recently used is evicted, so the first message to a model is slower. Maths answers are re-derived from your question and checked independently; other questions show NOT CHECKED.</p>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Ask Supermix (Enter sends, Shift+Enter newline — try math, Python AST code, physics, or Male-CNS connectome)…" autocomplete="off"></textarea>
+    <button id="stop" type="button">Stop</button>
+    <button id="send">Send</button>
+  </form>
+  <p class="note">Replies stream live from the selected checkpoint with optional <strong>Speculative MTP</strong> decoding, live <strong>CNS / PredErr / Hebbian / Thinking</strong> telemetry, <strong>SCF verify</strong> deterministic proof checks, and full <strong>Cognitive Fabric</strong> routing.</p>
 </main>
 <script>
 const el = id => document.getElementById(id);
-const SESSION = 'web-' + Math.random().toString(36).slice(2);
+const SESSION = 'web-' + ((window.crypto && crypto.randomUUID) ? crypto.randomUUID().slice(0,8) : String(Date.now()));
+const STORAGE_KEY = 'supermix.chat.transcript.v2';
+let activeAbort = null;
+const transcript = [];
+function saveTranscript(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(transcript.slice(-40))); }catch(_e){} }
+function usePrompt(t){ el('input').value = t; el('input').focus(); }
 async function loadModels(){
   const r = await fetch('/api/models'); const d = await r.json();
-  el('model').innerHTML = d.models.map(m =>
-    `<option value="${m.name}">${m.name}${m.resident?' •':''}</option>`).join('');
-  el('status').textContent = `${d.models.length} models, ${d.max_resident} resident max`;
+  el('model').innerHTML = d.models.map(m => {
+    const a = m.architecture || {};
+    const tag = a.cns_predictive_error ? (String(a.run_name||m.name).includes('v99') ? ' [v99 PredErr]' : ' [v98 PredErr]')
+      : a.cns_hebbian_trace ? ' [v97 Hebbian]' : a.cns_core ? ' [CNS]' : '';
+    return `<option value="${m.name}">${m.name}${tag}${m.resident?' •':''}</option>`;
+  }).join('');
+  el('status').textContent = `${d.models.length} models · max ${d.max_resident} resident`;
 }
 function add(cls, text){
   const n = document.createElement('div'); n.className = 'msg ' + cls; n.textContent = text;
   el('log').appendChild(n); window.scrollTo(0, document.body.scrollHeight); return n;
 }
+function badge(kind, text){ const b=document.createElement('div'); b.className=kind; b.textContent=text; return b; }
+function renderAnnotations(bot, data){
+  const m = document.createElement('div'); m.className='meta';
+  const parts = [`${data.model}`, `${data.tokens} tokens`, `${data.tokens_per_second.toFixed(1)} tok/s`, `${data.latency_ms.toFixed(0)} ms`];
+  if(data.speculative_stats && data.speculative_stats.acceptance_length){
+    parts.push(`MTP accept ${data.speculative_stats.acceptance_length}x`);
+  }
+  const summarySpan = document.createElement('span');
+  summarySpan.textContent = parts.join(' · ');
+  m.appendChild(summarySpan);
+  const cp = document.createElement('button'); cp.type='button'; cp.className='copy-btn'; cp.textContent='Copy';
+  cp.onclick = ()=>{ if(navigator.clipboard) navigator.clipboard.writeText(data.reply || ''); cp.textContent='Copied'; setTimeout(()=>cp.textContent='Copy',1200); };
+  m.appendChild(cp);
+  bot.appendChild(m);
+  if(data.hit_token_cap){ bot.appendChild(badge('meta', 'Token limit reached')); }
+  if(data.normalised_rule){
+    const n = document.createElement('div'); n.className='meta rewrite';
+    n.textContent = 'asked as: ' + data.asked_as + ' (' + data.normalised_rule + ')';
+    bot.appendChild(n);
+  }
+  if(data.architecture_telemetry){
+    const t = data.architecture_telemetry; const bits = [];
+    if(t.cns_core){
+      bits.push(`CNS alive=${t.cns_core.alive_nodes}/${t.cns_core.alive_edges||'?'}`);
+      if(t.cns_core.hebbian_trace) bits.push(`Hebbian gain=${Number(t.cns_core.hebbian_gain_mean||1).toFixed(3)}`);
+      if(t.cns_core.predictive_error) bits.push(`PredErr norm=${Number(t.cns_core.pred_error_norm||0).toFixed(4)}`);
+      if(t.cns_core.spectral_radius_est!==undefined && t.cns_core.spectral_radius_est!==null) bits.push(`ρ=${Number(t.cns_core.spectral_radius_est).toFixed(3)}`);
+    }
+    if(t.thinking){
+      bits.push(`Think cycles=${t.thinking.cycles_used} (${t.thinking.exit_reason})`);
+      if(t.thinking.cycle_entropies) bits.push(`H=[${t.thinking.cycle_entropies.map(v=>v.toFixed(2)).join(', ')}]`);
+    }
+    if(bits.length) bot.appendChild(badge('tele', bits.join(' · ')));
+  }
+  if(data.check !== undefined){
+    const c = data.check;
+    if(c === null) bot.appendChild(badge('check unknown','CHECKER: open-ended / outside legacy subset'));
+    else if(c.correct) bot.appendChild(badge('check ok','LEGACY CHECK OK — ' + c.expected));
+    else bot.appendChild(badge('check bad','LEGACY CHECK DIFF — answered ' + (c.predicted===null?'nothing':c.predicted) + ', expected ' + c.expected));
+  }
+  if(data.scf_check && data.scf_check.verified){
+    const sc = data.scf_check;
+    const tag = sc.model_agrees === true ? 'SCF VERIFIED MATCH' : (sc.model_agrees === false ? 'SCF VERIFIED OVERRIDE' : 'SCF VERIFIED');
+    bot.appendChild(badge(sc.model_agrees === false ? 'check bad' : 'check ok', `${tag}: ${sc.verified_answer} (${sc.verifier_source})`));
+  }
+  if(data.scf_runtime || (data.scf_check && (data.scf_check.independent_certificate || data.scf_check.proof_capsule))){
+    const det = document.createElement('details'); det.className='proof';
+    const sum = document.createElement('summary');
+    const rt = data.scf_runtime || {};
+    sum.textContent = rt.scf_active ? `Cognitive Fabric: family=${rt.selected_family} · domain=${rt.domain} · verified=${rt.verified} (${rt.total_latency_ms} ms)` : 'Verification Proof / Certificate';
+    det.appendChild(sum);
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify({scf_runtime: data.scf_runtime || null, certificate: data.scf_check ? data.scf_check.independent_certificate : null, proof_capsule: data.scf_check ? data.scf_check.proof_capsule : null}, null, 2);
+    det.appendChild(pre);
+    bot.appendChild(det);
+  }
+  if(data.recall){
+    const v = data.recall.verdict;
+    const label = (v==='largely_recalled'?'RECALLED':v==='part_recalled'?'PART RECALLED':v==='mostly_novel'?'NOVEL':'TOO SHORT') +
+      (data.recall.windows ? ` — ${(data.recall.verbatim_rate*100).toFixed(0)}% verbatim` : '');
+    bot.appendChild(badge('recall ' + (v==='largely_recalled'?'recalled':v==='part_recalled'?'partial':'novel'), label));
+  }
+  transcript.push({role:'bot', model:data.model, reply:data.reply, verified_answer:data.scf_check?data.scf_check.verified_answer:null});
+  saveTranscript();
+}
+el('stop').addEventListener('click', ()=>{ if(activeAbort) activeAbort.abort(); });
 async function send(ev){
   ev.preventDefault();
   const text = el('input').value.trim(); if(!text) return;
-  el('input').value = ''; el('send').disabled = true;
+  el('input').value = ''; el('send').disabled = true; el('stop').style.display='inline-block';
+  activeAbort = new AbortController();
+  transcript.push({role:'user', text}); saveTranscript();
   add('user', text);
   const bot = add('bot', ''); const cur = document.createElement('span');
   cur.className = 'cursor'; cur.textContent = '▋'; bot.appendChild(cur);
   try{
-    const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({message:text, model:el('model').value, mode:el('mode').value,
-                            session_id:SESSION, max_new_tokens:Number(el('ntok').value)})});
+    const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, signal:activeAbort.signal,
+      body: JSON.stringify({message:text, model:el('model').value, mode:el('mode').value, temperature:Number(el('temp').value||0.7),
+                            scf_verify:!!el('scf').checked, scf_runtime:!!el('fabric').checked, session_id:SESSION, max_new_tokens:Number(el('ntok').value)})});
     if(!r.ok){ const e = await r.json().catch(()=>({error:r.status}));
-      bot.textContent = 'error: ' + (e.error || r.status); el('send').disabled = false; return; }
+      bot.textContent = 'error: ' + (e.error || r.status); return; }
     const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
     for(;;){
       const {value, done} = await reader.read(); if(done) break;
       buf += dec.decode(value, {stream:true});
       let cut;
-      while((cut = buf.indexOf('\\n\\n')) >= 0){
+      while((cut = buf.indexOf('\n\n')) >= 0){
         const frame = buf.slice(0, cut); buf = buf.slice(cut+2);
-        const ev = (frame.match(/^event: (.+)$/m)||[])[1];
+        const evName = (frame.match(/^event: (.+)$/m)||[])[1];
         const data = JSON.parse((frame.match(/^data: (.+)$/m)||[])[1] || '{}');
-        if(ev === 'token'){ cur.insertAdjacentText('beforebegin', data.text); }
-        else if(ev === 'done'){
-          cur.remove();
-          const m = document.createElement('div'); m.className='meta';
-          m.textContent = `${data.model} · ${data.tokens} tokens · ${data.tokens_per_second.toFixed(1)} tok/s · ${data.latency_ms.toFixed(0)} ms`;
-          bot.appendChild(m);
-          if(data.hit_token_cap){ bot.appendChild(badge('meta', 'Token limit reached')); }
-          if(data.normalised_rule){
-            // The question was rewritten into the corpus format before the
-            // model saw it. Show it: answering a different question than the
-            // one typed, without saying so, misrepresents the model.
-            const n = document.createElement('div'); n.className='meta rewrite';
-            n.textContent = 'asked as: ' + data.asked_as + '  (' + data.normalised_rule + ')';
-            bot.appendChild(n);
-          }
-          if(data.check !== undefined){
-            const c = data.check; const b = document.createElement('div');
-            if(c === null){ b.className='check unknown'; b.textContent='NOT CHECKED — not a question I can verify'; }
-            else if(c.correct){ b.className='check ok'; b.textContent='CORRECT — ' + c.expected; }
-            else { b.className='check bad';
-                   b.textContent='WRONG — answered ' + (c.predicted===null?'nothing':c.predicted) + ', should be ' + c.expected; }
-            bot.appendChild(b);
-          }
-          if(data.recall){
-            const v = data.recall.verdict;
-            const b = document.createElement('div');
-            b.className = 'recall ' + (v==='largely_recalled'?'recalled':v==='part_recalled'?'partial':'novel');
-            b.textContent = (v==='largely_recalled'?'RECALLED':v==='part_recalled'?'PART RECALLED':
-                             v==='mostly_novel'?'NOVEL':'TOO SHORT') +
-              (data.recall.windows ? ` — ${(data.recall.verbatim_rate*100).toFixed(0)}% verbatim` : '');
-            bot.appendChild(b);
-          }
-          loadModels();
-        }
+        if(evName === 'token'){ cur.insertAdjacentText('beforebegin', data.text); }
+        else if(evName === 'done'){ cur.remove(); renderAnnotations(bot, data); loadModels(); }
       }
     }
-  }catch(e){ bot.textContent = 'error: ' + e.message; }
-  finally{ el('send').disabled = false; el('input').focus(); }
+  }catch(e){ cur.remove(); if(e.name==='AbortError') bot.appendChild(badge('meta','Generation cancelled')); else bot.textContent='error: '+e.message; }
+  finally{ activeAbort=null; el('stop').style.display='none'; el('send').disabled=false; el('input').focus(); }
 }
-function badge(kind, text){ const b=document.createElement('div'); b.className=kind; b.textContent=text; return b; }
 function verdictBadge(c){
   if(c === undefined) return null;
   if(c === null) return badge('check unknown','NOT CHECKED');
@@ -786,7 +1137,7 @@ async function compareAll(ev){
   el('log').appendChild(wait);
   try{
     const r = await fetch('/api/compare', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({message:text, max_new_tokens:Number(el('ntok').value), mode:el('mode').value})});
+      body: JSON.stringify({message:text, max_new_tokens:Number(el('ntok').value), mode:el('mode').value, temperature:Number(el('temp').value||0.7), scf_verify:!!el('scf').checked, scf_runtime:!!el('fabric').checked})});
     const d = await r.json(); wait.remove();
     if(!r.ok){ holder.textContent = 'error: ' + (d.error||r.status); return; }
     for(const res of d.results){
@@ -795,6 +1146,13 @@ async function compareAll(ev){
       const body = document.createElement('div'); body.textContent = res.error || res.reply || '(empty)';
       col.appendChild(body);
       const v = verdictBadge(res.check); if(v) col.appendChild(v);
+      if(res.scf_check && res.scf_check.verified){
+        col.appendChild(badge(res.scf_check.model_agrees===false?'check bad':'check ok', 'SCF: ' + res.scf_check.verified_answer));
+      }
+      if(res.architecture_telemetry && res.architecture_telemetry.cns_core){
+        const c=res.architecture_telemetry.cns_core;
+        col.appendChild(badge('tele', `CNS=${c.alive_nodes}` + (c.hebbian_trace?` Hebb=${Number(c.hebbian_gain_mean||1).toFixed(3)}`:'') + (c.predictive_error?` PE=${Number(c.pred_error_norm||0).toFixed(4)}`:'')));
+      }
       if(res.recall){ const rv=res.recall.verdict;
         col.appendChild(badge('recall ' + (rv==='largely_recalled'?'recalled':rv==='part_recalled'?'partial':'novel'),
           rv==='largely_recalled'?'RECALLED':rv==='part_recalled'?'PART RECALLED':rv==='mostly_novel'?'NOVEL':'TOO SHORT')); }
@@ -814,33 +1172,72 @@ async function compareAll(ev){
 el('bench').addEventListener('click', async ()=>{
   el('bench').disabled = true;
   const box = document.createElement('div'); box.className='bench';
-  box.textContent = 'benchmarking ' + el('model').value + ' on 20 fresh problems…';
+  box.textContent = 'benchmarking ' + el('model').value + ' on all 41 problem families…';
   el('log').appendChild(box); window.scrollTo(0,document.body.scrollHeight);
   try{
     const r = await fetch('/api/benchmark', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({model:el('model').value, problems:20, max_new_tokens:Number(el('ntok').value)})});
+      body: JSON.stringify({model:el('model').value, problems:41, seed:82, scf_verify:!!el('scf').checked, max_new_tokens:Number(el('ntok').value)})});
     const d = await r.json();
     if(!r.ok){ box.textContent='error: '+(d.error||r.status); return; }
-    box.textContent = d.model+' — '+d.correct+'/'+d.problems+' = '+(d.accuracy*100).toFixed(0)+'%';
+    const scfTxt = d.scf_hybrid_accuracy !== undefined ? ` | SCF Hybrid: ${d.scf_hybrid_correct}/${d.problems} = ${(d.scf_hybrid_accuracy*100).toFixed(1)}%` : '';
+    box.textContent = `${d.model} — Neural: ${d.correct}/${d.problems} = ${(d.accuracy*100).toFixed(1)}%${scfTxt}`;
     box.appendChild(badge('meta', d.settings.max_new_tokens+' token cap; '+d.truncated_replies+' truncated replies'));
     const t=document.createElement('table');
     for(const [k,v] of Object.entries(d.by_task)){
       const row=t.insertRow(); row.insertCell().textContent=k;
       row.insertCell().textContent=v.correct+'/'+v.n;
       row.insertCell().textContent=(v.accuracy*100).toFixed(0)+'%';
+      if(v.scf_correct!==undefined) row.insertCell().textContent='SCF '+v.scf_correct+'/'+v.n;
     }
     box.appendChild(t);
     const n=document.createElement('div'); n.className='note'; n.textContent=d.note; box.appendChild(n);
   }catch(e){ box.textContent='error: '+e.message; }
   finally{ el('bench').disabled=false; }
 });
+el('scfstatus').addEventListener('click', async ()=>{
+  const box = document.createElement('div'); box.className='bench'; box.textContent='loading Cognitive Fabric status…';
+  el('log').appendChild(box); window.scrollTo(0,document.body.scrollHeight);
+  try{
+    const r = await fetch('/api/scf_status'); const d = await r.json();
+    box.textContent = `Supermix ${d.name} (${d.version}) · Atlas ready=${d.connectome_atlas_ready} · Discovered talk checkpoints=${(d.talk_checkpoints||[]).length}`;
+    const pre = document.createElement('pre'); pre.style.fontSize='11px'; pre.style.overflow='auto';
+    pre.textContent = JSON.stringify({families: d.families, server_models: d.server_models}, null, 2);
+    box.appendChild(pre);
+  }catch(e){ box.textContent='error: '+e.message; }
+});
+el('exportmd').addEventListener('click', ()=>{
+  const md = transcript.map(x => x.role==='user' ? `### User\n${x.text}\n` : `### ${x.model}\n${x.reply}\n` + (x.verified_answer ? `> SCF verified: ${x.verified_answer}\n` : '')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([md || '# Supermix Chat Session\n'], {type:'text/markdown'}));
+  a.download = 'supermix-chat-transcript.md'; a.click();
+});
+el('input').addEventListener('keydown', e => {
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); el('form').requestSubmit(); }
+});
 el('form').addEventListener('submit', e => el('cmp').checked ? compareAll(e) : send(e));
-el('reset').addEventListener('click', async ()=>{ el('log').innerHTML='';
+el('reset').addEventListener('click', async ()=>{ el('log').innerHTML=''; transcript.length=0; try{localStorage.removeItem(STORAGE_KEY);}catch(_e){}
   await fetch('/api/reset', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({session_id:SESSION})}); });
 loadModels();
 </script>
 """
+
+def discover_default_models(root: Optional[Path] = None) -> Dict[str, str]:
+    """Auto-discover local MiMoMix talk checkpoints (v96/v97/v93/v89) for zero-arg startup."""
+    base = Path(root) if root is not None else Path(__file__).resolve().parents[1]
+    candidates = (
+        ("v96_physio_neurogenesis", "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt"),
+        ("v98_scf_predictive", "output/v98_scf_predictive/v98_scf_predictive.selected.pt"),
+        ("v99_scf_evolution", "output/v99_scf_evolution/v99_scf_evolution.selected.pt"),
+        ("v97_scf_connectome", "output/v97_scf_connectome/v97_scf_connectome.selected.pt"),
+        ("v93_neurogenesis", "output/v93_neurogenesis/v93_neurogenesis.selected.pt"),
+        ("v91_cns_connectome", "output/v91_cns_connectome/v91_cns_connectome.selected.pt"),
+        ("v89_corpus", "output/v89_corpus/v89_corpus.pt"),
+        ("v80_omni", "output/v80_omni/v80_omni.pt"),
+        ("v74_broad", "output/v74_broad/v74_broad.pt"),
+        ("v57_talk_v2", "output/hf_v57_publish/v57_talk_v2.pt"),
+    )
+    return {name: str(base / rel) for name, rel in candidates if (base / rel).is_file()}
 
 
 def parse_model_spec(values: Sequence[str]) -> Dict[str, str]:
@@ -860,7 +1257,7 @@ def parse_model_spec(values: Sequence[str]) -> Dict[str, str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", action="append", default=[], metavar="NAME=PATH",
-                        help="a checkpoint to serve; repeatable")
+                        help="a checkpoint to serve; repeatable (auto-discovers local v96/v97 when omitted)")
     parser.add_argument("--corpus", action="append", default=[], metavar="NAME=PATH",
                         help="training corpus for a model, enabling its recall meter")
     parser.add_argument(
@@ -898,7 +1295,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.torch_threads:
         torch.set_num_threads(args.torch_threads)
 
-    spec = parse_model_spec(args.model)
+    spec = parse_model_spec(args.model) if args.model else discover_default_models()
+    if not spec:
+        raise SystemExit("no --model given and no local checkpoints found")
     corpora = parse_model_spec(args.corpus) if args.corpus else {}
     unknown = set(corpora) - set(spec)
     if unknown:

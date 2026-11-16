@@ -144,6 +144,13 @@ ALLOWED_NODES = frozenset({
     # through, which is the whole argument for validating snippets this module
     # generates itself.
     "IfExp",
+    # `Attribute` is admitted for v93's `code_list_count` (`nums.count(v)`),
+    # and only in the shape `validate_snippet` checks below: a method named in
+    # `SAFE_METHODS`, called on a plain name. An attribute that is not a call
+    # on an allowlisted method -- `().__class__`, `x.__dict__` -- is still
+    # refused, so the sandbox-escape surface this node type usually opens is
+    # not opened here.
+    "Attribute",
 })
 
 #: The only callables a snippet may name. All six are pure, total on the
@@ -157,6 +164,10 @@ SAFE_BUILTINS: Dict[str, Any] = {
     "range": range,
     "sum": sum,
 }
+
+#: The only methods a snippet may call, by attribute name. `list.count` is
+#: pure and total; it is the one v93 needs.
+SAFE_METHODS = frozenset({"count"})
 
 
 def validate_snippet(source: str) -> ast.Module:
@@ -186,10 +197,16 @@ def validate_snippet(source: str) -> ast.Module:
             # (`().__class__`, `__builtins__`); no template needs one.
             if node.id.startswith("_"):
                 raise SnippetRejected(f"disallowed name: {node.id}")
+        if isinstance(node, ast.Attribute):
+            # Only `<name>.<safe method>`; anything else is the escape shape.
+            if node.attr not in SAFE_METHODS or not isinstance(node.value, ast.Name):
+                raise SnippetRejected(f"disallowed attribute: {node.attr}")
         if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name):
+            if isinstance(node.func, ast.Attribute):
+                pass  # checked as an Attribute above
+            elif not isinstance(node.func, ast.Name):
                 raise SnippetRejected("only direct calls to allowed builtins")
-            if node.func.id not in SAFE_BUILTINS:
+            elif node.func.id not in SAFE_BUILTINS:
                 raise SnippetRejected(f"disallowed call: {node.func.id}")
             if node.keywords:
                 raise SnippetRejected("keyword arguments are not permitted")
@@ -668,9 +685,127 @@ def _while_accumulate(rng: random.Random) -> CodeProblem:
                        {"step": step, "threshold": threshold, "iterations": iterations})
 
 
-#: Every generator, by task name. The `code_` prefix keeps them distinguishable
-#: in a receipt and guarantees they never shadow an arithmetic or omni task
-#: when `eval_problem_solving` merges the three families into one dict.
+# -- v93 generators ----------------------------------------------------------
+#
+# Three more tasks (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md, D7), verified by
+# execution like the nine above. They live in `V93_TASKS` rather than `TASKS`
+# for the reason `build_omni_corpus` gives: `build` draws every task from one
+# RNG in `chosen` order, so a default build stays byte-identical only if the
+# default list does; and the benchmark registry built from `TASKS` carries the
+# fingerprint every published receipt is paired on.
+
+#: The most terms a `code_range_sum` trace writes out. Measured with the
+#: training segmentation against the benchmark's 96-token generation cap
+#: (`eval_problem_solving.DEFAULT_MAX_NEW_TOKENS`): the longest ten-term
+#: trace, `range(3, 13)`, is 95 reply tokens including EOS, and an eleven-term
+#: one is 97 or more. One step per addition is the rule this family rests on,
+#: so the term count is bounded rather than the trace compressed. The map's
+#: suggestion of `range(13)` alone would have needed thirteen terms and 115
+#: tokens, a reply the benchmark could never finish.
+RANGE_SUM_MAX_TERMS = 10
+
+#: `range` stops below this. Sums stay two-digit: `sum(range(1, 13)) = 78`.
+RANGE_SUM_MAX_STOP = 13
+
+
+def _range_sum(rng: random.Random) -> CodeProblem:
+    """`r = sum(range(n))` or `r = sum(range(a, n))`, every addition written.
+
+    The one-argument form alone has eight legal instances under the term
+    bound, which is a lookup table rather than a procedure. The two-argument
+    form is what makes it a procedure: the trace has to read where `range`
+    starts as well as where it stops, and the sum then depends on both. A
+    start of 0 is written as `range(n)`, so both spellings the model will meet
+    are taught, and the trace names the first and last values so nothing about
+    the half-open interval is left to be inferred.
+    """
+
+    stop = rng.randint(3, RANGE_SUM_MAX_STOP)
+    # The start must leave at least two terms and at most the trace budget.
+    start = rng.randint(max(0, stop - RANGE_SUM_MAX_TERMS), stop - 2)
+    call = f"range({stop})" if start == 0 else f"range({start}, {stop})"
+    source = f"r = sum({call})"
+    prompt = _pick(rng, TRACE_TEMPLATES, code=source, var="r")
+
+    terms = list(range(start, stop))
+    running = terms[0]
+    pieces = [f"range counts from {start} up to {stop - 1}", f"r starts at {running}"]
+    for term in terms[1:]:
+        pieces.append(f"{running} + {term} = {running + term}")
+        running += term
+    pieces.append(f"r is {running}")
+    response = ", ".join(pieces) + f", total {running}"
+    return CodeProblem("code_range_sum", DOMAIN, prompt, response, float(running), "",
+                       source, "r", {"start": start, "stop": stop})
+
+
+#: Values a `code_list_count` list is built from. Six values in four slots keep
+#: the space near the family's other list tasks (4,020 distinct problems,
+#: 5.0x repetition at 20,000 rows) rather than the 96,040 a five-slot list
+#: over eight values would give.
+COUNT_POOL = range(2, 8)
+COUNT_LENGTH = 4
+
+
+def _list_count(rng: random.Random) -> CodeProblem:
+    """`r = nums.count(v)` over a four-item literal, one verdict per item.
+
+    The counted value appears one, two or three times; the other slots hold
+    values that differ from it, so every `matches` / `does not` in the trace is
+    decidable from the two numbers on the line. `.count` is the first method
+    call in this family, admitted through `SAFE_METHODS` rather than by
+    widening the call rule in general.
+    """
+
+    value = rng.choice(list(COUNT_POOL))
+    hits = rng.randint(1, 3)
+    positions = set(rng.sample(range(COUNT_LENGTH), hits))
+    others = [v for v in COUNT_POOL if v != value]
+    items = [value if i in positions else rng.choice(others) for i in range(COUNT_LENGTH)]
+    literal = ", ".join(str(v) for v in items)
+    source = f"nums = [{literal}]\nr = nums.count({value})"
+    prompt = _pick(rng, COMPACT_TRACE_TEMPLATES, code=source, var="r")
+
+    pieces = [f"count checks each item against {value}"]
+    for item in items:
+        pieces.append(f"{item} matches" if item == value else f"{item} does not")
+    pieces.append(f"r is {hits}")
+    response = ", ".join(pieces) + f", total {hits}"
+    return CodeProblem("code_list_count", DOMAIN, prompt, response, float(hits), "",
+                       source, "r", {"value": value, "hits": hits,
+                                     **{f"v{i}": v for i, v in enumerate(items)}})
+
+
+def _neg_index(rng: random.Random) -> CodeProblem:
+    """`r = nums[-k]`: one position read from the end of a three-item list.
+
+    `code_index` states `count positions from zero` on every row because
+    zero-based indexing is a convention the numbers alone do not reveal. The
+    negative form is the same kind of fact from the other end, and the trace
+    walks back one position at a time so `nums [ -2 ]` is reached from
+    `nums [ -1 ]` rather than asserted.
+    """
+
+    values = rng.sample(list(INDEX_POOL), 3)
+    literal = ", ".join(str(v) for v in values)
+    k = rng.randint(1, 3)
+    source = f"nums = [{literal}]\nr = nums[-{k}]"
+    prompt = _pick(rng, COMPACT_TRACE_TEMPLATES, code=source, var="r")
+
+    pieces = ["negative positions count from the end"]
+    for back in range(1, k + 1):
+        pieces.append(f"nums [ -{back} ] is {values[-back]}")
+    answer = values[-k]
+    pieces.append(f"r is {answer}")
+    response = ", ".join(pieces) + f", total {answer}"
+    return CodeProblem("code_neg_index", DOMAIN, prompt, response, float(answer), "",
+                       source, "r", {"k": k, **{f"v{i}": v for i, v in enumerate(values)}})
+
+
+#: Every v89 generator, by task name. The `code_` prefix keeps them
+#: distinguishable in a receipt and guarantees they never shadow an arithmetic
+#: or omni task when `eval_problem_solving` merges the three families into one
+#: dict. Frozen: see the note above `RANGE_SUM_MAX_TERMS`.
 TASKS: Dict[str, Callable[[random.Random], CodeProblem]] = {
     "code_loop_add": _loop_add,
     "code_loop_subtract": _loop_subtract,
@@ -682,6 +817,16 @@ TASKS: Dict[str, Callable[[random.Random], CodeProblem]] = {
     "code_nested_loop": _nested_loop,
     "code_while_accumulate": _while_accumulate,
 }
+
+#: The tasks added for v93. Built only when named with `--task`.
+V93_TASKS: Dict[str, Callable[[random.Random], CodeProblem]] = {
+    "code_range_sum": _range_sum,
+    "code_list_count": _list_count,
+    "code_neg_index": _neg_index,
+}
+
+#: Every generator this module can build, for lookup by name.
+ALL_TASKS: Dict[str, Callable[[random.Random], CodeProblem]] = {**TASKS, **V93_TASKS}
 
 
 #: How many distinct problems each generator can produce, counted from the
@@ -722,6 +867,19 @@ def distinct_capacity() -> Dict[str, int]:
         "code_while_accumulate": sum(
             step for step in range(5, 20) for _ in range(3)
         ),
+        # -- v93 --
+        # (start, stop) pairs with 2..RANGE_SUM_MAX_TERMS terms; 71 today
+        "code_range_sum": sum(
+            (stop - 2) - max(0, stop - RANGE_SUM_MAX_TERMS) + 1
+            for stop in range(3, RANGE_SUM_MAX_STOP + 1)
+        ),
+        # value(6) x sum over hits of C(4, hits) x 5^(4 - hits)
+        "code_list_count": len(COUNT_POOL) * sum(
+            math.comb(COUNT_LENGTH, hits) * (len(COUNT_POOL) - 1) ** (COUNT_LENGTH - hits)
+            for hits in range(1, 4)
+        ),
+        # ordered 3-subsets of the narrower pool x 3 offsets
+        "code_neg_index": index_pool * (index_pool - 1) * (index_pool - 2) * 3,
     }
 
 
@@ -790,8 +948,9 @@ def build(per_task: int, seed: int, tasks: Optional[Sequence[str]] = None,
     """
 
     rng = random.Random(seed)
+    # The default is the v89 nine; a v93 task is built only when named.
     chosen = list(tasks or TASKS)
-    unknown = [name for name in chosen if name not in TASKS]
+    unknown = [name for name in chosen if name not in ALL_TASKS]
     if unknown:
         raise ValueError(f"unknown task(s): {', '.join(unknown)}")
 
@@ -807,7 +966,7 @@ def build(per_task: int, seed: int, tasks: Optional[Sequence[str]] = None,
         """One executed-and-agreed problem, or None. Counts its own drops."""
 
         attempts[name] = attempts.get(name, 0) + 1
-        problem = TASKS[name](rng)
+        problem = ALL_TASKS[name](rng)
         result = verify(problem, timeout_seconds)
         parsed = extract_answer(problem.response)
         if not result.ok:
@@ -873,6 +1032,7 @@ def build(per_task: int, seed: int, tasks: Optional[Sequence[str]] = None,
         "verified_by": "cpython exec in a restricted namespace",
         "verification": {
             "builtins": sorted(SAFE_BUILTINS),
+            "methods": sorted(SAFE_METHODS),
             "timeout_seconds": timeout_seconds,
             "allowed_syntax": sorted(ALLOWED_NODES),
             "note": (
@@ -904,7 +1064,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "scored 0.93, while a 24,000-unique build of the same "
                               "operation scored 0.03"))
     parser.add_argument("--task", action="append", default=[],
-                        help="restrict to these tasks; repeatable")
+                        help=("restrict to these tasks; repeatable. The default is "
+                              "the nine v89 tasks; the v93 tasks "
+                              f"({', '.join(V93_TASKS)}) are built only when named"))
     parser.add_argument("--keep_canonical", action="store_true",
                         help="ship the executable source and target variable per row")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS,

@@ -1,0 +1,7 @@
+# SHA-256 of the files arm A imported at 02:09:38 (recorded by the v91 validity review at ~02:31, before any edit)
+6d022c7b1de6d3a21e83ed42c7b61af3fc9d03ce13fb53e40dd081c9e73315f9  source/mimomix_core.py
+52dbd67d899f9d3da7b5bd7caeae699d5485187ad2a303558af1859b6c3419bc  source/train_mimomix_generalisation.py
+5b463ca7557c80f7b4c8c63c22d445a1987abb441f5f9e366aecca37cf7bb88c  source/train_mimomix_talk.py
+94ccc7bb4148b0b61031e335e84b6853ef1ddb3fb943037118d1e2b149e44044  source/train_supervised.py
+520001fa4c55a5d0147c4bf5650bd0e57e0a32789e6462673ec0d5efd356ee03  source/eval_problem_solving.py
+10397de474e741c470aa414c1f6c137cc83f78674a7fdfbe1c32c12865958211  datasets/v91_malecns/malecns_modules_512.npz

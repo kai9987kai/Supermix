@@ -1,0 +1,57 @@
+
+=== leg 1 from step 0 ===
+  vocabulary   extended: 8679 from output/v89_corpus/v89_corpus.pt + 736 new ids
+  cns core     connectome | 768 modules, 16,373 edges, 208 in / 54 out, after block 2
+  cns v93      capacity 832 (64 spare) | hemispheres L 384 / R 384 | edges LL 5,391 RR 5,336 LR 2,820 RL 2,826 | reads [0, 1, 2] writes [2, 3, 4] + thinking | temporal
+  init_from    output/v89_corpus/v89_corpus.pt (24250 prior steps)
+  grown vocab  8679 -> 9415 rows (seed 57)
+  grown depth  1 block(s) from layer 5 zeroed to identity
+  grown moe    8 router tensors padded for 8 spare slots per layer
+v58 generalisation | arm full | thinking core True
+  train        2,253,222 rows, dev 6,307
+  tier1_seen_response      16,219 rows
+  tier2_unseen_response    211 rows
+  tier3_unseen_sentence    50,098 rows
+  withheld     6962 sentences (312040 remain in training)
+  vocabulary   9415 types
+  parameters   36,594,245 total / 9,127,349 active
+  device       cpu
+  restored     optimiser=False scheduler=False
+  neurogenesis every 1000 steps | witness 8 rows | log output\v93_neurogenesis\neurogenesis.jsonl
+step  1000/8000  train 0.5123  dev 0.1506  ppl 1.16  acc 0.80  6008s
+step  2000/8000  train 0.1070  dev 0.1024  ppl 1.11  acc 0.80  11123s
+step  3000/8000  train 0.0823  dev 0.0939  ppl 1.10  acc 0.81  17921s
+step  4000/8000  train 0.0721  dev 0.0781  ppl 1.08  acc 0.84  24533s
+step  5000/8000  train 0.0586  dev 0.0709  ppl 1.07  acc 0.86  31194s
+step  6000/8000  train 0.0545  dev 0.0624  ppl 1.06  acc 0.90  36961s
+step  7000/8000  train 0.0492  dev 0.0580  ppl 1.06  acc 0.87  42099s
+step  8000/8000  train 0.0455  dev 0.0578  ppl 1.06  acc 0.88  62326s
+  cns ablation dev 0.06236 with core, 0.06239 without (+0.00003 nats)
+  v93 ablation gates_off   dev 0.06145 (-0.00005 nats over 4000 rows)
+  v93 ablation cross_off   dev 0.06151 (+0.00000 nats over 4000 rows)
+  v93 ablation left_only   dev 0.06147 (-0.00004 nats over 4000 rows)
+  v93 ablation right_only  dev 0.06148 (-0.00002 nats over 4000 rows)
+  v93 ablation grown_off   dev 0.06123 (-0.00027 nats over 4000 rows)
+
+== v58 generalisation ladder | arm full ==
+  parameters      36,594,245 (9,127,349 active/token)
+  selected        step 6000 on accuracy (probe 0.90, dev loss 0.0624)
+
+  tier                         rows     loss      ppl
+  tier1_seen_response         16219   0.0559   1.0575
+  tier2_unseen_response         211   0.2252   1.2525
+  tier3_unseen_sentence       50098   0.0757   1.0786
+
+  recombination_cost_nats          +0.1693
+  unseen_sentence_cost_nats        -0.1494
+  total_cost_nats                  +0.0198
+  perplexity ratio tier3/tier1     1.020x
+
+  [PASS] split_verified
+  [PASS] learned_something
+  [PASS] produces_non_empty_replies
+  [PASS] speculative_matches_greedy
+  [PASS] selection_never_read_a_tier
+
+  checkpoint  output\v93_neurogenesis\v93_neurogenesis.pt
+=== finished after 1 leg(s) ===

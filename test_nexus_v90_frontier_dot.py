@@ -12,7 +12,6 @@ Tests:
 from __future__ import annotations
 
 import sys
-import math
 import os
 
 # Ensure source dir is on path first
@@ -40,14 +39,6 @@ from nexus_causal_dag import (
 )
 from nexus_engine import NexusEngine
 from nexus_api import (
-    DiffusionThoughtRequest,
-    DiffusionThoughtResponse,
-    ReflexionCorrectionRequest,
-    ReflexionCorrectionResponse,
-    ConformalStoppingRequest,
-    ConformalStoppingResponse,
-    CausalDAGRequest,
-    CausalDAGResponse,
     NexusApiService,
     create_app,
 )
@@ -270,8 +261,36 @@ class TestConformalStoppingController:
 
     def test_certified_risk_bound_equals_alpha(self):
         ctrl = ConformalStoppingController(target_risk_alpha=0.07)
-        result = ctrl.evaluate_stopping("q", 1, 5)
-        assert result.certified_risk_bound == pytest.approx(0.07, abs=1e-6)
+        # Uncalibrated controller honestly reports None (not certified), recording target_risk_alpha
+        uncalibrated = ctrl.evaluate_stopping("q", 1, 5)
+        assert uncalibrated.certified_risk_bound is None
+        assert uncalibrated.telemetry["target_risk_alpha"] == pytest.approx(0.07, abs=1e-6)
+        assert uncalibrated.telemetry["risk_certified"] is False
+
+        # Labeled Conformal Risk Control (CRC) genuinely certifies risk <= alpha
+        margins = [0.05 + 0.03 * i for i in range(30)]
+        losses = [1.0 if m < 0.55 else 0.0 for m in margins]
+        threshold = ctrl.calibrate_labeled(margins, losses)
+        assert 0.50 <= threshold <= 0.70
+        calibrated = ctrl.evaluate_stopping("q", 1, 5, top_confidence=0.95, runner_up_confidence=0.10)
+        assert calibrated.certified_risk_bound == pytest.approx(0.07, abs=1e-6)
+        assert calibrated.telemetry["risk_certified"] is True
+        assert calibrated.should_early_exit is True
+
+    def test_selective_risk_coverage_profile_and_labeled_crc(self):
+        margins = [0.95, 0.85, 0.70, 0.55, 0.40, 0.25, 0.15, 0.05]
+        losses = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0]
+        profile = ConformalStoppingController.selective_risk_coverage_profile(margins, losses)
+        assert profile["n_samples"] == 8
+        assert profile["oracle_aurc"] <= profile["aurc"] + 1e-9
+        assert profile["e_aurc"] == pytest.approx(max(0.0, profile["aurc"] - profile["oracle_aurc"]), abs=1e-5)
+
+        ctrl = ConformalStoppingController(target_risk_alpha=0.15)
+        lam = ctrl.calibrate_labeled(margins, losses)
+        assert lam > 0.0
+        res = ctrl.evaluate_stopping("crc_step", 2, 10, top_confidence=0.96, runner_up_confidence=0.05)
+        assert res.telemetry["calibration_status"] == "labeled_conformal_risk_control"
+        assert res.telemetry["selective_aurc"] == profile["aurc"]
 
     def test_to_dict_serialization(self):
         ctrl = ConformalStoppingController()
@@ -400,11 +419,12 @@ class TestNexusEngineV90ConvenienceMethods:
 
     def test_evaluate_conformal_stopping_early_exit(self, engine):
         from nexus_conformal_stopping import ConformalStoppingResult
-        # With step_entropy=0.9: runner_up = 0.95 - 0.9*0.5 = 0.50
-        # margin = 0.95 - 0.50 = 0.45 > default threshold 0.35 → early exit
+        # margin = verifier * (1 - entropy) * (1 - volatility)
+        # With step_entropy=0.1, rsi_volatility=10.0, verifier_score=0.95:
+        # margin = 0.95 * 0.9 * 0.9 = 0.7695 > default threshold 0.35 -> early exit
         res = engine.evaluate_conformal_stopping(
-            step_entropy=0.9,
-            rsi_volatility=30.0,
+            step_entropy=0.1,
+            rsi_volatility=10.0,
             verifier_score=0.95,
             step_index=2,
             total_budget=10,
@@ -515,10 +535,10 @@ class TestV90RestApiEndpoints:
         assert "diagnostic_summary" in data
 
     def test_conformal_evaluate_endpoint_early_exit(self, client):
-        # step_entropy=0.9 → runner_up = 0.97 - 0.9*0.5 = 0.52 → margin = 0.45 > 0.35
+        # Low entropy & volatility -> high margin > 0.35 -> early exit
         payload = {
-            "step_entropy": 0.9,
-            "rsi_volatility": 20.0,
+            "step_entropy": 0.1,
+            "rsi_volatility": 10.0,
             "verifier_score": 0.97,
             "step_index": 3,
             "total_budget": 10,

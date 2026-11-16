@@ -699,7 +699,149 @@ def _arithmetic_series(rng: random.Random) -> OmniProblem:
                        {"a": first, "d": difference, "n": terms})
 
 
-#: Every generator, by task name.
+# -- v93 generators ----------------------------------------------------------
+#
+# Five more single-formula tasks, added for v93 (docs/V93_NEUROGENESIS_TWO_
+# HEMISPHERES.md, D7). Each mirrors the shape of a task above that already
+# scores well, so that every written step stays inside the envelope
+# V81_WHAT_THE_MODEL_CAN_LEARN.md established: products are
+# two-digit-by-one-digit through `decompose_product`, divisions are built
+# backwards from the quotient so they are exact, and additions stay below 999.
+#
+# They live in `V93_TASKS`, not `TASKS`. `build` draws every task from ONE
+# `random.Random(seed)` in `chosen` order, so appending to `TASKS` would move
+# the default build's output; `eval_problem_solving` and `coverage_audit`
+# register `TASKS` into the 30-task v89 benchmark whose fingerprint
+# 3b99a446cd533be9bc5f8ae57d1310b4 every published receipt is paired on; and
+# `test_code_corpus.py` derives its 21-task fingerprint from that registry.
+# Keeping the twelve where they are is what leaves all three byte-identical.
+# `ALL_TASKS` is the lookup table; `--task` accepts any name in it.
+
+
+def _impulse(rng: random.Random) -> OmniProblem:
+    # Same ranges as `force` and `work`: a two-digit force, a one-digit time.
+    force = rng.randint(11, 99)
+    time = rng.randint(2, 9)
+    answer = force * time
+    prompt = _pick(rng, [
+        "A force of {f} N acts for {t} s. What is the impulse?",
+        "force {f} N time {t} s find the impulse",
+        "Find the impulse delivered by {f} N applied for {t} s.",
+        "What impulse does a {f} N force give over {t} s?",
+        "Given force {f} N and time {t} s, compute the impulse.",
+    ], f=force, t=time, _task="impulse")
+    response = (f"impulse = force x time, {decompose_product(force, time)}, "
+                f"the impulse is {answer} newton seconds, total {answer}")
+    return OmniProblem("impulse", "physics", prompt, response, float(answer), "N*s",
+                       f"force {force} N time {time} s find the impulse",
+                       {"F": force, "t": time})
+
+
+def _ohms_current(rng: random.Random) -> OmniProblem:
+    # Built backwards from the quotient, as `acceleration` and `division` are,
+    # and over `division`'s exact ranges (divisor 2-9, quotient 11-60), the
+    # shape that scored 1.000 on v86. The written division follows the same
+    # three-way switch as the other division tasks so `--long_division`
+    # reaches it.
+    resistance = rng.randint(2, 9)
+    current = rng.randint(11, 60)
+    voltage = current * resistance  # exact division
+    prompt = _pick(rng, [
+        "A voltage of {v} V is applied across {r} ohm. What is the current?",
+        "voltage {v} V resistance {r} ohm find the current",
+        "Find the current when {v} V drives a {r} ohm resistor.",
+        "What current flows through {r} ohm at {v} V?",
+        "Given voltage {v} V and resistance {r} ohm, compute the current.",
+    ], v=voltage, r=resistance, _task="ohms_current")
+    response = (f"current = voltage / resistance, "
+                f"{long_division(voltage, resistance, with_total=False) if LONG_DIVISION else decompose_quotient(voltage, resistance) if DECOMPOSE_QUOTIENT else f'{voltage} / {resistance} = {current}'}, "
+                f"the current is {current} amperes, total {current}")
+    return OmniProblem("ohms_current", "physics", prompt, response, float(current), "A",
+                       f"voltage {voltage} V resistance {resistance} ohm find the current",
+                       {"V": voltage, "R": resistance})
+
+
+def _spring_energy(rng: random.Random) -> OmniProblem:
+    # `kinetic_energy`'s decomposition exactly: halve the even constant first,
+    # square the one-digit extension, then one two-digit-by-one-digit product.
+    constant = rng.randrange(2, 20, 2)
+    extension = rng.randint(2, 9)
+    squared = extension * extension
+    half_constant = constant // 2
+    answer = half_constant * squared
+    prompt = _pick(rng, [
+        "A spring of constant {k} N/m is stretched {x} m. Find the spring energy.",
+        "spring constant {k} N/m extension {x} m spring energy",
+        "What is the elastic potential energy of a {k} N/m spring extended {x} m?",
+        "Compute the spring energy for spring constant {k} N/m and extension {x} m.",
+    ], k=constant, x=extension, _task="spring_energy")
+    response = (f"spring energy = half x spring constant x extension squared, "
+                f"half of {constant} = {half_constant}, "
+                f"extension squared = {extension} x {extension} = {squared}, "
+                f"{decompose_product(squared, half_constant)}, "
+                f"the spring energy is {answer} joules, total {answer}")
+    return OmniProblem("spring_energy", "physics", prompt, response, float(answer), "J",
+                       f"spring constant {constant} N/m extension {extension} m spring energy",
+                       {"k": constant, "x": extension})
+
+
+def _permutations(rng: random.Random) -> OmniProblem:
+    # k is fixed at 2, as `combination` fixes it, so the working is one product
+    # `n x (n - 1)`. n stops at 10 because `decompose_product` splits only its
+    # first operand: `12 x 11` would be written `10 x 11 = 110, 2 x 11 = 22`,
+    # and a ten-times-two-digit partial is not a shape any scored task
+    # contains. That leaves seven operand sets, which the report shows as
+    # heavy repetition -- the same order as v74's 712 x 56 multiplication task
+    # (0.93) rather than the 24,000 x 1.7 omni build (0.03).
+    n = rng.randint(4, 10)
+    k = 2
+    answer = math.perm(n, k)
+    prompt = _pick(rng, [
+        "In how many ways can {k} items be arranged in order from {n}?",
+        "permutations n = {n} k = {k}",
+        "Find the number of permutations of {n} things taken {k} at a time.",
+        "How many ordered arrangements of {k} are there from {n} items?",
+    ], n=n, k=k, _task="permutations")
+    response = (f"permutations = n x (n - 1), {n} - 1 = {n - 1}, "
+                f"{decompose_product(n, n - 1)}, "
+                f"there are {answer} arrangements, total {answer}")
+    return OmniProblem("permutations", "mathematics", prompt, response, float(answer), "",
+                       f"permutations n = {n} k = {k}", {"n": n, "k": k})
+
+
+def _final_velocity(rng: random.Random) -> OmniProblem:
+    # v = u + a t. Both factors of the product are one digit, as
+    # `arithmetic_series` writes `(n - 1) x d`, and the one addition is
+    # two-digit plus two-digit with a sum under 150, which `word_problem`
+    # does at 0.87. Verified through `science_plan`'s formula registry
+    # (`constant_acceleration.final_velocity`), the one v71 target this
+    # corpus uses; its parser needs the explicit assumption phrase and consumes
+    # every word, hence the fixed wording of the canonical query.
+    initial = rng.randint(10, 60)
+    accel = rng.randint(2, 9)
+    time = rng.randint(2, 9)
+    gained = accel * time
+    answer = initial + gained
+    prompt = _pick(rng, [
+        "A body moving at {u} m/s accelerates at {a} m/s^2 for {t} s. "
+        "What is its final velocity?",
+        "initial velocity {u} m/s acceleration {a} m/s^2 time {t} s final velocity",
+        "Find the final velocity from initial velocity {u} m/s, "
+        "acceleration {a} m/s^2 and time {t} s.",
+        "Starting at {u} m/s with acceleration {a} m/s^2, "
+        "what is the velocity after {t} s?",
+    ], u=initial, a=accel, t=time, _task="final_velocity")
+    response = (f"final velocity = initial velocity + acceleration x time, "
+                f"{accel} x {time} = {gained}, {initial} + {gained} = {answer}, "
+                f"the final velocity is {answer} metres per second, total {answer}")
+    return OmniProblem("final_velocity", "physics", prompt, response, float(answer), "m/s",
+                       f"assuming constant acceleration an object has initial velocity "
+                       f"{initial} m/s acceleration {accel} m/s^2 for {time} s "
+                       f"find the final velocity",
+                       {"u": initial, "a": accel, "t": time})
+
+
+#: Every v89 generator, by task name. Frozen: see the note above `_impulse`.
 TASKS: Dict[str, Callable[[random.Random], OmniProblem]] = {
     "force": _force,
     "acceleration": _acceleration,
@@ -714,6 +856,19 @@ TASKS: Dict[str, Callable[[random.Random], OmniProblem]] = {
     "combination": _combination,
     "arithmetic_series": _arithmetic_series,
 }
+
+#: The tasks added for v93. Built only when named with `--task`; never part of
+#: a default build, so `python build_omni_corpus.py` still writes v89's corpus.
+V93_TASKS: Dict[str, Callable[[random.Random], OmniProblem]] = {
+    "impulse": _impulse,
+    "ohms_current": _ohms_current,
+    "spring_energy": _spring_energy,
+    "permutations": _permutations,
+    "final_velocity": _final_velocity,
+}
+
+#: Every generator this module can build, for lookup by name.
+ALL_TASKS: Dict[str, Callable[[random.Random], OmniProblem]] = {**TASKS, **V93_TASKS}
 
 
 # -- verification -----------------------------------------------------------
@@ -1081,7 +1236,12 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
 
     rng = random.Random(seed)
     harder = _HarderRandom(rng)
+    # The default is the v89 twelve. A v93 task is built only when asked for
+    # by name, so this line is what keeps a default build byte-identical.
     chosen = tasks or list(TASKS)
+    unknown = [name for name in chosen if name not in ALL_TASKS]
+    if unknown:
+        raise ValueError(f"unknown task(s): {', '.join(unknown)}")
     rows: List[Dict[str, str]] = []
     counts: Dict[str, int] = {}
     dropped: Dict[str, int] = {}
@@ -1098,7 +1258,7 @@ def build(per_task: int, seed: int, tasks: Optional[List[str]] = None,
         if priming_fraction > 0 and rng.random() < priming_fraction:
             source = harder
             primed[name] = primed.get(name, 0) + 1
-        problem = TASKS[name](source)
+        problem = ALL_TASKS[name](source)
         if not verify(problem) or extract_answer(problem.response) != problem.answer:
             dropped[name] = dropped.get(name, 0) + 1
             if source is harder:
@@ -1255,7 +1415,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "multiplication task repeated 712 pairs 56x each and "
                               "scored 0.93, while the diverse omni build scored 0.03"))
     parser.add_argument("--task", action="append", default=[],
-                        help="restrict to these tasks; repeatable")
+                        help=("restrict to these tasks; repeatable. The default is "
+                              "the twelve v89 tasks; the v93 tasks "
+                              f"({', '.join(V93_TASKS)}) are built only when named"))
     parser.add_argument("--retry_rate", type=float, default=0.0,
                         help=("fraction of rows carrying one wrong step, the "
                               "marker word and the correction (Ye et al. 2024, "

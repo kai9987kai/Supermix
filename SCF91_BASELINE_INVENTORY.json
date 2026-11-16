@@ -1,0 +1,2209 @@
+{
+  "schema": "supermix-scf91-baseline-inventory-v1",
+  "generated_at": "2026-11-16T11:04:03+00:00",
+  "git": {
+    "branch": "scf-v91-cognitive-fabric",
+    "head_commit": "93839843cc07ed8347f9e719fc7861f412f7871b",
+    "tracked_files_count": 1094
+  },
+  "environment": {
+    "python_version": "3.12.10",
+    "platform": "Windows-11-10.0.28120-SP0",
+    "cpu_count": 8,
+    "torch_version": "2.11.0+cpu",
+    "cuda_available": false,
+    "cuda_device_count": 0,
+    "packages": {
+      "torch": "2.11.0",
+      "numpy": "2.4.3",
+      "fastapi": "0.137.1",
+      "uvicorn": "0.49.0",
+      "pydantic": "2.13.4",
+      "starlette": "1.3.1",
+      "httpx": "0.28.1",
+      "transformers": "5.12.1",
+      "peft": "0.19.1",
+      "safetensors": "0.8.0",
+      "pytest": "8.4.2",
+      "ruff": "0.15.16",
+      "Pillow": "12.1.1"
+    }
+  },
+  "entrypoints": [
+    {
+      "path": "source/supermix_multimodel_desktop_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/supermix_multimodel_web_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/chat_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/chat_web_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/qwen_chat_web_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/mimomix_talk_web_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/mimomix_reasoner_web_app.py",
+      "exists": true
+    },
+    {
+      "path": "source/supermix_chat_server.py",
+      "exists": true
+    },
+    {
+      "path": "source/nexus_api.py",
+      "exists": true
+    },
+    {
+      "path": "source/nexus_cli.py",
+      "exists": true
+    },
+    {
+      "path": "source/train_mimomix_generalisation.py",
+      "exists": true
+    },
+    {
+      "path": "source/train_supervised.py",
+      "exists": true
+    }
+  ],
+  "repository_counts": {
+    "source_python_modules": 265,
+    "root_test_suites": 208,
+    "weight_artifacts_total": 176,
+    "dataset_jsonl_files": 41
+  },
+  "subsystems": {
+    "championnet_architectures_and_heads": [
+      "ExpandedClassifierHead",
+      "ExpandedClassifierHeadXL",
+      "ExpandedClassifierHeadXXL",
+      "ExpandedClassifierHeadXXXL",
+      "ExpandedClassifierHeadUltra",
+      "ExpandedClassifierHeadMega",
+      "GatedExpertClassifierHead",
+      "HierarchicalMoEClassifierHead",
+      "DeepExpertClassifierHead",
+      "ExpertChoiceClassifierHead",
+      "SmarterExpertClassifierHead",
+      "ThoughtExpertClassifierHead",
+      "RecursiveThoughtExpertHead",
+      "ChampionNetRecursiveExpert",
+      "ReflexiveThoughtExpertHead",
+      "ChampionNetReflexiveExpert",
+      "MetaCognitiveExpertHead",
+      "ChampionNetMetaCognitiveExpert",
+      "TreeOfThoughtExpertHead",
+      "ChampionNetTreeOfThoughtExpert",
+      "ConsensusExpertHead",
+      "ChampionNetConsensusExpert",
+      "DeliberativeAlignmentExpertHead",
+      "ChampionNetDeliberativeExpert",
+      "OmniscientSynergyExpertHead",
+      "ChampionNetOmniscientExpert",
+      "NeurogenesisExpertHead",
+      "ChampionNetNeurogenesisExpert",
+      "CognitiveSingularityExpertHead",
+      "ChampionNetCognitiveExpert",
+      "TranscendentArchitectExpertHead",
+      "ChampionNetTranscendentExpert",
+      "OmniversalQuantumExpertHead",
+      "ChampionNetOmniversalExpert",
+      "FractalGenesisExpertHead",
+      "ChampionNetFractalExpert",
+      "LiquidSpikingTensorExpertHead",
+      "ChampionNetLiquidSpikingExpert",
+      "ActiveInferenceExpertHead",
+      "ChampionNetActiveInferenceExpert",
+      "TestTimeDifferentialExpertHead",
+      "ChampionNetTestTimeDiffExpert",
+      "HolographicStateSpaceExpertHead",
+      "ChampionNetHolographicStateSpaceExpert",
+      "PaperFusionExpertHead",
+      "ChampionNetPaperFusionExpert",
+      "ChampionNetHierarchicalExpert",
+      "ChampionNetDeepExpert",
+      "ChampionNetExpertChoice",
+      "ChampionNetSmarterExpert",
+      "ChampionNetThoughtExpert",
+      "ChampionNetUltraExpert",
+      "ChampionNetLarge",
+      "ChampionNetXL",
+      "ChampionNetXXL",
+      "ChampionNetXXXL",
+      "ChampionNetUltra",
+      "ChampionNetMega"
+    ],
+    "cognitive_leap_classes": [
+      "CognitiveLeapExpertHead",
+      "ChampionNetCognitiveLeapExpert",
+      "CognitiveLeapUltraExpertHead",
+      "ChampionNetCognitiveLeapUltraExpert",
+      "CognitiveLeapV52ExpertHead",
+      "ChampionNetCognitiveLeapV52Expert"
+    ],
+    "omni_collective_modules": [
+      "source/omni_collective_model.py",
+      "source/omni_collective_v3_model.py",
+      "source/omni_collective_v41_model.py",
+      "source/omni_collective_v42_model.py",
+      "source/omni_collective_v4_model.py",
+      "source/omni_collective_v5_model.py",
+      "source/omni_collective_v6_model.py",
+      "source/omni_collective_v7_model.py",
+      "source/omni_collective_v8_model.py"
+    ],
+    "multimodel_catalog_specs": [
+      {
+        "key": "omni_collective_v46",
+        "label": "Omni Collective V46 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v46",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v46_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v47",
+        "label": "Omni Collective V47 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v47",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v47_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v48",
+        "label": "Omni Collective V48 Frontier (H-MoE)",
+        "family": "fusion",
+        "kind": "omni_collective_v48",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v48_frontier.pth",
+          "omni_collective_v48_frontier_chat.pth"
+        ]
+      },
+      {
+        "key": "science_vision_micro_v1",
+        "label": "Science Vision Micro",
+        "family": "vision",
+        "kind": "image_recognition",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "science_image_recognition_micro_v1.pth"
+        ]
+      },
+      {
+        "key": "dcgan_mnist_model",
+        "label": "DCGAN MNIST",
+        "family": "gan",
+        "kind": "dcgan_image",
+        "capabilities": [
+          "image"
+        ],
+        "preferred_weights": [
+          "generator_final.pth"
+        ]
+      },
+      {
+        "key": "dcgan_v2_in_progress",
+        "label": "DCGAN V2 CIFAR",
+        "family": "gan",
+        "kind": "dcgan_image",
+        "capabilities": [
+          "image"
+        ],
+        "preferred_weights": [
+          "generator_epoch_015.pth",
+          "generator_epoch_010.pth",
+          "generator_epoch_005.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v1",
+        "label": "Omni Collective V1",
+        "family": "fusion",
+        "kind": "omni_collective",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v1.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v2",
+        "label": "Omni Collective V2 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v2_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v3",
+        "label": "Omni Collective V3 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v3",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v3_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v4",
+        "label": "Omni Collective V4 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v4",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v4_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v5",
+        "label": "Omni Collective V5 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v5",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v5_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v6",
+        "label": "Omni Collective V6 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v6",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v6_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v7",
+        "label": "Omni Collective V7 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v7",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v7_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v8",
+        "label": "Omni Collective V8 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v8",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v8_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v42",
+        "label": "Omni Collective V42 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v42",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v42_frontier.pth",
+          "omni_collective_v42_smoke.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v41",
+        "label": "Omni Collective V41 Frontier",
+        "family": "fusion",
+        "kind": "omni_collective_v41",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v41_frontier.pth"
+        ]
+      },
+      {
+        "key": "omni_collective_v8_preview",
+        "label": "Omni Collective V8 Preview",
+        "family": "fusion",
+        "kind": "omni_collective_v8",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v8_preview.pth"
+        ]
+      },
+      {
+        "key": "v40_benchmax",
+        "label": "V40 Benchmax",
+        "family": "fusion",
+        "kind": "omni_collective_v5",
+        "capabilities": [
+          "chat",
+          "vision"
+        ],
+        "preferred_weights": [
+          "omni_collective_v40_benchmax.pth"
+        ]
+      },
+      {
+        "key": "math_equation_micro_v1",
+        "label": "Math Equation Micro",
+        "family": "math",
+        "kind": "math_equation",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "math_equation_micro_v1.pth"
+        ]
+      },
+      {
+        "key": "protein_folding_micro_v1",
+        "label": "Protein Folding Micro",
+        "family": "protein",
+        "kind": "protein_folding",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "protein_folding_micro_v1.pth"
+        ]
+      },
+      {
+        "key": "mattergen_micro_v1",
+        "label": "MatterGen Micro",
+        "family": "materials",
+        "kind": "mattergen_generation",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "mattergen_micro_v1.pth"
+        ]
+      },
+      {
+        "key": "three_d_generation_micro_v1",
+        "label": "3D Generation Micro",
+        "family": "3d",
+        "kind": "three_d_generation",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "three_d_generation_micro_v1.pth"
+        ]
+      },
+      {
+        "key": "qwen_v28",
+        "label": "Qwen V28",
+        "family": "qwen",
+        "kind": "qwen_adapter",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": []
+      },
+      {
+        "key": "qwen_v30",
+        "label": "Qwen V30 Experimental",
+        "family": "qwen",
+        "kind": "qwen_adapter",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": []
+      },
+      {
+        "key": "cognitive_leap_v50",
+        "label": "Cognitive Leap V50 Chat",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v50_cognitive_leap.pth"
+        ]
+      },
+      {
+        "key": "cognitive_leap_ultra_v51_demo",
+        "label": "Cognitive Leap Ultra V51 (Bounded Arithmetic Demo)",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "cognitive_leap_ultra_v51_trained.pth"
+        ]
+      },
+      {
+        "key": "cognitive_leap_ultra_v51_1_balanced_blend30",
+        "label": "Cognitive Leap Ultra v51.1 Balanced Blend (Unpromoted)",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "cognitive_leap_ultra_v51_1_balanced_blend30.pth"
+        ]
+      },
+      {
+        "key": "v30_lite",
+        "label": "V30 Lite FP16",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v30_lite_student_fp16.pth"
+        ]
+      },
+      {
+        "key": "v31_final",
+        "label": "V31 Hybrid Plus Refresh",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v31_hybrid_plus_refresh.pth"
+        ]
+      },
+      {
+        "key": "v31_image_variant",
+        "label": "V31 Image Variant",
+        "family": "wrapper",
+        "kind": "image_wrapper",
+        "capabilities": [
+          "chat",
+          "image"
+        ],
+        "preferred_weights": [
+          "model/champion_model_chat_v31_hybrid_plus_refresh.pth"
+        ]
+      },
+      {
+        "key": "v32_final",
+        "label": "V32 Omnifuse",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v32_omnifuse_final.pth"
+        ]
+      },
+      {
+        "key": "v33_final",
+        "label": "V33 Frontier",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v33_frontier_full_final.pth"
+        ]
+      },
+      {
+        "key": "v34_final",
+        "label": "V34 Frontier Plus",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v34_frontier_plus_stage2.pth"
+        ]
+      },
+      {
+        "key": "v35_final",
+        "label": "V35 Collective",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v35_collective_allteachers_stage2.pth"
+        ]
+      },
+      {
+        "key": "v36_native",
+        "label": "V36 Native Image",
+        "family": "native_image",
+        "kind": "native_image",
+        "capabilities": [
+          "image"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v36_native_image_single_checkpoint.pth"
+        ]
+      },
+      {
+        "key": "v37_native_lite",
+        "label": "V37 Native Image Lite",
+        "family": "native_image",
+        "kind": "native_image",
+        "capabilities": [
+          "image"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v37_native_image_lite_single_checkpoint.pth"
+        ]
+      },
+      {
+        "key": "v38_native_xlite",
+        "label": "V38 Native Image XLite",
+        "family": "native_image",
+        "kind": "native_image",
+        "capabilities": [
+          "image"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v38_native_image_xlite_single_checkpoint.pth"
+        ]
+      },
+      {
+        "key": "v38_native_xlite_fp16",
+        "label": "V38 Native Image XLite FP16",
+        "family": "native_image",
+        "kind": "native_image",
+        "capabilities": [
+          "image"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v38_native_image_xlite_single_checkpoint_fp16.pth"
+        ]
+      },
+      {
+        "key": "v39_final",
+        "label": "V39 Frontier Reasoning",
+        "family": "champion",
+        "kind": "champion_chat",
+        "capabilities": [
+          "chat"
+        ],
+        "preferred_weights": [
+          "champion_model_chat_v39_frontier_reasoning_plus_stage2.pth"
+        ]
+      }
+    ],
+    "qwen_modules": [
+      "source/launch_qwen_chat_detached.py",
+      "source/qwen_adapter_promotion.py",
+      "source/qwen_chat_desktop_app.py",
+      "source/qwen_chat_web_app.py",
+      "source/qwen_paired_evidence.py",
+      "source/qwen_supermix_pipeline.py",
+      "source/run_qwen_general_promotion_gate.py"
+    ],
+    "mimomix_modules": [
+      "source/mimomix_api.py",
+      "source/mimomix_controller.py",
+      "source/mimomix_core.py",
+      "source/mimomix_decoding.py",
+      "source/mimomix_distill.py",
+      "source/mimomix_eval_splits.py",
+      "source/mimomix_observatory.py",
+      "source/mimomix_reasoner.py",
+      "source/mimomix_reasoner_web_app.py",
+      "source/mimomix_talk_web_app.py",
+      "source/mimomix_text.py"
+    ],
+    "nexusmind_modules": [
+      "source/nexus_active_inference.py",
+      "source/nexus_api.py",
+      "source/nexus_causal_dag.py",
+      "source/nexus_chat.py",
+      "source/nexus_cli.py",
+      "source/nexus_complexity.py",
+      "source/nexus_conformal_stopping.py",
+      "source/nexus_diffusion_thought.py",
+      "source/nexus_engine.py",
+      "source/nexus_epistemics.py",
+      "source/nexus_evidence_ledger.py",
+      "source/nexus_got.py",
+      "source/nexus_ideation.py",
+      "source/nexus_independent_checker.py",
+      "source/nexus_interpretability.py",
+      "source/nexus_nonce_ledger.py",
+      "source/nexus_proof.py",
+      "source/nexus_proof_verification.py",
+      "source/nexus_reflexion.py",
+      "source/nexus_risk_control.py",
+      "source/nexus_solver.py",
+      "source/nexus_speculative_bidirectional.py",
+      "source/nexus_swarm.py",
+      "source/nexus_v95_ecosystem.py"
+    ],
+    "multimodal_modules": [
+      "source/image_feature_utils.py",
+      "source/image_recognition_model.py",
+      "source/dcgan_image_model.py",
+      "source/video_feature_utils.py",
+      "source/mesh_feature_utils.py",
+      "source/three_d_generation_model.py",
+      "source/protein_folding_model.py",
+      "source/mattergen_generation_model.py"
+    ],
+    "memory_and_conversation_systems": [
+      "source/memory_authority.py",
+      "source/multimodel_memory.py",
+      "source/conversation_state.py",
+      "source/conversation_directive.py",
+      "source/chat_memory.py",
+      "source/mimomix_reasoner.py"
+    ],
+    "verification_and_evaluation_infrastructure": [
+      "source/nexus_solver.py",
+      "source/science_plan.py",
+      "source/answer_check.py",
+      "source/prompt_normaliser.py",
+      "source/grounding_runtime.py",
+      "source/eval_problem_solving.py",
+      "source/nexus_proof.py",
+      "source/nexus_proof_verification.py",
+      "source/nexus_independent_checker.py",
+      "source/nexus_conformal_stopping.py",
+      "source/qwen_adapter_promotion.py",
+      "source/run_v56_promotion_gate.py",
+      "source/v94_connectome_audit.py"
+    ]
+  },
+  "flagship_checkpoints": {
+    "output/v80_omni/v80_omni.pt": {
+      "path": "output/v80_omni/v80_omni.pt",
+      "format": "pt",
+      "size_bytes": 184006887,
+      "size_mb": 175.483,
+      "sha256": "f49ffbf4da98e277f0e5f6b8d8535a4af1e9a067a1b27a3dc5e838017e6ccdc2",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v57-talk-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "optimiser_state",
+          "scheduler_state",
+          "schema",
+          "state_dict",
+          "tokenizer"
+        ],
+        "vocab_size": 8570,
+        "hidden_size": 256,
+        "n_layers": 4,
+        "n_heads": 8,
+        "n_kv_heads": 2,
+        "n_routed_experts": 48,
+        "use_cns_core": false,
+        "cns_nodes": null,
+        "cns_spare_nodes": null,
+        "tensor_count": 529,
+        "steps": 18000
+      }
+    },
+    "output/v89_corpus/v89_corpus.pt": {
+      "path": "output/v89_corpus/v89_corpus.pt",
+      "format": "pt",
+      "size_bytes": 121291155,
+      "size_mb": 115.672,
+      "sha256": "0ca39999327ceb4b18d2d2b9c2ca525025f6ba655d50529dae8e58a7552259fd",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v57-talk-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "schema",
+          "state_dict",
+          "tokenizer"
+        ],
+        "vocab_size": 8679,
+        "hidden_size": 320,
+        "n_layers": 5,
+        "n_heads": 8,
+        "n_kv_heads": 2,
+        "n_routed_experts": 64,
+        "use_cns_core": false,
+        "cns_nodes": null,
+        "cns_spare_nodes": null,
+        "tensor_count": 877,
+        "steps": 24250
+      }
+    },
+    "output/v91_cns_connectome/v91_cns_connectome.selected.pt": {
+      "path": "output/v91_cns_connectome/v91_cns_connectome.selected.pt",
+      "format": "pt",
+      "size_bytes": 125781750,
+      "size_mb": 119.955,
+      "sha256": "e927a848a164f9343365afcdad4966ac406934c3e57b2b3231b220ba6c567c79",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v57-talk-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "schema",
+          "state_dict",
+          "tokenizer"
+        ],
+        "vocab_size": 8679,
+        "hidden_size": 320,
+        "n_layers": 5,
+        "n_heads": 8,
+        "n_kv_heads": 2,
+        "n_routed_experts": 64,
+        "use_cns_core": true,
+        "cns_nodes": 512,
+        "cns_spare_nodes": null,
+        "tensor_count": 890,
+        "steps": 2500
+      }
+    },
+    "output/v93_neurogenesis/v93_neurogenesis.selected.pt": {
+      "path": "output/v93_neurogenesis/v93_neurogenesis.selected.pt",
+      "format": "pt",
+      "size_bytes": 153147277,
+      "size_mb": 146.053,
+      "sha256": "55a9a5a2f2e68cd87e0ca94398600f93b6c5262a683f02f139c0f1580e5b5ced",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v57-talk-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "schema",
+          "state_dict",
+          "tokenizer"
+        ],
+        "vocab_size": 9415,
+        "hidden_size": 320,
+        "n_layers": 6,
+        "n_heads": 8,
+        "n_kv_heads": 2,
+        "n_routed_experts": 64,
+        "use_cns_core": true,
+        "cns_nodes": 832,
+        "cns_spare_nodes": 64,
+        "tensor_count": 1015,
+        "steps": 6000
+      }
+    },
+    "output/v96_physio_neurogenesis/v96_physio_neurogenesis.pt": {
+      "path": "output/v96_physio_neurogenesis/v96_physio_neurogenesis.pt",
+      "format": "pt",
+      "size_bytes": 153146113,
+      "size_mb": 146.052,
+      "sha256": "13bb1bcd9d1c9095245a909e00ad2c91e46e443baa37e62a89616e6f72967abe",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v57-talk-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "schema",
+          "state_dict",
+          "tokenizer"
+        ],
+        "vocab_size": 9415,
+        "hidden_size": 320,
+        "n_layers": 6,
+        "n_heads": 8,
+        "n_kv_heads": 2,
+        "n_routed_experts": 64,
+        "use_cns_core": true,
+        "cns_nodes": 832,
+        "cns_spare_nodes": 64,
+        "tensor_count": 1021,
+        "steps": 16
+      }
+    },
+    "output/hf_v56_publish/v56b_randslots_entropy.pt": {
+      "path": "output/hf_v56_publish/v56b_randslots_entropy.pt",
+      "format": "pt",
+      "size_bytes": 3288582,
+      "size_mb": 3.136,
+      "sha256": "c329bc847c4a3b5757c9d5e31f6893fb69d4239924333994f0fa0902c26536b0",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v56-reasoner-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "schema",
+          "state_dict"
+        ],
+        "vocab_size": 0,
+        "hidden_size": 96,
+        "n_layers": 4,
+        "n_heads": 4,
+        "n_kv_heads": 2,
+        "n_routed_experts": 8,
+        "use_cns_core": false,
+        "cns_nodes": null,
+        "cns_spare_nodes": null,
+        "tensor_count": 161,
+        "steps": null
+      }
+    },
+    "output/hf_v57_publish/v57_talk_v2.pt": {
+      "path": "output/hf_v57_publish/v57_talk_v2.pt",
+      "format": "pt",
+      "size_bytes": 12370087,
+      "size_mb": 11.797,
+      "sha256": "d97c2d84a2569a4742aec52f42eb16475b0d5ff281bd3c6bdfbf1465f5c956f8",
+      "present_on_disk": true,
+      "inspected": {
+        "schema": "supermix-v57-talk-checkpoint-v1",
+        "top_keys": [
+          "config",
+          "extra",
+          "schema",
+          "state_dict",
+          "tokenizer"
+        ],
+        "vocab_size": 582,
+        "hidden_size": 192,
+        "n_layers": 4,
+        "n_heads": 6,
+        "n_kv_heads": 2,
+        "n_routed_experts": 8,
+        "use_cns_core": false,
+        "cns_nodes": null,
+        "cns_spare_nodes": null,
+        "tensor_count": 169,
+        "steps": null
+      }
+    },
+    "artifacts/v52_initialization/champion_model_chat_v50_cognitive_leap.pth": {
+      "path": "artifacts/v52_initialization/champion_model_chat_v50_cognitive_leap.pth",
+      "format": "pth",
+      "size_bytes": 6768714,
+      "size_mb": 6.455,
+      "sha256": "6d595a44ee130a569bae4e697007bc4d3212a5142598f7ea59c8ddf73ffcc864",
+      "present_on_disk": true
+    },
+    "artifacts/v52_initialization/champion_model_chat_v52_initialized.pth": {
+      "path": "artifacts/v52_initialization/champion_model_chat_v52_initialized.pth",
+      "format": "pth",
+      "size_bytes": 9737831,
+      "size_mb": 9.287,
+      "sha256": "1ab25aa9772f90896a9a6c28eb346135b9b9a8d48fa9d84936c4d802d742c192",
+      "present_on_disk": true
+    },
+    "output/benchmark_v51_cognitive_leap_ultra/cognitive_leap_ultra_v51_trained.pth": {
+      "path": "output/benchmark_v51_cognitive_leap_ultra/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": "664b1779452fe1482389413004d8bce3369f6d8ee15ab8c2c891dc5e382ebae4",
+      "present_on_disk": true
+    }
+  },
+  "all_weight_artifacts": [
+    {
+      "path": "build/chat_model_stage/supermix_v74.pt",
+      "format": "pt",
+      "size_bytes": 34570909,
+      "size_mb": 32.969,
+      "sha256": null
+    },
+    {
+      "path": "dist/SupermixChatDesktop/_internal/model/supermix_v74.pt",
+      "format": "pt",
+      "size_bytes": 34570909,
+      "size_mb": 32.969,
+      "sha256": null
+    },
+    {
+      "path": "output/acc_smoke/acc_smoke.pt",
+      "format": "pt",
+      "size_bytes": 44879499,
+      "size_mb": 42.8,
+      "sha256": null
+    },
+    {
+      "path": "output/ck_fix/ck_fix.partial.pt",
+      "format": "pt",
+      "size_bytes": 44882961,
+      "size_mb": 42.804,
+      "sha256": null
+    },
+    {
+      "path": "output/ck_fix/ck_fix.pt",
+      "format": "pt",
+      "size_bytes": 44871585,
+      "size_mb": 42.793,
+      "sha256": null
+    },
+    {
+      "path": "output/hf_v56_publish/v56b_randslots_entropy.pt",
+      "format": "pt",
+      "size_bytes": 3288582,
+      "size_mb": 3.136,
+      "sha256": "c329bc847c4a3b5757c9d5e31f6893fb69d4239924333994f0fa0902c26536b0"
+    },
+    {
+      "path": "output/hf_v57_publish/v57_talk_v2.pt",
+      "format": "pt",
+      "size_bytes": 12370087,
+      "size_mb": 11.797,
+      "sha256": "d97c2d84a2569a4742aec52f42eb16475b0d5ff281bd3c6bdfbf1465f5c956f8"
+    },
+    {
+      "path": "output/sel_bal/sel_bal.pt",
+      "format": "pt",
+      "size_bytes": 35922159,
+      "size_mb": 34.258,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00008/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00016/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00024/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00048/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00072/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00096/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/checkpoints/sft_step_00008/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/checkpoints/sft_step_00016/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/checkpoints/sft_step_00008/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/checkpoints/sft_step_00016/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v5_hardened_seed5204/checkpoints/sft_step_00008/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00048/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00072/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00096/trainer_state.pt",
+      "format": "pt",
+      "size_bytes": 8809443,
+      "size_mb": 8.401,
+      "sha256": null
+    },
+    {
+      "path": "output/v56_curriculum/v56_curriculum_160k.pt",
+      "format": "pt",
+      "size_bytes": 3288017,
+      "size_mb": 3.136,
+      "sha256": null
+    },
+    {
+      "path": "output/v56_matched_12k_4ep/v56_matched_12k_4ep.pt",
+      "format": "pt",
+      "size_bytes": 3288017,
+      "size_mb": 3.136,
+      "sha256": null
+    },
+    {
+      "path": "output/v56_smoke/v56_smoke.pt",
+      "format": "pt",
+      "size_bytes": 3285323,
+      "size_mb": 3.133,
+      "sha256": null
+    },
+    {
+      "path": "output/v56b_full_equivariant/v56b_full_equivariant.pt",
+      "format": "pt",
+      "size_bytes": 3286547,
+      "size_mb": 3.134,
+      "sha256": null
+    },
+    {
+      "path": "output/v56b_randslots/v56b_randslots.pt",
+      "format": "pt",
+      "size_bytes": 3287182,
+      "size_mb": 3.135,
+      "sha256": null
+    },
+    {
+      "path": "output/v56b_randslots_entropy/v56b_randslots_entropy.pt",
+      "format": "pt",
+      "size_bytes": 3288582,
+      "size_mb": 3.136,
+      "sha256": null
+    },
+    {
+      "path": "output/v56b_slot_only/v56b_slot_only.pt",
+      "format": "pt",
+      "size_bytes": 3285060,
+      "size_mb": 3.133,
+      "sha256": null
+    },
+    {
+      "path": "output/v57_smoke/v57_smoke.pt",
+      "format": "pt",
+      "size_bytes": 29437515,
+      "size_mb": 28.074,
+      "sha256": null
+    },
+    {
+      "path": "output/v57_talk/v57_talk.pt",
+      "format": "pt",
+      "size_bytes": 12179933,
+      "size_mb": 11.616,
+      "sha256": null
+    },
+    {
+      "path": "output/v57_talk_v2/v57_talk_v2.pt",
+      "format": "pt",
+      "size_bytes": 12370087,
+      "size_mb": 11.797,
+      "sha256": null
+    },
+    {
+      "path": "output/v58_ablation/v58_ablation.pt",
+      "format": "pt",
+      "size_bytes": 12113497,
+      "size_mb": 11.552,
+      "sha256": null
+    },
+    {
+      "path": "output/v58_full/v58_full.pt",
+      "format": "pt",
+      "size_bytes": 12369565,
+      "size_mb": 11.797,
+      "sha256": null
+    },
+    {
+      "path": "output/v58_smoke/v58_smoke.pt",
+      "format": "pt",
+      "size_bytes": 29717067,
+      "size_mb": 28.34,
+      "sha256": null
+    },
+    {
+      "path": "output/v59_gate_warm/v59_gate_warm.pt",
+      "format": "pt",
+      "size_bytes": 29736867,
+      "size_mb": 28.359,
+      "sha256": null
+    },
+    {
+      "path": "output/v59_gate_zero/v59_gate_zero.pt",
+      "format": "pt",
+      "size_bytes": 29736867,
+      "size_mb": 28.359,
+      "sha256": null
+    },
+    {
+      "path": "output/v60_control_2000/v60_control_2000.pt",
+      "format": "pt",
+      "size_bytes": 20179405,
+      "size_mb": 19.245,
+      "sha256": null
+    },
+    {
+      "path": "output/v60_diverse/v60_diverse.pt",
+      "format": "pt",
+      "size_bytes": 20178535,
+      "size_mb": 19.244,
+      "sha256": null
+    },
+    {
+      "path": "output/v60_smoke/v60_smoke.pt",
+      "format": "pt",
+      "size_bytes": 16829579,
+      "size_mb": 16.05,
+      "sha256": null
+    },
+    {
+      "path": "output/v61_scaled/v61_scaled.pt",
+      "format": "pt",
+      "size_bytes": 63899113,
+      "size_mb": 60.939,
+      "sha256": null
+    },
+    {
+      "path": "output/v62_amp_smoke/v62_amp_smoke.pt",
+      "format": "pt",
+      "size_bytes": 15131971,
+      "size_mb": 14.431,
+      "sha256": null
+    },
+    {
+      "path": "output/v62_long/v62_long.pt",
+      "format": "pt",
+      "size_bytes": 24778653,
+      "size_mb": 23.631,
+      "sha256": null
+    },
+    {
+      "path": "output/v62_multidomain/v62_multidomain.pt",
+      "format": "pt",
+      "size_bytes": 24779871,
+      "size_mb": 23.632,
+      "sha256": null
+    },
+    {
+      "path": "output/v62_resume_smoke/v62_resume_smoke.pt",
+      "format": "pt",
+      "size_bytes": 24780045,
+      "size_mb": 23.632,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_aligned/v63_aligned.partial.pt",
+      "format": "pt",
+      "size_bytes": 73756503,
+      "size_mb": 70.34,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_aligned/v63_aligned.pt",
+      "format": "pt",
+      "size_bytes": 73751207,
+      "size_mb": 70.335,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_ck_r2/v63_ck_r2.pt",
+      "format": "pt",
+      "size_bytes": 45245259,
+      "size_mb": 43.149,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_ck_smoke/v63_ck_smoke.partial.pt",
+      "format": "pt",
+      "size_bytes": 45252517,
+      "size_mb": 43.156,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_ck_smoke/v63_ck_smoke.pt",
+      "format": "pt",
+      "size_bytes": 45247221,
+      "size_mb": 43.151,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_coherent/v63_coherent.partial.pt",
+      "format": "pt",
+      "size_bytes": 73757157,
+      "size_mb": 70.34,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_probe/v63_probe.pt",
+      "format": "pt",
+      "size_bytes": 45245259,
+      "size_mb": 43.149,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_ta_smoke/v63_ta_smoke.pt",
+      "format": "pt",
+      "size_bytes": 45246133,
+      "size_mb": 43.15,
+      "sha256": null
+    },
+    {
+      "path": "output/v63_tiny/v63_tiny.pt",
+      "format": "pt",
+      "size_bytes": 45244157,
+      "size_mb": 43.148,
+      "sha256": null
+    },
+    {
+      "path": "output/v64_meaning/v64_meaning.partial.pt",
+      "format": "pt",
+      "size_bytes": 111816855,
+      "size_mb": 106.637,
+      "sha256": null
+    },
+    {
+      "path": "output/v64_meaning_b/v64_meaning_b.partial.pt",
+      "format": "pt",
+      "size_bytes": 111818163,
+      "size_mb": 106.638,
+      "sha256": null
+    },
+    {
+      "path": "output/v64_meaning_b/v64_meaning_b.pt",
+      "format": "pt",
+      "size_bytes": 111812867,
+      "size_mb": 106.633,
+      "sha256": null
+    },
+    {
+      "path": "output/v65_math/v65_math.partial.pt",
+      "format": "pt",
+      "size_bytes": 37759149,
+      "size_mb": 36.01,
+      "sha256": null
+    },
+    {
+      "path": "output/v65_math/v65_math.pt",
+      "format": "pt",
+      "size_bytes": 37753853,
+      "size_mb": 36.005,
+      "sha256": null
+    },
+    {
+      "path": "output/v66_scratchpad/v66_scratchpad.partial.pt",
+      "format": "pt",
+      "size_bytes": 35932609,
+      "size_mb": 34.268,
+      "sha256": null
+    },
+    {
+      "path": "output/v66_scratchpad/v66_scratchpad.pt",
+      "format": "pt",
+      "size_bytes": 35927249,
+      "size_mb": 34.263,
+      "sha256": null
+    },
+    {
+      "path": "output/v67_scratchpad_all/v67_scratchpad_all.partial.pt",
+      "format": "pt",
+      "size_bytes": 36046521,
+      "size_mb": 34.377,
+      "sha256": null
+    },
+    {
+      "path": "output/v67_scratchpad_all/v67_scratchpad_all.pt",
+      "format": "pt",
+      "size_bytes": 36041161,
+      "size_mb": 34.372,
+      "sha256": null
+    },
+    {
+      "path": "output/v68_average_fix/v68_average_fix.partial.pt",
+      "format": "pt",
+      "size_bytes": 36044559,
+      "size_mb": 34.375,
+      "sha256": null
+    },
+    {
+      "path": "output/v68_average_fix/v68_average_fix.pt",
+      "format": "pt",
+      "size_bytes": 36039199,
+      "size_mb": 34.37,
+      "sha256": null
+    },
+    {
+      "path": "output/v69_unified/v69_unified.partial.pt",
+      "format": "pt",
+      "size_bytes": 55331031,
+      "size_mb": 52.768,
+      "sha256": null
+    },
+    {
+      "path": "output/v69_unified_b/v69_unified_b.partial.pt",
+      "format": "pt",
+      "size_bytes": 55332339,
+      "size_mb": 52.769,
+      "sha256": null
+    },
+    {
+      "path": "output/v69_unified_b/v69_unified_b.pt",
+      "format": "pt",
+      "size_bytes": 55327107,
+      "size_mb": 52.764,
+      "sha256": null
+    },
+    {
+      "path": "output/v70_moe/v70_moe.partial.pt",
+      "format": "pt",
+      "size_bytes": 103584287,
+      "size_mb": 98.786,
+      "sha256": null
+    },
+    {
+      "path": "output/v70_moe/v70_moe.pt",
+      "format": "pt",
+      "size_bytes": 103571631,
+      "size_mb": 98.774,
+      "sha256": null
+    },
+    {
+      "path": "output/v71_decomposed/v71_decomposed.partial.pt",
+      "format": "pt",
+      "size_bytes": 103748193,
+      "size_mb": 98.942,
+      "sha256": null
+    },
+    {
+      "path": "output/v71_decomposed/v71_decomposed.pt",
+      "format": "pt",
+      "size_bytes": 103735985,
+      "size_mb": 98.93,
+      "sha256": null
+    },
+    {
+      "path": "output/v72_seq_control/v72_seq_control.partial.pt",
+      "format": "pt",
+      "size_bytes": 103596559,
+      "size_mb": 98.797,
+      "sha256": null
+    },
+    {
+      "path": "output/v72_seq_control/v72_seq_control.pt",
+      "format": "pt",
+      "size_bytes": 103584351,
+      "size_mb": 98.786,
+      "sha256": null
+    },
+    {
+      "path": "output/v73_decomposed_short/v73_decomposed_short.partial.pt",
+      "format": "pt",
+      "size_bytes": 103627253,
+      "size_mb": 98.827,
+      "sha256": null
+    },
+    {
+      "path": "output/v73_decomposed_short/v73_decomposed_short.pt",
+      "format": "pt",
+      "size_bytes": 103615045,
+      "size_mb": 98.815,
+      "sha256": null
+    },
+    {
+      "path": "output/v74_broad/v74_broad.partial.pt",
+      "format": "pt",
+      "size_bytes": 103466757,
+      "size_mb": 98.674,
+      "sha256": null
+    },
+    {
+      "path": "output/v74_broad/v74_broad.pt",
+      "format": "pt",
+      "size_bytes": 103454421,
+      "size_mb": 98.662,
+      "sha256": null
+    },
+    {
+      "path": "output/v74_broad/v74_broad.step11500.backup.pt",
+      "format": "pt",
+      "size_bytes": 103462395,
+      "size_mb": 98.669,
+      "sha256": null
+    },
+    {
+      "path": "output/v79_omni/v79_omni.partial.pt",
+      "format": "pt",
+      "size_bytes": 183965207,
+      "size_mb": 175.443,
+      "sha256": null
+    },
+    {
+      "path": "output/v79_omni/v79_omni.pt",
+      "format": "pt",
+      "size_bytes": 183948263,
+      "size_mb": 175.427,
+      "sha256": null
+    },
+    {
+      "path": "output/v80_omni/v80_omni.partial.pt",
+      "format": "pt",
+      "size_bytes": 184023831,
+      "size_mb": 175.499,
+      "sha256": null
+    },
+    {
+      "path": "output/v80_omni/v80_omni.pt",
+      "format": "pt",
+      "size_bytes": 184006887,
+      "size_mb": 175.483,
+      "sha256": "f49ffbf4da98e277f0e5f6b8d8535a4af1e9a067a1b27a3dc5e838017e6ccdc2"
+    },
+    {
+      "path": "output/v86_corpus/v86_corpus.partial.pt",
+      "format": "pt",
+      "size_bytes": 183988467,
+      "size_mb": 175.465,
+      "sha256": null
+    },
+    {
+      "path": "output/v86_corpus/v86_corpus.pt",
+      "format": "pt",
+      "size_bytes": 183971651,
+      "size_mb": 175.449,
+      "sha256": null
+    },
+    {
+      "path": "output/v87_corpus/v87_corpus.partial.pt",
+      "format": "pt",
+      "size_bytes": 254436714,
+      "size_mb": 242.65,
+      "sha256": null
+    },
+    {
+      "path": "output/v87_corpus/v87_corpus.pt",
+      "format": "pt",
+      "size_bytes": 61485155,
+      "size_mb": 58.637,
+      "sha256": null
+    },
+    {
+      "path": "output/v87_corpus/v87_corpus.selected.pt",
+      "format": "pt",
+      "size_bytes": 61502185,
+      "size_mb": 58.653,
+      "sha256": null
+    },
+    {
+      "path": "output/v88_corpus/v88_corpus.partial.pt",
+      "format": "pt",
+      "size_bytes": 495954719,
+      "size_mb": 472.979,
+      "sha256": null
+    },
+    {
+      "path": "output/v88_corpus/v88_corpus.pt",
+      "format": "pt",
+      "size_bytes": 121280851,
+      "size_mb": 115.662,
+      "sha256": null
+    },
+    {
+      "path": "output/v88_corpus/v88_corpus.selected.pt",
+      "format": "pt",
+      "size_bytes": 121301077,
+      "size_mb": 115.682,
+      "sha256": null
+    },
+    {
+      "path": "output/v88_corpus_lr3e3_diverged/v88_corpus.partial.pt",
+      "format": "pt",
+      "size_bytes": 495944351,
+      "size_mb": 472.969,
+      "sha256": null
+    },
+    {
+      "path": "output/v88_corpus_lr3e3_diverged/v88_corpus.selected.pt",
+      "format": "pt",
+      "size_bytes": 121290965,
+      "size_mb": 115.672,
+      "sha256": null
+    },
+    {
+      "path": "output/v89_corpus/v89_corpus.partial.pt",
+      "format": "pt",
+      "size_bytes": 496007391,
+      "size_mb": 473.03,
+      "sha256": null
+    },
+    {
+      "path": "output/v89_corpus/v89_corpus.pt",
+      "format": "pt",
+      "size_bytes": 121291155,
+      "size_mb": 115.672,
+      "sha256": "0ca39999327ceb4b18d2d2b9c2ca525025f6ba655d50529dae8e58a7552259fd"
+    },
+    {
+      "path": "output/v89_corpus/v89_corpus.selected.pt",
+      "format": "pt",
+      "size_bytes": 121313045,
+      "size_mb": 115.693,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_cns_connectome/v91_cns_connectome.partial.pt",
+      "format": "pt",
+      "size_bytes": 509715978,
+      "size_mb": 486.103,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_cns_connectome/v91_cns_connectome.pt",
+      "format": "pt",
+      "size_bytes": 125771711,
+      "size_mb": 119.945,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_cns_connectome/v91_cns_connectome.selected.pt",
+      "format": "pt",
+      "size_bytes": 125781750,
+      "size_mb": 119.955,
+      "sha256": "e927a848a164f9343365afcdad4966ac406934c3e57b2b3231b220ba6c567c79"
+    },
+    {
+      "path": "output/v91_cns_rewired/v91_cns_rewired.partial.pt",
+      "format": "pt",
+      "size_bytes": 509702751,
+      "size_mb": 486.09,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_cns_rewired/v91_cns_rewired.pt",
+      "format": "pt",
+      "size_bytes": 125769026,
+      "size_mb": 119.943,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_cns_rewired/v91_cns_rewired.selected.pt",
+      "format": "pt",
+      "size_bytes": 125779065,
+      "size_mb": 119.952,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_control/v91_control.partial.pt",
+      "format": "pt",
+      "size_bytes": 496000041,
+      "size_mb": 473.023,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_control/v91_control.pt",
+      "format": "pt",
+      "size_bytes": 121292229,
+      "size_mb": 115.673,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_control/v91_control.selected.pt",
+      "format": "pt",
+      "size_bytes": 121302151,
+      "size_mb": 115.683,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_malecns/A_off.pt",
+      "format": "pt",
+      "size_bytes": 125701327,
+      "size_mb": 119.878,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_malecns/B_off.pt",
+      "format": "pt",
+      "size_bytes": 125701327,
+      "size_mb": 119.878,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_preflight/v91_preflight.pt",
+      "format": "pt",
+      "size_bytes": 125766532,
+      "size_mb": 119.94,
+      "sha256": null
+    },
+    {
+      "path": "output/v91_smoke/v91_smoke.pt",
+      "format": "pt",
+      "size_bytes": 114672520,
+      "size_mb": 109.36,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/P_real_s1.core.pt",
+      "format": "pt",
+      "size_bytes": 3425465,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_empty_s1.core.pt",
+      "format": "pt",
+      "size_bytes": 3425482,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_null_101.core.pt",
+      "format": "pt",
+      "size_bytes": 3425482,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_null_102.core.pt",
+      "format": "pt",
+      "size_bytes": 3425482,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_null_103.core.pt",
+      "format": "pt",
+      "size_bytes": 3425482,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_physio_s1.core.pt",
+      "format": "pt",
+      "size_bytes": 3436735,
+      "size_mb": 3.278,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_physio_s2.core.pt",
+      "format": "pt",
+      "size_bytes": 3436735,
+      "size_mb": 3.278,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_real_s1.core.pt",
+      "format": "pt",
+      "size_bytes": 3425465,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v92_connectome/runs/T_real_s2.core.pt",
+      "format": "pt",
+      "size_bytes": 3425465,
+      "size_mb": 3.267,
+      "sha256": null
+    },
+    {
+      "path": "output/v93_neurogenesis/v93_neurogenesis.partial.pt",
+      "format": "pt",
+      "size_bytes": 591061126,
+      "size_mb": 563.68,
+      "sha256": null
+    },
+    {
+      "path": "output/v93_neurogenesis/v93_neurogenesis.pt",
+      "format": "pt",
+      "size_bytes": 153120881,
+      "size_mb": 146.027,
+      "sha256": null
+    },
+    {
+      "path": "output/v93_neurogenesis/v93_neurogenesis.selected.pt",
+      "format": "pt",
+      "size_bytes": 153147277,
+      "size_mb": 146.053,
+      "sha256": "55a9a5a2f2e68cd87e0ca94398600f93b6c5262a683f02f139c0f1580e5b5ced"
+    },
+    {
+      "path": "output/v93_preflight/v93_preflight.partial.pt",
+      "format": "pt",
+      "size_bytes": 591021965,
+      "size_mb": 563.642,
+      "sha256": null
+    },
+    {
+      "path": "output/v93_preflight/v93_preflight.pt",
+      "format": "pt",
+      "size_bytes": 153117821,
+      "size_mb": 146.025,
+      "sha256": null
+    },
+    {
+      "path": "output/v93_preflight/v93_preflight.selected.pt",
+      "format": "pt",
+      "size_bytes": 153131801,
+      "size_mb": 146.038,
+      "sha256": null
+    },
+    {
+      "path": "output/v96_physio_neurogenesis/v96_physio_neurogenesis.partial.pt",
+      "format": "pt",
+      "size_bytes": 343752823,
+      "size_mb": 327.828,
+      "sha256": null
+    },
+    {
+      "path": "output/v96_physio_neurogenesis/v96_physio_neurogenesis.pt",
+      "format": "pt",
+      "size_bytes": 153146113,
+      "size_mb": 146.052,
+      "sha256": "13bb1bcd9d1c9095245a909e00ad2c91e46e443baa37e62a89616e6f72967abe"
+    },
+    {
+      "path": "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt",
+      "format": "pt",
+      "size_bytes": 153160019,
+      "size_mb": 146.065,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/v52_initialization/champion_model_chat_v50_cognitive_leap.pth",
+      "format": "pth",
+      "size_bytes": 6768714,
+      "size_mb": 6.455,
+      "sha256": "6d595a44ee130a569bae4e697007bc4d3212a5142598f7ea59c8ddf73ffcc864"
+    },
+    {
+      "path": "artifacts/v52_initialization/champion_model_chat_v52_initialized.pth",
+      "format": "pth",
+      "size_bytes": 9737831,
+      "size_mb": 9.287,
+      "sha256": "1ab25aa9772f90896a9a6c28eb346135b9b9a8d48fa9d84936c4d802d742c192"
+    },
+    {
+      "path": "output/benchmark_v51_cognitive_leap_ultra/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": "664b1779452fe1482389413004d8bce3369f6d8ee15ab8c2c891dc5e382ebae4"
+    },
+    {
+      "path": "output/benchmark_v51_cognitive_leap_ultra_latest/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "output/benchmark_v51_cognitive_leap_ultra_latest_smoke/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_balanced_blend30_seed151/cognitive_leap_ultra_v51_1_balanced_blend30.pth",
+      "format": "pth",
+      "size_bytes": 9017183,
+      "size_mb": 8.599,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_balanced_continue12k_lr1e4_seed151/cognitive_leap_ultra_v51_1_balanced_continue12k.pth",
+      "format": "pth",
+      "size_bytes": 9017671,
+      "size_mb": 8.6,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_blend10_data12k_seed51/cognitive_leap_ultra_v51_1_blend10_data12k.pth",
+      "format": "pth",
+      "size_bytes": 9017077,
+      "size_mb": 8.599,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_continue12k_lr1e4_seed151/cognitive_leap_ultra_v51_1_continue12k.pth",
+      "format": "pth",
+      "size_bytes": 9016653,
+      "size_mb": 8.599,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_data12k_seed51/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_data6k_seed51/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_lr6e4_seed51/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_1_seed51/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_2_dual_profile_dev/members/tempered_251/weights.pth",
+      "format": "pth",
+      "size_bytes": 9014213,
+      "size_mb": 8.597,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_2_dual_profile_dev/members/tempered_351/weights.pth",
+      "format": "pth",
+      "size_bytes": 9014213,
+      "size_mb": 8.597,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_2_round3_headcal_dev/members/headcal_451/weights.pth",
+      "format": "pth",
+      "size_bytes": 9014107,
+      "size_mb": 8.597,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/cognitive_leap_ultra_v51_2_round3_headcal_dev/members/headcal_551/weights.pth",
+      "format": "pth",
+      "size_bytes": 9014107,
+      "size_mb": 8.597,
+      "sha256": null
+    },
+    {
+      "path": "output/v56_baseline_replication_v51_12k_seed51/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "tmp/ext/supermix-cognitive-leap-ultra-v51-demo-20260812-128c755f271d/cognitive_leap_ultra_v51_trained.pth",
+      "format": "pth",
+      "size_bytes": 9016017,
+      "size_mb": 8.598,
+      "sha256": null
+    },
+    {
+      "path": "tmp/ext/supermix-cognitive-leap-v50-chat-20260812-80f69154b789/champion_model_chat_v50_cognitive_leap.pth",
+      "format": "pth",
+      "size_bytes": 6768714,
+      "size_mb": 6.455,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/continue_verify_20260320/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/distill_rank_iter_20260321/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/paper_iter_20260321/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/pref_len_ctrl_iter_20260321/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/pref_stop_iter_20260321/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/scoped_token_budget_iter_20260321/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/self_play_iter_20260321/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/autoresearch/token_budget_iter_20260321_c/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "artifacts/qwen_supermix_auto_verify_20260320/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 71669568,
+      "size_mb": 68.349,
+      "sha256": null
+    },
+    {
+      "path": "dist/SupermixStudioDesktop/_internal/bundled_base_model/model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 988097824,
+      "size_mb": 942.324,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00016/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v1_seed5201/checkpoints/sft_step_00024/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00048/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00072/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v2_seed5202/checkpoints/sft_step_00096/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v3_repair_seed5203/checkpoints/sft_step_00016/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v4_repair_seed5203/checkpoints/sft_step_00016/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v5_hardened_seed5204/checkpoints/sft_step_00008/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00048/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00072/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    },
+    {
+      "path": "output/training_candidates/qwen_general_intelligence_v6_curriculum_v3_seed6202/checkpoints/sft_step_00096/adapter/adapter_model.safetensors",
+      "format": "safetensors",
+      "size_bytes": 4350392,
+      "size_mb": 4.149,
+      "sha256": null
+    }
+  ],
+  "deployment_interfaces": [
+    "FastAPI / Uvicorn NexusMind API (source/nexus_api.py)",
+    "Supermix Studio Web App & Desktop Executable (source/supermix_multimodel_web_app.py, source/supermix_multimodel_desktop_app.py)",
+    "Supermix Chat Web/Desktop/Server (source/chat_web_app.py, source/supermix_chat_server.py, source/supermix_chat_desktop_app.py)",
+    "Qwen Chat Web/Desktop (source/qwen_chat_web_app.py, source/qwen_chat_desktop_app.py)",
+    "MiMoMix Talk & Reasoner Web Apps (source/mimomix_talk_web_app.py, source/mimomix_reasoner_web_app.py)",
+    "Static Nexus Studio UI (web_static/nexus_studio.html)"
+  ]
+}

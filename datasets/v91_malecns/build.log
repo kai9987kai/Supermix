@@ -1,0 +1,98 @@
+batch 64/2318  rows 4,194,304  kept 3,932,575  type-edges 648,108  3s
+batch 128/2318  rows 8,388,608  kept 6,444,164  type-edges 974,936  7s
+batch 192/2318  rows 12,582,912  kept 7,961,603  type-edges 1,177,152  9s
+batch 256/2318  rows 16,777,216  kept 8,996,628  type-edges 1,321,050  11s
+batch 320/2318  rows 20,971,520  kept 9,952,274  type-edges 1,443,149  13s
+batch 384/2318  rows 25,165,824  kept 10,552,196  type-edges 1,557,091  15s
+batch 448/2318  rows 29,360,128  kept 11,011,671  type-edges 1,658,425  17s
+batch 512/2318  rows 33,554,432  kept 11,641,310  type-edges 1,736,661  19s
+batch 576/2318  rows 37,748,736  kept 12,216,003  type-edges 1,821,914  21s
+batch 640/2318  rows 41,943,040  kept 12,810,664  type-edges 1,913,464  23s
+batch 704/2318  rows 46,137,344  kept 13,448,115  type-edges 2,008,893  25s
+batch 768/2318  rows 50,331,648  kept 14,068,107  type-edges 2,080,463  27s
+batch 832/2318  rows 54,525,952  kept 14,653,922  type-edges 2,153,927  29s
+batch 896/2318  rows 58,720,256  kept 15,186,020  type-edges 2,210,615  32s
+batch 960/2318  rows 62,914,560  kept 15,834,580  type-edges 2,290,355  34s
+batch 1024/2318  rows 67,108,864  kept 16,485,482  type-edges 2,366,486  36s
+batch 1088/2318  rows 71,303,168  kept 17,160,992  type-edges 2,436,455  37s
+batch 1152/2318  rows 75,497,472  kept 17,832,339  type-edges 2,504,129  40s
+batch 1216/2318  rows 79,691,776  kept 18,499,256  type-edges 2,571,453  42s
+batch 1280/2318  rows 83,886,080  kept 19,171,025  type-edges 2,637,122  44s
+batch 1344/2318  rows 88,080,384  kept 19,839,087  type-edges 2,701,847  46s
+batch 1408/2318  rows 92,274,688  kept 20,514,185  type-edges 2,773,328  48s
+batch 1472/2318  rows 96,468,992  kept 21,136,708  type-edges 2,843,500  50s
+batch 1536/2318  rows 100,663,296  kept 21,540,262  type-edges 2,936,644  52s
+batch 1600/2318  rows 104,857,600  kept 21,955,781  type-edges 3,032,079  54s
+batch 1664/2318  rows 109,051,904  kept 22,323,246  type-edges 3,132,395  56s
+batch 1728/2318  rows 113,246,208  kept 22,779,938  type-edges 3,213,779  58s
+batch 1792/2318  rows 117,440,512  kept 23,210,091  type-edges 3,289,423  61s
+batch 1856/2318  rows 121,634,816  kept 23,465,636  type-edges 3,382,599  63s
+batch 1920/2318  rows 125,829,120  kept 23,797,533  type-edges 3,499,670  66s
+batch 1984/2318  rows 130,023,424  kept 24,178,079  type-edges 3,619,952  69s
+batch 2048/2318  rows 134,217,728  kept 24,565,105  type-edges 3,708,644  71s
+batch 2112/2318  rows 138,412,032  kept 24,837,368  type-edges 3,778,516  74s
+batch 2176/2318  rows 142,606,336  kept 25,004,773  type-edges 3,812,487  76s
+batch 2240/2318  rows 146,800,640  kept 25,062,994  type-edges 3,821,303  78s
+batch 2304/2318  rows 150,994,944  kept 25,127,708  type-edges 3,830,605  80s
+batch 2318/2318  rows 151,856,684  kept 25,135,616  type-edges 3,830,931  81s
+{
+  "schema": "supermix-v91-malecns-types-v1",
+  "source": "Janelia FlyEM male-cns v1.0 flat connectome, minconf 0.5 (CC-BY)",
+  "source_url": "https://storage.googleapis.com/flyem-male-cns/v1.0/connectome-data/flat-connectome/",
+  "files_md5_b64": {
+    "body-annotations-male-cns-v1.0-minconf-0.5.feather": "UKdxh3DFciDxYLpPQxq4ng==",
+    "body-neurotransmitters-male-cns-v1.0.feather": "PYQrEv5cSe763lKNfdJKHw==",
+    "connectome-weights-male-cns-v1.0-minconf-0.5.feather": "8w6dzKJc/QIb8eez2XVZng=="
+  },
+  "typed_neurons": 164506,
+  "cell_types": 11751,
+  "type_edges": 3830931,
+  "body_edge_rows": 151856684,
+  "body_edge_rows_kept": 25135616,
+  "synapses_total": 311833243,
+  "synapses_kept": 122318556,
+  "synapse_fraction_kept": 0.39225630604111056,
+  "nt_counts_by_type": {
+    "glutamate": 2429,
+    "serotonin": 86,
+    "acetylcholine": 5983,
+    "unclear": 363,
+    "gaba": 2778,
+    "histamine": 16,
+    "dopamine": 44,
+    "octopamine": 52
+  },
+  "superclass_counts_by_type": {
+    "cb_intrinsic": 6605,
+    "visual_centrifugal": 108,
+    "visual_projection": 346,
+    "vnc_motor": 142,
+    "ascending_neuron": 563,
+    "vnc_intrinsic": 2777,
+    "ol_intrinsic": 271,
+    "cb_sensory": 158,
+    "cb_endocrine": 10,
+    "vnc_endocrine": 4,
+    "descending_neuron": 480,
+    "cb_motor": 43,
+    "efferent_descending": 1,
+    "sensory_descending": 4,
+    "efferent_ascending": 5,
+    "vnc_efferent": 27,
+    "cb_efferent": 1,
+    "ol_sensory": 11,
+    "sensory_ascending": 26,
+    "vnc_sensory": 169
+  },
+  "sign_convention": {
+    "acetylcholine": 1,
+    "glutamate": -1,
+    "gaba": -1,
+    "histamine": -1,
+    "dopamine": 1,
+    "serotonin": 1,
+    "octopamine": 1,
+    "unclear": 1
+  },
+  "output": "datasets/v91_malecns/malecns_types.npz"
+}

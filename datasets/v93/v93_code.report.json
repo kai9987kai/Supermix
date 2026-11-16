@@ -1,0 +1,138 @@
+{
+  "schema": "supermix-v87-code-corpus-v1",
+  "seed": 93,
+  "rows": 60000,
+  "tasks": 3,
+  "per_task": {
+    "code_range_sum": 20000,
+    "code_list_count": 20000,
+    "code_neg_index": 20000
+  },
+  "distinct_prompts": {
+    "code_range_sum": 355,
+    "code_list_count": 9460,
+    "code_neg_index": 12614
+  },
+  "repetition": {
+    "code_range_sum": 56.3,
+    "code_list_count": 2.1,
+    "code_neg_index": 1.6
+  },
+  "distinct_capacity": {
+    "code_range_sum": 71,
+    "code_list_count": 4020,
+    "code_neg_index": 3960
+  },
+  "attempts": {
+    "code_range_sum": 20000,
+    "code_list_count": 20000,
+    "code_neg_index": 20000
+  },
+  "dropped_failing_execution": {},
+  "drop_reasons": {},
+  "drop_rate": 0.0,
+  "short_of_requested": {},
+  "verified_by": "cpython exec in a restricted namespace",
+  "verification": {
+    "builtins": [
+      "abs",
+      "len",
+      "max",
+      "min",
+      "range",
+      "sum"
+    ],
+    "methods": [
+      "count"
+    ],
+    "timeout_seconds": 2.0,
+    "allowed_syntax": [
+      "Add",
+      "Assign",
+      "Attribute",
+      "AugAssign",
+      "BinOp",
+      "Break",
+      "Call",
+      "Compare",
+      "Constant",
+      "Continue",
+      "Eq",
+      "Expr",
+      "FloorDiv",
+      "For",
+      "Gt",
+      "GtE",
+      "If",
+      "IfExp",
+      "Index",
+      "List",
+      "Load",
+      "Lt",
+      "LtE",
+      "Mod",
+      "Module",
+      "Mult",
+      "Name",
+      "NotEq",
+      "Pass",
+      "Store",
+      "Sub",
+      "Subscript",
+      "UAdd",
+      "USub",
+      "UnaryOp",
+      "While"
+    ],
+    "note": "the checker executes the snippet the PROMPT shows, not the expression the generator used, so a template that renders something other than what it computes is dropped"
+  },
+  "line_initial_forms": {
+    "r": 40000
+  },
+  "options": {
+    "repeat": true,
+    "keep_canonical": false
+  },
+  "token_budget": {
+    "sequence_length": 128,
+    "digit_tokens": true,
+    "tasks": {
+      "code_list_count": {
+        "rows": 20000,
+        "response_median": 27,
+        "response_p95": 28,
+        "response_max": 28,
+        "turn_median": 54,
+        "turn_p95": 56,
+        "turn_max": 56,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "code_neg_index": {
+        "rows": 20000,
+        "response_median": 30,
+        "response_p95": 41,
+        "response_max": 42,
+        "turn_median": 55,
+        "turn_p95": 66,
+        "turn_max": 70,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      },
+      "code_range_sum": {
+        "rows": 20000,
+        "response_median": 44,
+        "response_p95": 85,
+        "response_max": 94,
+        "turn_median": 65,
+        "turn_p95": 107,
+        "turn_max": 118,
+        "dropped_by_turn_aligned_packing": 0,
+        "dropped_fraction": 0.0
+      }
+    },
+    "worst_dropped_fraction": 0.0,
+    "note": "turn-aligned packing drops a turn longer than sequence_length rather than truncating it; the dropped rows are a task's longest, so any non-zero fraction here biases that task toward its easiest instances"
+  },
+  "output": "C:\\Users\\kai99\\Desktop\\New folder (9)\\Supermix\\datasets\\v93\\v93_code.jsonl"
+}

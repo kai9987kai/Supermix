@@ -9,6 +9,17 @@
         "set PYTHONPATH=%CD%\\source&& .venv-dml\\Scripts\\python.exe source\\chat_web_app.py --weights champion_model_chat_v50_cognitive_leap.pth --meta chat_model_meta_v50_cognitive_leap.json --autoload --device cpu --port 8000"
       ],
       "port": 8000
+    },
+    {
+      "name": "v93-chat",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "source/mimomix_talk_web_app.py",
+        "--checkpoint", "output/v93_preflight/v93_preflight.pt",
+        "--port", "8157",
+        "--torch_threads", "2"
+      ],
+      "port": 8157
     }
   ]
 }

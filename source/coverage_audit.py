@@ -44,6 +44,24 @@ NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 #: corpus splits them into two builders.
 CORPUS_ALIASES = {"addition": "arithmetic", "subtraction": "arithmetic"}
 
+#: Benchmark tasks this audit names as uncompared on purpose, with the reason
+#: the report carries. The v93 connectome lookups are one generator on both
+#: sides: `eval_problem_solving` adapts `build_connectome_corpus.TASKS`
+#: directly, and every type and pair either side can draw comes from the one
+#: `build_connectome_corpus.population()`, so value coverage is complete by
+#: construction and there is nothing to compare. Running the comparison
+#: anyway would be worse than skipping it: the only numbers in a connectome
+#: prompt are the digits inside type names (`T4a`, `IN17A052`), and reading
+#: those as operands would make a coverage table out of noise.
+NOT_COMPARED_BY_DESIGN = {
+    name: (
+        "lookup task: benchmark and corpus draw from the same "
+        "build_connectome_corpus.population(), so every asked type or pair is "
+        "taught by construction; the digits in type names are not values"
+    )
+    for name in ("cns_type_count", "cns_side_count", "cns_pair_synapses")
+}
+
 
 def numbers_in(prompt: str) -> List[float]:
     return [float(match) for match in NUMBER.findall(prompt)]
@@ -110,10 +128,15 @@ def audit(samples: int = 4000, seed: int = 87, threshold: float = 0.02,
     import eval_problem_solving as solving
 
     corpus_generators: Dict[str, Callable[[random.Random], str]] = {}
-    for name, generator in omni.TASKS.items():
-        corpus_generators[name] = lambda rng, g=generator: g(rng).prompt
-    for name, generator in code.TASKS.items():
-        corpus_generators[name] = lambda rng, g=generator: g(rng).prompt
+    # v93's tasks live in each builder's `V93_TASKS` rather than `TASKS`, so
+    # a default build stays byte-identical; the benchmark adapts both, and so
+    # must this, or a value hole in a new task would never be reported.
+    for table in (omni.TASKS, getattr(omni, "V93_TASKS", {})):
+        for name, generator in table.items():
+            corpus_generators[name] = lambda rng, g=generator: g(rng).prompt
+    for table in (code.TASKS, getattr(code, "V93_TASKS", {})):
+        for name, generator in table.items():
+            corpus_generators[name] = lambda rng, g=generator: g(rng).prompt
     # `build_scratchpad_math.GENERATORS` is a tuple of functions with no names
     # attached; each row it produces carries its own `task`. Calling each once
     # is how the mapping is recovered, and it is also a check that every
@@ -132,11 +155,17 @@ def audit(samples: int = 4000, seed: int = 87, threshold: float = 0.02,
         "threshold": threshold,
         "tasks": {},
         "not_compared": [],
+        "not_compared_reason": {},
     }
     names = list(tasks or solving.GENERATORS)
     for name in sorted(names):
+        if name in NOT_COMPARED_BY_DESIGN:
+            report["not_compared"].append(name)
+            report["not_compared_reason"][name] = NOT_COMPARED_BY_DESIGN[name]
+            continue
         if name not in corpus_generators:
             report["not_compared"].append(name)
+            report["not_compared_reason"][name] = "no corpus generator"
             continue
         corpus_rng = random.Random(f"corpus:{name}:{seed}")
         bench_rng = solving.task_rng(name, seed)
@@ -184,8 +213,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not flagged:
         print("no task asks about a value its corpus never teaches")
     if report["not_compared"]:
-        print(f"\nnot compared (no corpus generator): "
-              f"{', '.join(report['not_compared'])}")
+        print("\nnot compared:")
+        for name in report["not_compared"]:
+            print(f"    {name}: {report['not_compared_reason'].get(name, '')}")
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as handle:

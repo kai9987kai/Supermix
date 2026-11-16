@@ -96,6 +96,20 @@ from nexus_causal_dag import (
 import nexus_proof as proof
 import nexus_solver as solver
 import nexus_swarm as swarm
+try:
+    from nexus_v95_ecosystem import (
+        CrosswireInterfaceEngine,
+        FaultlineEnsembleEngine,
+        MnemorphArchaeologyEngine,
+        TetherForensicsEngine,
+    )
+except ImportError:  # pragma: no cover - package import fallback
+    from source.nexus_v95_ecosystem import (
+        CrosswireInterfaceEngine,
+        FaultlineEnsembleEngine,
+        MnemorphArchaeologyEngine,
+        TetherForensicsEngine,
+    )
 
 
 __all__ = [
@@ -167,6 +181,10 @@ __all__ = [
     "ConformalStoppingResult",
     "CausalDAGEngine",
     "CausalQueryResult",
+    "TetherForensicsEngine",
+    "FaultlineEnsembleEngine",
+    "CrosswireInterfaceEngine",
+    "MnemorphArchaeologyEngine",
     "NexusEngine",
     "build_default_engine",
 ]
@@ -2542,6 +2560,12 @@ class NexusEngine:
         self.conformal_stopping = conformal.ConformalStoppingController()
         self.causal_dag = causal_dag.CausalDAGEngine()
 
+        # 15. NexusMind v95 Unified Frontier Ecosystem
+        self.tether_forensics = TetherForensicsEngine()
+        self.faultline_ensemble = FaultlineEnsembleEngine()
+        self.crosswire_interface = CrosswireInterfaceEngine()
+        self.mnemorph_archaeology = MnemorphArchaeologyEngine()
+
     def run_bell_experiment(
         self,
         theta_a: float = 0.0,
@@ -2859,6 +2883,98 @@ class NexusEngine:
             outcome=outcome_node,
             intervention_val=do_value,
         )
+
+    def analyze_tether_geometry(
+        self,
+        expert_probs: Sequence[Sequence[float]],
+        weights: Optional[Sequence[float]] = None,
+        target_class: Optional[int] = None,
+        reference_probs: Optional[Sequence[Sequence[float]]] = None,
+    ) -> Dict[str, Any]:
+        return self.tether_forensics.analyze(
+            expert_probs=expert_probs,
+            weights=weights,
+            target_class=target_class,
+            reference_probs=reference_probs,
+        )
+
+    def select_faultline_panel(
+        self,
+        failure_matrix: Sequence[Sequence[float]],
+        panel_size: int = 3,
+        expert_names: Optional[Sequence[str]] = None,
+        condition_names: Optional[Sequence[str]] = None,
+        condition_weights: Optional[Sequence[float]] = None,
+    ) -> Dict[str, Any]:
+        return self.faultline_ensemble.select_panel(
+            failure_matrix=failure_matrix,
+            panel_size=panel_size,
+            expert_names=expert_names,
+            condition_names=condition_names,
+            condition_weights=condition_weights,
+        )
+
+    def verify_crosswire_interface(
+        self,
+        hypotheses: Optional[Sequence[Mapping[str, Any]]] = None,
+        observed_trace: Optional[Sequence[Mapping[str, Any]]] = None,
+        candidate_action: Optional[str] = None,
+        unsafe_outputs: Optional[Sequence[str]] = None,
+        unsafe_states: Optional[Sequence[str]] = None,
+    ) -> Dict[str, Any]:
+        return self.crosswire_interface.verify_and_probe(
+            hypotheses=hypotheses,
+            observed_trace=observed_trace,
+            candidate_action=candidate_action,
+            unsafe_outputs=unsafe_outputs,
+            unsafe_states=unsafe_states,
+        )
+
+    def run_mnemorph_assay(
+        self,
+        assay_observations: Optional[Sequence[Mapping[str, Any]]] = None,
+        recovery_trajectory: Optional[Sequence[float]] = None,
+        prior: Optional[Mapping[str, float]] = None,
+    ) -> Dict[str, Any]:
+        return self.mnemorph_archaeology.analyze_assays(
+            assay_observations=assay_observations,
+            recovery_trajectory=recovery_trajectory,
+            prior=prior,
+        )
+
+    def calibrate_conformal_crc(
+        self,
+        margins: Sequence[float],
+        losses: Sequence[float],
+        b_max: float = 1.0,
+        target_risk_alpha: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        threshold = self.conformal_stopping.calibrate_labeled(
+            margins,
+            losses,
+            b_max=b_max,
+            target_risk_alpha=target_risk_alpha,
+        )
+        profile = self.conformal_stopping.selective_risk_coverage_profile(margins, losses)
+        alpha = (
+            self.conformal_stopping.target_risk_alpha
+            if target_risk_alpha is None
+            else self.conformal_stopping.validate_risk(target_risk_alpha)
+        )
+        return {
+            "engine": "ConformalRiskControl-ICLR2024",
+            "answer_authority": False,
+            "target_risk_alpha": alpha,
+            "b_max": float(b_max),
+            "calibrated_threshold": round(float(threshold), 8),
+            "empirical_crc_bound": (
+                round(float(self.conformal_stopping._empirical_crc_risk), 8)
+                if self.conformal_stopping._empirical_crc_risk is not None
+                else None
+            ),
+            "risk_certified": True,
+            "risk_coverage_profile": profile,
+        }
 
 
     def process(

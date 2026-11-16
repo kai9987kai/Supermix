@@ -192,7 +192,12 @@ def test_registering_code_tasks_does_not_disturb_the_existing_benchmark():
     and v80 were never comparable. The per-task RNG means nine new tasks leave
     the published fingerprint intact.
     """
-    original = [t for t in solving.GENERATORS if t not in solving.CODE_TASKS]
+    # v93 registers eleven more names (five science, three code, three
+    # connectome lookups); the v80/v86 baseline is the registry minus every
+    # family registered after it, not minus the code tasks alone.
+    later = set(solving.CODE_TASKS) | set(solving.V93_REGISTERED_TASKS)
+    original = [t for t in solving.GENERATORS if t not in later]
+    assert len(original) == 21
     assert solving.generator_fingerprint(original) == (
         "4077062251bc762c9716a730f3818ad2"
     ), "the v80/v86 baseline fingerprint moved; published scores are no longer paired"

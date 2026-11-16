@@ -56,6 +56,15 @@ V80_CHECKPOINT = ROOT / "output" / "v80_omni" / "v80_omni.pt"
 V85_ADDED_FIELDS = {
     "attention_output_gate": False,
     "attention_sink_kinds": "all",
+    "cns_commissural_gate": False,
+    "cns_dual_soma": False,
+    "cns_glial_homeostasis": False,
+    "cns_hebbian_trace": False,
+    "cns_homeostatic_radius": 0.0,
+    "cns_predictive_error": False,
+    "cns_slow_leak_init": 0.05,
+    "cns_trunk_dropout": 0.0,
+    "thinking_entropy_halt": False,
     "differential_lambda_init": 0.8,
     "differential_noise_ratio": 1,
     "differential_output_norm": True,
@@ -207,7 +216,7 @@ CI_REQUIRED = [
 #: This is a ratchet, not a target. It fails when coverage drops and never
 #: demands it be perfect. Raise it when you add suites; never lower it without
 #: saying why in the commit.
-CI_COVERAGE_FLOOR = 86
+CI_COVERAGE_FLOOR = 91
 
 
 def _root_test_files():

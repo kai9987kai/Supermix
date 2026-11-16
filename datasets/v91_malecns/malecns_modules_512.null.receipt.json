@@ -1,0 +1,70 @@
+{
+  "rewire": {
+    "kind": "stratified_by_source_role_and_sign_fraction_carried_with_target",
+    "swaps_accepted": 100420,
+    "swap_attempts": 141660,
+    "edges_rewired": 10042,
+    "self_loops_held": 467,
+    "strata": 14
+  },
+  "seed": 1,
+  "diagnostics": {
+    "real": {
+      "edges": 10509,
+      "abs_spectral_radius_unscaled": 0.96778,
+      "scale_to_abs_radius": 0.929964,
+      "signed_spectral_radius": 0.547308,
+      "signed_max_real_eigenvalue": 0.534117,
+      "input_fraction_row_sum_max": 0.98967,
+      "rows_over_one": 0,
+      "reciprocity": 0.451105,
+      "clustering": 0.430571,
+      "role_modularity": 0.327626,
+      "linear_io_gain_frobenius": 0.567631,
+      "hops_afferent_to_efferent": {
+        "mean": 2.8058823529411763,
+        "reachable_fraction": 1.0
+      }
+    },
+    "stratified_null": {
+      "edges": 10509,
+      "abs_spectral_radius_unscaled": 0.858832,
+      "scale_to_abs_radius": 1.047935,
+      "signed_spectral_radius": 0.689819,
+      "signed_max_real_eigenvalue": 0.669717,
+      "input_fraction_row_sum_max": 0.98967,
+      "rows_over_one": 0,
+      "reciprocity": 0.084445,
+      "clustering": 0.178083,
+      "role_modularity": 0.338671,
+      "linear_io_gain_frobenius": 0.609071,
+      "hops_afferent_to_efferent": {
+        "mean": 2.3441176470588236,
+        "reachable_fraction": 1.0
+      },
+      "edge_overlap_with_real": 0.217242,
+      "modules_with_changed_inhibitory_input_count": 0,
+      "role_block_edge_count_l1_diff": 0
+    },
+    "unstratified_null": {
+      "edges": 10509,
+      "abs_spectral_radius_unscaled": 0.781786,
+      "scale_to_abs_radius": 1.15121,
+      "signed_spectral_radius": 0.757823,
+      "signed_max_real_eigenvalue": 0.717884,
+      "input_fraction_row_sum_max": 1.945628,
+      "rows_over_one": 116,
+      "reciprocity": 0.041028,
+      "clustering": 0.095416,
+      "role_modularity": -0.012301,
+      "linear_io_gain_frobenius": 1.885338,
+      "hops_afferent_to_efferent": {
+        "mean": 2.3823529411764706,
+        "reachable_fraction": 1.0
+      },
+      "edge_overlap_with_real": 0.107241,
+      "modules_with_changed_inhibitory_input_count": 429,
+      "role_block_edge_count_l1_diff": 9152
+    }
+  }
+}

@@ -291,6 +291,120 @@ def _register_code_generators() -> List[str]:
 CODE_TASKS: List[str] = _register_code_generators()
 
 
+#: The thirty tasks of the v89 benchmark, in the registry order of the day
+#: v89 was scored: nine arithmetic templates, `build_omni_corpus.TASKS`, then
+#: `build_code_corpus.TASKS`. Frozen as a literal rather than read from the
+#: registry, so that registering a task can never move it. `--task_set v89`
+#: expands to exactly this list, and `generator_fingerprint` over it is
+#: 3b99a446cd533be9bc5f8ae57d1310b4 -- the value every v87, v88, v89 and v91
+#: receipt carries, which `test_v93_corpus.py` pins. A v93 receipt over this
+#: set pairs with those by exact McNemar; one over any other set does not.
+V89_BENCHMARK_TASKS: Tuple[str, ...] = (
+    "arithmetic", "percent", "average", "algebra_one_step", "word_problem",
+    "multiplication", "division", "sequence", "two_step",
+    "force", "acceleration", "momentum", "kinetic_energy", "work", "power",
+    "voltage", "electrical_power", "wave_speed", "molarity", "combination",
+    "arithmetic_series",
+    "code_loop_add", "code_loop_subtract", "code_list_sum", "code_list_extreme",
+    "code_index", "code_conditional", "code_divmod", "code_nested_loop",
+    "code_while_accumulate",
+)
+
+#: The tasks v93 adds (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md, D7): five
+#: solver-verified science tasks, three execution-verified code tasks and
+#: three connectome-knowledge lookups. `--task_set new` expands to this list.
+#: Their scores have no v89 baseline -- v89 cannot answer them -- so a number
+#: over this set is descriptive, and the connectome three are recall (see
+#: `NON_CLAIMS`).
+V93_NEW_TASKS: Tuple[str, ...] = (
+    "impulse", "ohms_current", "spring_energy", "permutations", "final_velocity",
+    "code_range_sum", "code_list_count", "code_neg_index",
+    "cns_type_count", "cns_side_count", "cns_pair_synapses",
+)
+
+#: What `--task_set` expands to. `all` is the v89 thirty followed by the
+#: eleven new tasks, which is also the registry's own order today.
+TASK_SETS: Dict[str, Tuple[str, ...]] = {
+    "v89": V89_BENCHMARK_TASKS,
+    "new": V93_NEW_TASKS,
+    "all": V89_BENCHMARK_TASKS + V93_NEW_TASKS,
+}
+
+
+def _register_v93_generators() -> List[str]:
+    """Add the v93 families to this benchmark, after the thirty above.
+
+    Three registries, one adapter shape each, exactly as the two adapters
+    above: `build_omni_corpus.V93_TASKS` (solver-verified),
+    `build_code_corpus.V93_TASKS` (execution-verified) and
+    `build_connectome_corpus.TASKS` (looked up in the CC-BY male-CNS tables).
+    They are kept out of the builders' `TASKS` dicts so a default corpus build
+    and the two adapters above stay byte-identical; this is where they enter
+    the benchmark, and the trainer's probe, instead.
+
+    Registration never shadows: a name already in `GENERATORS` is skipped, so
+    the v89 thirty cannot be redefined from here. Per-task RNGs mean the
+    thirty's problems do not move either (`test_v93_corpus.py` asserts both).
+
+    The connectome tasks need `datasets/v91_malecns/malecns_types.npz` and a
+    side source on disk; where those are absent the family is left out, as an
+    import failure leaves a builder's family out. A `--task_set new` run on
+    such a machine then fails loudly at the unknown-task check rather than
+    silently scoring eight tasks as eleven.
+    """
+
+    added: List[str] = []
+
+    def adapt(table, name):
+        def generate(rng: random.Random) -> Problem:
+            problem = table[name](rng)
+            return Problem(name, problem.prompt, problem.answer, "novel")
+        return generate
+
+    try:
+        import build_omni_corpus as omni
+        omni_v93 = getattr(omni, "V93_TASKS", {})
+    except Exception:  # noqa: BLE001 - optional, as for the twelve above
+        omni_v93 = {}
+    try:
+        import build_code_corpus as code
+        code_v93 = getattr(code, "V93_TASKS", {})
+    except Exception:  # noqa: BLE001
+        code_v93 = {}
+    try:
+        import build_connectome_corpus as cns
+        cns_tasks = cns.TASKS if cns.data_available() else {}
+    except Exception:  # noqa: BLE001
+        cns_tasks = {}
+
+    for table in (omni_v93, code_v93, cns_tasks):
+        for name in table:
+            if name not in GENERATORS:      # never shadow an existing task
+                GENERATORS[name] = adapt(table, name)
+                added.append(name)
+    return added
+
+
+#: Task names the v93 adapter actually registered on this machine. Equal to
+#: `V93_NEW_TASKS` wherever the connectome data is present.
+V93_REGISTERED_TASKS: List[str] = _register_v93_generators()
+
+# The three v93 code tasks are execution-verified code tasks like the nine
+# before them, and `CODE_TASKS` is how the live checker's tests find every
+# task that `answer_check._code_trace` must run; so they are listed there too.
+# `OMNI_TASKS` stays the twelve of v89 (it names what `_register_omni_generators`
+# added), and the five new science tasks are found through `V93_NEW_TASKS`.
+CODE_TASKS.extend(name for name in V93_REGISTERED_TASKS if name.startswith("code_"))
+
+
+def expand_task_set(name: str) -> List[str]:
+    """The ordered task list a `--task_set` name stands for."""
+
+    if name not in TASK_SETS:
+        raise KeyError(f"unknown task set {name!r}; choose from {', '.join(TASK_SETS)}")
+    return list(TASK_SETS[name])
+
+
 def task_rng(task: str, seed: int) -> random.Random:
     """A generator's own RNG, derived from its *name* and the master seed.
 
@@ -755,6 +869,19 @@ NON_CLAIMS: List[str] = [
     "a second measurement. It cannot reward calibrated uncertainty in a model "
     "that was never trained to express any -- these models emit a number or "
     "nothing.",
+    # v93. The eleven new tasks enter the default registry, so a run with no
+    # --task_set or --tasks now draws over 41 names. The line above about
+    # comparability already covers that; this one covers the three tasks
+    # whose score is not skill of any kind.
+    "The cns_* tasks (cns_type_count, cns_side_count, cns_pair_synapses) "
+    "measure recall over the same population of types and type pairs the "
+    "corpus was generated from: benchmark and corpus draw from one "
+    "`build_connectome_corpus.population()`, and there is no held-out type. "
+    "A score there is how much of the male-CNS table the model retained, not "
+    "generalisation to a type it never saw, and it says nothing about the "
+    "10,000-odd types outside the population. Use --task_set v89 for the "
+    "thirty tasks that pair with v87-v91 receipts and --task_set new for the "
+    "eleven that have no baseline.",
 ]
 
 
@@ -843,10 +970,25 @@ def build_parser() -> argparse.ArgumentParser:
             "task shapes)"
         ),
     )
-    parser.add_argument(
+    task_group = parser.add_mutually_exclusive_group()
+    task_group.add_argument(
         "--tasks",
         default=None,
         help="comma-separated subset of tasks; default is every registered task",
+    )
+    task_group.add_argument(
+        "--task_set",
+        choices=sorted(TASK_SETS),
+        default=None,
+        help=(
+            "a named task list instead of --tasks: 'v89' is the thirty tasks "
+            "every v87-v91 receipt was scored on, in their order, so the "
+            "fingerprint reproduces 3b99a446cd533be9bc5f8ae57d1310b4 and "
+            "--novel 630 gives 21 per task; 'new' is the eleven v93 tasks, "
+            "which have no baseline; 'all' is both. With neither flag the run "
+            "draws over every registered task, which since v93 is 41 names "
+            "and a fingerprint that pairs with nothing published."
+        ),
     )
     parser.add_argument(
         "--legacy_shared_rng",
@@ -888,11 +1030,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    tasks = (
-        [name.strip() for name in args.tasks.split(",") if name.strip()]
-        if args.tasks
-        else None
-    )
+    task_set = getattr(args, "task_set", None)
+    if task_set:
+        tasks: Optional[List[str]] = expand_task_set(task_set)
+    else:
+        tasks = (
+            [name.strip() for name in args.tasks.split(",") if name.strip()]
+            if args.tasks
+            else None
+        )
     unknown = [name for name in (tasks or []) if name not in GENERATORS]
     if unknown:
         raise SystemExit(f"unknown task(s): {', '.join(unknown)}")
@@ -935,6 +1081,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     settings = {
         "seed": args.seed,
         "tasks": list(tasks or GENERATORS),
+        "task_set": task_set,
         "shared_rng": bool(args.legacy_shared_rng),
         "generator_fingerprint": generator_fingerprint(tasks),
         "novel_requested": args.novel,

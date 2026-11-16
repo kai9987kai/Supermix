@@ -118,7 +118,12 @@ def save_talk_checkpoint(
         # Includes KeyboardInterrupt: leaving a stray .tmp beside the
         # checkpoint would be read by nothing but would confuse the next
         # person to look in the directory.
-        staging.unlink(missing_ok=True)
+        for _attempt in range(5):
+            try:
+                staging.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                time.sleep(0.05)
         raise
 
 
@@ -368,6 +373,7 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "thinking_residual_init": "thinking_residual_init",
     "ponder_loss_weight": "ponder_loss_weight",
     "consistency_loss_weight": "consistency_loss_weight",
+    "thinking_entropy_halt": "thinking_entropy_halt",
     "use_differential_attention": "use_differential_attention",
     "differential_lambda_init": "differential_lambda_init",
     "differential_output_norm": lambda a: not a.no_differential_output_norm,
@@ -380,6 +386,32 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "mla_latent_dim": "mla_latent_dim",
     "mla_pe_dim": "mla_pe_dim",
     "mla_global_only": lambda a: not a.no_mla_global_only,
+    "use_cns_core": "cns_core",
+    "cns_nodes": "cns_nodes",
+    "cns_steps": "cns_steps",
+    "cns_after_layer": "cns_after_layer",
+    "cns_io": "cns_io",
+    "cns_graph": "cns_graph",
+    "cns_wiring": "cns_wiring",
+    # v93 (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md D2/D3). Every default is
+    # the v91 value, so a v89/v91 command still builds the identical config.
+    # `grow_layers` is deliberately NOT here: it must be applied to the built
+    # config through `pin_layout_for_growth` (it changes n_layers and pins
+    # global_layers), which the generalisation trainer does after build_config.
+    "cns_spare_nodes": "cns_spare_nodes",
+    "cns_read_layers": lambda a: parse_layer_list(a.cns_read_layers) or (),
+    "cns_write_layers": lambda a: parse_layer_list(a.cns_write_layers) or (),
+    "cns_to_thinking": "cns_to_thinking",
+    "cns_temporal": "cns_temporal",
+    "cns_dual_soma": "cns_dual_soma",
+    "cns_slow_leak_init": "cns_slow_leak_init",
+    "cns_commissural_gate": "cns_commissural_gate",
+    "cns_glial_homeostasis": "cns_glial_homeostasis",
+    "cns_trunk_dropout": "cns_trunk_dropout",
+    "cns_homeostatic_radius": "cns_homeostatic_radius",
+    "cns_hebbian_trace": "cns_hebbian_trace",
+    "cns_predictive_error": "cns_predictive_error",
+    "moe_spare_experts": "moe_spare_experts",
 }
 
 
@@ -719,6 +751,40 @@ RECORDED_HYPERPARAMETERS: Tuple[str, ...] = (
     "start_step",
     "init_from",
     "arm",
+    # v93 neurogenesis. `recorded_hyperparameters` skips names a trainer's
+    # parser lacks, so the generalisation-only flags (grow_every ...) are
+    # listed here once and recorded wherever they exist.
+    "cns_spare_nodes",
+    "cns_read_layers",
+    "cns_write_layers",
+    "cns_to_thinking",
+    "cns_temporal",
+    "moe_spare_experts",
+    "grow_layers",
+    "extend_vocab",
+    "max_new_tokens_vocab",
+    "grow_every",
+    "grow_modules",
+    "grow_edges",
+    "grow_taps",
+    "grow_experts",
+    "prune_threshold",
+    "witness_rows",
+    "ablation_rows",
+    "cns_dual_soma",
+    "cns_slow_leak_init",
+    "cns_commissural_gate",
+    "cns_glial_homeostasis",
+    "cns_trunk_dropout",
+    "cns_homeostatic_radius",
+    "cns_hebbian_trace",
+    "cns_predictive_error",
+    "thinking_entropy_halt",
+    "freeze_trunk_steps",
+    "witness_rollback_tolerance",
+    "maturity_steps",
+    "max_splits_per_parent",
+    "edge_proposal_mode",
 )
 
 
@@ -939,6 +1005,16 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         corpus.validation, tokenizer, args.sequence_length
     )
 
+    if int(getattr(args, "grow_layers", 0)) > 0:
+        # Depth growth is a warm-start operation (zero the appended blocks
+        # after loading a source checkpoint); this trainer has no --init_from,
+        # so the flag would build a model nobody asked for. Refuse rather
+        # than silently ignore it.
+        raise SystemExit(
+            "--grow_layers is a warm-start operation of "
+            "train_mimomix_generalisation.py (--init_from); this trainer "
+            "trains from scratch, so drop the flag or raise --n_layers."
+        )
     config = build_config(args, tokenizer.vocab_size)
     model = MiMoMixModel(config).to(device)
     parameters = model.parameter_report()
@@ -1171,6 +1247,120 @@ def build_parser() -> argparse.ArgumentParser:
             "multiplied by. 0.0 (default) reproduces v57/v58 exactly and leaves "
             "the core inert; above zero gives it a gradient path from step 0"
         ),
+    )
+    parser.add_argument(
+        "--thinking_entropy_halt",
+        action="store_true",
+        help="enable normalized latent Shannon entropy stability halting & telemetry (v97, default off)",
+    )
+    # v91: the male-CNS connectome core. Off by default; every flag below is
+    # inert unless --cns_core is given.
+    parser.add_argument(
+        "--cns_core",
+        action="store_true",
+        help=(
+            "graft mimomix_core.ConnectomeCore: a Dale's-law recurrent branch "
+            "wired like the Janelia male CNS v1.0 connectome. Needs --cns_graph"
+        ),
+    )
+    parser.add_argument("--cns_graph", default="",
+                        help="module graph npz from `malecns_connectome.py modules`")
+    parser.add_argument("--cns_wiring", choices=("connectome", "rewired"), default="connectome",
+                        help="'rewired' installs the degree-preserving null from the same npz")
+    parser.add_argument("--cns_nodes", type=int, default=512)
+    parser.add_argument("--cns_steps", type=int, default=6)
+    parser.add_argument("--cns_after_layer", type=int, default=2)
+    parser.add_argument("--cns_io", choices=("afferent_efferent", "all"), default="afferent_efferent")
+    parser.add_argument("--cns_spectral_radius", type=float, default=0.9,
+                        help="both wirings are rescaled to this spectral radius at install")
+    # v93: capacity slots, multi-site taps, temporal core, expert slots, depth
+    # growth (docs/V93_NEUROGENESIS_TWO_HEMISPHERES.md D2-D4). All inert by
+    # default; each maps to a MiMoMixConfig field whose default is the v91
+    # behaviour, except --grow_layers which the generalisation trainer applies
+    # through pin_layout_for_growth after build_config.
+    growth = parser.add_argument_group("v93 growth capacity")
+    growth.add_argument(
+        "--cns_spare_nodes", type=int, default=0,
+        help=(
+            "dead module slots at the end of --cns_nodes (which is then the "
+            "capacity); the graph npz must carry cns_nodes - cns_spare_nodes "
+            "modules. 0 (default) is v91"
+        ),
+    )
+    growth.add_argument(
+        "--cns_read_layers", type=int, nargs="+", default=None,
+        help=(
+            "trunk blocks the core reads (each through its own norm and "
+            "read_in); the core runs after the deepest. Default: the single "
+            "--cns_after_layer site"
+        ),
+    )
+    growth.add_argument(
+        "--cns_write_layers", type=int, nargs="+", default=None,
+        help=(
+            "trunk blocks after which gate_j * read_out_j is added, each with "
+            "its own zero-initialised gate; every one must be >= the deepest "
+            "read layer. Default: the single --cns_after_layer site"
+        ),
+    )
+    growth.add_argument(
+        "--cns_to_thinking", action="store_true",
+        help="bond the core to the recursive thinking core's input (zero gate at birth)",
+    )
+    growth.add_argument(
+        "--cns_temporal", action="store_true",
+        help=(
+            "carry the core's rate across positions as a causal scan instead of "
+            "restarting it per token; the state rides in past_key_values"
+        ),
+    )
+    growth.add_argument(
+        "--moe_spare_experts", type=int, default=0,
+        help=(
+            "dead expert slots appended to every MoE layer (router logits -inf "
+            "until born). 0 (default) is byte-identical to v89"
+        ),
+    )
+    growth.add_argument(
+        "--grow_layers", type=int, default=0,
+        help=(
+            "append this many dense identity blocks at the end of the stack "
+            "(n_layers grows by this, global_layers is pinned to the existing "
+            "layout); after a warm start their o_proj/down_proj are zeroed so "
+            "the grown model's logits equal the source's. 0 (default) is off"
+        ),
+    )
+    growth.add_argument(
+        "--cns_dual_soma", action="store_true",
+        help="enable coupled slow-timescale soma compartment per connectome module (v95)",
+    )
+    growth.add_argument(
+        "--cns_slow_leak_init", type=float, default=0.05,
+        help="initial slow-soma leak rate in (0, 1) when --cns_dual_soma is enabled",
+    )
+    growth.add_argument(
+        "--cns_commissural_gate", action="store_true",
+        help="enable input-dependent nonnegative sigmoid gating on LR/RL commissural tracts (v95)",
+    )
+    growth.add_argument(
+        "--cns_glial_homeostasis", action="store_true",
+        help="enable activity-dependent glial EMA gain modulation on connectome modules (v95)",
+    )
+    growth.add_argument(
+        "--cns_trunk_dropout", type=float, default=0.0,
+        help="counterfactual trunk-bypass dropout probability during training at connectome write sites",
+    )
+    growth.add_argument(
+        "--cns_homeostatic_radius", type=float, default=0.0,
+        help="target spectral/singular norm for periodic homeostatic edge projection; 0.0 disables",
+    )
+    growth.add_argument(
+        "--cns_hebbian_trace", action="store_true",
+        help="enable bounded short-term synaptic facilitation / Hebbian trace modulation (v97, default off)",
+    )
+    growth.add_argument(
+        "--cns_predictive_error", action="store_true",
+        help="enable bounded recurrent predictive-coding sensory error modulation (v98, default off)",
     )
 
     # --- v82: the 33 MiMoMixConfig fields no trainer could previously set ---

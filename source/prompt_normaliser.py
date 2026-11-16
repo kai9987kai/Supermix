@@ -74,6 +74,11 @@ SCIENCE_LEAD_IN = {
     "electrical_power": "voltage {u} V current {i} A electrical power",
     "voltage": "current {i} A resistance {r} ohm find voltage",
     "power": "work {w} J time {t} s power",
+    # v93 science / physics families (verbatim canonical corpus forms)
+    "impulse": "force {f} N time {t} s find the impulse",
+    "ohms_current": "voltage {u} V resistance {r} ohm find the current",
+    "spring_energy": "spring constant {k} N/m extension {d} m spring energy",
+    "final_velocity": "initial velocity {v} m/s acceleration {a} m/s^2 time {t} s final velocity",
 }
 
 #: The two counting tasks, which carry no units and so cannot be reached by the
@@ -98,12 +103,14 @@ COUNTING_LEAD_IN = {
     "arithmetic_series": ("An arithmetic series starts at {a} with common "
                           "difference {d}. What is the sum of the first {n} "
                           "terms?"),
+    "permutations": "permutations n = {n} k = {k}",
 }
 
 #: Words that mark a counting question. A rule fires only when one of these is
 #: present *and* the operands can be located by role, never by position -- see
 #: `_counting` for why position is not usable here.
 CHOOSE_WORDS = r"choose|choosing|chose|pick|picking|select|selecting|combination|ways|options"
+PERM_WORDS = r"permutations?|arrang(?:e|ing|ements?)|ordered"
 SERIES_WORDS = r"series|progression|terms?"
 
 #: v91 Cognitive Lead-in formats for Pearlian causal DAG, proof audit, DoT, and conformal stopping
@@ -118,6 +125,7 @@ COGNITIVE_LEAD_IN = {
 #: tried before `m/s`, and both before a bare `m`, or an acceleration is read as
 #: a velocity and a velocity as a distance.
 QUANTITY_PATTERNS = (
+    ("k", rf"({NUMBER})\s*(?:N\s*/\s*m\b|newtons?\s+per\s+met(?:re|er)\b)"),
     ("a", rf"({NUMBER})\s*(?:m\s*/\s*s\s*(?:\^|\*\*)?\s*2|m/s²|"
           rf"met(?:re|er)s?\s+per\s+second\s+squared)"),
     ("v", rf"({NUMBER})\s*(?:m\s*/\s*s(?![\^²0-9])|met(?:re|er)s?\s+per\s+second(?!\s+squared))"),
@@ -134,11 +142,15 @@ QUANTITY_PATTERNS = (
 #: What each task asks for, and what it needs to be answerable. A target whose
 #: quantities are not all present is left alone rather than guessed at.
 SCIENCE_TARGETS = (
+    ("final_velocity", r"(?:final\s+velocity|velocity\s+after)", ("v", "a", "t")),
     ("kinetic_energy", r"kinetic\s+energ", ("m", "v")),
+    ("spring_energy", r"(?:spring\s+energy|elastic\s+potential\s+energy)", ("k", "d")),
     ("electrical_power", r"(?:electrical\s+power|power)", ("u", "i")),
+    ("ohms_current", r"current", ("u", "r")),
     ("power", r"power", ("w", "t")),
     ("voltage", r"(?:voltage|potential\s+difference)", ("i", "r")),
     ("momentum", r"momentum", ("m", "v")),
+    ("impulse", r"impulse", ("f", "t")),
     ("acceleration", r"accelerat", ("f", "m")),
     ("work", r"work", ("f", "d")),
     ("force", r"force", ("m", "a")),
@@ -202,6 +214,33 @@ SCIENCE_SHAPES = {
         r"find the power dissipated at @u@ and @i@",
         r"what electrical power is used at @u@ and @i@",
         r"a @u@ battery drives @i@\. what's the power",
+    ),
+    "impulse": (
+        r"a force of @f@ acts for @t@\. what is the impulse",
+        r"force @f@ time @t@ find(?: the)? impulse",
+        r"find the impulse delivered by @f@ applied for @t@",
+        r"what impulse does a @f@ force give over @t@",
+        r"given force @f@ and time @t@, compute the impulse",
+        r"(?:what is the )?impulse (?:for|of) force @f@ (?:acting )?over (?:time )?@t@",
+    ),
+    "ohms_current": (
+        r"voltage @u@ resistance @r@ find(?: the)? current",
+        r"given voltage @u@ and resistance @r@, compute the current",
+        r"what current flows when @u@ is applied across @r@",
+        r"a resistor of @r@ is across @u@\. what is the current",
+        r"find the current through @r@ at @u@",
+    ),
+    "spring_energy": (
+        r"spring constant @k@ extension @d@ spring energy",
+        r"compute the spring energy for spring constant @k@ and extension @d@",
+        r"(?:what is the )?(?:spring|elastic potential) energy of a @k@ spring (?:stretched|extended|compressed)(?: by)? @d@",
+        r"find the (?:spring|elastic potential) energy for @k@ (?:stretched|extended|compressed)(?: by)? @d@",
+    ),
+    "final_velocity": (
+        r"initial velocity @v@ acceleration @a@ time @t@ final velocity",
+        r"a body moving at @v@ accelerates at @a@ for @t@\. what is its final velocity",
+        r"find the final velocity from initial velocity @v@, acceleration @a@ and time @t@",
+        r"starting at @v@ with acceleration @a@, what is the velocity after @t@",
     ),
 }
 
@@ -358,6 +397,36 @@ def _counting(text: str) -> Optional[Normalised]:
                     a=first.group(1), d=step.group(1), n=count.group(1)),
                 "arithmetic_series", text)
 
+    # -- permutations (v93): P(n, k) -- check BEFORE combination because
+    # phrasing like "how many ways can 2 items be arranged in order from 5?"
+    # contains both "ways" (CHOOSE_WORDS) and permutation markers.
+    if re.search(rf"(?:{PERM_WORDS})|\barranged\b|\bin\s+order\b", lowered):
+        explicit = re.fullmatch(
+            r"\s*(?:please\s+)?permutations\s+n\s*=\s*(\d+)\s*(?:,\s*)?k\s*=\s*(\d+)\s*[?.!]?",
+            lowered,
+        )
+        if explicit:
+            n_val, k_val = explicit.groups()
+            if int(k_val) <= int(n_val):
+                return Normalised(
+                    COUNTING_LEAD_IN["permutations"].format(n=n_val, k=k_val),
+                    "permutations",
+                    text,
+                )
+        pool = re.search(rf"(?:from|of)\s+({NUMBER})", lowered)
+        if pool:
+            pool_val = pool.group(1)
+            all_nums = re.findall(NUMBER, lowered)
+            others = [v for v in all_nums if v != pool_val]
+            if not others and len(all_nums) == 2:
+                others = [all_nums[0]]
+            if len(others) == 1 and float(others[0]) <= float(pool_val):
+                return Normalised(
+                    COUNTING_LEAD_IN["permutations"].format(n=pool_val, k=others[0]),
+                    "permutations",
+                    text,
+                )
+
     # -- combination: needs a chosen count and a pool ------------------------
     if re.search(CHOOSE_WORDS, lowered):
         pool = re.search(
@@ -391,6 +460,129 @@ def _counting(text: str) -> Optional[Normalised]:
                 return Normalised(
                     COUNTING_LEAD_IN["combination"].format(k=low, n=high),
                     "combination", text)
+    return None
+
+
+def _code_v93(source: str, original_text: str) -> Optional[Normalised]:
+    """Rewrite bounded Python range-sum, list-count, and negative-index queries."""
+    # Canonical or natural sum(range(...))
+    range_canon = re.fullmatch(
+        r"(?:Trace\s+this\s+Python\s+and\s+give\s+r\.\s*)?(?:r\s*=\s*)?(sum\s*\(\s*range\s*\(\s*-?\d+(?:\s*,\s*-?\d+)?\s*\)\s*\))\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if range_canon:
+        expr = re.sub(r"\s+", " ", range_canon.group(1)).replace("sum ( range", "sum(range")
+        return Normalised(f"Trace this Python and give r. r = {expr}", "code_range_sum", original_text)
+
+    range_nat = _request(
+        r"(?:the\s+)?(?:sum|total)\s+of\s+(range\s*\(\s*-?\d+(?:\s*,\s*-?\d+)?\s*\))",
+        source,
+    )
+    if range_nat:
+        expr = re.sub(r"\s+", " ", range_nat.group(1))
+        return Normalised(f"Trace this Python and give r. r = sum({expr})", "code_range_sum", original_text)
+
+    # list.count(v) in canonical or natural phrasing
+    count_canon = re.fullmatch(
+        r"(?:Trace\s+this\s+Python\s+and\s+give\s+r\.\s*)?nums\s*=\s*\[([^\]]+)\]\s*(?:;|,|\s)\s*r\s*=\s*nums\.count\((-?\d+)\)\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if count_canon and re.fullmatch(r"\s*-?\d+(?:\s*,\s*-?\d+)*\s*", count_canon.group(1)):
+        items = ", ".join(x.strip() for x in count_canon.group(1).split(","))
+        val = count_canon.group(2)
+        return Normalised(f"Trace this Python and give r. nums = [{items}]\nr = nums.count({val})", "code_list_count", original_text)
+
+    count_nat = _request(
+        r"(?:how\s+many\s+times\s+does\s+(-?\d+)\s+appear\s+in|count\s+(?:of\s+)?(-?\d+)\s+in)\s+\[([^\]]+)\]",
+        source,
+    )
+    if count_nat:
+        val = count_nat.group(1) or count_nat.group(2)
+        raw_list = count_nat.group(3)
+        if re.fullmatch(r"\s*-?\d+(?:\s*,\s*-?\d+)*\s*", raw_list):
+            items = ", ".join(x.strip() for x in raw_list.split(","))
+            return Normalised(f"Trace this Python and give r. nums = [{items}]\nr = nums.count({val})", "code_list_count", original_text)
+
+    # nums[-k] canonical or natural negative index
+    neg_canon = re.fullmatch(
+        r"(?:Trace\s+this\s+Python\s+and\s+give\s+r\.\s*)?nums\s*=\s*\[([^\]]+)\]\s*(?:;|,|\s)\s*r\s*=\s*nums\[-(\d+)\]\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if neg_canon and re.fullmatch(r"\s*-?\d+(?:\s*,\s*-?\d+)*\s*", neg_canon.group(1)):
+        items = ", ".join(x.strip() for x in neg_canon.group(1).split(","))
+        k = neg_canon.group(2)
+        return Normalised(f"Trace this Python and give r. nums = [{items}]\nr = nums[-{k}]", "code_neg_index", original_text)
+
+    neg_nat = _request(
+        r"(?:the\s+)?(?:element|item|value)\s+(?:at\s+)?(?:index\s+)?-(\d+)\s+(?:of|in)\s+\[([^\]]+)\]",
+        source,
+    )
+    if neg_nat and re.fullmatch(r"\s*-?\d+(?:\s*,\s*-?\d+)*\s*", neg_nat.group(2)):
+        k = neg_nat.group(1)
+        items = ", ".join(x.strip() for x in neg_nat.group(2).split(","))
+        return Normalised(f"Trace this Python and give r. nums = [{items}]\nr = nums[-{k}]", "code_neg_index", original_text)
+
+    return None
+
+
+_CNS_TYPE = r"([A-Za-z0-9_+.\-/]+)"
+
+
+def _connectome_v93(source: str, original_text: str) -> Optional[Normalised]:
+    """Rewrite Male-CNS connectome queries into canonical v93 training form."""
+    # Pair synapses: check before type_count so two-type queries don't match single-type
+    pair_match = re.fullmatch(
+        rf"(?:How\s+many\s+synapses\s+(?:go\s+)?from\s+type\s+{_CNS_TYPE}\s+to\s+type\s+{_CNS_TYPE}\s+in\s+the\s+male\s+CNS|"
+        rf"(?:what\s+is\s+the\s+)?synapse\s+count\s+from\s+(?:cell\s+)?(?:type\s+)?{_CNS_TYPE}\s+(?:to|onto)\s+(?:cell\s+)?(?:type\s+)?{_CNS_TYPE}\s+in\s+(?:the\s+)?male\s+CNS(?:\s+connectome)?)\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if pair_match:
+        groups = [g for g in pair_match.groups() if g is not None]
+        if len(groups) == 2:
+            return Normalised(
+                f"How many synapses go from type {groups[0]} to type {groups[1]} in the male CNS?",
+                "cns_pair_synapses",
+                original_text,
+            )
+
+    # Hemisphere side count
+    side_match = re.fullmatch(
+        rf"(?:How\s+many\s+neurons\s+of\s+type\s+{_CNS_TYPE}\s+are\s+on\s+the\s+(left|right)\s+side\s+of\s+the\s+male\s+CNS|"
+        rf"(?:in\s+the\s+)?male\s+CNS\s+(left|right)\s+(?:side|hemisphere)\s+neuron\s+count\s+for\s+(?:cell\s+)?type\s+{_CNS_TYPE})\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if side_match:
+        g1, g2, g3, g4 = side_match.groups()
+        if g1 and g2:
+            ctype, side = g1, g2.lower()
+        else:
+            side, ctype = g3.lower(), g4
+        return Normalised(
+            f"How many neurons of type {ctype} are on the {side} side of the male CNS?",
+            "cns_side_count",
+            original_text,
+        )
+
+    # Total type count
+    type_match = re.fullmatch(
+        rf"(?:How\s+many\s+neurons\s+of\s+type\s+{_CNS_TYPE}\s+are\s+in\s+the\s+male\s+CNS|"
+        rf"(?:in\s+the\s+)?male\s+CNS\s+neuron\s+count\s+for\s+(?:cell\s+)?type\s+{_CNS_TYPE})\s*[?.!]?",
+        source,
+        flags=re.IGNORECASE,
+    )
+    if type_match:
+        ctype = type_match.group(1) or type_match.group(2)
+        return Normalised(
+            f"How many neurons of type {ctype} are in the male CNS?",
+            "cns_type_count",
+            original_text,
+        )
+
     return None
 
 
@@ -551,6 +743,16 @@ def normalise(text: str) -> Normalised:
     cognitive = _cognitive(source, text)
     if cognitive is not None:
         return cognitive
+
+    # Bounded Python snippets (v93 code families) before arithmetic scan.
+    code_req = _code_v93(source, text)
+    if code_req is not None:
+        return code_req
+
+    # Male-CNS connectome queries before science/binary scan.
+    cns_req = _connectome_v93(source, text)
+    if cns_req is not None:
+        return cns_req
 
     # Science before the binary scan. "A 30 kg mass is pushed with 90 N" would
     # otherwise be harvested as an arithmetic pair by the `A op B` search.

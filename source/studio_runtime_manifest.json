@@ -162,6 +162,26 @@
   "legacy_compatibility_tree": "runtime_python",
   "modules": [
     {
+      "path": "source/answer_check.py",
+      "sha256": "e2c53a5f758f05b625b19ed09b3abc0c973bb97f7161ddebe6ed78d3c6feba5c",
+      "size_bytes": 38469
+    },
+    {
+      "path": "source/build_code_corpus.py",
+      "sha256": "0305eb325d98faac320cf620a529f46362751e89ca27e271c93cddb6e5cc06aa",
+      "size_bytes": 50850
+    },
+    {
+      "path": "source/build_connectome_corpus.py",
+      "sha256": "658410891c3dd79076c2882b6ebed9c59960c1906e5268c6a3ce193f771e38a8",
+      "size_bytes": 32472
+    },
+    {
+      "path": "source/build_omni_corpus.py",
+      "sha256": "0fd714aa30ab0161bd3b1efd8401807bd803c732771e9346694c93cf11888927",
+      "size_bytes": 72194
+    },
+    {
       "path": "source/chat_app.py",
       "sha256": "d8274e6c7a25e6101fd2405b31c5543e21982e0b647b5dba53fd19fdbf0b9fc7",
       "size_bytes": 98052
@@ -178,13 +198,13 @@
     },
     {
       "path": "source/chat_memory.py",
-      "sha256": "0c550cacb4dc263526ba93dd988353561ddd0ca3c3bb05f42a6b425a9773a93f",
-      "size_bytes": 5683
+      "sha256": "efef924ed0a27fcfe822f178d9db8791cf05435200e6a9bbecf4416fe93029bd",
+      "size_bytes": 11168
     },
     {
       "path": "source/chat_pipeline.py",
-      "sha256": "c5776c15fe22cfbc846fade687dccc090edc9f457a7c3d667b673cf3614c73c1",
-      "size_bytes": 118858
+      "sha256": "f7bc5ec9cdd4fe468b78dab0bef271f423849eb47f0e8284435573b5a7d8b307",
+      "size_bytes": 124518
     },
     {
       "path": "source/chat_web_app.py",
@@ -257,6 +277,26 @@
       "size_bytes": 3901
     },
     {
+      "path": "source/mimomix_controller.py",
+      "sha256": "021213c839f7dd07e1b625d22bf967146d74ed7289733a131745eb9c0ff301f1",
+      "size_bytes": 20031
+    },
+    {
+      "path": "source/mimomix_core.py",
+      "sha256": "8866fb38778a46e13bcfa2f93a61bc643abec92c4ac3a7ea65c5e1d1270fbbcd",
+      "size_bytes": 206182
+    },
+    {
+      "path": "source/mimomix_observatory.py",
+      "sha256": "e647079f5f939042b773d671232657df5b25159e3093a8f5e19287a8dc5897e9",
+      "size_bytes": 34402
+    },
+    {
+      "path": "source/mimomix_text.py",
+      "sha256": "2def1554e411bc76a0e6f5a426c48d7c82c40a9d9f0757fcd68437f0cc8462b8",
+      "size_bytes": 27965
+    },
+    {
       "path": "source/model_frontier_native_image_v36.py",
       "sha256": "468bc3297fbf9df38ce2985d326cffcd0474ea46eac6ad8e8bfbf292e9043f6b",
       "size_bytes": 5561
@@ -312,6 +352,11 @@
       "size_bytes": 7387
     },
     {
+      "path": "source/natural_phrasings.py",
+      "sha256": "59342e50f1ee3ecdc560d2e7706b88ca3d0b664611d245ce5dc2577dfac7f8a7",
+      "size_bytes": 21749
+    },
+    {
       "path": "source/native_image_infer_v36.py",
       "sha256": "49bd2447f6d2e0733e337ac2adf041f09c3959b22b9f2233a29ea3e80647832d",
       "size_bytes": 1564
@@ -325,6 +370,101 @@
       "path": "source/native_image_infer_v38_xlite.py",
       "sha256": "a1ebd38e9ffa4eada24b09d858dcd85ca6ea0302823d55d7262867b531c5e705",
       "size_bytes": 1327
+    },
+    {
+      "path": "source/nexus_active_inference.py",
+      "sha256": "ac61bcf17e4825f253141ea4e631e52dab98b278a6590d8e9b9aed289f8ea3a8",
+      "size_bytes": 10117
+    },
+    {
+      "path": "source/nexus_causal_dag.py",
+      "sha256": "66b05a186a5a06905cb401b88c60ff8d783de24d58eb2609ed215293b3b71a11",
+      "size_bytes": 6780
+    },
+    {
+      "path": "source/nexus_chat.py",
+      "sha256": "805a4ebf9223035a452d81a9725b3efe63d2853ce5c67b62d5e4b11bdde96b0d",
+      "size_bytes": 16327
+    },
+    {
+      "path": "source/nexus_complexity.py",
+      "sha256": "983ee046bf594abdcc1a3bcc9ec5a9746bc2fd3f0997bb16781b77af865949a1",
+      "size_bytes": 6976
+    },
+    {
+      "path": "source/nexus_conformal_stopping.py",
+      "sha256": "709cd3235abe75d37e1fa5541573ed4a2d2d8aeddcb630792383703866a1d210",
+      "size_bytes": 13690
+    },
+    {
+      "path": "source/nexus_diffusion_thought.py",
+      "sha256": "46934da1df2c25a21dfecf523b9d76a285065fd86a69526a23051ca38c82c162",
+      "size_bytes": 9454
+    },
+    {
+      "path": "source/nexus_engine.py",
+      "sha256": "f91b5cab705d07ff1d2f8121c08673426bc77784caf4299f1302ec64d504a24a",
+      "size_bytes": 149494
+    },
+    {
+      "path": "source/nexus_epistemics.py",
+      "sha256": "fc38e548ce10313cb538140e7bbdecb57fc0ee07de5119565a42a5ea933f3135",
+      "size_bytes": 24083
+    },
+    {
+      "path": "source/nexus_got.py",
+      "sha256": "e0d893e6cd28886fff310897a1c25cb7b6667a6a4de19315f73ffa62f98bb896",
+      "size_bytes": 11954
+    },
+    {
+      "path": "source/nexus_ideation.py",
+      "sha256": "b547b09191c2178e2205b8ab4c0d17e72ac064df042d5f8f264767b50f16736e",
+      "size_bytes": 16050
+    },
+    {
+      "path": "source/nexus_independent_checker.py",
+      "sha256": "6314e7f987b5bf2248642308f59bd279caba3b6ddcc78b4183d8e00bdf854244",
+      "size_bytes": 26583
+    },
+    {
+      "path": "source/nexus_interpretability.py",
+      "sha256": "aebddaba2a0c4e5eefe14fede41a4242240d3e3b525e7ad90a59bfd348338967",
+      "size_bytes": 9934
+    },
+    {
+      "path": "source/nexus_proof.py",
+      "sha256": "ad4a9512a66a5b27e0b313df15c1661143b013e92781d9fd5d052d3b50961408",
+      "size_bytes": 19035
+    },
+    {
+      "path": "source/nexus_proof_verification.py",
+      "sha256": "28cb0ef332528bc1e5d21ab1690c45c46d8f3ca78f58b9139ec05fb804666e0a",
+      "size_bytes": 11877
+    },
+    {
+      "path": "source/nexus_reflexion.py",
+      "sha256": "a29adb7469eadb650345d85724381707794bfda93823c6f542e26d4458989561",
+      "size_bytes": 9779
+    },
+    {
+      "path": "source/nexus_solver.py",
+      "sha256": "6a0a5f831437f3ba8bcb4b99a204965f158a53ff6e11000cd9e5f91556729fe9",
+      "size_bytes": 86805
+    },
+    {
+      "path": "source/nexus_speculative_bidirectional.py",
+      "sha256": "3dca6df3e2127ed8c07c1d8d13c96ba57ff587ff7f90787a450933147d7f7ea3",
+      "size_bytes": 9184
+    },
+    {
+      "path": "source/nexus_swarm.py",
+      "sha256": "ff1b9ff93f4737807d24548c9ee08523c24c829f002da0b80d0f0c3cebdf4d41",
+      "size_bytes": 18958
+    },
+    {
+      "path": "source/nexus_v95_ecosystem.py",
+      "sha256": "1606db426afa3806b19435a74e508d3a7308384f5e127f0bd79dcbe2fda45ccf",
+      "size_bytes": 50112
     },
     {
       "path": "source/omni_collective_model.py",
@@ -538,8 +678,8 @@
     },
     {
       "path": "runtime_python/chat_memory.py",
-      "sha256": "0c550cacb4dc263526ba93dd988353561ddd0ca3c3bb05f42a6b425a9773a93f",
-      "size_bytes": 5683
+      "sha256": "efef924ed0a27fcfe822f178d9db8791cf05435200e6a9bbecf4416fe93029bd",
+      "size_bytes": 11168
     },
     {
       "path": "runtime_python/device_utils.py",
