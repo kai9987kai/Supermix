@@ -1,0 +1,117 @@
+{
+  "schema": "supermix-scf91-feature-preservation-v1",
+  "generated_at": "2026-11-16T11:04:03+00:00",
+  "policy": "additive_zero_deletion_default_off",
+  "preserved_families": {
+    "ChampionNet": {
+      "source": "source/model_variants.py",
+      "scf_adapter": "source/scf/models/__init__.py::ChampionNetAdapter",
+      "scf_layers": [
+        "source/scf/routing/__init__.py",
+        "source/scf/reasoning/__init__.py"
+      ],
+      "preserved_capabilities": [
+        "HierarchicalMoEClassifierHead",
+        "DeepExpertClassifierHead",
+        "ExpertChoiceClassifierHead",
+        "SmarterExpertClassifierHead",
+        "ThoughtExpertClassifierHead",
+        "RecursiveThoughtExpertHead",
+        "ReflexiveThoughtExpertHead",
+        "MetaCognitiveExpertHead",
+        "TreeOfThoughtExpertHead",
+        "ConsensusExpertHead",
+        "DeliberativeAlignmentExpertHead",
+        "NeurogenesisExpertHead",
+        "CognitiveSingularityExpertHead",
+        "TranscendentArchitectExpertHead",
+        "OmniversalQuantumExpertHead",
+        "FractalGenesisExpertHead",
+        "LiquidSpikingTensorExpertHead",
+        "ActiveInferenceExpertHead",
+        "TestTimeDifferentialExpertHead",
+        "HolographicStateSpaceExpertHead",
+        "PaperFusionExpertHead",
+        "load_weights_for_model",
+        "detect_model_size_from_state_dict"
+      ],
+      "notes": "Experimental heads (LiquidSpiking, OmniversalQuantum, FractalGenesis) remain isolated and tagged experimental_isolated."
+    },
+    "CognitiveLeap": {
+      "source": "source/model_variants.py, source/chat_app.py",
+      "scf_adapter": "source/scf/models/__init__.py::CognitiveLeapAdapter",
+      "scf_layers": [
+        "source/scf/adaptive/__init__.py"
+      ],
+      "preserved_capabilities": [
+        "CognitiveLeapExpertHead",
+        "CognitiveLeapUltraExpertHead",
+        "CognitiveLeapV52ExpertHead",
+        "resolve_runtime_compute_cycles",
+        "evaluate_runtime_compute_budgets",
+        "select_auto_runtime_compute_budget",
+        "progressive_auto_compute_forward",
+        "prediction stability margin and rank-depth early stopping guards"
+      ]
+    },
+    "OmniCollective": {
+      "source": "source/omni_collective_model.py, source/omni_collective_v41_model.py, source/omni_collective_v42_model.py, source/multimodel_catalog.py, source/score_fusion.py",
+      "scf_adapter": "source/scf/models/__init__.py::OmniCollectiveAdapter",
+      "scf_layers": [
+        "source/scf/routing/__init__.py",
+        "source/scf/collective/__init__.py"
+      ],
+      "preserved_capabilities": [
+        "OmniCollective v1-v8, v40-v42, v46-v48 catalog & engine wrappers",
+        "Domain-aware specialist routing (math, coding, protein, materials, 3d, vision, gan)",
+        "Signal calibration & consensus fusion (zmuv, borda, consensus_multiplier)"
+      ]
+    },
+    "QwenLoRA": {
+      "source": "source/qwen_supermix_pipeline.py, source/qwen_adapter_promotion.py, source/qwen_chat_web_app.py",
+      "scf_adapter": "source/scf/models/__init__.py::QwenAdapter",
+      "scf_layers": [
+        "source/scf/learning/__init__.py"
+      ],
+      "preserved_capabilities": [
+        "Artifact-attested adapter loading",
+        "Explicit promotion gate enforcement (never auto-promoted)"
+      ]
+    },
+    "MiMoMix": {
+      "source": "source/mimomix_reasoner.py (v53/v56), source/mimomix_core.py (v57-v96), source/mimomix_decoding.py, source/mimomix_multimodal.py",
+      "scf_adapter": "source/scf/models/__init__.py::MiMoMixAdapter",
+      "scf_layers": [
+        "source/scf/memory/__init__.py",
+        "source/scf/adaptive/__init__.py",
+        "source/scf/multimodal/__init__.py"
+      ],
+      "preserved_capabilities": [
+        "v53/v56 LatentStateReasoner slot-transition memory",
+        "Hybrid SWA/global GQA attention + YaRN/NTK RoPE + Differential Attention + MLA + MoD",
+        "Sparse MoE + aux-loss-free bias update + Multi-Token Prediction (MTP)",
+        "Bit-exact greedy == MTP self-speculative decoding (blocked when adaptive_thinking=True)",
+        "Male-CNS bilateral ConnectomeCore + dual_soma, commissural_gate, glial_homeostasis, homeostatic_radius"
+      ]
+    },
+    "NexusMind": {
+      "source": "source/nexus_engine.py, source/nexus_*.py",
+      "scf_adapter": "source/scf/models/__init__.py::NexusMindAdapter",
+      "scf_layers": [
+        "source/scf/reasoning/__init__.py",
+        "source/scf/verification/__init__.py",
+        "source/scf/observability/__init__.py"
+      ],
+      "preserved_capabilities": [
+        "Graph-of-Thought (nexus_got.py)",
+        "Multi-Agent Swarm (nexus_swarm.py)",
+        "Active Inference & Epistemic Planning (nexus_active_inference.py, nexus_epistemics.py)",
+        "Pearlian Causal DAG (nexus_causal_dag.py)",
+        "Reflexion & Diffusion-of-Thought",
+        "Conformal Stopping + CRC + AURC (nexus_conformal_stopping.py)",
+        "Formal Proof Verification & Deterministic Science/Math Solver (nexus_proof.py, nexus_solver.py, nexus_independent_checker.py)",
+        "v95 Tether/Faultline/Crosswire/Mnemorph forensic diagnostics (answer_authority=False)"
+      ]
+    }
+  }
+}

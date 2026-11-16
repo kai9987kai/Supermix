@@ -1712,6 +1712,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
               f"{' | counters restored' if args.start_step > 0 and neurogenesis_state is not None else ''}",
               flush=True)
     growth_watch = growth_telemetry(model) is not None
+    freeze_trunk_steps = int(getattr(args, "freeze_trunk_steps", 0) or 0)
+    graft_prefixes = new_parameter_prefixes(config)
 
     # `--start_step` resumes mid-curve: the run keeps the *same* `--steps`
     # OneCycle schedule and simply picks up where the crashed leg stopped, so
@@ -1738,14 +1740,27 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             out = model(batch_x, labels=batch_y)
 
         optimiser.zero_grad(set_to_none=True)
+        freeze_trunk = (
+            freeze_trunk_steps > 0
+            and (step - args.start_step) <= freeze_trunk_steps
+            and bool(graft_prefixes)
+        )
         if scaler is not None:
             scaler.scale(out.loss).backward()
             scaler.unscale_(optimiser)
+            if freeze_trunk:
+                for name, param in model.named_parameters():
+                    if not name.startswith(graft_prefixes):
+                        param.grad = None
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimiser)
             scaler.update()
         else:
             out.loss.backward()
+            if freeze_trunk:
+                for name, param in model.named_parameters():
+                    if not name.startswith(graft_prefixes):
+                        param.grad = None
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimiser.step()
         scheduler.step()
@@ -2463,6 +2478,28 @@ def build_parser() -> argparse.ArgumentParser:
             "uses the whole dev set"
         ),
     )
+    neuro.add_argument(
+        "--freeze_trunk_steps", type=int, default=0,
+        help="freeze non-grafted trunk gradients for the first N steps of a continuation leg",
+    )
+    neuro.add_argument(
+        "--witness_rollback_tolerance", type=float, default=None,
+        help="maximum allowed witness loss increase before rolling back a growth event atomically",
+    )
+    neuro.add_argument(
+        "--maturity_steps", type=int, default=0,
+        help="minimum steps a newborn module must mature before splitting or pruning",
+    )
+    neuro.add_argument(
+        "--max_splits_per_parent", type=int, default=0,
+        help="lifetime limit on splits per parent module (0 disables limit)",
+    )
+    neuro.add_argument(
+        "--edge_proposal_mode",
+        choices=("covariance", "signed_gradient", "hybrid"),
+        default="covariance",
+        help="synaptogenesis candidate scoring mode",
+    )
     parser.add_argument("--compare", nargs=2, metavar=("FULL_DIR", "ABLATION_DIR"),
                         help="compare two finished arms instead of training")
     # Architecture defaults are the *published v57 configuration*, not the v57
@@ -2550,10 +2587,17 @@ def validate_growth_settings(args) -> None:
             "needs --init_from; to train a deeper model from scratch raise --n_layers"
         )
     for name in ("grow_modules", "grow_edges", "grow_taps", "witness_rows", "ablation_rows",
-                 "max_new_tokens_vocab", "cns_spare_nodes", "moe_spare_experts"):
+                 "max_new_tokens_vocab", "cns_spare_nodes", "moe_spare_experts",
+                 "freeze_trunk_steps", "maturity_steps", "max_splits_per_parent"):
         value = getattr(args, name, None)
         if value is not None and int(value) < 0:
             raise SystemExit(f"--{name} must be >= 0, got {value}")
+    radius = getattr(args, "cns_homeostatic_radius", None)
+    if radius is not None and float(radius) < 0.0:
+        raise SystemExit(f"--cns_homeostatic_radius must be >= 0, got {radius}")
+    tol = getattr(args, "witness_rollback_tolerance", None)
+    if tol is not None and not math.isfinite(float(tol)):
+        raise SystemExit(f"--witness_rollback_tolerance must be finite, got {tol}")
 
 
 def validate_selection_settings(args) -> None:

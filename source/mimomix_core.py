@@ -216,6 +216,9 @@ class MiMoMixConfig:
     thinking_residual_init: float = 0.0
     ponder_loss_weight: float = 1e-2
     consistency_loss_weight: float = 1e-2
+    #: Track normalized Shannon entropy across latent refinement states for
+    #: entropy-stability telemetry/halting (v97, default off).
+    thinking_entropy_halt: bool = False
 
     # --- differential attention (Microsoft ICLR 2025) ---------------------
     use_differential_attention: bool = False
@@ -309,6 +312,30 @@ class MiMoMixConfig:
     #: Cached decoding then carries the per-position state history as one
     #: extra ``past_key_values`` entry after the layer entries.
     cns_temporal: bool = False
+
+    # --- v95 dual-soma, commissural gating, homeostasis & trunk dropout ---
+    #: Coupled slow-timescale soma compartment per connectome module
+    #: (ODDITY-LAB / SONAPSE-CONNECTOME). Default False preserves v91/v93 bit-identity.
+    cns_dual_soma: bool = False
+    cns_slow_leak_init: float = 0.05
+    #: Input-dependent nonnegative sigmoid gate on cross-hemisphere LR/RL tracts
+    #: preserving Dale's law signs (Qiu et al., NeurIPS 2025).
+    cns_commissural_gate: bool = False
+    #: Activity-dependent glial homeostatic gain scaling across live connectome modules.
+    cns_glial_homeostasis: bool = False
+    #: Counterfactual trunk-bypass dropout probability during training at connectome
+    #: write sites so the trunk cannot ignore open connectome gates.
+    cns_trunk_dropout: float = 0.0
+    #: Target dominant singular/spectral norm for homeostatic edge rescaling.
+    #: 0.0 (default) leaves edges untouched.
+    cns_homeostatic_radius: float = 0.0
+    #: Fast pre-synaptic short-term synaptic facilitation / Hebbian trace modulation
+    #: bounded to [0.75, 1.25] per module (v97, default off).
+    cns_hebbian_trace: bool = False
+    #: Rao-Ballard style recurrent predictive-coding error gate: subtracts bounded
+    #: internal recurrent prediction ``0.25 * tanh(strength) * rec.detach()`` from
+    #: incoming sensory drive (v98, default off, zero perturbation at init).
+    cns_predictive_error: bool = False
 
     # --- v93 MoE expert slots ---------------------------------------------
     #: Dead expert slots per MoE layer, appended after ``n_routed_experts``.
@@ -410,6 +437,12 @@ class MiMoMixConfig:
         # is on, so to_dict/from_dict round-trip the same shapes either way.
         self.cns_read_layers = self._layer_tuple("cns_read_layers", self.cns_read_layers)
         self.cns_write_layers = self._layer_tuple("cns_write_layers", self.cns_write_layers)
+        if not (0.0 < float(self.cns_slow_leak_init) < 1.0):
+            raise ValueError(f"cns_slow_leak_init {self.cns_slow_leak_init} must be in (0, 1)")
+        if not (0.0 <= float(self.cns_trunk_dropout) < 1.0):
+            raise ValueError(f"cns_trunk_dropout {self.cns_trunk_dropout} must be in [0, 1)")
+        if float(self.cns_homeostatic_radius) < 0.0:
+            raise ValueError(f"cns_homeostatic_radius {self.cns_homeostatic_radius} must be >= 0")
         if int(self.cns_spare_nodes) < 0:
             raise ValueError("cns_spare_nodes must be >= 0")
         if int(self.moe_spare_experts) < 0:
@@ -2195,6 +2228,8 @@ class RecursiveThinkingCore(nn.Module):
         self.register_buffer("last_consistency_loss", torch.zeros(()), persistent=False)
         self.register_buffer("last_quality_score", torch.full((), 0.5), persistent=False)
         self.register_buffer("last_continue_probability", torch.full((), 0.5), persistent=False)
+        self.entropy_halt = bool(getattr(config, "thinking_entropy_halt", False))
+        self.last_cycle_entropies: List[float] = []
         self.last_exit_reason = "not_run"
         self._last_quality_logits: Optional[torch.Tensor] = None
 
@@ -2252,12 +2287,18 @@ class RecursiveThinkingCore(nn.Module):
         stable_steps = 0
         cycles_used = 0
         exit_reason = "budget_exhausted"
+        cycle_entropies: List[float] = []
 
         for cycle in range(budget):
             cycles_used = cycle + 1
             for _ in range(self.inner_steps):
                 state = self.cell(self.refine(z), state)
             z = z + state
+            if self.entropy_halt:
+                z_probs = F.softmax(z.detach().float(), dim=-1)
+                ent = -(z_probs * z_probs.clamp_min(1e-12).log()).sum(dim=-1).mean()
+                denom = max(1e-6, math.log(max(2, int(z.shape[-1]))))
+                cycle_entropies.append(float(ent / denom))
 
             halt_logit = self.halt_head(state)
             halt_p = torch.sigmoid(halt_logit)
@@ -2275,10 +2316,15 @@ class RecursiveThinkingCore(nn.Module):
             if previous_residual is not None:
                 delta = (step_residual - previous_residual).pow(2).mean()
                 consistency = consistency + delta
-                if adaptive and float(delta.detach()) <= stability_tol:
+                ent_stable = (
+                    self.entropy_halt
+                    and len(cycle_entropies) >= 2
+                    and abs(cycle_entropies[-1] - cycle_entropies[-2]) <= stability_tol
+                )
+                if adaptive and (float(delta.detach()) <= stability_tol or ent_stable):
                     stable_steps += 1
                     if stable_steps >= stability_patience:
-                        exit_reason = "prediction_stability"
+                        exit_reason = "entropy_stability" if ent_stable else "prediction_stability"
                         previous_residual = step_residual
                         break
                 else:
@@ -2288,6 +2334,8 @@ class RecursiveThinkingCore(nn.Module):
             if adaptive and float(cumulative_halt.mean().detach()) >= halt_threshold:
                 exit_reason = "halting_threshold"
                 break
+
+        self.last_cycle_entropies = cycle_entropies
 
         # Any unspent halting mass falls to the last residual so the mixture is
         # a proper convex combination regardless of where the loop exited.
@@ -2484,6 +2532,48 @@ class ConnectomeCore(nn.Module):
         self.ablate_cross = False
         self.ablate_side: Optional[int] = None
         self.ablate_grown = False
+        # v95 connectome enhancements (all default-off for v91/v93 bit-identity).
+        self.dual_soma = bool(getattr(config, "cns_dual_soma", False))
+        self.slow_leak_init = float(getattr(config, "cns_slow_leak_init", 0.05))
+        self.commissural_gate = bool(getattr(config, "cns_commissural_gate", False))
+        self.glial_homeostasis = bool(getattr(config, "cns_glial_homeostasis", False))
+        self.trunk_dropout = float(getattr(config, "cns_trunk_dropout", 0.0))
+        self.homeostatic_radius = float(getattr(config, "cns_homeostatic_radius", 0.0))
+        self._last_spectral_radius: Optional[float] = None
+        self._edge_grad_probe: Optional[torch.Tensor] = None
+        if self.dual_soma:
+            init_slow_logit = math.log(self.slow_leak_init / (1.0 - self.slow_leak_init))
+            self.slow_leak_logit = nn.Parameter(torch.full((n,), init_slow_logit))
+            self.slow_coupling = nn.Parameter(torch.zeros(n))
+        else:
+            self.slow_leak_logit = None
+            self.slow_coupling = None
+        if self.commissural_gate:
+            self.commissural_gate_proj = nn.Linear(hidden, 2, bias=True)
+            with torch.no_grad():
+                self.commissural_gate_proj.weight.zero_()
+                self.commissural_gate_proj.bias.fill_(4.0)
+        else:
+            self.commissural_gate_proj = None
+        if self.glial_homeostasis:
+            self.glial_strength = nn.Parameter(torch.zeros(n))
+            self.register_buffer("glial_activity_ema", torch.full((n,), 0.25), persistent=True)
+            self.glial_target = 0.25
+        else:
+            self.glial_strength = None
+            self.glial_activity_ema = None
+        self.hebbian_trace = bool(getattr(config, "cns_hebbian_trace", False))
+        self.register_buffer("last_hebbian_gain_mean", torch.ones(()), persistent=False)
+        if self.hebbian_trace:
+            self.hebbian_strength = nn.Parameter(torch.zeros(n))
+        else:
+            self.hebbian_strength = None
+        self.predictive_error = bool(getattr(config, "cns_predictive_error", False))
+        self.register_buffer("last_pred_error_norm", torch.zeros(()), persistent=False)
+        if self.predictive_error:
+            self.pred_error_strength = nn.Parameter(torch.zeros(n))
+        else:
+            self.pred_error_strength = None
         #: What the most recent growth primitive changed, for the event log.
         self.last_event: Dict[str, object] = {}
         self.graph_info: Dict[str, object] = {"loaded": False}
@@ -2538,6 +2628,22 @@ class ConnectomeCore(nn.Module):
                 gate.zero_()
             if self.thinking_gate is not None:
                 self.thinking_gate.zero_()
+            if self.slow_leak_logit is not None:
+                init_slow_logit = math.log(self.slow_leak_init / (1.0 - self.slow_leak_init))
+                self.slow_leak_logit.fill_(init_slow_logit)
+            if self.slow_coupling is not None:
+                self.slow_coupling.zero_()
+            if self.commissural_gate_proj is not None:
+                self.commissural_gate_proj.weight.zero_()
+                self.commissural_gate_proj.bias.fill_(4.0)
+            if self.glial_strength is not None:
+                self.glial_strength.zero_()
+            if self.glial_activity_ema is not None:
+                self.glial_activity_ema.fill_(0.25)
+            if self.hebbian_strength is not None:
+                self.hebbian_strength.zero_()
+            if self.pred_error_strength is not None:
+                self.pred_error_strength.zero_()
             target = (self.init_fraction * self.spectral_scale).clamp_min(1e-6)
             # softplus^-1(y) = log(expm1(y)); masked entries sit far below zero.
             inverse = torch.log(torch.expm1(target))
@@ -2712,7 +2818,10 @@ class ConnectomeCore(nn.Module):
         if self.ablate_cross:
             same_side = self.hemisphere.unsqueeze(1) == self.hemisphere.unsqueeze(0)
             mask = mask * same_side.to(mask.dtype)
-        return mask * F.softplus(self.edge_logit) * self.sign.unsqueeze(0)
+        w = mask * F.softplus(self.edge_logit) * self.sign.unsqueeze(0)
+        if self._edge_grad_probe is not None:
+            w = w + self._edge_grad_probe.to(w.dtype) * self.sign.unsqueeze(0)
+        return w
 
     def drive(self, hiddens: Sequence[torch.Tensor]) -> torch.Tensor:
         """Afferent drive ``(B*T, n)`` from the read-site hidden states.
@@ -2735,12 +2844,83 @@ class ConnectomeCore(nn.Module):
             total = total + self.extra_read_in[index](self.extra_norms[index](tap_flat)) * in_mask
         return total + self.node_bias
 
+    def _split_commissural_weights(
+        self, w: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        side = self.hemisphere.to(torch.int64)
+        post_left = (side == 0).unsqueeze(1)
+        pre_left = (side == 0).unsqueeze(0)
+        same_mask = (side.unsqueeze(1) == side.unsqueeze(0)).to(w.dtype)
+        lr_mask = (post_left & ~pre_left).to(w.dtype)
+        rl_mask = (~post_left & pre_left).to(w.dtype)
+        return (w * same_mask).t(), (w * lr_mask).t(), (w * rl_mask).t()
+
+    def _glial_gain(self, dtype: torch.dtype) -> Optional[torch.Tensor]:
+        if not self.glial_homeostasis or self.glial_strength is None or self.glial_activity_ema is None:
+            return None
+        target = float(getattr(self, "glial_target", 0.25))
+        ema = self.glial_activity_ema.to(dtype)
+        raw_gain = ((target + 1e-3) / (ema + 1e-3)).clamp(0.5, 2.0)
+        return (1.0 + torch.tanh(self.glial_strength.to(dtype)) * (raw_gain - 1.0)).clamp(0.1, 3.0)
+
+    def _hebbian_modulation(self, pre_rate: torch.Tensor) -> Optional[torch.Tensor]:
+        if not self.hebbian_trace or self.hebbian_strength is None:
+            return None
+        strength = torch.tanh(self.hebbian_strength.to(pre_rate.dtype))
+        centered_rate = pre_rate.detach().clamp(0.0, 2.0) - 0.25
+        gain = (1.0 + 0.25 * strength * centered_rate).clamp(0.75, 1.25)
+        self.last_hebbian_gain_mean = gain.detach().mean()
+        return gain
+
+    def _predictive_drive(self, drive: torch.Tensor, rec: torch.Tensor) -> torch.Tensor:
+        if not self.predictive_error or self.pred_error_strength is None:
+            return drive
+        strength = 0.25 * torch.tanh(self.pred_error_strength.to(drive.dtype))
+        err_drive = drive - strength * rec.detach()
+        self.last_pred_error_norm = (err_drive - drive).detach().pow(2).mean().sqrt()
+        return err_drive
+
     def _per_token_rates(
-        self, drive: torch.Tensor, w_t: torch.Tensor, alpha: torch.Tensor, active: Optional[torch.Tensor]
+        self,
+        drive: torch.Tensor,
+        w: torch.Tensor,
+        alpha: torch.Tensor,
+        active: Optional[torch.Tensor],
+        comm_gates: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         rate = torch.zeros_like(drive)
+        slow = torch.zeros_like(drive) if self.dual_soma else None
+        slow_alpha = (
+            torch.sigmoid(self.slow_leak_logit).to(drive.dtype)
+            if self.dual_soma and self.slow_leak_logit is not None
+            else None
+        )
+        slow_coup = (
+            torch.tanh(self.slow_coupling).to(drive.dtype)
+            if self.dual_soma and self.slow_coupling is not None
+            else None
+        )
+        glial_gain = self._glial_gain(drive.dtype)
+        if comm_gates is not None:
+            w_same_t, w_lr_t, w_rl_t = self._split_commissural_weights(w)
+            g_lr, g_rl = comm_gates[:, 0:1], comm_gates[:, 1:2]
+        else:
+            w_t = w.t()
         for _ in range(self.steps):
-            rate = (1.0 - alpha) * rate + alpha * F.relu(rate @ w_t + drive)
+            if comm_gates is not None:
+                rec = rate @ w_same_t + g_lr * (rate @ w_lr_t) + g_rl * (rate @ w_rl_t)
+            else:
+                rec = rate @ w_t
+            eff_drive = self._predictive_drive(drive, rec)
+            rate = (1.0 - alpha) * rate + alpha * F.relu(rec + eff_drive)
+            if slow is not None and slow_alpha is not None and slow_coup is not None:
+                slow = (1.0 - slow_alpha) * slow + slow_alpha * rate
+                rate = F.relu(rate + slow_coup * slow)
+            if glial_gain is not None:
+                rate = rate * glial_gain
+            heb_gain = self._hebbian_modulation(rate)
+            if heb_gain is not None:
+                rate = rate * heb_gain
             if active is not None:
                 rate = rate * active
         return rate
@@ -2749,9 +2929,10 @@ class ConnectomeCore(nn.Module):
         self,
         drive: torch.Tensor,
         state: Optional[torch.Tensor],
-        w_t: torch.Tensor,
+        w: torch.Tensor,
         alpha: torch.Tensor,
         active: Optional[torch.Tensor],
+        comm_gates: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Causal scan over ``drive`` ``(B, T, n)`` from ``state`` ``(B, n)``.
 
@@ -2765,11 +2946,44 @@ class ConnectomeCore(nn.Module):
             state = drive.new_zeros(bsz, n)
         else:
             state = state.to(dtype=drive.dtype)
+        slow = state.clone() if self.dual_soma else None
+        slow_alpha = (
+            torch.sigmoid(self.slow_leak_logit).to(drive.dtype)
+            if self.dual_soma and self.slow_leak_logit is not None
+            else None
+        )
+        slow_coup = (
+            torch.tanh(self.slow_coupling).to(drive.dtype)
+            if self.dual_soma and self.slow_coupling is not None
+            else None
+        )
+        glial_gain = self._glial_gain(drive.dtype)
+        if comm_gates is not None:
+            w_same_t, w_lr_t, w_rl_t = self._split_commissural_weights(w)
+            comm_seq = comm_gates.view(bsz, seq_len, 2)
+        else:
+            w_t = w.t()
         states: List[torch.Tensor] = []
         for t in range(seq_len):
             u = drive[:, t]
+            if comm_gates is not None:
+                g_lr = comm_seq[:, t, 0:1]
+                g_rl = comm_seq[:, t, 1:2]
             for _ in range(self.steps):
-                state = (1.0 - alpha) * state + alpha * F.relu(state @ w_t + u)
+                if comm_gates is not None:
+                    rec = state @ w_same_t + g_lr * (state @ w_lr_t) + g_rl * (state @ w_rl_t)
+                else:
+                    rec = state @ w_t
+                eff_u = self._predictive_drive(u, rec)
+                state = (1.0 - alpha) * state + alpha * F.relu(rec + eff_u)
+                if slow is not None and slow_alpha is not None and slow_coup is not None:
+                    slow = (1.0 - slow_alpha) * slow + slow_alpha * state
+                    state = F.relu(state + slow_coup * slow)
+                if glial_gain is not None:
+                    state = state * glial_gain
+                heb_gain = self._hebbian_modulation(state)
+                if heb_gain is not None:
+                    state = state * heb_gain
                 if active is not None:
                     state = state * active
             states.append(state)
@@ -2779,14 +2993,27 @@ class ConnectomeCore(nn.Module):
         """Raw module rates ``(B*T, n)`` (per-token) or ``(B, T, n)`` (temporal)."""
 
         drive = self.drive(hiddens)
-        w_t = self.weight().to(drive.dtype).t()
+        w = self.weight().to(drive.dtype)
         alpha = torch.sigmoid(self.leak_logit).to(drive.dtype)
         _, _, active = self._tap_masks(drive.dtype)
+        comm_gates: Optional[torch.Tensor] = None
+        if self.commissural_gate_proj is not None:
+            primary = hiddens[-1]
+            flat = primary.reshape(-1, primary.shape[-1])
+            comm_gates = torch.sigmoid(self.commissural_gate_proj(self.norm(flat))).to(drive.dtype)
         if self.temporal:
             primary = hiddens[-1]
             bsz, seq_len = int(primary.shape[0]), int(primary.shape[1])
-            return self._temporal_rates(drive.view(bsz, seq_len, self.n_nodes), state, w_t, alpha, active)
-        return self._per_token_rates(drive, w_t, alpha, active)
+            out = self._temporal_rates(
+                drive.view(bsz, seq_len, self.n_nodes), state, w, alpha, active, comm_gates
+            )
+        else:
+            out = self._per_token_rates(drive, w, alpha, active, comm_gates)
+        if self.glial_homeostasis and self.training and self.glial_activity_ema is not None:
+            with torch.no_grad():
+                batch_mean = out.detach().float().reshape(-1, self.n_nodes).mean(0)
+                self.glial_activity_ema.mul_(0.99).add_(0.01 * batch_mean)
+        return out
 
     def readout(self, rate: torch.Tensor) -> torch.Tensor:
         """RMS-normalised efferent read ``(B*T, n)`` from raw rates ``(B*T, n)``."""
@@ -2813,7 +3040,14 @@ class ConnectomeCore(nn.Module):
             gate, projection = self.gate, self.read_out
         else:
             gate, projection = self.extra_gates[site - 1], self.extra_read_out[site - 1]
-        out = flat + gate.to(flat.dtype) * projection(read)
+        flat_term = flat
+        if self.training and self.trunk_dropout > 0.0:
+            keep_prob = 1.0 - self.trunk_dropout
+            keep = (torch.rand((flat.shape[0], 1), device=flat.device) < keep_prob).to(flat.dtype)
+            # Counterfactual residual attenuation during training forces open connectome gates
+            # to carry real predictive load rather than being bypassed by the trunk.
+            flat_term = flat * (keep + 0.1 * (1.0 - keep))
+        out = flat_term + gate.to(flat.dtype) * projection(read)
         return out.reshape(shape)
 
     def thinking_input(self, read: torch.Tensor) -> Optional[torch.Tensor]:
@@ -2986,6 +3220,18 @@ class ConnectomeCore(nn.Module):
         self.tap_grown[child] = self.tap_grown[parent]
         self.node_bias[child] = self.node_bias[parent]
         self.leak_logit[child] = self.leak_logit[parent]
+        if self.slow_leak_logit is not None:
+            self.slow_leak_logit[child] = self.slow_leak_logit[parent]
+        if self.slow_coupling is not None:
+            self.slow_coupling[child] = self.slow_coupling[parent]
+        if self.glial_strength is not None:
+            self.glial_strength[child] = self.glial_strength[parent]
+        if self.glial_activity_ema is not None:
+            self.glial_activity_ema[child] = self.glial_activity_ema[parent]
+        if self.hebbian_strength is not None:
+            self.hebbian_strength[child] = self.hebbian_strength[parent]
+        if self.pred_error_strength is not None:
+            self.pred_error_strength[child] = self.pred_error_strength[parent]
         self.alive[child] = 1
         self.born_step[child] = int(step)
         # taps: afferent rows copied, efferent columns halved and shared
@@ -3126,11 +3372,174 @@ class ConnectomeCore(nn.Module):
         self.sign[index] = 1.0
         self.node_bias[index] = 0.0
         self.leak_logit[index] = 0.0
+        if self.slow_leak_logit is not None:
+            self.slow_leak_logit[index] = math.log(self.slow_leak_init / (1.0 - self.slow_leak_init))
+        if self.slow_coupling is not None:
+            self.slow_coupling[index] = 0.0
+        if self.glial_strength is not None:
+            self.glial_strength[index] = 0.0
+        if self.glial_activity_ema is not None:
+            self.glial_activity_ema[index] = float(getattr(self, "glial_target", 0.25))
+        if self.hebbian_strength is not None:
+            self.hebbian_strength[index] = 0.0
+        if self.pred_error_strength is not None:
+            self.pred_error_strength[index] = 0.0
         slot = torch.zeros(self.n_nodes, dtype=torch.bool, device=self.alive.device)
         slot[index] = True
         self._zero_slot_taps(slot)
         self.last_event = {"event": "kill_module", "module": index, "in_edges": in_edges, "out_edges": out_edges}
         return True
+
+    @torch.no_grad()
+    def probe_signed_edge_gradients(
+        self,
+        pre_activity: torch.Tensor,
+        post_grad: torch.Tensor,
+        edge_grad_override: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Compute Dale-signed first-order synaptogenesis utility scores ``(n, n)``.
+
+        For unconnected candidate pairs ``(post, pre)`` between distinct alive modules,
+        increasing ``softplus(edge_logit[post, pre])`` shifts synaptic current in
+        direction ``sign[pre] * r_pre``. The first-order steepest-descent utility is:
+        ``ReLU(-sign[pre] * E[post_grad[post] * pre_activity[pre]])``.
+        When ``edge_grad_override`` ``(n, n)`` is passed directly from an autograd
+        probe on ``_edge_grad_probe``, it uses ``ReLU(-edge_grad_override)`` directly.
+        """
+        n = self.n_nodes
+        alive = self.alive.bool()
+        eligible = (
+            alive.unsqueeze(1)
+            & alive.unsqueeze(0)
+            & (self.mask == 0)
+            & ~torch.eye(n, dtype=torch.bool, device=self.alive.device)
+        )
+        if edge_grad_override is not None:
+            raw = -edge_grad_override.to(device=self.alive.device, dtype=torch.float32)
+        else:
+            pre_flat = pre_activity.detach().reshape(-1, n).to(device=self.alive.device, dtype=torch.float32)
+            post_flat = post_grad.detach().reshape(-1, n).to(device=self.alive.device, dtype=torch.float32)
+            denom = float(max(1, pre_flat.shape[0]))
+            grad_w = (post_flat.t() @ pre_flat) / denom
+            raw = -(grad_w * self.sign.to(dtype=torch.float32).unsqueeze(0))
+        return torch.where(eligible, F.relu(raw), torch.zeros_like(raw))
+
+    @torch.no_grad()
+    def grow_edges_from_scores(
+        self,
+        score_matrix: torch.Tensor,
+        count: int = 8,
+        step: int = 0,
+        logit: float = -7.0,
+        cross_quota: float = 0.5,
+    ) -> List[Tuple[int, int]]:
+        """Select top-``count`` unconnected candidate pairs by score and install them."""
+        quota = int(count)
+        if quota <= 0:
+            return []
+        n = self.n_nodes
+        scores = score_matrix.detach().to(device=self.alive.device, dtype=torch.float32)
+        if tuple(scores.shape) != (n, n):
+            raise ValueError(f"score_matrix must have shape {(n, n)}, got {tuple(scores.shape)}")
+        alive = self.alive.bool()
+        eligible = (
+            alive.unsqueeze(1)
+            & alive.unsqueeze(0)
+            & (self.mask == 0)
+            & ~torch.eye(n, dtype=torch.bool, device=alive.device)
+            & (scores > 0)
+        )
+        if not bool(eligible.any()):
+            return []
+        masked = torch.where(eligible, scores, torch.full_like(scores, float("-inf")))
+        ranked = torch.argsort(masked.flatten(), descending=True, stable=True)
+        n_elig = int(eligible.sum())
+        ranked = ranked[:n_elig]
+
+        side = self.hemisphere.to(torch.int64)
+        two_sides = bool(((side == 0) & alive).any()) and bool(((side == 1) & alive).any())
+        chosen: List[int] = []
+        if two_sides and cross_quota > 0.0:
+            cross_flat = (side.unsqueeze(1) != side.unsqueeze(0)).flatten()
+            reserve = min(quota, int(math.ceil(float(cross_quota) * quota)))
+            chosen = ranked[cross_flat[ranked]][:reserve].tolist()
+        taken = set(chosen)
+        for flat in ranked.tolist():
+            if len(chosen) >= quota:
+                break
+            if flat not in taken:
+                chosen.append(flat)
+                taken.add(flat)
+
+        installed: List[Tuple[int, int]] = []
+        for flat in chosen:
+            post, pre = divmod(int(flat), n)
+            if self.grow_edge(post, pre, step, float(logit)):
+                installed.append((post, pre))
+        return installed
+
+    @torch.no_grad()
+    def estimate_spectral_radius(self, power_iters: int = 8) -> float:
+        """Estimate the dominant singular value of ``self.weight()`` by power iteration."""
+
+        w = self.weight().detach().to(torch.float32)
+        n = int(w.shape[0])
+        if n == 0 or not bool((self.mask > 0).any()):
+            self._last_spectral_radius = 0.0
+            return 0.0
+        v = self.alive.to(torch.float32).clone()
+        if float(v.norm()) <= 1e-12:
+            v = torch.ones(n, dtype=torch.float32, device=w.device)
+        v = v / v.norm().clamp_min(1e-12)
+        iters = max(1, int(power_iters))
+        for _ in range(iters):
+            u = w @ v
+            un = u.norm()
+            if float(un) <= 1e-12:
+                self._last_spectral_radius = 0.0
+                return 0.0
+            u = u / un
+            v = w.t() @ u
+            vn = v.norm()
+            if float(vn) <= 1e-12:
+                self._last_spectral_radius = 0.0
+                return 0.0
+            v = v / vn
+        sigma = float((w @ v).norm())
+        self._last_spectral_radius = sigma
+        return sigma
+
+    @torch.no_grad()
+    def project_spectral_radius(
+        self,
+        target_radius: Optional[float] = None,
+        power_iters: int = 8,
+        max_scale_step: float = 0.25,
+    ) -> Dict[str, float]:
+        """Rescale active edge magnitudes smoothly toward ``target_radius`` (criticality homeostasis)."""
+
+        target = float(
+            target_radius
+            if target_radius is not None
+            else (self.homeostatic_radius if self.homeostatic_radius > 0.0 else 0.9)
+        )
+        rho_before = self.estimate_spectral_radius(power_iters=power_iters)
+        scale = 1.0
+        rho_after = rho_before
+        if rho_before > 1e-6 and target > 0.0 and bool((self.mask > 0).any()):
+            raw_scale = target / rho_before
+            step_bound = max(0.0, float(max_scale_step))
+            scale = min(max(raw_scale, 1.0 - step_bound), 1.0 + step_bound)
+            mag = (F.softplus(self.edge_logit) * scale).clamp_min(1e-6)
+            inv = torch.log(torch.expm1(mag))
+            self.edge_logit.copy_(torch.where(self.mask > 0, inv, self.edge_logit))
+            rho_after = self.estimate_spectral_radius(power_iters=power_iters)
+        return {
+            "rho_before": float(rho_before),
+            "rho_after": float(rho_after),
+            "scale": float(scale),
+            "target_radius": float(target),
+        }
 
     # -- telemetry -------------------------------------------------------------
 
@@ -3198,6 +3607,40 @@ class ConnectomeCore(nn.Module):
                 "cross": bool(self.ablate_cross), "grown": bool(self.ablate_grown),
                 "side": None if self.ablate_side is None else int(self.ablate_side),
             }
+        if self.dual_soma:
+            snapshot["dual_soma"] = True
+            snapshot["mean_slow_leak"] = (
+                float(torch.sigmoid(self.slow_leak_logit.detach()).mean())
+                if self.slow_leak_logit is not None
+                else 0.0
+            )
+            snapshot["slow_coupling_mean_abs"] = (
+                float(self.slow_coupling.detach().abs().mean())
+                if self.slow_coupling is not None
+                else 0.0
+            )
+        if self.commissural_gate and self.commissural_gate_proj is not None:
+            snapshot["commissural_gate"] = True
+            snapshot["commissural_gate_bias_sigmoid"] = [
+                float(torch.sigmoid(v)) for v in self.commissural_gate_proj.bias.detach()
+            ]
+        if self.glial_homeostasis and self.glial_activity_ema is not None:
+            snapshot["glial_homeostasis"] = True
+            snapshot["glial_activity_ema_mean"] = float(self.glial_activity_ema.detach().mean())
+        if self.trunk_dropout > 0.0:
+            snapshot["trunk_dropout"] = float(self.trunk_dropout)
+        if self.homeostatic_radius > 0.0:
+            snapshot["homeostatic_radius"] = float(self.homeostatic_radius)
+        if self._last_spectral_radius is not None:
+            snapshot["spectral_radius_est"] = float(self._last_spectral_radius)
+        if self.hebbian_trace and self.hebbian_strength is not None:
+            snapshot["hebbian_trace"] = True
+            snapshot["hebbian_strength_mean_abs"] = float(self.hebbian_strength.detach().abs().mean())
+            snapshot["hebbian_gain_mean"] = float(self.last_hebbian_gain_mean.detach())
+        if self.predictive_error and self.pred_error_strength is not None:
+            snapshot["predictive_error"] = True
+            snapshot["pred_error_strength_mean_abs"] = float(self.pred_error_strength.detach().abs().mean())
+            snapshot["pred_error_norm"] = float(self.last_pred_error_norm.detach())
         return snapshot
 
 
@@ -3539,7 +3982,7 @@ class MiMoMixModel(nn.Module):
             snapshot["mla_pe_dim"] = int(self.config.mla_pe_dim)
             snapshot["mla_global_only"] = bool(getattr(self.config, "mla_global_only", True))
         if self.thinking_core is not None:
-            snapshot["thinking"] = {
+            thinking_payload: Dict[str, object] = {
                 "cycles_used": float(self.thinking_core.last_cycles_used),
                 "ponder_cost": float(self.thinking_core.last_ponder_cost),
                 "consistency_loss": float(self.thinking_core.last_consistency_loss),
@@ -3548,6 +3991,9 @@ class MiMoMixModel(nn.Module):
                 "exit_reason": self.thinking_core.last_exit_reason,
                 "temperature": float(self.thinking_core.temperature.detach()),
             }
+            if self.thinking_core.entropy_halt:
+                thinking_payload["cycle_entropies"] = list(self.thinking_core.last_cycle_entropies)
+            snapshot["thinking"] = thinking_payload
         if self.cns_core is not None:
             snapshot["cns_core"] = self.cns_core.telemetry()
         return snapshot

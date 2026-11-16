@@ -566,9 +566,9 @@ def test_expert_birth_and_death():
     assert child == 4 and moe.alive_count() == 5 and int(moe.expert_alive[4]) == 1
     assert float(moe.expert_bias[4]) == float(moe.expert_bias[2])
     parent_w = moe.experts[2].down_proj.weight
-    assert torch.allclose(moe.experts[4].down_proj.weight, parent_w, atol=0.05 * float(parent_w.std()))
+    assert torch.allclose(moe.experts[4].down_proj.weight, parent_w, atol=0.05 * float(parent_w.detach().std()))
     assert not torch.equal(moe.experts[4].down_proj.weight, parent_w)  # noise broke the symmetry
-    assert torch.allclose(moe.gate.weight[4], moe.gate.weight[2], atol=0.05 * float(moe.gate.weight[2].std()))
+    assert torch.allclose(moe.gate.weight[4], moe.gate.weight[2], atol=0.05 * float(moe.gate.weight[2].detach().std()))
     with torch.no_grad():
         moe(x)
     assert moe.last_expert_load[4] > 0                      # the child is routable at once

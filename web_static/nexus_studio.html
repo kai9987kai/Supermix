@@ -162,6 +162,7 @@
 
     /* ── MIMO THINKING CONSOLE ───────────────────────────── */
     #panel-think{flex-direction:row;}
+    #panel-v95-ecosystem{flex-direction:row;}
     .think-main{flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;}
     .think-step-row{display:flex;flex-direction:column;gap:8px;}
     .think-step-card{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.6;}
@@ -247,6 +248,8 @@
   <div class="tab" onclick="switchTab('reflexion-correct',this)"><span class="tab-icon">&#x1F9EC;</span> Reflexion Corrector</div>
   <div class="tab" onclick="switchTab('conformal-stop',this)"><span class="tab-icon">&#x1F6D1;</span> Conformal Stop</div>
   <div class="tab" onclick="switchTab('causal-dag',this)"><span class="tab-icon">&#x1F578;</span> Causal DAG</div>
+  <div class="tab" onclick="switchTab('v95-ecosystem',this)"><span class="tab-icon">&#x1F52D;</span> v95 Ecosystem Lab</div>
+  <div class="tab" onclick="switchTab('scf',this)"><span class="tab-icon">&#x1F9EC;</span> SCF Cognitive Fabric</div>
 </div>
 
 <!-- ══ WORKSPACE ════════════════════════════════════════════ -->
@@ -255,6 +258,27 @@
   <!-- ─── CHAT PANEL ──────────────────────────────────── -->
   <div class="tab-panel active" id="panel-chat">
     <div class="sidebar">
+      <div class="section">
+        <div class="section-title">Chat Engine &amp; Model Checkpoint</div>
+        <label>Engine Mode</label>
+        <select id="chatEngineMode" onchange="onChatEngineChange()">
+          <option value="persona">Persona Scaffold (Analysis-Only)</option>
+          <option value="neural">MiMoMix Neural + Connectome (v96/v97)</option>
+        </select>
+        <div id="chatNeuralControls" style="display:none;margin-top:8px;">
+          <label>Talk Checkpoint</label>
+          <select id="chatCheckpointSelect">
+            <option value="">Auto (v96 promoted default)</option>
+          </select>
+          <label style="margin-top:8px;"><input type="checkbox" id="chatSpeculative" checked style="width:auto;margin-right:6px;">Speculative MTP Decoding</label>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">
+          <button class="btn" style="font-size:10px;padding:4px 7px;" onclick="setChatStarter('can you help me with tests')">Coding</button>
+          <button class="btn" style="font-size:10px;padding:4px 7px;" onclick="setChatStarter('Count the neurons of cell type IN03A068 in the male CNS connectome.')">Connectome</button>
+          <button class="btn" style="font-size:10px;padding:4px 7px;" onclick="setChatStarter('What is the impulse for force 12 N acting over time 4 s?')">Impulse</button>
+          <button class="btn" style="font-size:10px;padding:4px 7px;" onclick="setChatStarter('Calculate 25 * 14')">Exact Math</button>
+        </div>
+      </div>
       <div class="section">
         <div class="section-title">Active Persona</div>
         <div class="persona-grid">
@@ -1035,6 +1059,79 @@ total 42</textarea>
     </div>
   </div>
 
+  <!-- v95 ECOSYSTEM LAB PANEL -->
+  <div class="tab-panel" id="panel-v95-ecosystem">
+    <div class="sidebar" style="width:340px;overflow-y:auto;">
+      <div class="section">
+        <div class="section-title">1. Tether Fisher-Rao &amp; Robustness Sandwich</div>
+        <label>Expert Probabilities (JSON matrix E x C)</label>
+        <textarea id="v95TetherProbs" rows="3">[[0.75,0.20,0.05],[0.65,0.25,0.10],[0.80,0.12,0.08]]</textarea>
+        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV95Tether()">Analyze Tether Geometry</button>
+      </div>
+      <div class="section" style="margin-top:14px;">
+        <div class="section-title">2. Labeled Conformal Risk Control (CRC)</div>
+        <label>Margins (comma-separated) &amp; Target alpha</label>
+        <input type="text" id="v95CrcMargins" value="0.15,0.28,0.42,0.55,0.68,0.80,0.91">
+        <input type="text" id="v95CrcLosses" value="1,1,0,0,0,0,0" style="margin-top:6px;">
+        <input type="number" id="v95CrcAlpha" value="0.25" step="0.05" min="0.01" max="0.95" style="margin-top:6px;">
+        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV95ConformalCRC()">Calibrate Labeled CRC</button>
+      </div>
+      <div class="section" style="margin-top:14px;">
+        <div class="section-title">3. Faultline Joint-Failure Matrix</div>
+        <label>Failure Matrix (JSON experts x conditions)</label>
+        <textarea id="v95FaultlineMat" rows="3">[[1,0,0],[1,0,0],[1,0,0],[0,1,0],[0,0,1]]</textarea>
+        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV95Faultline()">Select Faultline Panel</button>
+      </div>
+      <div class="section" style="margin-top:14px;">
+        <div class="section-title">4. Crosswire Version-Space Shield</div>
+        <label>Candidate Action &amp; Observed Trace (JSON)</label>
+        <input type="text" id="v95CrosswireAction" value="EXEC">
+        <textarea id="v95CrosswireTrace" rows="2" style="margin-top:6px;">[]</textarea>
+        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV95Crosswire()">Verify Interface Shield</button>
+      </div>
+      <div class="section" style="margin-top:14px;">
+        <div class="section-title">5. Mnemorph &amp; CNS v95 Archaeology</div>
+        <label>Assay Observations (JSON)</label>
+        <textarea id="v95MnemorphObs" rows="2">[{"intervention":"commissure_cut","observed_retention":0.85}]</textarea>
+        <label style="margin-top:6px;">MORPHEUS Recovery Trajectory</label>
+        <input type="text" id="v95MnemorphTraj" value="0.34,0.52,0.74,0.88">
+        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV95Mnemorph()">Run Mnemorph Assay</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">v95 Unified Frontier Synthesis: experimental diagnostic &amp; safety engines (<code>answer_authority: false</code>). Live results require a running NexusMind API server.</div>
+      <div id="v95Output" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Select any v95 Ecosystem diagnostic module on the left to inspect live Riemannian geometry, Risk-Coverage AURC, Faultline panel selection, Crosswire shields, or Mnemorph engram posteriors.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCF COGNITIVE FABRIC PANEL -->
+  <div class="tab-panel" id="panel-scf">
+    <div class="sidebar" style="width:340px;overflow-y:auto;">
+      <div class="section">
+        <div class="section-title">SCF Query &amp; Feature Flags</div>
+        <label>Task / Prompt</label>
+        <textarea id="scfQueryInput" rows="4">What is 25% of 232?</textarea>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;font-size:12px;">
+          <label><input type="checkbox" id="scfEnableMaster" checked style="width:auto;margin-right:6px;">SCF_ENABLED</label>
+          <label><input type="checkbox" id="scfEnableVerify" checked style="width:auto;margin-right:6px;">SCF_VERIFICATION_ENABLED</label>
+          <label><input type="checkbox" id="scfEnableCollective" checked style="width:auto;margin-right:6px;">SCF_COLLECTIVE_REASONING_ENABLED</label>
+          <label><input type="checkbox" id="scfEnableSpec" style="width:auto;margin-right:6px;">SCF_SPECULATIVE_DECODING_ENABLED</label>
+          <label><input type="checkbox" id="scfEnableNeural" style="width:auto;margin-right:6px;">Live MiMoMix Neural Candidate</label>
+        </div>
+        <button class="btn-primary" style="margin-top:12px;width:100%;" onclick="runSCFTask()">Run Cognitive Fabric</button>
+        <button class="btn" style="margin-top:8px;width:100%;" onclick="loadSCFStatus()">Inspect 6-Family Registry</button>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" style="margin-bottom:16px;">Supermix v91.5 Cognitive Fabric: deterministic exact-arithmetic, physics, code, and Male-CNS connectome-atlas checks are separated cleanly from model-conditional neural candidates and advisory reasoning traces.</div>
+      <div id="scfOutput" style="display:flex;flex-direction:column;gap:14px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Run Cognitive Fabric or inspect the 6-family registry using the controls on the left.</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1056,11 +1153,12 @@ var state = {
 
 var PERSONA_ICONS = {
   empathetic_conversationalist:'\u{1F91D}',socratic_mentor:'\u{1F989}',rigorous_scientist:'\u2697\uFE0F',
-  creative_catalyst:'\u{1F31F}',executive_analyst:'\u{1F4CA}'
+  creative_catalyst:'\u{1F31F}',executive_analyst:'\u{1F4CA}',neural_mimomix:'\u{1F9EC}'
 };
 var PERSONA_NAMES = {
   empathetic_conversationalist:'Empathetic Conversationalist',socratic_mentor:'Socratic Mentor',
-  rigorous_scientist:'Rigorous Scientist',creative_catalyst:'Creative Catalyst',executive_analyst:'Executive Analyst'
+  rigorous_scientist:'Rigorous Scientist',creative_catalyst:'Creative Catalyst',executive_analyst:'Executive Analyst',
+  neural_mimomix:'MiMoMix Neural'
 };
 
 var BACKEND_UNAVAILABLE = 'DEMO / BACKEND UNAVAILABLE';
@@ -1329,15 +1427,56 @@ function chatKeydown(e) {
   if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 }
 
+function setChatStarter(txt) {
+  var inp = document.getElementById('chatInput');
+  if (inp) { inp.value = txt; inp.focus(); }
+}
+
+function onChatEngineChange() {
+  var mode = document.getElementById('chatEngineMode').value;
+  var box = document.getElementById('chatNeuralControls');
+  if (box) box.style.display = mode === 'neural' ? 'block' : 'none';
+  if (mode === 'neural') refreshChatCheckpoints();
+}
+
+function refreshChatCheckpoints() {
+  var sel = document.getElementById('chatCheckpointSelect');
+  if (!sel || sel.dataset.loaded === '1') return;
+  fetch('/v1/scf/status')
+  .then(requireBackendJson)
+  .then(function(d){
+    var mimo = (d.families && d.families.MiMoMix && d.families.MiMoMix.details && d.families.MiMoMix.details.talk_checkpoints_available) || [];
+    if (!mimo.length) return;
+    sel.innerHTML = mimo.map(function(path){
+      var label = path.indexOf('v99_scf_evolution') >= 0
+        ? 'v99_scf_evolution (Exp: Latest 41-Task+PredErr)'
+        : path.indexOf('v98_scf_predictive') >= 0
+        ? 'v98_scf_predictive (Exp: Hebbian+PredErr+Halt)'
+        : path.indexOf('v97_scf_connectome') >= 0
+        ? 'v97_scf_connectome (Exp: Hebbian+EntropyHalt)'
+        : path.indexOf('v96_physio_neurogenesis') >= 0
+        ? 'v96_physio_neurogenesis (Promoted Baseline)'
+        : path.split('/').pop();
+      return '<option value="' + esc(path) + '">' + esc(label) + '</option>';
+    }).join('');
+    sel.dataset.loaded = '1';
+  })
+  .catch(function(){});
+}
+
 function sendChat() {
   var txt = document.getElementById('chatInput').value.trim();
   if (!txt) return;
   var requestToken = ++state.requests.chat;
   var requestNonce = newRequestNonce();
+  var engineSel = document.getElementById('chatEngineMode');
+  var ckptSel = document.getElementById('chatCheckpointSelect');
+  var specChk = document.getElementById('chatSpeculative');
+  var useNeural = !!(engineSel && engineSel.value === 'neural');
   document.getElementById('chatInput').value = '';
   appendMsg('user', txt, '\uD83D\uDC64', 'You');
   var typingId = appendTyping();
-  document.getElementById('chatIntentDisplay').textContent = 'Analyzing intent...';
+  document.getElementById('chatIntentDisplay').textContent = useNeural ? 'Running MiMoMix neural decode...' : 'Analyzing intent...';
 
   fetch('/v1/chat', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -1345,7 +1484,10 @@ function sendChat() {
       session_id:state.chat.session,
       message:txt,
       persona:state.chat.persona,
-      request_nonce:requestNonce
+      request_nonce:requestNonce,
+      use_neural_model:useNeural,
+      model_checkpoint:(useNeural && ckptSel && ckptSel.value) ? ckptSel.value : null,
+      speculative:specChk ? !!specChk.checked : true
     })
   }).then(requireBackendJson)
     .then(function(result){ handleChatResult(result, typingId, txt, requestNonce, requestToken); })
@@ -3279,6 +3421,200 @@ function renderCausalDAG(d) {
 
   h += '</div></div>';
   out.innerHTML = h;
+}
+
+/* ─── V95 UNIFIED FRONTIER ECOSYSTEM LAB ────────────────── */
+function _v95Loading(label) {
+  var out = document.getElementById('v95Output');
+  out.innerHTML = '<div style="color:var(--dim);"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div> ' + esc(label) + '</div>';
+}
+
+function runV95Tether() {
+  var probs;
+  try { probs = JSON.parse(document.getElementById('v95TetherProbs').value); }
+  catch (e) { renderUnavailable('v95Output', 'Tether JSON parse (' + e.message + ')'); return; }
+  _v95Loading('Computing Riemannian Fisher-Rao Karcher barycenter & Robustness Sandwich...');
+  fetch('/v1/tether/geometry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({expert_probs: probs})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var sw = d.robustness_sandwich || {};
+    var pid = d.partial_information_decomposition || {};
+    var dk = d.dark_knowledge_forensics || {};
+    var bars = (d.karcher_barycenter || []).map(function(v, idx){
+      var w = Math.max(4, Math.round(v * 240));
+      return '<g transform="translate(0,' + (idx * 24) + ')"><text x="0" y="14" fill="#94a3b8" font-size="11">C' + idx + '</text><rect x="32" y="3" width="' + w + '" height="14" rx="3" fill="#38bdf8"/><text x="' + (38 + w) + '" y="14" fill="#e2e8f0" font-size="11">' + Number(v).toFixed(4) + '</text></g>';
+    }).join('');
+    var svgH = Math.max(40, (d.karcher_barycenter || []).length * 24 + 8);
+    var html = '<div class="step-card" style="border-color:var(--primary);">';
+    html += '<div class="step-header"><span class="step-label">Tether Fisher-Rao Geometry &amp; Robustness Sandwich</span><span>answer_authority: ' + esc(d.answer_authority) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:12px;">';
+    html += '<svg width="340" height="' + svgH + '">' + bars + '</svg>';
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">';
+    html += '<div style="background:#0b1422;padding:8px;border-radius:6px;"><div style="font-size:10px;color:var(--dim);">R_TV_CERT &lt;= DELTA_BREAK</div><div style="font-weight:700;color:var(--success);">' + esc(sw.r_tv_cert) + ' &lt;= ' + esc(sw.delta_break_tv) + '</div></div>';
+    html += '<div style="background:#0b1422;padding:8px;border-radius:6px;"><div style="font-size:10px;color:var(--dim);">PID (R / SYNERGY BITS)</div><div style="font-weight:700;color:var(--accent2);">' + esc(pid.redundancy_bits) + ' / ' + esc(pid.synergy_bits) + '</div></div>';
+    html += '<div style="background:#0b1422;padding:8px;border-radius:6px;"><div style="font-size:10px;color:var(--dim);">SPOOF FORENSICS</div><div style="font-weight:700;color:var(--primary);">' + esc(dk.spoof_verdict) + '</div></div>';
+    html += '</div></div></div>';
+    document.getElementById('v95Output').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('v95Output', 'Tether Fisher-Rao Geometry'); });
+}
+
+function runV95ConformalCRC() {
+  var margins = document.getElementById('v95CrcMargins').value.split(',').map(Number);
+  var losses = document.getElementById('v95CrcLosses').value.split(',').map(Number);
+  var alpha = +document.getElementById('v95CrcAlpha').value;
+  _v95Loading('Calibrating Finite-Sample Monotone Conformal Risk Control (ICLR 2024)...');
+  fetch('/v1/conformal/crc', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({margins: margins, losses: losses, target_risk_alpha: alpha})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var prof = d.risk_coverage_profile || {};
+    var pts = (prof.curve || []).map(function(pt){
+      var x = Math.round(pt.coverage * 280) + 10;
+      var y = 90 - Math.round(Math.min(1, pt.selective_risk) * 80);
+      return x + ',' + y;
+    }).join(' ');
+    var html = '<div class="step-card" style="border-color:var(--success);">';
+    html += '<div class="step-header"><span class="step-label">Monotone Conformal Risk Control &amp; Risk-Coverage Curve</span><span>alpha=' + esc(d.target_risk_alpha) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:10px;">';
+    html += '<svg width="310" height="100" style="background:#0b1422;border-radius:6px;"><polyline fill="none" stroke="#34d399" stroke-width="2" points="' + pts + '"/></svg>';
+    html += '<div style="font-size:12px;">Threshold: <strong>' + esc(d.calibrated_threshold) + '</strong> | Empirical CRC Bound: <strong>' + esc(d.empirical_crc_bound) + '</strong> | AURC: <strong>' + esc(prof.aurc) + '</strong> | E-AURC: <strong>' + esc(prof.e_aurc) + '</strong></div>';
+    html += '</div></div>';
+    document.getElementById('v95Output').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('v95Output', 'Labeled Conformal Risk Control'); });
+}
+
+function runV95Faultline() {
+  var mat;
+  try { mat = JSON.parse(document.getElementById('v95FaultlineMat').value); }
+  catch (e) { renderUnavailable('v95Output', 'Faultline matrix parse'); return; }
+  _v95Loading('Selecting minimax condition-indexed majority-vote panel...');
+  fetch('/v1/faultline/panel', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({failure_matrix: mat, panel_size: 3})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var st = d.strategies || {};
+    var rows = ['accuracy', 'pairwise', 'pooled', 'joint'].map(function(name){
+      var r = st[name] || {};
+      return '<tr><td>' + esc(name) + '</td><td>' + esc((r.expert_names || []).join(', ')) + '</td><td>' + esc(r.worst_condition_failure_rate) + '</td><td>' + esc(r.expected_joint_failure_rate) + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">Faultline Correlated-Failure Panel Selection</span><span>SHA: ' + esc((d.receipt || {}).receipt_sha256 || '').slice(0, 12) + '</span></div>';
+    html += '<div class="step-body"><table style="width:100%;font-size:12px;border-collapse:collapse;"><tr><th align="left">Strategy</th><th align="left">Panel</th><th align="left">Worst Cond</th><th align="left">Expected Joint</th></tr>' + rows + '</table></div></div>';
+    document.getElementById('v95Output').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('v95Output', 'Faultline Panel Selection'); });
+}
+
+function runV95Crosswire() {
+  var trace;
+  var action = document.getElementById('v95CrosswireAction').value.trim() || 'EXEC';
+  try { trace = JSON.parse(document.getElementById('v95CrosswireTrace').value || '[]'); }
+  catch (e) { renderUnavailable('v95Output', 'Crosswire trace parse'); return; }
+  _v95Loading('Checking all-hypothesis safety shield & active probes...');
+  fetch('/v1/crosswire/synthesize', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({observed_trace: trace, candidate_action: action})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:' + (d.certified_safe ? 'var(--success)' : 'var(--danger)') + ';">';
+    html += '<div class="step-header"><span class="step-label">Crosswire Active Interface Shield</span><strong>' + esc(d.shield_verdict) + '</strong></div>';
+    html += '<div class="step-body" style="font-size:12px;">Surviving: <strong>' + esc((d.surviving_hypotheses || []).join(', ')) + '</strong> (' + esc(d.version_space_entropy_bits) + ' bits)<br>Recommended Next Probe: <strong>' + esc(d.recommended_probe_action) + '</strong> | Counterexamples: <strong>' + esc((d.counterexample_hypotheses || []).length) + '</strong></div></div>';
+    document.getElementById('v95Output').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('v95Output', 'Crosswire Interface Verification'); });
+}
+
+function runV95Mnemorph() {
+  var obs;
+  try { obs = JSON.parse(document.getElementById('v95MnemorphObs').value || '[]'); }
+  catch (e) { renderUnavailable('v95Output', 'Mnemorph JSON parse'); return; }
+  var traj = document.getElementById('v95MnemorphTraj').value.split(',').filter(Boolean).map(Number);
+  _v95Loading('Updating Bayesian engram posteriors & MORPHEUS recovery...');
+  fetch('/v1/mnemorph/assay', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({assay_observations: obs, recovery_trajectory: traj})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var post = d.posterior || {};
+    var morp = d.morpheus_recovery || {};
+    var bars = Object.keys(post).map(function(k){
+      var val = post[k];
+      return '<div style="margin-bottom:6px;"><div style="font-size:11px;">' + esc(k) + ': ' + Number(val).toFixed(4) + '</div><div style="height:8px;background:#0b1422;border-radius:4px;"><div style="height:8px;width:' + Math.round(val * 100) + '%;background:var(--primary);border-radius:4px;"></div></div></div>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">Mnemorph Connectome Engram &amp; MORPHEUS Assay</span><span>MAP: ' + esc(d.map_mechanism) + '</span></div>';
+    html += '<div class="step-body">' + bars + '<div style="font-size:11px;color:var(--dim);margin-top:8px;">Recommended Next Assay: <strong>' + esc(d.recommended_next_assay) + '</strong> | MORPHEUS Recovery Delta: <strong>' + esc(morp.recovery_delta) + '</strong> | Posterior Entropy: <strong>' + esc(d.posterior_entropy_bits) + ' bits</strong></div></div></div>';
+    document.getElementById('v95Output').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('v95Output', 'Mnemorph Archaeology Assay'); });
+}
+
+function loadSCFStatus() {
+  document.getElementById('scfOutput').innerHTML = '<div style="color:var(--dim);font-size:13px;">Loading SCF 6-family registry status...</div>';
+  fetch('/v1/scf/status')
+  .then(requireBackendJson)
+  .then(function(d){
+    var fams = d.families || {};
+    var rows = Object.keys(fams).map(function(name){
+      var f = fams[name] || {};
+      return '<tr><td>' + esc(name) + '</td><td>' + esc(f.available_in_source) + '</td><td>' + esc((f.available_weights || []).length) + '</td><td>' + esc(f.maturity_status) + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--primary);">';
+    html += '<div class="step-header"><span class="step-label">SCF ' + esc(d.version) + ' Registry (' + esc(d.internal_name) + ')</span><span>Auto-Promo: ' + esc(d.automatic_promotion_enabled) + '</span></div>';
+    html += '<div class="step-body"><table style="width:100%;font-size:12px;border-collapse:collapse;"><tr><th align="left">Family</th><th align="left">Source</th><th align="left">Weights</th><th align="left">Maturity</th></tr>' + rows + '</table></div></div>';
+    document.getElementById('scfOutput').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('scfOutput', 'SCF Status'); });
+}
+
+function runSCFTask() {
+  var q = document.getElementById('scfQueryInput').value.trim();
+  if (!q) return;
+  document.getElementById('scfOutput').innerHTML = '<div style="color:var(--dim);font-size:13px;">Running SCF Cognitive Fabric...</div>';
+  fetch('/v1/scf/run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      query: q,
+      enable_scf: document.getElementById('scfEnableMaster').checked,
+      enable_verification: document.getElementById('scfEnableVerify').checked,
+      enable_collective: document.getElementById('scfEnableCollective').checked,
+      enable_speculative_decoding: document.getElementById('scfEnableSpec').checked,
+      enable_neural_candidates: document.getElementById('scfEnableNeural').checked
+    })
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var ver = d.verification || {};
+    var rec = d.receipt || {};
+    var route = d.routing || {};
+    var ok = !!d.verified;
+    var html = '<div class="step-card" style="border-color:' + (ok ? 'var(--success)' : 'var(--warn)') + ';">';
+    html += '<div class="step-header"><span class="step-label">' + esc(d.status) + ' (' + esc(route.selected_family || rec.selected_family) + ')</span><span>Verified: ' + esc(ok) + ' | Answer Authority: ' + esc(!!d.answer_authority) + '</span></div>';
+    html += '<div class="step-body" style="font-size:12px;display:flex;flex-direction:column;gap:8px;">';
+    html += '<div><strong>Output:</strong> ' + esc(d.final_answer || '(empty)') + '</div>';
+    html += '<div style="color:var(--dim);">Verifier: <code>' + esc(ver.verifier_source || 'none') + '</code> | Latency: <strong>' + esc(rec.total_latency_ms) + ' ms</strong> | Production Claim: <strong>' + esc(rec.production_ready_claim) + '</strong></div>';
+    html += '<div style="color:var(--dim);">Receipt SHA-256: <code>' + esc(rec.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('scfOutput').innerHTML = html;
+  })
+  .catch(function(){ renderUnavailable('scfOutput', 'SCF Cognitive Fabric'); });
 }
 
 

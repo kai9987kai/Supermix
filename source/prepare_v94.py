@@ -192,6 +192,24 @@ def prepare(output: Path, *, corpus=None, evaluation=None, parent_checkpoint=Non
     return report
 
 
+def check_v95_readiness() -> dict:
+    """Verify that v95 transactional neurogenesis and ecosystem modules are active."""
+    checks = {}
+    for mod_name in ("v95_neurogenesis_adapter", "nexus_v95_ecosystem", "v94_growth_policy"):
+        try:
+            __import__(mod_name)
+            checks[mod_name] = True
+        except Exception:
+            checks[mod_name] = False
+    return {
+        "schema": "supermix-v95-readiness-v1",
+        "transactional_adapter_installed": checks.get("v95_neurogenesis_adapter", False),
+        "ecosystem_installed": checks.get("nexus_v95_ecosystem", False),
+        "growth_policy_installed": checks.get("v94_growth_policy", False),
+        "all_ready": all(checks.values()),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)

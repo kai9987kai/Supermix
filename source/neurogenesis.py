@@ -113,29 +113,54 @@ class GrowthSettings:
     expert_noise: float = 0.01
     witness_rows: int = 8
     seed: int = 93
+    witness_rollback_tolerance: Optional[float] = None
+    maturity_steps: int = 0
+    max_splits_per_parent: int = 0
+    edge_proposal_mode: str = "covariance"
+    homeostatic_radius: float = 0.0
 
 
 def build_settings_from_args(args: Any) -> GrowthSettings:
     """Settings from the trainer's argparse namespace.
 
     Reads ``grow_every``, ``grow_modules``, ``grow_edges``, ``grow_taps``,
-    ``grow_experts``, ``prune_threshold`` and ``witness_rows``; an attribute
-    the namespace lacks keeps its default, so an older trainer (or a test
-    namespace) builds a controller that never grows. The remaining fields are
-    deliberately not read from ``args``: ``seed`` in particular would
-    otherwise pick up the run's ``--seed`` and silently couple the expert
-    noise to it.
+    ``grow_experts``, ``prune_threshold``, ``witness_rows``, and v96
+    transactional/homeostatic controls; an attribute the namespace lacks keeps
+    its default, so an older trainer (or a test namespace) builds a controller
+    that never grows. The remaining fields are deliberately not read from
+    ``args``: ``seed`` in particular would otherwise pick up the run's ``--seed``
+    and silently couple the expert noise to it.
     """
 
     defaults = GrowthSettings()
     values: Dict[str, Any] = {}
-    for name in ("grow_every", "grow_modules", "grow_edges", "grow_taps", "prune_threshold", "witness_rows"):
+    for name in (
+        "grow_every",
+        "grow_modules",
+        "grow_edges",
+        "grow_taps",
+        "prune_threshold",
+        "witness_rows",
+        "maturity_steps",
+        "max_splits_per_parent",
+    ):
         value = getattr(args, name, None)
         if value is not None:
             values[name] = type(getattr(defaults, name))(value)
     grow_experts = getattr(args, "grow_experts", None)
     if grow_experts is not None:
         values["grow_experts"] = bool(grow_experts)
+    tol = getattr(args, "witness_rollback_tolerance", None)
+    if tol is not None:
+        values["witness_rollback_tolerance"] = float(tol)
+    mode = getattr(args, "edge_proposal_mode", None)
+    if mode is not None:
+        values["edge_proposal_mode"] = str(mode)
+    radius = getattr(args, "homeostatic_radius", None)
+    if radius is None:
+        radius = getattr(args, "cns_homeostatic_radius", None)
+    if radius is not None:
+        values["homeostatic_radius"] = float(radius)
     return GrowthSettings(**values)
 
 
@@ -265,9 +290,11 @@ class NeurogenesisController:
         # consecutive-weak counters (the apoptosis memory), restored on resume
         self._edge_weak: Optional[torch.Tensor] = None     # (n, n) uint8, lazily sized to the core
         self._expert_weak: Dict[Tuple[int, int], int] = {}  # (layer, slot) -> strikes
+        self._parent_splits: Dict[int, int] = {}
         self.n_events = 0
         self.events: List[Dict[str, Any]] = []
         self.flagged_events: List[int] = []
+        self.rolled_back_events: List[int] = []
         self.last_record: Optional[Dict[str, Any]] = None
         #: The slices the last event wrote (bool masks over the core plus the
         #: expert slots per layer); tests and diagnostics read it.
@@ -356,12 +383,31 @@ class NeurogenesisController:
         written = _Written(core.n_nodes, core.mask.device) if core is not None else None
         expert_written: Dict[int, set] = {}
 
+        tol = self.settings.witness_rollback_tolerance
+        model_snap: Optional[Dict[str, torch.Tensor]] = None
+        opt_snap: List[Tuple[torch.Tensor, Dict[str, Any]]] = []
+        ctrl_snap: Optional[Dict[str, Any]] = None
+        if tol is not None:
+            model_snap = {k: v.detach().clone() for k, v in self.model.state_dict().items()}
+            if optimiser is not None:
+                for param, entry in optimiser.state.items():
+                    if not isinstance(entry, dict):
+                        continue
+                    opt_snap.append((
+                        param,
+                        {
+                            key: val.detach().clone() if isinstance(val, torch.Tensor) else val
+                            for key, val in entry.items()
+                        },
+                    ))
+            ctrl_snap = self.state_dict()
+
         # 1. apoptosis
         pruned_grown, pruned_real, pruned_now = 0, 0, None
         modules_killed: List[int] = []
         if core is not None:
             pruned_grown, pruned_real, pruned_now = self._edge_apoptosis(core, written)
-            modules_killed = self._module_apoptosis(core, written)
+            modules_killed = self._module_apoptosis(core, written, step=step)
         experts_killed = self._expert_apoptosis(moe_stats, expert_written)
         # 2. mitosis
         modules_split: List[List[int]] = []
@@ -379,22 +425,63 @@ class NeurogenesisController:
         noise_seed = int(self.settings.seed) * 1_000_003 + step
         experts_born = self._expert_births(moe_stats, noise_seed, expert_written)
 
+        # 6. spectral criticality homeostasis
+        spectral_projection: Optional[Dict[str, float]] = None
+        if core is not None:
+            target_r = float(
+                self.settings.homeostatic_radius
+                or getattr(core, "homeostatic_radius", 0.0)
+                or 0.0
+            )
+            if target_r > 0.0:
+                spectral_projection = core.project_spectral_radius(target_radius=target_r)
+
         after = self.witness_loss()
         delta = after - before
-        moments_zeroed = self._zero_written(optimiser, core, written, moe_layers, expert_written)
-        self.last_written = {
-            "edges": written.edges.clone() if written is not None else None,
-            "nodes": written.nodes.clone() if written is not None else None,
-            "in_rows": written.in_rows.clone() if written is not None else None,
-            "out_cols": written.out_cols.clone() if written is not None else None,
-            "experts": {layer: sorted(slots) for layer, slots in expert_written.items()},
-        }
+        rolled_back = False
+        if tol is not None and (not math.isfinite(after) or delta > float(tol)):
+            rolled_back = True
+            if model_snap is not None:
+                self.model.load_state_dict(model_snap, strict=True)
+            if optimiser is not None:
+                for param, saved_entry in opt_snap:
+                    cur = optimiser.state.get(param)
+                    if cur is None:
+                        continue
+                    for key, saved_val in saved_entry.items():
+                        if isinstance(saved_val, torch.Tensor) and isinstance(cur.get(key), torch.Tensor):
+                            cur[key].copy_(saved_val)
+                        else:
+                            cur[key] = saved_val
+            if ctrl_snap is not None:
+                self.load_state_dict(ctrl_snap)
+            moments_zeroed = 0
+            self.rolled_back_events.append(step)
+            self.last_written = {
+                "edges": None,
+                "nodes": None,
+                "in_rows": None,
+                "out_cols": None,
+                "experts": {},
+            }
+        else:
+            moments_zeroed = self._zero_written(optimiser, core, written, moe_layers, expert_written)
+            self.last_written = {
+                "edges": written.edges.clone() if written is not None else None,
+                "nodes": written.nodes.clone() if written is not None else None,
+                "in_rows": written.in_rows.clone() if written is not None else None,
+                "out_cols": written.out_cols.clone() if written is not None else None,
+                "experts": {layer: sorted(slots) for layer, slots in expert_written.items()},
+            }
         record: Dict[str, Any] = {
             "step": step,
             "witness_loss_before": before,
             "witness_loss_after": after,
             "witness_delta": delta,
             "flagged": bool(abs(delta) > FLAG_THRESHOLD_NATS),
+            "rolled_back": bool(rolled_back),
+            "edge_proposal_mode": str(self.settings.edge_proposal_mode),
+            "spectral_projection": spectral_projection,
             "modules_split": modules_split,
             "edges_opened": edges_opened,
             "edges_pruned": {"grown": int(pruned_grown), "real": int(pruned_real)},
@@ -464,7 +551,7 @@ class NeurogenesisController:
             written.edges |= pruned_now
         return grown_pruned, real_pruned, pruned_now
 
-    def _module_apoptosis(self, core: ConnectomeCore, written: _Written) -> List[int]:
+    def _module_apoptosis(self, core: ConnectomeCore, written: _Written, step: int = 0) -> List[int]:
         """Kill grown modules that nothing reads any more (no outgoing edge, no
         efferent tap): exactly inert, so the kill is function-preserving and
         frees the slot for a later split. Real modules are never killed."""
@@ -472,6 +559,9 @@ class NeurogenesisController:
         with torch.no_grad():
             alive = core.alive.bool()
             grown = core.born_step > 0
+            maturity = int(getattr(self.settings, "maturity_steps", 0) or 0)
+            if maturity > 0:
+                grown = grown & ((int(step) - core.born_step) >= maturity)
             no_out_edges = (core.mask > 0).sum(0) == 0
             no_out_tap = core.out_mask == 0
             inert = alive & grown & no_out_edges & no_out_tap
@@ -561,6 +651,15 @@ class NeurogenesisController:
             score = mean_rate * (1.0 + out_share)
             has_output = ((core.mask > 0).sum(0) > 0) | (core.out_mask > 0)
             candidates = core.alive.bool() & stats["alive"].to(core.alive.device) & (mean_rate > 0) & has_output
+            maturity = int(getattr(self.settings, "maturity_steps", 0) or 0)
+            if maturity > 0:
+                mature = (core.born_step == 0) | ((int(step) - core.born_step) >= maturity)
+                candidates = candidates & mature
+            max_splits = int(getattr(self.settings, "max_splits_per_parent", 0) or 0)
+            if max_splits > 0 and self._parent_splits:
+                for p_idx, count in self._parent_splits.items():
+                    if count >= max_splits and 0 <= p_idx < int(candidates.numel()):
+                        candidates[p_idx] = False
             ranked = _ranked(score, candidates)[:quota].tolist()
         splits: List[List[int]] = []
         for parent in ranked:
@@ -569,11 +668,45 @@ class NeurogenesisController:
             child = core.split_module(int(parent), step)
             if child is None:
                 continue
+            self._parent_splits[int(parent)] = self._parent_splits.get(int(parent), 0) + 1
             splits.append([int(parent), int(child)])
             written.split(int(parent), int(child))
         return splits
 
     # -- 3. synaptogenesis ---------------------------------------------------------
+
+    def _probe_signed_edge_scores(self, core: ConnectomeCore) -> Optional[torch.Tensor]:
+        """Compute Dale-signed first-order edge utility scores via ``core._edge_grad_probe``."""
+
+        n = core.n_nodes
+        was_training = self.model.training
+        saved_grads = [
+            (param, param.grad.detach().clone() if param.grad is not None else None)
+            for param in self.model.parameters()
+        ]
+        self.model.eval()
+        self.model.zero_grad(set_to_none=True)
+        edge_probe = torch.zeros_like(core.edge_logit, requires_grad=True)
+        core._edge_grad_probe = edge_probe
+        try:
+            with torch.enable_grad():
+                out = self.model(self.witness_x, labels=self.witness_y, return_mtp=False)
+                loss = out.lm_loss if out.lm_loss is not None else out.loss
+                if loss is None or not torch.isfinite(loss):
+                    return None
+                loss.backward()
+            if edge_probe.grad is None:
+                return None
+            return core.probe_signed_edge_gradients(
+                edge_probe.new_zeros((1, n)),
+                edge_probe.new_zeros((1, n)),
+                edge_grad_override=edge_probe.grad,
+            ).detach().clone()
+        finally:
+            core._edge_grad_probe = None
+            for param, grad in saved_grads:
+                param.grad = grad
+            self.model.train(was_training)
 
     def _synaptogenesis(
         self,
@@ -585,24 +718,48 @@ class NeurogenesisController:
     ) -> Dict[str, Any]:
         result: Dict[str, Any] = {"count": 0, "by_block": {"LL": 0, "RR": 0, "LR": 0, "RL": 0}}
         quota = int(self.settings.grow_edges)
-        if quota <= 0 or int(stats["tokens"]) <= 0:
+        mode = str(getattr(self.settings, "edge_proposal_mode", "covariance") or "covariance")
+        if quota <= 0:
+            return result
+        if mode == "covariance" and int(stats["tokens"]) <= 0:
+            return result
+        grad_scores = self._probe_signed_edge_scores(core) if mode in ("signed_gradient", "hybrid") else None
+        if int(stats["tokens"]) <= 0 and (grad_scores is None or float(grad_scores.max()) <= 0.0):
             return result
         n = core.n_nodes
         with torch.no_grad():
-            cov = stats["rate_cov"].to(torch.float32)
+            cov = stats["rate_cov"].to(torch.float32) if int(stats["tokens"]) > 0 else torch.zeros(
+                (n, n), dtype=torch.float32, device=core.mask.device
+            )
+            if mode == "signed_gradient":
+                if grad_scores is not None and float(grad_scores.max()) > 0.0:
+                    score_map = grad_scores.to(device=core.mask.device, dtype=torch.float32)
+                else:
+                    score_map = cov
+            elif mode == "hybrid":
+                cov_pos = F.relu(cov)
+                cov_max = float(cov_pos.max())
+                cov_norm = (cov_pos / cov_max) if cov_max > 0.0 else cov_pos
+                if grad_scores is not None and float(grad_scores.max()) > 0.0:
+                    gs = grad_scores.to(device=core.mask.device, dtype=torch.float32)
+                    score_map = 0.5 * cov_norm + 0.5 * (gs / float(gs.max()))
+                else:
+                    score_map = cov
+            else:
+                score_map = cov
             alive = core.alive.bool()
             eligible = (
                 alive.unsqueeze(1) & alive.unsqueeze(0)
                 & (core.mask == 0)
                 & ~torch.eye(n, dtype=torch.bool, device=alive.device)
-                & (cov > 0)
+                & (score_map > 0)
             )
             if pruned_now is not None:
                 eligible &= ~pruned_now
             side = core.hemisphere.to(torch.int64)
             two_sides = bool(((side == 0) & alive).any()) and bool(((side == 1) & alive).any())
             cross = side.unsqueeze(1) != side.unsqueeze(0)
-            ranked = _ranked(cov.flatten(), eligible.flatten())  # flat indices, best first
+            ranked = _ranked(score_map.flatten(), eligible.flatten())  # flat indices, best first
             chosen: List[int] = []
             if two_sides:
                 reserve = min(quota, int(math.ceil(float(self.settings.cross_quota) * quota)))
@@ -709,6 +866,9 @@ class NeurogenesisController:
             if bool(written.nodes.any()):
                 zeroed += zero_moments(optimiser, core.node_bias, written.nodes)
                 zeroed += zero_moments(optimiser, core.leak_logit, written.nodes)
+                zeroed += zero_moments(optimiser, getattr(core, "slow_leak_logit", None), written.nodes)
+                zeroed += zero_moments(optimiser, getattr(core, "slow_coupling", None), written.nodes)
+                zeroed += zero_moments(optimiser, getattr(core, "glial_strength", None), written.nodes)
             if bool(written.in_rows.any()):
                 zeroed += zero_moments(optimiser, core.read_in.weight, (0, written.in_rows))
                 for tap in core.extra_read_in:
@@ -746,6 +906,7 @@ class NeurogenesisController:
             "witness_loss_before": float(record["witness_loss_before"]),
             "witness_delta": float(record["witness_delta"]),
             "flagged": bool(record["flagged"]),
+            "rolled_back": bool(record.get("rolled_back", False)),
             "modules_split": len(record["modules_split"]),
             "edges_opened": int(record["edges_opened"]["count"]),
             "edges_opened_by_block": dict(record["edges_opened"]["by_block"]),
@@ -788,6 +949,8 @@ class NeurogenesisController:
             "n_events": int(self.n_events),
             "totals": totals,
             "flagged_events": list(self.flagged_events),
+            "rolled_back_events": list(self.rolled_back_events),
+            "parent_splits": {str(k): int(v) for k, v in sorted(self._parent_splits.items())},
             "flag_threshold_nats": FLAG_THRESHOLD_NATS,
             "alive_modules": int(last["alive_modules"]) if last else None,
             "alive_edges": int(last["alive_edges"]) if last else None,
@@ -810,7 +973,9 @@ class NeurogenesisController:
             "n_events": int(self.n_events),
             "edge_weak": edge_weak,
             "expert_weak": [[int(layer), int(slot), int(count)] for (layer, slot), count in sorted(self._expert_weak.items())],
+            "parent_splits": [[int(parent), int(count)] for parent, count in sorted(self._parent_splits.items())],
             "flagged_events": list(self.flagged_events),
+            "rolled_back_events": list(self.rolled_back_events),
             "events": [dict(event) for event in self.events],
         }
 
@@ -829,6 +994,10 @@ class NeurogenesisController:
         self._expert_weak = {
             (int(layer), int(slot)): int(count) for layer, slot, count in state.get("expert_weak", [])
         }
+        self._parent_splits = {
+            int(parent): int(count) for parent, count in state.get("parent_splits", [])
+        }
         self.n_events = int(state.get("n_events", 0))
         self.events = [dict(event) for event in state.get("events", [])]
         self.flagged_events = [int(step) for step in state.get("flagged_events", [])]
+        self.rolled_back_events = [int(step) for step in state.get("rolled_back_events", [])]

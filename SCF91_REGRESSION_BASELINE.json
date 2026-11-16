@@ -1,0 +1,40 @@
+{
+  "schema": "supermix-scf91-regression-baseline-v1",
+  "generated_at": "2026-11-16T11:04:03+00:00",
+  "studio_manifest": {
+    "schema_version": "supermix-studio-runtime-manifest-v1",
+    "app_version": "71.0.0",
+    "declared_modules_count": 108
+  },
+  "checkpoint_sha256_pins": {
+    "output/v80_omni/v80_omni.pt": "f49ffbf4da98e277f0e5f6b8d8535a4af1e9a067a1b27a3dc5e838017e6ccdc2",
+    "output/v89_corpus/v89_corpus.pt": "0ca39999327ceb4b18d2d2b9c2ca525025f6ba655d50529dae8e58a7552259fd",
+    "output/v91_cns_connectome/v91_cns_connectome.selected.pt": "e927a848a164f9343365afcdad4966ac406934c3e57b2b3231b220ba6c567c79",
+    "output/v93_neurogenesis/v93_neurogenesis.selected.pt": "55a9a5a2f2e68cd87e0ca94398600f93b6c5262a683f02f139c0f1580e5b5ced",
+    "output/v96_physio_neurogenesis/v96_physio_neurogenesis.pt": "13bb1bcd9d1c9095245a909e00ad2c91e46e443baa37e62a89616e6f72967abe",
+    "output/hf_v56_publish/v56b_randslots_entropy.pt": "c329bc847c4a3b5757c9d5e31f6893fb69d4239924333994f0fa0902c26536b0",
+    "output/hf_v57_publish/v57_talk_v2.pt": "d97c2d84a2569a4742aec52f42eb16475b0d5ff281bd3c6bdfbf1465f5c956f8",
+    "artifacts/v52_initialization/champion_model_chat_v50_cognitive_leap.pth": "6d595a44ee130a569bae4e697007bc4d3212a5142598f7ea59c8ddf73ffcc864",
+    "artifacts/v52_initialization/champion_model_chat_v52_initialized.pth": "1ab25aa9772f90896a9a6c28eb346135b9b9a8d48fa9d84936c4d802d742c192",
+    "output/benchmark_v51_cognitive_leap_ultra/cognitive_leap_ultra_v51_trained.pth": "664b1779452fe1482389413004d8bce3369f6d8ee15ab8c2c891dc5e382ebae4"
+  },
+  "dark_test_baseline": 30,
+  "core_gate_suites": [
+    "test_v85_release_contract.py",
+    "test_studio_runtime_manifest.py",
+    "test_nexus_studio_contract.py",
+    "test_mimomix_core.py",
+    "test_mimomix_v82.py",
+    "test_v91_connectome_core.py",
+    "test_v92_temporal_connectome.py",
+    "test_v93_core.py",
+    "test_v93_neurogenesis.py",
+    "test_v93_trainer.py",
+    "test_v94_growth_policy.py",
+    "test_v94_connectome_audit.py",
+    "test_prepare_v94.py",
+    "test_v95_neurogenesis_and_connectome.py",
+    "test_nexus_v95_ecosystem.py",
+    "test_v96_physio_training_and_criticality.py"
+  ]
+}

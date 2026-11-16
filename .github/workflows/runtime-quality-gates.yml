@@ -102,6 +102,11 @@ jobs:
             source/nexus_proof.py \
             source/nexus_risk_control.py \
             source/nexus_solver.py \
+            source/nexus_v95_ecosystem.py \
+            source/v95_neurogenesis_adapter.py \
+            source/build_v96_repair_mix.py \
+            source/build_v97_evolution_mix.py \
+            source/build_v99_evolution_mix.py \
             source/nexus_swarm.py \
             source/grounding_runtime.py \
             source/supermix_chat_server.py \
@@ -115,7 +120,28 @@ jobs:
             source/train_supervised.py \
             runtime_python/chat_app.py \
             runtime_python/chat_web_app.py \
-            runtime_python/model_variants.py
+            runtime_python/model_variants.py \
+            test_v95_neurogenesis_and_connectome.py \
+            test_nexus_v95_ecosystem.py \
+            test_v96_physio_training_and_criticality.py \
+            source/scf/__init__.py \
+            source/scf/__main__.py \
+            source/scf/audit_phase_zero.py \
+            source/scf/adaptive/__init__.py \
+            source/scf/collective/__init__.py \
+            source/scf/config/__init__.py \
+            source/scf/core/__init__.py \
+            source/scf/learning/__init__.py \
+            source/scf/memory/__init__.py \
+            source/scf/models/__init__.py \
+            source/scf/multimodal/__init__.py \
+            source/scf/observability/__init__.py \
+            source/scf/reasoning/__init__.py \
+            source/scf/routing/__init__.py \
+            source/scf/verification/__init__.py \
+            test_scf_v91_cognitive_fabric.py \
+            test_v97_scf_evolution.py \
+            test_v98_scf_evolution.py
 
       - name: Check self-contained runtime snapshot
         run: python source/sync_runtime_model_variants.py --check
@@ -157,6 +183,11 @@ jobs:
             source/nexus_nonce_ledger.py \
             source/nexus_proof.py \
             source/nexus_risk_control.py \
+            source/nexus_v95_ecosystem.py \
+            source/v95_neurogenesis_adapter.py \
+            source/build_v96_repair_mix.py \
+            source/build_v97_evolution_mix.py \
+            source/build_v99_evolution_mix.py \
             source/build_omni_corpus.py \
             source/build_scratchpad_math.py \
             source/eval_problem_solving.py \
@@ -177,7 +208,28 @@ jobs:
             test_v56_promotion_gate.py \
             test_reasoner_chat.py \
             test_mimomix_text.py \
-            test_mimomix_talk_web_app.py
+            test_mimomix_talk_web_app.py \
+            test_v95_neurogenesis_and_connectome.py \
+            test_nexus_v95_ecosystem.py \
+            test_v96_physio_training_and_criticality.py \
+            source/scf/__init__.py \
+            source/scf/__main__.py \
+            source/scf/audit_phase_zero.py \
+            source/scf/adaptive/__init__.py \
+            source/scf/collective/__init__.py \
+            source/scf/config/__init__.py \
+            source/scf/core/__init__.py \
+            source/scf/learning/__init__.py \
+            source/scf/memory/__init__.py \
+            source/scf/models/__init__.py \
+            source/scf/multimodal/__init__.py \
+            source/scf/observability/__init__.py \
+            source/scf/reasoning/__init__.py \
+            source/scf/routing/__init__.py \
+            source/scf/verification/__init__.py \
+            test_scf_v91_cognitive_fabric.py \
+            test_v97_scf_evolution.py \
+            test_v98_scf_evolution.py
 
       - name: Run runtime and routing regression tests
         run: |
@@ -199,6 +251,7 @@ jobs:
           python -m pytest -q test_mimomix_multimodal.py test_nexus_compare.py test_nexus_quantum_bell.py test_nexus_resonance.py test_nexus_studio_v83.py test_nexus_studio_v84.py test_nexus_v84_innovations.py
           python -m pytest -q test_v85_release_contract.py
           python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py test_nexus_engine.py test_nexus_api.py test_nexus_swarm.py test_nexus_got.py test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py test_nexus_studio_contract.py test_nexus_hybrid_advancements.py test_nexus_adaptive.py test_nexus_risk_control.py test_nexus_independent_checker.py test_nexus_nonce_ledger.py
+          python -m pytest -q test_v95_neurogenesis_and_connectome.py test_nexus_v95_ecosystem.py test_v96_physio_training_and_criticality.py test_scf_v91_cognitive_fabric.py test_v97_scf_evolution.py test_v98_scf_evolution.py
 
       - name: Freeze and smoke-test protocol console
         if: runner.os == 'Windows'

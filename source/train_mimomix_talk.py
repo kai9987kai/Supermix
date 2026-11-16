@@ -118,7 +118,12 @@ def save_talk_checkpoint(
         # Includes KeyboardInterrupt: leaving a stray .tmp beside the
         # checkpoint would be read by nothing but would confuse the next
         # person to look in the directory.
-        staging.unlink(missing_ok=True)
+        for _attempt in range(5):
+            try:
+                staging.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                time.sleep(0.05)
         raise
 
 
@@ -368,6 +373,7 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "thinking_residual_init": "thinking_residual_init",
     "ponder_loss_weight": "ponder_loss_weight",
     "consistency_loss_weight": "consistency_loss_weight",
+    "thinking_entropy_halt": "thinking_entropy_halt",
     "use_differential_attention": "use_differential_attention",
     "differential_lambda_init": "differential_lambda_init",
     "differential_output_norm": lambda a: not a.no_differential_output_norm,
@@ -397,6 +403,14 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "cns_write_layers": lambda a: parse_layer_list(a.cns_write_layers) or (),
     "cns_to_thinking": "cns_to_thinking",
     "cns_temporal": "cns_temporal",
+    "cns_dual_soma": "cns_dual_soma",
+    "cns_slow_leak_init": "cns_slow_leak_init",
+    "cns_commissural_gate": "cns_commissural_gate",
+    "cns_glial_homeostasis": "cns_glial_homeostasis",
+    "cns_trunk_dropout": "cns_trunk_dropout",
+    "cns_homeostatic_radius": "cns_homeostatic_radius",
+    "cns_hebbian_trace": "cns_hebbian_trace",
+    "cns_predictive_error": "cns_predictive_error",
     "moe_spare_experts": "moe_spare_experts",
 }
 
@@ -757,6 +771,20 @@ RECORDED_HYPERPARAMETERS: Tuple[str, ...] = (
     "prune_threshold",
     "witness_rows",
     "ablation_rows",
+    "cns_dual_soma",
+    "cns_slow_leak_init",
+    "cns_commissural_gate",
+    "cns_glial_homeostasis",
+    "cns_trunk_dropout",
+    "cns_homeostatic_radius",
+    "cns_hebbian_trace",
+    "cns_predictive_error",
+    "thinking_entropy_halt",
+    "freeze_trunk_steps",
+    "witness_rollback_tolerance",
+    "maturity_steps",
+    "max_splits_per_parent",
+    "edge_proposal_mode",
 )
 
 
@@ -1220,6 +1248,11 @@ def build_parser() -> argparse.ArgumentParser:
             "the core inert; above zero gives it a gradient path from step 0"
         ),
     )
+    parser.add_argument(
+        "--thinking_entropy_halt",
+        action="store_true",
+        help="enable normalized latent Shannon entropy stability halting & telemetry (v97, default off)",
+    )
     # v91: the male-CNS connectome core. Off by default; every flag below is
     # inert unless --cns_core is given.
     parser.add_argument(
@@ -1296,6 +1329,38 @@ def build_parser() -> argparse.ArgumentParser:
             "layout); after a warm start their o_proj/down_proj are zeroed so "
             "the grown model's logits equal the source's. 0 (default) is off"
         ),
+    )
+    growth.add_argument(
+        "--cns_dual_soma", action="store_true",
+        help="enable coupled slow-timescale soma compartment per connectome module (v95)",
+    )
+    growth.add_argument(
+        "--cns_slow_leak_init", type=float, default=0.05,
+        help="initial slow-soma leak rate in (0, 1) when --cns_dual_soma is enabled",
+    )
+    growth.add_argument(
+        "--cns_commissural_gate", action="store_true",
+        help="enable input-dependent nonnegative sigmoid gating on LR/RL commissural tracts (v95)",
+    )
+    growth.add_argument(
+        "--cns_glial_homeostasis", action="store_true",
+        help="enable activity-dependent glial EMA gain modulation on connectome modules (v95)",
+    )
+    growth.add_argument(
+        "--cns_trunk_dropout", type=float, default=0.0,
+        help="counterfactual trunk-bypass dropout probability during training at connectome write sites",
+    )
+    growth.add_argument(
+        "--cns_homeostatic_radius", type=float, default=0.0,
+        help="target spectral/singular norm for periodic homeostatic edge projection; 0.0 disables",
+    )
+    growth.add_argument(
+        "--cns_hebbian_trace", action="store_true",
+        help="enable bounded short-term synaptic facilitation / Hebbian trace modulation (v97, default off)",
+    )
+    growth.add_argument(
+        "--cns_predictive_error", action="store_true",
+        help="enable bounded recurrent predictive-coding sensory error modulation (v98, default off)",
     )
 
     # --- v82: the 33 MiMoMixConfig fields no trainer could previously set ---

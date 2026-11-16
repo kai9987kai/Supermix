@@ -81,6 +81,27 @@ PLAN: List[Dict[str, Any]] = (
     + [{"name": "P_null_101", "temporal": False, "wiring": "null:101", "seed": 1}]
 )
 
+PHYSIO_PLAN: List[Dict[str, Any]] = [
+    {
+        "name": "T_physio_s1",
+        "temporal": True,
+        "wiring": "real",
+        "seed": 1,
+        "dual_soma": True,
+        "commissural_gate": True,
+        "glial_homeostasis": True,
+    },
+    {
+        "name": "T_physio_s2",
+        "temporal": True,
+        "wiring": "real",
+        "seed": 2,
+        "dual_soma": True,
+        "commissural_gate": True,
+        "glial_homeostasis": True,
+    },
+]
+
 
 # ---------------------------------------------------------------------------
 # The core
@@ -99,11 +120,17 @@ class TemporalConnectomeCore(nn.Module):
     """
 
     def __init__(self, hidden: int, n_nodes: int = 512, inner_steps: int = 2, temporal: bool = True,
-                 leak_init: float = 0.2, rms_eps: float = 1e-6):
+                 leak_init: float = 0.2, rms_eps: float = 1e-6,
+                 dual_soma: bool = False, slow_leak_init: float = 0.05,
+                 commissural_gate: bool = False, glial_homeostasis: bool = False):
         super().__init__()
         self.n_nodes = int(n_nodes)
         self.inner_steps = int(inner_steps)
         self.temporal = bool(temporal)
+        self.dual_soma = bool(dual_soma)
+        self.slow_leak_init = float(slow_leak_init)
+        self.commissural_gate = bool(commissural_gate)
+        self.glial_homeostasis = bool(glial_homeostasis)
         self.norm = RMSNorm(hidden, rms_eps)
         self.read_in = nn.Linear(hidden, n_nodes, bias=False)
         self.read_out = nn.Linear(n_nodes, hidden, bias=False)
@@ -118,6 +145,29 @@ class TemporalConnectomeCore(nn.Module):
         self.register_buffer("sign", torch.ones(n_nodes))
         self.register_buffer("in_mask", torch.ones(n_nodes))
         self.register_buffer("out_mask", torch.ones(n_nodes))
+        if self.dual_soma:
+            slow_leak = min(max(self.slow_leak_init, 1e-4), 1.0 - 1e-4)
+            self.slow_leak_logit: Optional[nn.Parameter] = nn.Parameter(
+                torch.full((n_nodes,), math.log(slow_leak / (1.0 - slow_leak)))
+            )
+            self.slow_coupling: Optional[nn.Parameter] = nn.Parameter(torch.zeros(n_nodes))
+        else:
+            self.slow_leak_logit = None
+            self.slow_coupling = None
+        if self.commissural_gate:
+            self.commissural_gate_proj: Optional[nn.Linear] = nn.Linear(hidden, 1, bias=True)
+            with torch.no_grad():
+                self.commissural_gate_proj.weight.zero_()
+                self.commissural_gate_proj.bias.fill_(4.0)
+        else:
+            self.commissural_gate_proj = None
+        if self.glial_homeostasis:
+            self.glial_strength: Optional[nn.Parameter] = nn.Parameter(torch.zeros(n_nodes))
+            self.register_buffer("glial_activity_ema", torch.full((n_nodes,), 0.25), persistent=True)
+            self.glial_target = 0.25
+        else:
+            self.glial_strength = None
+            self.glial_activity_ema = None
         self.info: Dict[str, Any] = {}
 
     @torch.no_grad()
@@ -162,22 +212,57 @@ class TemporalConnectomeCore(nn.Module):
     def rates(self, hidden: torch.Tensor) -> torch.Tensor:
         """Module rates ``(B, T, N)`` for hidden states ``(B, T, H)``."""
 
-        drive = self.read_in(self.norm(hidden)) * self.in_mask + self.node_bias
+        normed = self.norm(hidden)
+        drive = self.read_in(normed) * self.in_mask + self.node_bias
         w_t = self.weight().t()
         alpha = torch.sigmoid(self.leak_logit)
+        syn_gate = (
+            torch.sigmoid(self.commissural_gate_proj(normed))
+            if self.commissural_gate and self.commissural_gate_proj is not None
+            else None
+        )
+        has_dual = self.dual_soma and self.slow_leak_logit is not None and self.slow_coupling is not None
+        alpha_slow = torch.sigmoid(self.slow_leak_logit) if has_dual else None
+        coupling = self.slow_coupling if has_dual else None
+
         if not self.temporal:
             rate = torch.zeros_like(drive)
+            slow = torch.zeros_like(drive) if has_dual else None
             for _ in range(self.inner_steps):
-                rate = (1 - alpha) * rate + alpha * F.relu(rate @ w_t + drive)
-            return rate
-        state = drive.new_zeros(drive.shape[0], drive.shape[2])
-        states = []
-        for t in range(drive.shape[1]):
-            u = drive[:, t]
-            for _ in range(self.inner_steps):
-                state = (1 - alpha) * state + alpha * F.relu(state @ w_t + u)
-            states.append(state)
-        return torch.stack(states, dim=1)
+                syn = rate @ w_t
+                if syn_gate is not None:
+                    syn = syn * syn_gate
+                slow_term = (coupling * slow) if slow is not None else 0.0
+                rate = (1 - alpha) * rate + alpha * F.relu(syn + drive + slow_term)
+                if slow is not None and alpha_slow is not None:
+                    slow = (1 - alpha_slow) * slow + alpha_slow * rate
+            if slow is not None and coupling is not None:
+                rate = rate + 0.25 * coupling * slow
+        else:
+            state = drive.new_zeros(drive.shape[0], drive.shape[2])
+            slow_state = drive.new_zeros(drive.shape[0], drive.shape[2]) if has_dual else None
+            states = []
+            for t in range(drive.shape[1]):
+                u = drive[:, t]
+                sg_t = syn_gate[:, t] if syn_gate is not None else None
+                for _ in range(self.inner_steps):
+                    syn = state @ w_t
+                    if sg_t is not None:
+                        syn = syn * sg_t
+                    slow_term = (coupling * slow_state) if slow_state is not None else 0.0
+                    state = (1 - alpha) * state + alpha * F.relu(syn + u + slow_term)
+                    if slow_state is not None and alpha_slow is not None:
+                        slow_state = (1 - alpha_slow) * slow_state + alpha_slow * state
+                states.append(state + (0.25 * coupling * slow_state if slow_state is not None and coupling is not None else 0.0))
+            rate = torch.stack(states, dim=1)
+
+        if self.glial_homeostasis and self.glial_strength is not None and self.glial_activity_ema is not None:
+            gain = (1.0 + torch.tanh(self.glial_strength) * (self.glial_target - self.glial_activity_ema)).clamp(0.25, 4.0)
+            rate = rate * gain
+            if self.training:
+                with torch.no_grad():
+                    self.glial_activity_ema.lerp_(rate.detach().abs().mean(dim=(0, 1)), 0.05)
+        return rate
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         read = self.rates(hidden) * self.out_mask
@@ -289,12 +374,14 @@ def wiring_arrays(wiring: str, modules: str = MODULES, nulls: str = NULLS):
 # ---------------------------------------------------------------------------
 
 
-def _split_rows(split_seed_args: Optional[Sequence[str]] = None):
+def _split_rows(split_seed_args: Optional[Sequence[str]] = None, max_pairs: Optional[int] = None):
     import mimomix_eval_splits as splits
     from train_mimomix_generalisation import build_parser, load_corpus_pairs
     from v91_analysis import V91_SPLIT_ARGS
 
     args = build_parser().parse_args(list(split_seed_args or V91_SPLIT_ARGS))
+    if max_pairs is not None:
+        args.pairs = int(max_pairs)
     pairs = load_corpus_pairs(args.database, limit=args.pairs, corpus_jsonl=args.corpus_jsonl,
                               min_response_characters=args.min_response_characters)
     return splits.build_generalisation_split(
@@ -307,7 +394,8 @@ def _split_rows(split_seed_args: Optional[Sequence[str]] = None):
 
 @torch.no_grad()
 def prepare(cache_dir: str = CACHE, checkpoint: str = V89, train_batches: int = 1000, batch_size: int = 16,
-            dev_rows: int = 2000, seed: int = 92, threads: int = 8, rows_override=None) -> Dict[str, Any]:
+            dev_rows: int = 2000, seed: int = 92, threads: int = 8, rows_override=None,
+            max_pairs: Optional[int] = None) -> Dict[str, Any]:
     """Cache fp32 hidden states after block 2 for a fixed train stream and dev subset."""
 
     import mimomix_text as text_utils
@@ -318,7 +406,7 @@ def prepare(cache_dir: str = CACHE, checkpoint: str = V89, train_batches: int = 
     model, tokenizer, _ = load_talk_checkpoint(checkpoint)
     model.eval()
     if rows_override is None:
-        split = _split_rows()
+        split = _split_rows(max_pairs=max_pairs)
         train_pool, dev_pool = list(split.train), list(split.dev)
     else:
         train_pool, dev_pool = rows_override
@@ -416,16 +504,28 @@ def run_one(spec: Dict[str, Any], cache_dir: str = CACHE, out_dir: str = RUNS, c
         p.requires_grad_(False)
     torch.manual_seed(int(spec["seed"]))
     temporal = bool(spec["temporal"])
+    dual_soma = bool(spec.get("dual_soma", False))
+    commissural_gate = bool(spec.get("commissural_gate", False))
+    glial_homeostasis = bool(spec.get("glial_homeostasis", False))
     core = TemporalConnectomeCore(
         model.config.hidden_size, 512,
         inner_steps=2 if temporal else 6,
         temporal=temporal,
         leak_init=0.2 if temporal else 0.5,
+        dual_soma=dual_soma,
+        commissural_gate=commissural_gate,
+        glial_homeostasis=glial_homeostasis,
     )
     post, pre, fraction, sign, roles = wiring_arrays(spec["wiring"])
     info = core.install(post, pre, fraction, sign, roles, signed_radius=signed_radius)
     decay = [core.read_in.weight, core.read_out.weight]
     no_decay = [core.edge_logit, core.node_bias, core.leak_logit, core.gate, core.norm.weight]
+    if core.commissural_gate_proj is not None:
+        decay.append(core.commissural_gate_proj.weight)
+        no_decay.append(core.commissural_gate_proj.bias)
+    for extra_p in (core.slow_leak_logit, core.slow_coupling, core.glial_strength):
+        if extra_p is not None:
+            no_decay.append(extra_p)
     optimiser = torch.optim.AdamW(
         [{"params": decay, "weight_decay": 0.01}, {"params": no_decay, "weight_decay": 0.0}],
         lr=lr, betas=(0.9, 0.95), eps=1e-12,
@@ -491,6 +591,9 @@ def run_one(spec: Dict[str, Any], cache_dir: str = CACHE, out_dir: str = RUNS, c
         "gate_max_abs": float(core.gate.detach().abs().max()),
         "mean_leak": float(torch.sigmoid(core.leak_logit.detach()).mean()),
         "edge_mean_now": float(edges_now.sum() / core.mask.sum().clamp_min(1)),
+        "dual_soma": dual_soma,
+        "commissural_gate": commissural_gate,
+        "glial_homeostasis": glial_homeostasis,
         "history": history,
         "seconds": round(time.time() - started, 1),
     }
@@ -553,7 +656,8 @@ def report(out_dir: str = RUNS, output: Optional[str] = None) -> Dict[str, Any]:
             "holds": bool(gap > 2 * sd_null and gap > (max(real) - min(real))),
         }
     for label, a, b in (("H3_memory_vs_per_token", "T_real_s1", "P_real_s1"),
-                        ("H4_wiring_vs_empty", "T_real_s1", "T_empty_s1")):
+                        ("H4_wiring_vs_empty", "T_real_s1", "T_empty_s1"),
+                        ("H5_physio_vs_vanilla_real", "T_physio_s1", "T_real_s1")):
         if a in results and b in results:
             ra = np.load(os.path.join(out_dir, f"{a}.rows.npz"))
             rb = np.load(os.path.join(out_dir, f"{b}.rows.npz"))
@@ -576,9 +680,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p = sub.add_parser("prepare")
     p.add_argument("--train_batches", type=int, default=1000)
     p.add_argument("--dev_rows", type=int, default=2000)
+    p.add_argument("--max_pairs", type=int, default=None)
     r = sub.add_parser("run")
     r.add_argument("--steps", type=int, default=1000)
     r.add_argument("--only", nargs="*", default=None, help="run names from PLAN")
+    r.add_argument("--include_physio", action="store_true", help="include PHYSIO_PLAN entries")
     sub.add_parser("report")
     args = parser.parse_args(argv)
     if args.command == "nulls":
@@ -587,11 +693,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                     "reciprocity", "modules_with_changed_inhibitory_input_count")}
                           for k, v in receipt["diagnostics"].items()}, indent=1))
     elif args.command == "prepare":
-        print(json.dumps(prepare(train_batches=args.train_batches, dev_rows=args.dev_rows), indent=2))
+        print(json.dumps(prepare(train_batches=args.train_batches, dev_rows=args.dev_rows, max_pairs=args.max_pairs), indent=2))
     elif args.command == "run":
-        plan = [s for s in PLAN if not args.only or s["name"] in args.only]
+        active_plan = list(PLAN) + (list(PHYSIO_PLAN) if args.include_physio else [])
+        plan = [s for s in active_plan if not args.only or s["name"] in args.only]
         run_plan(plan, steps=args.steps)
     elif args.command == "report":
+        os.makedirs(os.path.dirname("output/v92_connectome/report.json"), exist_ok=True)
         print(json.dumps(report(output="output/v92_connectome/report.json"), indent=2))
     return 0
 
