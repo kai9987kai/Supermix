@@ -77,6 +77,21 @@ class SCFLayeredMemory:
             if c.get("active") and c.get("text")
         ][:6]
 
+        # Capture explicit standalone user preference/remember statements missed by narrow frame prefixes
+        seen_c_texts = {c["text"].lower() for c in active_commitments}
+        for t_idx, turn in enumerate(list(recent_turns)[-12:]):
+            u_txt = str(turn.get("user", "") if isinstance(turn, dict) else (turn[0] if isinstance(turn, (list, tuple)) and turn else "")).strip()
+            low_u = u_txt.lower()
+            if not u_txt or len(u_txt) > 180 or low_u in seen_c_texts:
+                continue
+            if any(blk in low_u for blk in ("ignore previous", "system:", "[tool]", "quote:")):
+                continue
+            if any(k in low_u for k in ("remember ", "i prefer ", "we use ", "always ", "keep answers")):
+                active_commitments.append({"id": f"mem_{t_idx}", "kind": "preference", "text": u_txt})
+                seen_c_texts.add(low_u)
+                if len(active_commitments) >= 6:
+                    break
+
         contradictions = [
             {
                 "kind": str(item.get("kind", "conflict")),

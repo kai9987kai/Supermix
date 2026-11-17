@@ -97,16 +97,24 @@ def test_map_elites_ideation_and_crosswire_problem_solving() -> None:
     cells = {tuple(c["metadata"]["map_elites_cell"]) for c in idea_out["ideation"]["concepts"]}
     assert len(cells) >= 2
 
-    # Problem solving triggers decomposition + Crosswire clarifying probes on vague queries
+    # Problem solving triggers decomposition + Crosswire clarifying probes even on prose debug queries
     prob_out = rt.run_task(
-        "Why is it failing and how should I optimize this?",
+        "How should I debug an intermittent async race condition step by step?",
         flags_override=flags,
+        recent_turns=[("Remember I prefer Python and concise structured steps.", "Got it.")],
     )
     syn = prob_out["assistant_synthesis"]
     assert syn["mode"] == "problem_solving"
     assert syn["answer_authority"] is False
-    assert len(syn["bullets"]) >= 3
-    assert len(syn["clarifying_questions"]) >= 1
+    assert len(syn["bullets"]) >= 4
+    assert any("Memory alignment:" in b for b in syn["bullets"])
+
+    vague_prob = rt.run_task(
+        "Why is it failing and how should I optimize this?",
+        flags_override=flags,
+    )
+    assert vague_prob["assistant_synthesis"]["mode"] == "problem_solving"
+    assert len(vague_prob["assistant_synthesis"]["clarifying_questions"]) >= 1
 
     # Conversation continuity honors standing constraints without authority escalation
     conv_out = rt.run_task(

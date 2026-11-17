@@ -94,10 +94,12 @@ class SCFRouter:
 
         if is_ideation:
             submode = "ideation"
-        elif domain in {"math_science", "code", "connectome"}:
+        elif domain == "connectome" or (norm.rule is not None and domain in {"math_science", "code"}):
             submode = domain
         elif is_problem_solving or is_causal:
             submode = "problem_solving"
+        elif domain in {"math_science", "code"}:
+            submode = domain
         else:
             submode = "dialogue"
 

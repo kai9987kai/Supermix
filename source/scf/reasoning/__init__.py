@@ -74,7 +74,7 @@ class SCFReasoningCoordinator:
             "Boundary guard: preserve baseline behavior via default-off flag or rollback point until verified.",
         ]
         if commitments:
-            critic_checks.append(f"Memory alignment: verify plan respects active user constraints ({'; '.join(commitments[:2])}).")
+            critic_checks.insert(0, f"Memory alignment: verify plan respects active user constraints ({'; '.join(commitments[:2])}).")
 
         return {
             "focus_terms": unique_terms[:6],
