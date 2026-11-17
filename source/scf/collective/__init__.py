@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -65,6 +66,32 @@ class SCFCollectiveOrchestrator:
                 pass
             return " ".join(text.lower().split())
 
+        def _audit_trace_arithmetic(raw_ans: str) -> int:
+            """Count inconsistent inline `a op b = c` steps inside a neural candidate."""
+            bad_steps = 0
+            step_re = re.compile(r"(-?\d+(?:\.\d+)?)\s*([+\-xX*/])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)")
+            for a_s, op_s, b_s, c_s in step_re.findall(str(raw_ans or "")):
+                try:
+                    a_v, b_v, c_v = float(a_s), float(b_s), float(c_s)
+                except ValueError:
+                    continue
+                if op_s == "+":
+                    exp_v = a_v + b_v
+                elif op_s == "-":
+                    exp_v = a_v - b_v
+                elif op_s in ("*", "x", "X"):
+                    exp_v = a_v * b_v
+                elif op_s == "/":
+                    if b_v == 0.0:
+                        bad_steps += 1
+                        continue
+                    exp_v = a_v / b_v
+                else:
+                    continue
+                if abs(exp_v - c_v) > max(1e-4, 1e-4 * abs(exp_v)):
+                    bad_steps += 1
+            return bad_steps
+
         answers = [
             _canonical_value(str(c.get("answer") or ""))
             for c in candidates
@@ -79,22 +106,30 @@ class SCFCollectiveOrchestrator:
             verified_bonus = 0.35 if bool(cand.get("verified")) else 0.0
             conf = max(0.0, min(1.0, float(cand.get("confidence", 0.0))))
             nonempty_bonus = 0.10 if ans else -0.20
-            total_score = round(conf + consensus_bonus + verified_bonus + nonempty_bonus, 4)
+            trace_errors = 0 if cand.get("verified") else _audit_trace_arithmetic(ans)
+            trace_penalty = min(0.24, 0.12 * trace_errors)
+            total_score = round(conf + consensus_bonus + verified_bonus + nonempty_bonus - trace_penalty, 4)
+            note = (
+                "verified_exact"
+                if cand.get("verified")
+                else (
+                    "trace_arithmetic_inconsistency"
+                    if trace_errors > 0
+                    else (
+                        "cross_model_consensus"
+                        if agree_count > 1
+                        else "unverified_advisory"
+                    )
+                )
+            )
             critiqued.append(
                 {
                     **cand,
                     "canonical_answer": canon,
                     "consensus_agreement": agree_count,
+                    "trace_audit_failures": trace_errors,
                     "composite_score": total_score,
-                    "critique_notes": (
-                        "verified_exact"
-                        if cand.get("verified")
-                        else (
-                            "cross_model_consensus"
-                            if agree_count > 1
-                            else "unverified_advisory"
-                        )
-                    ),
+                    "critique_notes": note,
                 }
             )
 

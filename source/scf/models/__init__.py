@@ -295,6 +295,7 @@ class MiMoMixAdapter(BaseModelAdapter):
         candidates = (
             "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt",
             "output/v100_scf_balanced/v100_scf_balanced.selected.pt",
+            "output/v101_scf_cognitive/v101_scf_cognitive.pt",
             "output/v98_scf_predictive/v98_scf_predictive.selected.pt",
             "output/v99_scf_evolution/v99_scf_evolution.selected.pt",
             "output/v97_scf_connectome/v97_scf_connectome.selected.pt",
@@ -321,6 +322,7 @@ class MiMoMixAdapter(BaseModelAdapter):
                 "output/v98_scf_predictive/v98_scf_predictive.selected.pt",
                 "output/v99_scf_evolution/v99_scf_evolution.selected.pt",
                 "output/v100_scf_balanced/v100_scf_balanced.selected.pt",
+                "output/v101_scf_cognitive/v101_scf_cognitive.pt",
             )
             if (ROOT / rel).is_file()
         ]

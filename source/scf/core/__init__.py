@@ -233,19 +233,38 @@ class CognitiveFabricRuntime:
                 gen_fn = merged_generators.get(route_info["selected_family"])
                 candidate_answer = str(gen_fn(prompt).get("answer", "")) if gen_fn else ""
 
-            # Reasoning Coordinator (GoT / Causal DAG / Active Inference)
+            # Reasoning Coordinator (GoT / Problem Decomposition / Causal DAG / Active Inference)
             reasoning_res, st_reason = self.observability.measure_stage(
                 "reasoning",
                 self.reasoning.reason,
                 prompt,
                 flags=flags,
                 max_steps=self.config.max_reasoning_steps,
+                working_state=memory_ctx.get("working_state"),
             )
             stages.append(st_reason)
             if flags.SCF_ACTIVE_INFERENCE_ENABLED:
                 experimental_used.append("NexusMind_ActiveInferenceController")
             if route_info.get("hierarchical_moe"):
                 experimental_used.append("ChampionNet_HierarchicalMoE_RoutingPolicy")
+
+            # Optional MAP-Elites + SCAMPER/TRIZ Ideation synthesis (when ideation requested)
+            submode = str((route_info.get("assessment") or {}).get("submode") or "dialogue")
+            ws = memory_ctx.get("working_state") or {}
+            active_constraints = [
+                str(c.get("text", ""))
+                for c in ws.get("active_commitments", [])
+                if isinstance(c, dict) and c.get("text")
+            ]
+            ideation_res: Optional[Dict[str, Any]] = None
+            if submode == "ideation":
+                import nexus_ideation as nid
+
+                ideation_res = nid.NexusIdeationEngine().brainstorm(
+                    prompt,
+                    count=4,
+                    constraints=active_constraints,
+                ).to_dict()
 
             # 6. Final independent verification pass
             if flags.SCF_VERIFICATION_ENABLED:
@@ -263,23 +282,94 @@ class CognitiveFabricRuntime:
                         "verified": False,
                         "verified_answer": None,
                         "verifier_source": "disabled_by_flag",
+                        "derivation_steps": [],
+                        "explanation": "",
                         "grounding_audit": {"override_applied": False, "response_text": candidate_answer},
                     },
                 )
             stages.append(st_ver_final)
 
+            # Build structured, honest Cognitive Synthesis block for callers/UI
+            assistant_synthesis: Dict[str, Any]
             if verify_final["verified"] and verify_final["verified_answer"] is not None:
                 final_answer = str(verify_final["verified_answer"])
                 evidence_links.append(str(verify_final["verifier_source"]))
-            elif candidate_answer:
-                final_answer = str(verify_final["grounding_audit"]["response_text"] or candidate_answer)
-            else:
-                final_answer = (
+                deriv_steps = list(verify_final.get("derivation_steps") or [])
+                assistant_synthesis = {
+                    "mode": "verified_math",
+                    "title": f"Verified Solution ({verify_final['verifier_source']})",
+                    "summary": str(verify_final.get("explanation") or f"Verified answer: {final_answer}"),
+                    "bullets": [
+                        f"{s.get('description')}: {s.get('substitution_latex') or s.get('evaluated_value')}"
+                        for s in deriv_steps[:4]
+                    ],
+                    "clarifying_questions": [],
+                    "answer_authority": True,
+                }
+            elif ideation_res is not None:
+                concepts = list(ideation_res.get("concepts") or [])
+                assistant_synthesis = {
+                    "mode": "ideation",
+                    "title": "MAP-Elites & SCAMPER/TRIZ Idea Portfolio",
+                    "summary": f"Generated {len(concepts)} niche-diverse, topic-grounded concepts with falsification tests.",
+                    "bullets": [
+                        f"[{c.get('operator')}] {c.get('title')}: {c.get('mechanism')} ({c.get('target_benefit')})"
+                        for c in concepts[:4]
+                    ],
+                    "clarifying_questions": list((reasoning_res.get("problem_decomposition") or {}).get("clarifying_questions") or []),
+                    "answer_authority": False,
+                }
+                final_answer = candidate_answer or ideation_res.get("synthesis_proposal", "")
+                evidence_links.append("ideation.map_elites.advisory_only")
+            elif submode == "problem_solving":
+                prob = dict(reasoning_res.get("problem_decomposition") or {})
+                assistant_synthesis = {
+                    "mode": "problem_solving",
+                    "title": "Structured Problem-Solving & Critic Plan",
+                    "summary": f"Decomposed around {', '.join(prob.get('focus_terms') or ['target goal'])} with Crosswire ambiguity probes.",
+                    "bullets": list(prob.get("steps") or [])[:4] + list(prob.get("critic_checks") or [])[:1],
+                    "clarifying_questions": list(prob.get("clarifying_questions") or []),
+                    "answer_authority": False,
+                }
+                final_answer = candidate_answer or (
                     f"[SCF advisory trace | family={route_info['selected_family']} | "
                     f"domain={route_info['assessment']['domain']}] "
                     f"{reasoning_res['got']['final_output']}"
                 )
-                evidence_links.append("reasoning.got.advisory_only")
+                evidence_links.append("reasoning.problem_decomposition.advisory_only")
+            else:
+                prob = dict(reasoning_res.get("problem_decomposition") or {})
+                mem_bullets: List[str] = []
+                if ws.get("style_preference"):
+                    mem_bullets.append(f"Active style preference: {ws['style_preference']}")
+                for comm in ws.get("active_commitments", [])[:2]:
+                    if isinstance(comm, dict) and comm.get("text"):
+                        mem_bullets.append(f"Session constraint ({comm.get('kind', 'note')}): {comm['text']}")
+                for alert in ws.get("contradiction_alerts", [])[:1]:
+                    if isinstance(alert, dict) and alert.get("summary"):
+                        mem_bullets.append(f"Conflict check: {alert['summary']}")
+                if not mem_bullets:
+                    mem_bullets = list(prob.get("steps") or [])[:2]
+                assistant_synthesis = {
+                    "mode": "conversation_continuity",
+                    "title": "Memory-Aware Conversation Continuity",
+                    "summary": (
+                        f"Tracked {ws.get('turn_count', 0)} prior turn(s), {len(active_constraints)} active constraint(s), "
+                        f"and {len(ws.get('open_questions') or [])} open question(s)."
+                    ),
+                    "bullets": mem_bullets[:4],
+                    "clarifying_questions": list(prob.get("clarifying_questions") or []),
+                    "answer_authority": False,
+                }
+                if candidate_answer:
+                    final_answer = str(verify_final["grounding_audit"]["response_text"] or candidate_answer)
+                else:
+                    final_answer = (
+                        f"[SCF advisory trace | family={route_info['selected_family']} | "
+                        f"domain={route_info['assessment']['domain']}] "
+                        f"{reasoning_res['got']['final_output']}"
+                    )
+                    evidence_links.append("reasoning.got.advisory_only")
 
             learning_readiness = self.learning.inspect_readiness()
             peak_kb = self.observability.finish_memory_probe(was_tracing)
@@ -311,6 +401,8 @@ class CognitiveFabricRuntime:
                 "multimodal": mm_ctx,
                 "collective": collective_res,
                 "reasoning": reasoning_res,
+                "ideation": ideation_res,
+                "assistant_synthesis": assistant_synthesis,
                 "verification": verify_final,
                 "learning_gate": {
                     "automatic_promotion_enabled": learning_readiness["automatic_promotion_enabled"],

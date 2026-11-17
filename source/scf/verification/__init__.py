@@ -472,6 +472,15 @@ class SCFVerificationGate:
             verified_answer = str(solver_res.display_answer)
             verified = True
             verifier_source = f"nexus_solver.{solver_res.formula_id}"
+            independent_cert = {
+                "status": "passed",
+                "algorithmically_independent": True,
+                "problem_class": str(solver_res.target or solver_res.scenario),
+                "formula_id": str(solver_res.formula_id),
+                "domain": str(solver_res.domain),
+                "expected_display": verified_answer,
+                "unit": str(solver_res.unit or ""),
+            }
 
         effective_answer = verified_answer if verified_answer is not None else candidate_answer
         grounded = gr.finalize_grounded_response(
@@ -494,6 +503,17 @@ class SCFVerificationGate:
                     "derivation_hash": solver_res.receipt.derivation_hash,
                 }
 
+        derivation_steps = (
+            [s.to_dict() for s in solver_res.steps]
+            if (solver_res is not None and solver_res.solved and solver_res.steps)
+            else []
+        )
+        explanation = (
+            str(solver_res.explanation)
+            if (solver_res is not None and solver_res.solved and solver_res.explanation)
+            else ""
+        )
+
         # answer_check is strictly advisory (never promoted to verifier authority)
         advisory_reply_check = None
         if effective_answer:
@@ -507,6 +527,8 @@ class SCFVerificationGate:
             "verifier_source": verifier_source,
             "independent_certificate": independent_cert,
             "proof_capsule": proof_capsule,
+            "derivation_steps": derivation_steps,
+            "explanation": explanation,
             "grounding_audit": {
                 "override_applied": bool(grounded.get("override_applied", False)),
                 "response_text": grounded.get("response_text", effective_answer),

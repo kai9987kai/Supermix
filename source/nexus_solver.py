@@ -41,7 +41,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import science_plan as v71_science
 
@@ -306,8 +306,11 @@ class NexusSolver:
             self._solve_geometry_trig,
             self._solve_combinatorics_stats,
             self._solve_natural_combinatorics,
+            self._solve_general_sequences_and_laws,
+            self._solve_calculus_stats_number_theory,
             self._solve_code_expression,
             self._solve_python_ast_trace,
+            self._solve_safe_ast_math,
         ]
 
         for s_func in solvers:
@@ -1090,24 +1093,42 @@ class NexusSolver:
         return None
 
     # --------------------------------------------------------------------------
-    # 10. Pure Algebra: Quadratic Equation (ax^2 + bx + c = 0)
+    # 10. Pure Algebra: Quadratic Equation (ax^2 + bx + c = rhs)
     # --------------------------------------------------------------------------
     def _solve_quadratic_algebra(self, q: str) -> Optional[SolverResult]:
-        # Form: ax^2 + bx + c = 0 or "solve quadratic a=1, b=-5, c=6"
-        a_m = re.search(r"\ba\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
-        b_m = re.search(r"\bb\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
-        c_m = re.search(r"\bc\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q, re.I)
+        if re.search(r"\b(?:not|never|approx(?:imately)?|verify\s+proof|check\s+proof)\b", q, re.I):
+            return None
+        q_norm = q.replace("²", "^2").replace("−", "-")
+        a_m = re.search(r"\ba\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q_norm, re.I)
+        b_m = re.search(r"\bb\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q_norm, re.I)
+        c_m = re.search(r"\bc\s*(?:=|is)?\s*(-?\d+(?:\.\d+)?)", q_norm, re.I)
 
-        quad_match = re.search(r"(-?\d+)?\s*x\^2\s*([+-]\s*\d+)?\s*x\s*([+-]\s*\d+)?\s*=\s*0", q, re.I)
+        quad_match = re.search(
+            r"([+-]?\s*\d+(?:\.\d+)?|[+-])?\s*\*?\s*x\^2"
+            r"(?:\s*([+-]\s*(?:\d+(?:\.\d+)?)?)\s*\*?\s*x(?!\^))?"
+            r"(?:\s*([+-]\s*\d+(?:\.\d+)?))?"
+            r"\s*=\s*(-?\d+(?:\.\d+)?)",
+            q_norm,
+            re.I,
+        )
 
-        if (a_m and b_m and c_m and ("quadratic" in q.lower() or "roots" in q.lower())) or quad_match:
+        def _parse_signed_coeff(raw: Optional[str], default_if_empty: str = "1") -> Fraction:
+            cleaned = (raw or "").replace(" ", "")
+            if not cleaned:
+                return self._normalize_num(default_if_empty)
+            if cleaned == "+":
+                return Fraction(1)
+            if cleaned == "-":
+                return Fraction(-1)
+            return self._normalize_num(cleaned)
+
+        if (a_m and b_m and c_m and ("quadratic" in q_norm.lower() or "roots" in q_norm.lower())) or quad_match:
             if quad_match:
-                a_raw = quad_match.group(1) or "1"
-                b_raw = (quad_match.group(2) or "+0").replace(" ", "")
-                c_raw = (quad_match.group(3) or "+0").replace(" ", "")
-                a = self._normalize_num(a_raw)
-                b = self._normalize_num(b_raw)
-                c = self._normalize_num(c_raw)
+                a = _parse_signed_coeff(quad_match.group(1), "1")
+                b = _parse_signed_coeff(quad_match.group(2), "0") if quad_match.group(2) is not None else Fraction(0)
+                c_lhs = _parse_signed_coeff(quad_match.group(3), "0") if quad_match.group(3) is not None else Fraction(0)
+                rhs = _parse_signed_coeff(quad_match.group(4), "0")
+                c = c_lhs - rhs
             else:
                 a = self._normalize_num(a_m.group(1))
                 b = self._normalize_num(b_m.group(1))
@@ -1116,14 +1137,14 @@ class NexusSolver:
             if a == 0:
                 return None
 
-            disc = b*b - 4*a*c
+            disc = b * b - 4 * a * c
             disc_float = float(disc)
             if disc_float >= 0:
                 sqrt_disc = math.sqrt(disc_float)
                 r1 = (-float(b) + sqrt_disc) / (2 * float(a))
                 r2 = (-float(b) - sqrt_disc) / (2 * float(a))
-                disp1 = f"{r1:.4f}".rstrip("0").rstrip(".")
-                disp2 = f"{r2:.4f}".rstrip("0").rstrip(".")
+                disp1 = f"{r1:.4f}".rstrip("0").rstrip(".") or "0"
+                disp2 = f"{r2:.4f}".rstrip("0").rstrip(".") or "0"
                 res_str = f"x1 = {disp1}, x2 = {disp2}" if disp1 != disp2 else f"x = {disp1}"
                 steps = [
                     DerivationStep(1, "Calculate discriminant Delta = b^2 - 4ac", "\\Delta = b^2 - 4ac", f"\\Delta = ({b})^2 - 4({a})({c}) = {disc}", str(disc)),
@@ -1138,14 +1159,31 @@ class NexusSolver:
     # 11. Linear System of 2 Equations (a1*x + b1*y = c1, a2*x + b2*y = c2)
     # --------------------------------------------------------------------------
     def _solve_linear_system_2x2(self, q: str) -> Optional[SolverResult]:
-        # e.g., "solve system 2x + 3y = 8 and 4x - y = 2"
-        sys_m = re.search(r"(-?\d+)\s*x\s*([+-]\s*\d+)\s*y\s*=\s*(-?\d+)\s*(?:and|,|;)\s*(-?\d+)\s*x\s*([+-]\s*\d+)\s*y\s*=\s*(-?\d+)", q, re.I)
+        # e.g., "solve system 2x + 3y = 8 and 4x - y = 2" or "x + y = 10, x - y = 2"
+        if re.search(r"\b(?:not|never|approx(?:imately)?|verify\s+proof|check\s+proof)\b", q, re.I):
+            return None
+        q_norm = q.replace("−", "-")
+        sys_m = re.search(
+            r"([+-]?\s*(?:\d+(?:\.\d+)?)?)\s*\*?\s*x\s*([+-]\s*(?:\d+(?:\.\d+)?)?)\s*\*?\s*y\s*=\s*(-?\d+(?:\.\d+)?)"
+            r"\s*(?:and|,|;)\s*"
+            r"([+-]?\s*(?:\d+(?:\.\d+)?)?)\s*\*?\s*x\s*([+-]\s*(?:\d+(?:\.\d+)?)?)\s*\*?\s*y\s*=\s*(-?\d+(?:\.\d+)?)",
+            q_norm,
+            re.I,
+        )
         if sys_m:
-            a1 = self._normalize_num(sys_m.group(1))
-            b1 = self._normalize_num(sys_m.group(2).replace(" ", ""))
+            def _coeff(raw: str) -> Fraction:
+                cleaned = raw.replace(" ", "")
+                if cleaned in ("", "+"):
+                    return Fraction(1)
+                if cleaned == "-":
+                    return Fraction(-1)
+                return self._normalize_num(cleaned)
+
+            a1 = _coeff(sys_m.group(1))
+            b1 = _coeff(sys_m.group(2))
             c1 = self._normalize_num(sys_m.group(3))
-            a2 = self._normalize_num(sys_m.group(4))
-            b2 = self._normalize_num(sys_m.group(5).replace(" ", ""))
+            a2 = _coeff(sys_m.group(4))
+            b2 = _coeff(sys_m.group(5))
             c2 = self._normalize_num(sys_m.group(6))
 
             det = a1*b2 - a2*b1
@@ -1401,6 +1439,549 @@ class NexusSolver:
                     return SolverResult(True, q, "programming", "code", "code_neg_index", "code.neg_index", float(val), disp, "", steps, receipt, f"Indexed element is {disp}.")
 
         return None
+
+    # --------------------------------------------------------------------------
+    # 17. Generalized Sequence & Recurrence Discovery (Polynomial / Geometric / Fibonacci)
+    # --------------------------------------------------------------------------
+    def _solve_general_sequences_and_laws(self, q: str) -> Optional[SolverResult]:
+        lower = q.lower()
+        if any(neg in lower for neg in ("not", "never", "approx", "verify proof", "check proof")):
+            return None
+        if not any(kw in lower for kw in ("sequence", "next term", "comes next", "pattern", "progression")):
+            return None
+
+        nums_m = re.search(r"(-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?){2,})", q)
+        if not nums_m:
+            return None
+        vals = [self._normalize_num(item.strip()) for item in nums_m.group(1).split(",")]
+        if len(vals) < 3:
+            return None
+
+        # 1. Exact Geometric progression: t[i+1] / t[i] == r (non-zero constant ratio)
+        if all(v != 0 for v in vals[:-1]):
+            ratios = [vals[i + 1] / vals[i] for i in range(len(vals) - 1)]
+            if ratios and all(r == ratios[0] for r in ratios) and ratios[0] != 1:
+                nxt = vals[-1] * ratios[0]
+                disp = self._format_fraction(nxt)
+                steps = [
+                    DerivationStep(1, "Identify constant geometric ratio r", "r = \\frac{a_{k+1}}{a_k}", f"r = {self._format_fraction(ratios[0])}", self._format_fraction(ratios[0])),
+                    DerivationStep(2, "Multiply last term by common ratio", "a_{n+1} = a_n \\cdot r", f"{self._format_fraction(vals[-1])} \\cdot {self._format_fraction(ratios[0])} = {disp}", disp),
+                ]
+                receipt = self._build_receipt("sequence_discovery", "mathematics", "geometric_next_term", "math.sequence_geometric", {"terms": nums_m.group(1), "ratio": str(ratios[0])}, str(nxt), disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "sequence_discovery", "geometric_next_term", "math.sequence_geometric", float(nxt), disp, "", steps, receipt, f"Geometric progression with ratio {self._format_fraction(ratios[0])}; next term is {disp}.")
+
+        # 2. Newton forward-difference polynomial sequence up to degree 3 (requires degree < len(vals))
+        max_order = min(3, len(vals) - 2) if len(vals) >= 4 else 1
+        levels: List[List[Fraction]] = [list(vals)]
+        matched_order: Optional[int] = None
+        for order in range(1, max_order + 1):
+            prev = levels[-1]
+            diff = [prev[i + 1] - prev[i] for i in range(len(prev) - 1)]
+            levels.append(diff)
+            if diff and all(d == diff[0] for d in diff):
+                matched_order = order
+                break
+
+        if matched_order is not None:
+            # Propagate bottom-up to compute next term
+            nxt_val = Fraction(0)
+            for lvl in reversed(levels):
+                nxt_val = lvl[-1] + nxt_val
+            disp = self._format_fraction(nxt_val)
+            steps = [
+                DerivationStep(
+                    1,
+                    f"Compute finite-difference table of order {matched_order}",
+                    f"\\Delta^{matched_order} a_k = \\text{{const}}",
+                    f"\\Delta^{matched_order} = {self._format_fraction(levels[matched_order][0])}",
+                    self._format_fraction(levels[matched_order][0]),
+                ),
+                DerivationStep(
+                    2,
+                    "Propagate terminal differences to next term",
+                    "a_{n+1} = \\sum_{m=0}^{d} \\Delta^m a_{n-m}",
+                    f"a_{{n+1}} = {disp}",
+                    disp,
+                ),
+            ]
+            receipt = self._build_receipt(
+                "sequence_discovery",
+                "mathematics",
+                "polynomial_sequence_next",
+                f"math.sequence_poly_deg{matched_order}",
+                {"terms": nums_m.group(1), "degree": str(matched_order)},
+                str(nxt_val),
+                disp,
+                "dimensionless",
+                steps,
+            )
+            return SolverResult(
+                True,
+                q,
+                "mathematics",
+                "sequence_discovery",
+                "polynomial_sequence_next",
+                f"math.sequence_poly_deg{matched_order}",
+                float(nxt_val),
+                disp,
+                "",
+                steps,
+                receipt,
+                f"Degree-{matched_order} finite-difference law gives next term {disp}.",
+            )
+
+        # 3. 2-step Fibonacci additive recurrence: a[k] = a[k-1] + a[k-2]
+        if len(vals) >= 4 and all(vals[i] == vals[i - 1] + vals[i - 2] for i in range(2, len(vals))):
+            nxt_val = vals[-1] + vals[-2]
+            disp = self._format_fraction(nxt_val)
+            steps = [
+                DerivationStep(1, "Verify two-term additive recurrence", "a_k = a_{k-1} + a_{k-2}", f"{self._format_fraction(vals[-2])} + {self._format_fraction(vals[-1])} = {disp}", disp)
+            ]
+            receipt = self._build_receipt("sequence_discovery", "mathematics", "fibonacci_next", "math.sequence_recurrence", {"terms": nums_m.group(1)}, str(nxt_val), disp, "dimensionless", steps)
+            return SolverResult(True, q, "mathematics", "sequence_discovery", "fibonacci_next", "math.sequence_recurrence", float(nxt_val), disp, "", steps, receipt, f"Two-term additive recurrence gives next term {disp}.")
+
+        return None
+
+    # --------------------------------------------------------------------------
+    # 18. Calculus (Polynomial Derivatives/Definite Integrals), Number Theory & Stats
+    # --------------------------------------------------------------------------
+    @staticmethod
+    def _parse_poly_terms(poly_str: str) -> Optional[Dict[int, Fraction]]:
+        """Parse univariate polynomial in x like '3x^3 - 4x + 5' into {power: Fraction}."""
+        cleaned = poly_str.replace("−", "-").replace(" ", "")
+        if not cleaned or any(ch not in "0123456789.+-*^xX()" for ch in cleaned):
+            return None
+        cleaned = cleaned.replace("*", "")
+        # Split into signed monomials
+        raw_terms = re.findall(r"[+-]?[^+-]+", cleaned)
+        if not raw_terms or "".join(raw_terms) != cleaned:
+            return None
+        coeffs: Dict[int, Fraction] = {}
+        for term in raw_terms:
+            m = re.fullmatch(r"([+-]?(?:\d+(?:\.\d+)?)?)x(?:\^(\d+))?", term, re.I)
+            if m:
+                c_str = m.group(1) or ""
+                if c_str in ("", "+"):
+                    c = Fraction(1)
+                elif c_str == "-":
+                    c = Fraction(-1)
+                else:
+                    c = Fraction(Decimal(c_str))
+                deg = int(m.group(2)) if m.group(2) is not None else 1
+                if deg > 20:
+                    return None
+                coeffs[deg] = coeffs.get(deg, Fraction(0)) + c
+            else:
+                m_const = re.fullmatch(r"[+-]?\d+(?:\.\d+)?", term)
+                if not m_const:
+                    return None
+                c = Fraction(Decimal(term))
+                coeffs[0] = coeffs.get(0, Fraction(0)) + c
+        return {k: v for k, v in coeffs.items() if v != 0}
+
+    def _format_poly(self, coeffs: Dict[int, Fraction]) -> str:
+        if not coeffs:
+            return "0"
+        parts: List[str] = []
+        for deg in sorted(coeffs.keys(), reverse=True):
+            c = coeffs[deg]
+            if c == 0:
+                continue
+            sign = "-" if c < 0 else "+"
+            mag = abs(c)
+            mag_s = self._format_fraction(mag)
+            if deg == 0:
+                body = mag_s
+            elif deg == 1:
+                body = "x" if mag == 1 else f"{mag_s}x"
+            else:
+                body = f"x^{deg}" if mag == 1 else f"{mag_s}x^{deg}"
+            if not parts:
+                parts.append(f"-{body}" if sign == "-" else body)
+            else:
+                parts.append(f" {sign} {body}")
+        return "".join(parts)
+
+    def _solve_calculus_stats_number_theory(self, q: str) -> Optional[SolverResult]:
+        lower = q.lower()
+        if any(neg in lower for neg in ("not", "never", "approx", "verify proof", "check proof")):
+            return None
+
+        # Polynomial Derivative: "derivative of 3x^3 - 4x + 5" (+ optional "at x = 2")
+        deriv_m = re.search(
+            r"(?:derivative\s+of|differentiate)\s+(?:f\(x\)\s*=\s*)?([0-9xX\^\+\-\.\*\s]+?)(?:\s+at\s+x\s*=\s*(-?\d+(?:\.\d+)?)|\s*[?!.]|$)",
+            q,
+            re.I,
+        )
+        if deriv_m:
+            terms = self._parse_poly_terms(deriv_m.group(1))
+            if terms:
+                d_terms = {deg - 1: c * deg for deg, c in terms.items() if deg >= 1 and c * deg != 0}
+                d_str = self._format_poly(d_terms)
+                at_x = deriv_m.group(2)
+                if at_x is not None:
+                    xv = self._normalize_num(at_x)
+                    val = sum((c * (xv ** deg) for deg, c in d_terms.items()), Fraction(0))
+                    disp = self._format_fraction(val)
+                    steps = [
+                        DerivationStep(1, "Apply power rule to differentiate polynomial", "\\frac{d}{dx}(cx^n) = ncx^{n-1}", f"f'(x) = {d_str}", d_str),
+                        DerivationStep(2, f"Evaluate derivative at x = {at_x}", "f'(x_0)", f"f'({at_x}) = {disp}", disp),
+                    ]
+                    receipt = self._build_receipt("calculus", "mathematics", "polynomial_derivative_eval", "calc.poly_derivative_at", {"poly": deriv_m.group(1).strip(), "x": at_x}, str(val), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "calculus", "polynomial_derivative_eval", "calc.poly_derivative_at", float(val), disp, "", steps, receipt, f"f'(x) = {d_str}; at x = {at_x}, f'({at_x}) = {disp}.")
+                steps = [
+                    DerivationStep(1, "Apply power rule term-by-term", "\\frac{d}{dx}\\sum c_n x^n = \\sum n c_n x^{n-1}", f"\\frac{{d}}{{dx}}({deriv_m.group(1).strip()}) = {d_str}", d_str)
+                ]
+                receipt = self._build_receipt("calculus", "mathematics", "polynomial_derivative", "calc.poly_derivative", {"poly": deriv_m.group(1).strip()}, d_str, d_str, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "calculus", "polynomial_derivative", "calc.poly_derivative", None, d_str, "", steps, receipt, f"The derivative is {d_str}.")
+
+        # Definite Polynomial Integral: "integrate 6x^2 + 2x from x = 0 to x = 2"
+        integ_m = re.search(
+            r"(?:integral\s+of|integrate)\s+([0-9xX\^\+\-\.\*\s]+?)\s+from\s+(?:x\s*=\s*)?(-?\d+(?:\.\d+)?)\s+to\s+(?:x\s*=\s*)?(-?\d+(?:\.\d+)?)",
+            q,
+            re.I,
+        )
+        if integ_m:
+            terms = self._parse_poly_terms(integ_m.group(1))
+            if terms is not None:
+                a_lo = self._normalize_num(integ_m.group(2))
+                b_hi = self._normalize_num(integ_m.group(3))
+                anti = {deg + 1: c / Fraction(deg + 1) for deg, c in terms.items()}
+                val_b = sum((c * (b_hi ** deg) for deg, c in anti.items()), Fraction(0))
+                val_a = sum((c * (a_lo ** deg) for deg, c in anti.items()), Fraction(0))
+                res = val_b - val_a
+                disp = self._format_fraction(res)
+                anti_s = self._format_poly(anti)
+                steps = [
+                    DerivationStep(1, "Find antiderivative F(x)", "\\int c x^n dx = \\frac{c}{n+1} x^{n+1}", f"F(x) = {anti_s}", anti_s),
+                    DerivationStep(2, "Evaluate F(b) - F(a)", "F(b) - F(a)", f"({self._format_fraction(val_b)}) - ({self._format_fraction(val_a)}) = {disp}", disp),
+                ]
+                receipt = self._build_receipt("calculus", "mathematics", "definite_integral", "calc.poly_definite_integral", {"poly": integ_m.group(1).strip(), "a": str(a_lo), "b": str(b_hi)}, str(res), disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "calculus", "definite_integral", "calc.poly_definite_integral", float(res), disp, "", steps, receipt, f"Definite integral evaluates to {disp}.")
+
+        # GCD / LCM
+        gcd_m = re.search(r"\b(gcd|greatest common divisor|lcm|least common multiple)\b(?:\s+of)?\s*[:(]?\s*(-?\d+(?:\s*(?:,|and)\s*-?\d+)+)", q, re.I)
+        if gcd_m:
+            kind = gcd_m.group(1).lower()
+            nums = [abs(int(x)) for x in re.findall(r"-?\d+", gcd_m.group(2))]
+            if len(nums) >= 2 and len(nums) <= 16:
+                val = math.gcd(*nums) if ("gcd" in kind or "greatest" in kind) else math.lcm(*nums)
+                fid = "math.gcd" if ("gcd" in kind or "greatest" in kind) else "math.lcm"
+                disp = str(val)
+                steps = [DerivationStep(1, f"Compute {fid.split('.')[-1].upper()}", f"\\text{{{fid.split('.')[-1]}}}({nums})", disp, disp)]
+                receipt = self._build_receipt("number_theory", "mathematics", fid.split(".")[-1], fid, {"values": str(nums)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "number_theory", fid.split(".")[-1], fid, float(val), disp, "", steps, receipt, f"{fid.split('.')[-1].upper()} is {disp}.")
+
+        # Descriptive statistics: median / variance / std dev
+        stat_m = re.search(r"\b(median|population\s+variance|variance|standard\s+deviation|std\s*dev)\b\s+of(?:\s+these\s+numbers)?\s*[:\-]?\s*(-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?)+)", q, re.I)
+        if stat_m:
+            kind = stat_m.group(1).lower()
+            nums = [self._normalize_num(x.strip()) for x in stat_m.group(2).split(",")]
+            if len(nums) >= 2:
+                s_nums = sorted(nums)
+                n = len(s_nums)
+                if "median" in kind:
+                    med = s_nums[n // 2] if n % 2 == 1 else (s_nums[n // 2 - 1] + s_nums[n // 2]) / 2
+                    disp = self._format_fraction(med)
+                    steps = [DerivationStep(1, "Sort values and select midpoint", "\\text{median}", f"sorted={[self._format_fraction(v) for v in s_nums]} -> {disp}", disp)]
+                    receipt = self._build_receipt("statistics", "mathematics", "median", "stats.median", {"n": str(n)}, str(med), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "statistics", "median", "stats.median", float(med), disp, "", steps, receipt, f"Median is {disp}.")
+                mean_val = sum(nums, Fraction(0)) / Fraction(n)
+                var_val = sum(((v - mean_val) ** 2 for v in nums), Fraction(0)) / Fraction(n)
+                if "variance" in kind:
+                    disp = self._format_fraction(var_val)
+                    steps = [DerivationStep(1, "Compute population variance", "\\sigma^2 = \\frac{1}{N}\\sum (x_i - \\mu)^2", f"\\mu={self._format_fraction(mean_val)}, \\sigma^2={disp}", disp)]
+                    receipt = self._build_receipt("statistics", "mathematics", "variance", "stats.variance", {"n": str(n)}, str(var_val), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "statistics", "variance", "stats.variance", float(var_val), disp, "", steps, receipt, f"Population variance is {disp}.")
+                std_float = math.sqrt(float(var_val))
+                disp = f"{std_float:.4f}".rstrip("0").rstrip(".") or "0"
+                steps = [DerivationStep(1, "Compute population standard deviation", "\\sigma = \\sqrt{\\sigma^2}", f"\\sigma = \\sqrt{{{float(var_val):.6g}}} = {disp}", disp)]
+                receipt = self._build_receipt("statistics", "mathematics", "std_dev", "stats.std_dev", {"n": str(n)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "statistics", "std_dev", "stats.std_dev", std_float, disp, "", steps, receipt, f"Population standard deviation is {disp}.")
+
+        return None
+
+    # --------------------------------------------------------------------------
+    # 19. Safe Zero-Eval AST Math Evaluator & E-Graph Algebraic Equivalence Check
+    # --------------------------------------------------------------------------
+    def _eval_safe_ast_expr(self, expr: str, env: Optional[Dict[str, Fraction]] = None) -> Tuple[Optional[Fraction], Optional[float], str]:
+        """Evaluate arithmetic/scientific expression via ast.parse (zero eval/exec).
+
+        Returns `(exact_fraction_or_none, float_value_or_none, mode)`.
+        Inspired by kai9987kai/Calculators + Supermix-Poseidon/athenaeum.py.
+        """
+        text = str(expr or "").strip()
+        if not text or len(text) > 256:
+            return None, None, "invalid"
+        cleaned = (
+            text.replace("×", "*")
+            .replace("÷", "/")
+            .replace("−", "-")
+            .replace("^", "**")
+        )
+        cleaned = re.sub(r"(?<=\d)\s*[xX]\s*(?=-?\d|\()", " * ", cleaned)
+        try:
+            tree = ast.parse(cleaned, mode="eval")
+        except SyntaxError:
+            return None, None, "syntax_error"
+
+        rational_only = True
+        scope = dict(env or {})
+        scientific_consts = {"pi": math.pi, "e": math.e, "tau": math.tau}
+        exact_funcs = {
+            "abs": abs,
+            "min": min,
+            "max": max,
+            "sum": lambda xs: sum(xs),
+            "gcd": math.gcd,
+            "lcm": math.lcm,
+            "comb": math.comb,
+            "perm": math.perm,
+            "factorial": math.factorial,
+        }
+        float_funcs = {
+            "sqrt": math.sqrt,
+            "sin": math.sin,
+            "cos": math.cos,
+            "tan": math.tan,
+            "log": math.log,
+            "log10": math.log10,
+            "log2": math.log2,
+            "exp": math.exp,
+            "round": round,
+            "floor": math.floor,
+            "ceil": math.ceil,
+        }
+
+        bin_ops = {
+            ast.Add: _op.add,
+            ast.Sub: _op.sub,
+            ast.Mult: _op.mul,
+            ast.Div: _op.truediv,
+            ast.FloorDiv: _op.floordiv,
+            ast.Mod: _op.mod,
+            ast.Pow: _op.pow,
+        }
+
+        def _walk_exact(node: ast.AST) -> Any:
+            if isinstance(node, ast.Expression):
+                return _walk_exact(node.body)
+            if isinstance(node, ast.Constant):
+                if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+                    raise ValueError("Unsupported constant")
+                if len(str(node.value)) > 48:
+                    raise ValueError("Constant too long")
+                return Fraction(Decimal(str(node.value))) if isinstance(node.value, float) else Fraction(node.value)
+            if isinstance(node, ast.Name):
+                if node.id in scope:
+                    return scope[node.id]
+                raise ValueError(f"Non-rational symbol: {node.id}")
+            if isinstance(node, ast.UnaryOp):
+                val = _walk_exact(node.operand)
+                if isinstance(node.op, ast.UAdd):
+                    return val
+                if isinstance(node.op, ast.USub):
+                    return -val
+                raise ValueError("Unsupported unary op")
+            if isinstance(node, ast.BinOp):
+                left = _walk_exact(node.left)
+                right = _walk_exact(node.right)
+                fn = bin_ops.get(type(node.op))
+                if fn is None:
+                    raise ValueError("Unsupported binary op")
+                if isinstance(node.op, ast.Pow):
+                    if right.denominator != 1 or abs(right.numerator) > 64:
+                        raise ValueError("Exponent out of exact rational bounds")
+                    return left ** right.numerator
+                if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
+                    raise ZeroDivisionError("division by zero")
+                return fn(left, right)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                fname = node.func.id
+                if fname not in exact_funcs or node.keywords:
+                    raise ValueError(f"Unsupported exact fn: {fname}")
+                args = [_walk_exact(a) for a in node.args]
+                if fname in ("gcd", "lcm", "comb", "perm", "factorial"):
+                    int_args = [int(a) for a in args if a.denominator == 1]
+                    if len(int_args) != len(args):
+                        raise ValueError("Integer argument required")
+                    if fname == "factorial" and (len(int_args) != 1 or not (0 <= int_args[0] <= 170)):
+                        raise ValueError("Factorial out of bounds")
+                    if fname in ("comb", "perm") and any(a < 0 or a > 1000 for a in int_args):
+                        raise ValueError("Combinatoric bound exceeded")
+                    return Fraction(exact_funcs[fname](*int_args))
+                if fname == "sum" and len(args) == 1 and isinstance(args[0], (list, tuple)):
+                    return Fraction(sum(args[0], Fraction(0)))
+                return exact_funcs[fname](*args)
+            if isinstance(node, (ast.List, ast.Tuple)):
+                return [_walk_exact(e) for e in node.elts]
+            raise ValueError(f"Unsupported AST node: {type(node).__name__}")
+
+        def _walk_float(node: ast.AST) -> Any:
+            if isinstance(node, ast.Expression):
+                return _walk_float(node.body)
+            if isinstance(node, ast.Constant):
+                if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+                    raise ValueError("Unsupported constant")
+                return float(node.value)
+            if isinstance(node, ast.Name):
+                if node.id in scope:
+                    return float(scope[node.id])
+                if node.id in scientific_consts:
+                    return float(scientific_consts[node.id])
+                raise ValueError(f"Unknown symbol: {node.id}")
+            if isinstance(node, ast.UnaryOp):
+                val = _walk_float(node.operand)
+                if isinstance(node.op, ast.UAdd):
+                    return val
+                if isinstance(node.op, ast.USub):
+                    return -val
+                raise ValueError("Unsupported unary op")
+            if isinstance(node, ast.BinOp):
+                left = _walk_float(node.left)
+                right = _walk_float(node.right)
+                fn = bin_ops.get(type(node.op))
+                if fn is None:
+                    raise ValueError("Unsupported binary op")
+                if isinstance(node.op, ast.Pow) and abs(right) > 256:
+                    raise ValueError("Exponent too large")
+                if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
+                    raise ZeroDivisionError("division by zero")
+                return float(fn(left, right))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                fname = node.func.id
+                if node.keywords:
+                    raise ValueError("Keywords unsupported")
+                args = [_walk_float(a) for a in node.args]
+                if fname in float_funcs:
+                    return float(float_funcs[fname](*args))
+                if fname in exact_funcs:
+                    if fname in ("gcd", "lcm", "comb", "perm", "factorial"):
+                        int_args = [int(a) for a in args]
+                        if fname == "factorial" and (len(int_args) != 1 or not (0 <= int_args[0] <= 170)):
+                            raise ValueError("Factorial out of bounds")
+                        return float(exact_funcs[fname](*int_args))
+                    return float(exact_funcs[fname](*args))
+                raise ValueError(f"Unsupported fn: {fname}")
+            if isinstance(node, (ast.List, ast.Tuple)):
+                return [_walk_float(e) for e in node.elts]
+            raise ValueError(f"Unsupported AST node: {type(node).__name__}")
+
+        try:
+            frac = _walk_exact(tree)
+            if isinstance(frac, Fraction):
+                val_f = float(frac)
+                if math.isfinite(val_f):
+                    return frac, val_f, "exact_fraction"
+        except ZeroDivisionError:
+            return None, None, "zero_division"
+        except Exception:
+            rational_only = False
+
+        if not rational_only:
+            try:
+                val_f = _walk_float(tree)
+                if isinstance(val_f, float) and math.isfinite(val_f):
+                    return None, val_f, "scientific_float"
+            except Exception:
+                return None, None, "eval_failed"
+        return None, None, "unsupported"
+
+    def _solve_safe_ast_math(self, q: str) -> Optional[SolverResult]:
+        lower = q.lower()
+        if any(
+            bad in lower
+            for bad in (
+                "not", "never", "without", "approx", "verify proof", "check proof",
+                "denoise thought", "import ", "__", "eval", "exec", "lambda",
+                "sequence", "average", "mean", "cns", "male cns", "solve for ",
+                "nums =", "range(", ".count(", "for ", "while ",
+            )
+        ):
+            return None
+
+        candidate = q.strip()
+        prefix_m = re.match(
+            r"^\s*(?:please\s+)?(?:what\s+is|compute|calculate|evaluate|solve(?:\s+this\s+(?:basic\s+)?math\s+problem)?)\s*[:\-]?\s*(.+?)\s*[?!.]?\s*$",
+            candidate,
+            re.I,
+        )
+        expr = prefix_m.group(1) if prefix_m else candidate.rstrip("?!. ")
+        # Require either mathematical operators or whitelisted math functions, no prose sentences
+        if not any(op in expr for op in ("+", "-", "*", "/", "^", "×", "÷", "%", "(")):
+            return None
+        stripped_fn = re.sub(r"\b(?:sqrt|sin|cos|tan|log10|log2|log|exp|abs|min|max|gcd|lcm|comb|perm|factorial|round|floor|ceil|pi|e|tau)\b", "", expr)
+        if re.search(r"[a-zA-Z_]", stripped_fn):
+            return None
+
+        frac, val_f, mode = self._eval_safe_ast_expr(expr)
+        if val_f is None:
+            return None
+        if frac is not None:
+            disp = self._format_fraction(frac)
+            raw_str = str(frac)
+        else:
+            disp = f"{val_f:.6f}".rstrip("0").rstrip(".") or "0"
+            raw_str = disp
+        steps = [
+            DerivationStep(
+                1,
+                f"Evaluate mathematical expression via zero-eval AST ({mode})",
+                expr,
+                f"{expr} = {disp}",
+                disp,
+            )
+        ]
+        receipt = self._build_receipt(
+            "ast_math",
+            "mathematics",
+            "expression_eval",
+            f"math.safe_ast.{mode}",
+            {"expression": expr},
+            raw_str,
+            disp,
+            "dimensionless",
+            steps,
+        )
+        return SolverResult(
+            True,
+            q,
+            "mathematics",
+            "ast_math",
+            "expression_eval",
+            f"math.safe_ast.{mode}",
+            val_f,
+            disp,
+            "",
+            steps,
+            receipt,
+            f"Exact AST evaluation: {expr} = {disp}.",
+        )
+
+    def verify_algebraic_equivalence(self, lhs_expr: str, rhs_expr: str) -> Dict[str, Any]:
+        """Deterministically verify whether two algebraic expressions agree across rational probe points."""
+        lhs = str(lhs_expr or "").strip().replace("^", "**")
+        rhs = str(rhs_expr or "").strip().replace("^", "**")
+        probes = [
+            {"x": Fraction(2), "y": Fraction(3), "a": Fraction(5), "b": Fraction(7)},
+            {"x": Fraction(-3), "y": Fraction(5), "a": Fraction(2), "b": Fraction(-4)},
+            {"x": Fraction(7, 2), "y": Fraction(-1, 3), "a": Fraction(3, 5), "b": Fraction(4, 7)},
+        ]
+        diffs: List[float] = []
+        for env in probes:
+            _, v_l, m_l = self._eval_safe_ast_expr(lhs, env=env)
+            _, v_r, m_r = self._eval_safe_ast_expr(rhs, env=env)
+            if v_l is None or v_r is None:
+                return {"equivalent": False, "reason": f"eval_failed:{m_l}:{m_r}", "answer_authority": False}
+            diffs.append(abs(v_l - v_r))
+        max_diff = max(diffs) if diffs else 1.0
+        equivalent = max_diff <= 1e-9
+        return {
+            "equivalent": equivalent,
+            "max_probe_diff": max_diff,
+            "probes_checked": len(probes),
+            "answer_authority": bool(equivalent),
+        }
 
     def _build_receipt(
         self,

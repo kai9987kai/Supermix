@@ -276,6 +276,8 @@ def _scf_verify_reply(asked: str, normalised_query: str, reply: str) -> Optional
             "model_agrees": agrees,
             "independent_certificate": res.get("independent_certificate"),
             "proof_capsule": res.get("proof_capsule"),
+            "derivation_steps": res.get("derivation_steps") or [],
+            "explanation": res.get("explanation") or "",
         }
     except Exception:
         return None
@@ -312,12 +314,22 @@ def _scf_runtime_trace(
         )
         rec = res.get("receipt") or {}
         routing = res.get("routing") or {}
+        assessment = routing.get("assessment") or {}
+        ws = (res.get("memory") or {}).get("working_state") or {}
         return {
             "scf_active": bool(res.get("scf_active")),
             "verified": bool(res.get("verified")),
             "final_answer": res.get("final_answer"),
             "selected_family": routing.get("selected_family"),
-            "domain": (routing.get("assessment") or {}).get("domain"),
+            "domain": assessment.get("domain"),
+            "submode": assessment.get("submode"),
+            "assistant_synthesis": res.get("assistant_synthesis"),
+            "memory_summary": {
+                "turn_count": ws.get("turn_count", 0),
+                "style_preference": ws.get("style_preference") or "",
+                "active_commitments": len(ws.get("active_commitments") or []),
+                "open_questions": len(ws.get("open_questions") or []),
+            },
             "decoding_policy": (res.get("adaptive_budget") or {}).get("decoding_policy"),
             "experimental_components_used": rec.get("experimental_components_used") or [],
             "production_ready_claim": bool(rec.get("production_ready_claim", False)),
@@ -486,6 +498,10 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
             return []
         with sessions_guard:
             return list(sessions.get(session_id, []))[-history_turns:]
+
+    def session_turns_for(session_id: str, limit: int = 10) -> List[Tuple[str, str]]:
+        with sessions_guard:
+            return list(sessions.get(session_id, []))[-max(1, int(limit)):]
 
     def remember(session_id: str, user: str, reply: str) -> None:
         with sessions_guard:
@@ -903,7 +919,7 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
                         reply,
                         loaded.name,
                         options.get("mode", "greedy"),
-                        history,
+                        session_turns_for(options["session_id"]),
                     )
                 remember(options["session_id"], options["message"], reply)
                 with stats_guard:
@@ -928,7 +944,7 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
 
 
 PAGE = r"""<!doctype html><meta charset="utf-8">
-<title>Supermix Chat · v99 / SCF Cognitive Fabric</title>
+<title>Supermix Chat · v101 / SCF Cognitive Fabric</title>
 <style>
 :root{--bg:#0b101b;--panel:#131b2b;--card:#182236;--ink:#e9eff8;--dim:#8ea0be;--line:#26344f;--accent:#60a5fa;--accent2:#a78bfa;--ok:#34d399;--bad:#f87171}
 *{box-sizing:border-box}
@@ -953,6 +969,13 @@ main{max-width:980px;width:100%;margin:0 auto;padding:18px;flex:1;display:flex;f
 .recalled{background:#4f1919;color:#fca5a5}.partial{background:#4a3c16;color:#fde68a}.novel{background:#123d2a;color:#86efac}
 .tele{margin-top:6px;padding:6px 10px;border-radius:6px;background:#0e1524;border:1px solid var(--line);font-size:11.5px;color:#b8c7e0;font-variant-numeric:tabular-nums}
 details.proof{margin-top:6px;font-size:11.5px;color:var(--dim)}details.proof summary{cursor:pointer;color:var(--accent)}details.proof pre{margin:6px 0 0;padding:8px;border-radius:6px;background:#0b101b;border:1px solid var(--line);overflow:auto;color:#cfe0fa;font-size:11px}
+.synthesis{margin-top:8px;padding:9px 12px;border-radius:8px;background:#0e172a;border:1px solid #2b426b;font-size:12.5px;line-height:1.45;color:#dbe7fb}
+.synthesis .syn-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:600;color:#93c5fd;margin-bottom:4px}
+.synthesis .syn-tag{font-size:10.5px;padding:1px 6px;border-radius:999px;border:1px solid #355282;color:#b8d4ff}
+.synthesis .syn-tag.ok{border-color:#265b41;color:#86efac}
+.synthesis ul{margin:5px 0 0 18px;padding:0}
+.synthesis li{margin:2px 0;color:#cbd8ef}
+.synthesis .syn-ask{margin-top:6px;padding-top:5px;border-top:1px dashed #25385c;font-size:12px;color:#fcd34d}
 form{display:flex;gap:8px;margin-top:14px;align-items:flex-end}form input,form textarea{flex:1}
 textarea{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font:inherit;resize:vertical;min-height:36px}
 #send{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#07101f;font-weight:700;border:none}
@@ -995,6 +1018,10 @@ textarea{background:var(--panel);color:var(--ink);border:1px solid var(--line);b
     <button type="button" class="chip" onclick="usePrompt('How many Li20 neurons does the male CNS contain?')">Connectome Li20</button>
     <button type="button" class="chip" onclick="usePrompt('In the male CNS, how many synapses does type Tm2 make onto type Dm3c?')">Connectome Tm2-&gt;Dm3c</button>
     <button type="button" class="chip" onclick="usePrompt('Find the impulse delivered by 41 N applied for 5 s.')">Physics impulse</button>
+    <button type="button" class="chip" onclick="usePrompt('Solve x + y = 10 and x - y = 2')">System 2x2</button>
+    <button type="button" class="chip" onclick="usePrompt('Integrate 6x^2 + 2x from x = 0 to x = 2')">Calculus Integral</button>
+    <button type="button" class="chip" onclick="usePrompt('Brainstorm ways to cut Python CPU inference latency cleanly')">Brainstorm Ideas</button>
+    <button type="button" class="chip" onclick="usePrompt('How should I debug an intermittent async race condition step by step?')">Debug Race Bug</button>
     <button type="button" class="chip" onclick="usePrompt('can you help me with tests')">Coding chat</button>
   </div>
   <div id="log"></div>
@@ -1018,8 +1045,10 @@ async function loadModels(){
   const r = await fetch('/api/models'); const d = await r.json();
   el('model').innerHTML = d.models.map(m => {
     const a = m.architecture || {};
-    const tag = a.cns_divisive_norm ? ' [v100 DivNorm]'
-      : a.cns_predictive_error ? (String(a.run_name||m.name).includes('v99') ? ' [v99 PredErr]' : ' [v98 PredErr]')
+    const rname = String(a.run_name||m.name);
+    const tag = rname.includes('v101') ? ' [v101 Cognitive]'
+      : a.cns_divisive_norm ? ' [v100 DivNorm]'
+      : a.cns_predictive_error ? (rname.includes('v99') ? ' [v99 PredErr]' : ' [v98 PredErr]')
       : a.cns_hebbian_trace ? ' [v97 Hebbian]' : a.cns_core ? ' [CNS]' : '';
     return `<option value="${m.name}">${m.name}${tag}${m.resident?' •':''}</option>`;
   }).join('');
@@ -1075,6 +1104,28 @@ function renderAnnotations(bot, data){
     const sc = data.scf_check;
     const tag = sc.model_agrees === true ? 'SCF VERIFIED MATCH' : (sc.model_agrees === false ? 'SCF VERIFIED OVERRIDE' : 'SCF VERIFIED');
     bot.appendChild(badge(sc.model_agrees === false ? 'check bad' : 'check ok', `${tag}: ${sc.verified_answer} (${sc.verifier_source})`));
+  }
+  if(data.scf_runtime && data.scf_runtime.assistant_synthesis){
+    const syn = data.scf_runtime.assistant_synthesis;
+    const box = document.createElement('div'); box.className = 'synthesis';
+    const head = document.createElement('div'); head.className = 'syn-head';
+    const titleSpan = document.createElement('span'); titleSpan.textContent = syn.title || 'Cognitive Synthesis';
+    const authSpan = document.createElement('span'); authSpan.className = 'syn-tag' + (syn.answer_authority ? ' ok' : '');
+    authSpan.textContent = syn.answer_authority ? 'VERIFIED' : 'ADVISORY';
+    head.appendChild(titleSpan); head.appendChild(authSpan);
+    box.appendChild(head);
+    if(syn.summary){ const p = document.createElement('div'); p.textContent = syn.summary; box.appendChild(p); }
+    if(Array.isArray(syn.bullets) && syn.bullets.length){
+      const ul = document.createElement('ul');
+      for(const b of syn.bullets){ const li = document.createElement('li'); li.textContent = b; ul.appendChild(li); }
+      box.appendChild(ul);
+    }
+    if(Array.isArray(syn.clarifying_questions) && syn.clarifying_questions.length){
+      const ask = document.createElement('div'); ask.className = 'syn-ask';
+      ask.textContent = 'Clarify: ' + syn.clarifying_questions.join(' · ');
+      box.appendChild(ask);
+    }
+    bot.appendChild(box);
   }
   if(data.scf_runtime || (data.scf_check && (data.scf_check.independent_certificate || data.scf_check.proof_capsule))){
     const det = document.createElement('details'); det.className='proof';
@@ -1236,6 +1287,7 @@ def discover_default_models(root: Optional[Path] = None) -> Dict[str, str]:
     candidates = (
         ("v96_physio_neurogenesis", "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt"),
         ("v100_scf_balanced", "output/v100_scf_balanced/v100_scf_balanced.selected.pt"),
+        ("v101_scf_cognitive", "output/v101_scf_cognitive/v101_scf_cognitive.pt"),
         ("v98_scf_predictive", "output/v98_scf_predictive/v98_scf_predictive.selected.pt"),
         ("v99_scf_evolution", "output/v99_scf_evolution/v99_scf_evolution.selected.pt"),
         ("v97_scf_connectome", "output/v97_scf_connectome/v97_scf_connectome.selected.pt"),

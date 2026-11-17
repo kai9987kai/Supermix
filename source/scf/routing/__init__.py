@@ -45,6 +45,14 @@ class SCFRouter:
         r"folding|crystal|cif|mattergen)\b",
         re.IGNORECASE,
     )
+    _IDEATION_RE = re.compile(
+        r"\b(brainstorm|ideas?|invent|innovat(?:e|ion)|creative|novel|concept|what if|ways to|alternatives?)\b",
+        re.IGNORECASE,
+    )
+    _PROBLEM_SOLVING_RE = re.compile(
+        r"\b(debug|diagnose|troubleshoot|root cause|failing|crash|trade-?offs?|optimi[sz]e|architect(?:ure)?|fix\b|design\b|plan\b|step by step|how should i)\b",
+        re.IGNORECASE,
+    )
 
     def __init__(self, registry: Optional[SCFModelRegistry] = None) -> None:
         self.registry = registry or SCFModelRegistry()
@@ -69,6 +77,8 @@ class SCFRouter:
         is_causal = bool(self._CAUSAL_EPISTEMIC_RE.search(text)) or (norm.rule == "causal_intervention")
         is_connectome = bool(self._CONNECTOME_RE.search(text)) or (norm.rule or "").startswith("cns_")
         is_multimodal = bool(self._MULTIMODAL_RE.search(text))
+        is_ideation = bool(self._IDEATION_RE.search(text))
+        is_problem_solving = bool(self._PROBLEM_SOLVING_RE.search(text))
 
         domain = "general"
         if is_connectome:
@@ -82,16 +92,26 @@ class SCFRouter:
         elif is_multimodal:
             domain = "multimodal"
 
+        if is_ideation:
+            submode = "ideation"
+        elif domain in {"math_science", "code", "connectome"}:
+            submode = domain
+        elif is_problem_solving or is_causal:
+            submode = "problem_solving"
+        else:
+            submode = "dialogue"
+
         token_count = len(text.split())
         complexity = (
             "high"
             if (token_count >= 25 or is_causal or (is_math and is_code))
             else "medium"
-            if (token_count >= 10 or is_math or is_code or is_connectome or is_multimodal)
+            if (token_count >= 10 or is_math or is_code or is_connectome or is_multimodal or is_ideation or is_problem_solving)
             else "low"
         )
         return {
             "domain": domain,
+            "submode": submode,
             "complexity": complexity,
             "normalised_prompt": norm.prompt,
             "normalisation_rule": norm.rule,
@@ -103,6 +123,8 @@ class SCFRouter:
                 "causal_epistemic": is_causal,
                 "connectome": is_connectome,
                 "multimodal": is_multimodal,
+                "ideation": is_ideation,
+                "problem_solving": is_problem_solving,
             },
         }
 

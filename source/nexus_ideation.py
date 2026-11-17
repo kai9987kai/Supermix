@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -145,112 +144,244 @@ class NexusIdeationEngine:
         ("Quantum Superposition Search", "Maintaining multiple speculative hypotheses in parallel until evidence triggers constructive collapse."),
     ]
 
-    def brainstorm(self, topic: str, count: int = 6) -> IdeationResult:
-        """Generate structured innovative concepts across SCAMPER, TRIZ, and Analogies."""
-        clean_topic = topic.strip()
+    @staticmethod
+    def _extract_topic_profile(
+        topic: str,
+        constraints: Optional[Sequence[str]] = None,
+        domain_hint: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        lower = topic.lower()
+        stop = {
+            "the", "and", "for", "with", "into", "that", "this", "from", "how",
+            "can", "what", "why", "way", "ways", "idea", "ideas", "brainstorm",
+            "make", "better", "improve", "new", "more", "help", "about", "our",
+        }
+        keywords = [
+            w for w in re.findall(r"[a-zA-Z0-9_+-]{3,}", lower)
+            if w not in stop
+        ]
+        # Preserve order without duplicates
+        unique_kw = list(dict.fromkeys(keywords))[:8]
+        focus_phrase = ", ".join(unique_kw[:4]) if unique_kw else topic.strip()
+
+        detected_domain = domain_hint or "general"
+        if detected_domain == "general":
+            if any(k in lower for k in ("latency", "memory", "cache", "server", "api", "database", "bug", "race", "queue", "code", "rust", "python", "gpu", "cpu")):
+                detected_domain = "software_systems"
+            elif any(k in lower for k in ("model", "llm", "neural", "train", "token", "inference", "eval", "dataset", "attention", "moe", "connectome")):
+                detected_domain = "ml_ai"
+            elif any(k in lower for k in ("math", "equation", "proof", "physics", "energy", "circuit", "chemistry", "bio")):
+                detected_domain = "math_science"
+            elif any(k in lower for k in ("user", "ui", "chat", "design", "app", "product", "workflow", "onboarding")):
+                detected_domain = "product_ux"
+
+        domain_lever_map = {
+            "software_systems": ("hot-path serialization / lock contention", "lock-free batching, bounded caches, and replayable state checks", "p99 latency, RSS memory, and race-condition error rate"),
+            "ml_ai": ("static full-depth compute per token", "verified early-exit routing, sparse expert gating, and failure-aware distillation", "held-out accuracy, tokens/sec, and calibration drift"),
+            "math_science": ("single-pass heuristic estimation", "symbolic invariant decompositions paired with dimensional/boundary assertions", "exact conservation residuals, edge-case coverage, and step fidelity"),
+            "product_ux": ("multi-step modal friction", "progressive disclosure, sticky user context, and undoable micro-actions", "task completion time, retention, and accidental-reset rate"),
+            "general": ("monolithic linear execution", "modular decoupled stages with early feedback and falsifiable checkpoints", "throughput, defect rate, and iteration speed"),
+        }
+        bottleneck, lever, metric = domain_lever_map.get(detected_domain, domain_lever_map["general"])
+        clean_constraints = [str(c).strip() for c in (constraints or ()) if str(c).strip()][:4]
+        return {
+            "domain": detected_domain,
+            "keywords": unique_kw,
+            "focus_phrase": focus_phrase,
+            "bottleneck": bottleneck,
+            "lever": lever,
+            "metric": metric,
+            "constraints": clean_constraints,
+        }
+
+    @staticmethod
+    def _concept_tokens(concept: IdeaConcept) -> set:
+        return set(re.findall(r"[a-z0-9_+-]{3,}", f"{concept.title} {concept.description} {concept.mechanism}".lower()))
+
+    @classmethod
+    def _select_map_elites_diverse(cls, concepts: List[IdeaConcept], target_count: int) -> List[IdeaConcept]:
+        """SONAPSE-ORIGIN MAP-Elites 2D niche selection + NoveltySearch distance pruning."""
+        grid: Dict[Tuple[int, int], IdeaConcept] = {}
+        f_vals = [float(c.feasibility) for c in concepts]
+        n_vals = [float(c.novelty) for c in concepts]
+        f_min, f_max = (min(f_vals), max(f_vals)) if f_vals else (0.0, 1.0)
+        n_min, n_max = (min(n_vals), max(n_vals)) if n_vals else (0.0, 1.0)
+        f_span = max(1e-6, f_max - f_min)
+        n_span = max(1e-6, n_max - n_min)
+        for c in concepts:
+            f_norm = (float(c.feasibility) - f_min) / f_span
+            n_norm = (float(c.novelty) - n_min) / n_span
+            ix = max(0, min(3, int(f_norm * 3.999)))
+            iy = max(0, min(3, int(n_norm * 3.999)))
+            c.metadata["map_elites_cell"] = [ix, iy]
+            cur = grid.get((ix, iy))
+            if cur is None or c.composite_score > cur.composite_score:
+                grid[(ix, iy)] = c
+
+        elites = sorted(grid.values(), key=lambda x: x.composite_score, reverse=True)
+        selected: List[IdeaConcept] = []
+        pool = elites + [c for c in sorted(concepts, key=lambda x: x.composite_score, reverse=True) if c not in elites]
+
+        for _ in range(min(target_count, len(pool))):
+            best_cand: Optional[IdeaConcept] = None
+            best_rank = -1.0
+            for cand in pool:
+                if cand in selected:
+                    continue
+                if not selected:
+                    nov_dist = 1.0
+                else:
+                    t_c = cls._concept_tokens(cand)
+                    dists = []
+                    for sel in selected:
+                        t_s = cls._concept_tokens(sel)
+                        union = len(t_c | t_s)
+                        dists.append(1.0 - (len(t_c & t_s) / max(1, union)))
+                    nov_dist = sum(dists) / max(1, len(dists))
+                cand.metadata["novelty_distance"] = round(nov_dist, 4)
+                rank = 0.72 * cand.composite_score + 0.28 * nov_dist
+                if rank > best_rank:
+                    best_rank = rank
+                    best_cand = cand
+            if best_cand is not None:
+                selected.append(best_cand)
+        return selected
+
+    def brainstorm(
+        self,
+        topic: str,
+        count: int = 6,
+        *,
+        constraints: Optional[Sequence[str]] = None,
+        domain_hint: Optional[str] = None,
+    ) -> IdeationResult:
+        """Generate context-grounded concepts across SCAMPER/TRIZ/Analogies with MAP-Elites diversity."""
+        clean_topic = topic.strip() or "system improvement"
+        prof = self._extract_topic_profile(clean_topic, constraints=constraints, domain_hint=domain_hint)
+        focus = prof["focus_phrase"]
+        lever = prof["lever"]
+        bottleneck = prof["bottleneck"]
+        metric = prof["metric"]
+        constraint_note = (
+            f" Respecting active constraints: {'; '.join(prof['constraints'])}."
+            if prof["constraints"]
+            else ""
+        )
+
+        candidates_spec = [
+            (
+                "scamper",
+                "SCAMPER:Eliminate",
+                f"Strip {bottleneck} from {focus}",
+                f"Target the dominant friction ({bottleneck}) in {clean_topic} before adding new layers.",
+                f"Bypass intermediate transformations using {lever}.{constraint_note}",
+                f"Hypothesis: falsification test — benchmark baseline vs bypassed path on {metric}; keep only if p95 improves with zero defect increase.",
+                0.94, 0.76, 0.88, 0.93,
+            ),
+            (
+                "scamper",
+                "SCAMPER:Combine",
+                f"Closed-Loop Critic + Fast Generator for {focus}",
+                f"Pair an optimistic fast generator for {clean_topic} with a lightweight invariant checker that intercepts failure modes early.",
+                f"Execute speculative/fast draft path alongside deterministic check gates and automatic fallback.{constraint_note}",
+                f"Hypothesis: falsification test — measure end-to-end {metric} against unverified single-pass execution under injected edge cases.",
+                0.89, 0.87, 0.95, 0.91,
+            ),
+            (
+                "scamper",
+                "SCAMPER:Reverse",
+                f"Inversion / Failure-First Design for {focus}",
+                f"Invert the usual design flow of {clean_topic}: start from hardest failure inputs ({bottleneck}) and constrain the architecture backwards.",
+                f"Build a joint-failure suite covering correlated failure modes (FAULTLINE pattern) before scaling capacity.{constraint_note}",
+                "Hypothesis: falsification test — test worst-slice robustness on held-out stress conditions compared against average-case tuning.",
+                0.85, 0.94, 0.92, 0.90,
+            ),
+            (
+                "scamper",
+                "SCAMPER:Adapt",
+                f"Surprise-Gated Adaptive Routing in {focus}",
+                f"Adapt biological prediction-error / homeostatic gating so {clean_topic} allocates extra compute only on high-uncertainty cases.",
+                f"Route routine queries through a fast minimal path and escalate only high-entropy / conflict cases to deep deliberation.{constraint_note}",
+                f"Hypothesis: falsification test — verify equal accuracy on hard slice while cutting mean compute/latency on {metric}.",
+                0.84, 0.92, 0.93, 0.88,
+            ),
+            (
+                "triz",
+                "TRIZ:Segmentation",
+                f"Subroutine Library & Modular Boundaries for {focus}",
+                f"Break {clean_topic} into independently testable primitives that must be rediscovered across >=2 tasks before promotion (Tessera pattern).",
+                f"Separate volatile heuristics from verified reusable kernels with clear rollback seams.{constraint_note}",
+                "Hypothesis: falsification test — verify reuse transfers positively on unseen compositions rather than memorizing training fixtures.",
+                0.90, 0.85, 0.91, 0.94,
+            ),
+            (
+                "triz",
+                "TRIZ:SelfService",
+                f"Receipt-Verified Self-Repair Loop for {focus}",
+                f"Instrument {clean_topic} so anomalous outputs trigger local containment, root-cause localization, and shadow validation prior to rollout.",
+                f"Require paired baseline-vs-candidate receipt improvement before any parameter or policy change promotes.{constraint_note}",
+                "Hypothesis: falsification test — confirm automated promotion rejects noisy single-seed blips under paired evaluation.",
+                0.87, 0.89, 0.94, 0.92,
+            ),
+            (
+                "analogy",
+                "Analogy:ImmuneMemory",
+                f"Multi-Tier Episodic & Conflict Memory for {focus}",
+                f"Treat edge-case bugs and past solutions in {clean_topic} like tiered immune memory: fast working buffer + surprise-weighted episodic recall + contradiction alerts.",
+                f"Index successful interventions and explicitly flag when new assumptions contradict established constraints.{constraint_note}",
+                "Hypothesis: falsification test — measure repeat-mistake reduction across multi-step sessions compared to stateless baseline.",
+                0.86, 0.91, 0.90, 0.89,
+            ),
+            (
+                "analogy",
+                "Analogy:VersionSpace",
+                f"Crosswire Hypothesis Preservation under Ambiguity ({focus})",
+                f"Instead of committing to one brittle guess on {clean_topic}, keep all surviving hypotheses consistent with observations and probe the sharpest disagreement.",
+                f"Run targeted disambiguating questions/checks whenever candidate hypotheses diverge.{constraint_note}",
+                "Hypothesis: falsification test — compare wrong-commitment rate on underspecified prompts vs single-best guessing.",
+                0.81, 0.96, 0.94, 0.86,
+            ),
+        ]
+
         concepts: List[IdeaConcept] = []
-
-        # 1. Apply SCAMPER operators
-        scamper_ops = [
-            ("SCAMPER:Combine", "Hybrid Synthesis Fusion", f"Explore fusing {clean_topic} with bounded feedback loops and distributed review.", "Prototype cross-stream coordination with explicit failure and rollback boundaries.", "Hypothesis: reduce single-point assumptions; measure flexibility, recovery time, and coordination cost.", 0.88, 0.92, 0.94, 0.85),
-            ("SCAMPER:Adapt", "Biomimetic Adaptive Scaling", f"Explore an immune-memory analogy for adapting and scaling {clean_topic}.", "Prototype affinity-based routing with bounded reinforcement and decay.", "Hypothesis: improve adaptation to novel conditions; benchmark latency, false routing, and stability.", 0.84, 0.95, 0.90, 0.89),
-            ("SCAMPER:Eliminate", "Direct-Path Data Flow", f"Test whether intermediate serialization or buffering can be reduced in {clean_topic}.", "Evaluate zero-copy streaming and bounded lock-free queues where platform semantics permit.", "Hypothesis: reduce latency or memory overhead; validate with profiling and concurrency stress tests.", 0.93, 0.82, 0.88, 0.91),
-            ("SCAMPER:Reverse", "Inverted Speculative Execution", f"Explore pre-computing bounded candidates before the full {clean_topic} request is available.", "Use draft trees only when a verifier can reject incorrect or stale candidates.", "Hypothesis: lower perceived latency without degrading verified quality; test acceptance and error rates.", 0.86, 0.93, 0.92, 0.87),
-        ]
-
-        for op, title, desc, mech, benefit, f_score, n_score, i_score, r_score in scamper_ops:
-            cid = f"scamper_{len(concepts)+1}"
+        for idx, (prefix, op, title, desc, mech, benefit, f_s, n_s, i_s, r_s) in enumerate(candidates_spec, start=1):
             concepts.append(
                 IdeaConcept(
-                    concept_id=cid,
+                    concept_id=f"{prefix}_{idx}",
                     title=title,
                     operator=op,
                     description=desc,
                     mechanism=mech,
                     target_benefit=benefit,
-                    feasibility=f_score,
-                    novelty=n_score,
-                    impact=i_score,
-                    robustness=r_score,
+                    feasibility=f_s,
+                    novelty=n_s,
+                    impact=i_s,
+                    robustness=r_s,
+                    metadata={"domain": prof["domain"], "keywords": prof["keywords"][:4]},
                 )
             )
 
-        # 2. Apply TRIZ principles
-        triz_ops = [
-            ("TRIZ:Segmentation", "Bounded Micro-Kernel Mesh", f"Decompose {clean_topic} into isolated micro-engines with explicit peer-message contracts.", "Prototype localized stopping policies and fail-closed coordination.", "Hypothesis: contain component failures; validate partial-failure behavior and recovery limits.", 0.90, 0.89, 0.93, 0.94),
-            ("TRIZ:Self-Service", "Receipt-Gated Recovery Loop", f"Equip {clean_topic} with verifiers that can propose, check, and roll back bounded corrections.", "Track externally verified outcomes before any policy or parameter update.", "Hypothesis: reduce some manual recovery work while retaining review, audit, and override controls.", 0.89, 0.91, 0.95, 0.90),
-        ]
-
-        for op, title, desc, mech, benefit, f_score, n_score, i_score, r_score in triz_ops:
-            cid = f"triz_{len(concepts)+1}"
-            concepts.append(
-                IdeaConcept(
-                    concept_id=cid,
-                    title=title,
-                    operator=op,
-                    description=desc,
-                    mechanism=mech,
-                    target_benefit=benefit,
-                    feasibility=f_score,
-                    novelty=n_score,
-                    impact=i_score,
-                    robustness=r_score,
-                )
-            )
-
-        # 3. Apply Cross-Domain Analogical Mappings
-        analogy_ops = [
-            ("Analogy:MultiBranch", "Multi-Branch Hypothesis Set", f"Maintain several bounded hypotheses for {clean_topic} until discriminating evidence is available.", "Compare candidates under a declared test protocol with pruning based on measured outcomes.", "Hypothesis: reduce premature convergence; compare against a single-candidate baseline at matched compute.", 0.82, 0.96, 0.96, 0.84),
-            ("Analogy:MycelialStigmergy", "Decaying Coordination Trace", f"Coordinate distributed tasks in {clean_topic} through inspectable, expiring state traces.", "Use decay, provenance, and bounded reinforcement for routing hints.", "Hypothesis: reduce central coordination pressure; measure bottlenecks, stale-state errors, and recovery.", 0.87, 0.94, 0.91, 0.92),
-        ]
-
-        for op, title, desc, mech, benefit, f_score, n_score, i_score, r_score in analogy_ops:
-            cid = f"analogy_{len(concepts)+1}"
-            concepts.append(
-                IdeaConcept(
-                    concept_id=cid,
-                    title=title,
-                    operator=op,
-                    description=desc,
-                    mechanism=mech,
-                    target_benefit=benefit,
-                    feasibility=f_score,
-                    novelty=n_score,
-                    impact=i_score,
-                    robustness=r_score,
-                )
-            )
-
-        # 4. Compute Pareto-Optimal Frontier
         pareto = self._compute_pareto_frontier(concepts)
         for c in concepts:
             c.is_pareto_optimal = c in pareto
 
-        # Sort concepts by composite score descending
-        concepts.sort(key=lambda x: x.composite_score, reverse=True)
+        selected = self._select_map_elites_diverse(concepts, max(1, int(count)))
         pareto.sort(key=lambda x: x.composite_score, reverse=True)
-
-        # 5. Synthesize a testable hybrid hypothesis. The ranking is static and
-        # must not be presented as empirical evidence.
-        top_concepts = pareto[:3] if len(pareto) >= 3 else concepts[:3]
+        top_concepts = selected[:3] if len(selected) >= 3 else concepts[:3]
         synthesis = (
-            f"### Testable Hybrid Hypothesis for '{clean_topic}'\n\n"
-            "The authored FNIR rankings prioritize three concepts for investigation; they do not validate them: "
-            f"**{top_concepts[0].title}** + **{top_concepts[1].title}** + **{top_concepts[2].title}**.\n\n"
-            f"1. **Prototype boundary**: {top_concepts[0].mechanism}\n"
-            f"2. **Comparison mechanism**: {top_concepts[1].mechanism}\n"
-            f"3. **Safety and quality check**: {top_concepts[2].mechanism}\n\n"
-            "**Validation required**: define a baseline, matched-compute protocol, failure cases, rollback criteria, "
-            "and held-out outcome metrics before treating any projected benefit as established."
+            f"### Convergent Action Plan for '{clean_topic}' ({prof['domain']})\n\n"
+            "Ranked via MAP-Elites niche coverage (Feasibility x Novelty) + Pareto FNIR trade-offs (advisory heuristic):\n"
+            f"- **Quick Win (High Feasibility)**: **{top_concepts[0].title}** — {top_concepts[0].mechanism}\n"
+            f"- **Core Lever**: **{top_concepts[1].title}** — {top_concepts[1].mechanism}\n"
+            f"- **Breakthrough / Contrarian Angle**: **{top_concepts[2].title}** — {top_concepts[2].mechanism}\n\n"
+            f"**Validation required**: track `{metric}` on a paired baseline vs candidate sweep; use {top_concepts[0].target_benefit}"
         )
 
-        # 6. Emits Cryptographic Ideation Receipt
-        receipt = self._build_receipt(clean_topic, concepts, pareto)
-
+        receipt = self._build_receipt(clean_topic, selected, pareto)
         return IdeationResult(
             query=clean_topic,
-            core_problem_statement=f"Exploration and innovation across lateral dimensions for: {clean_topic}",
-            concepts=concepts[:count],
+            core_problem_statement=f"Domain-grounded MAP-Elites & SCAMPER/TRIZ exploration for: {clean_topic}",
+            concepts=selected,
             pareto_optimal_concepts=pareto,
             synthesis_proposal=synthesis,
             receipt=receipt,

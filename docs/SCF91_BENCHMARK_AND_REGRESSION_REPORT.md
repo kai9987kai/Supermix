@@ -160,3 +160,18 @@ Combining `SCFVerificationGate` (extending deterministic verification with `Conn
     - `seed=84` (`82`): **`72 / 82 (0.878)`** vs `v96` **`73 / 82 (0.890)`** (`v100` final step 64 checkpoint also `72 / 82`)
     - Combined: `v100` **`179 / 205 (87.3%)`** vs promoted `v96` **`180 / 205 (87.8%)`**, `SCF Hybrid (seed=82)`: **`41 / 41 (1.0000)`**.
   - Per Rule 9, `v96_physio_neurogenesis.selected.pt` stays the promoted baseline (`#1`) while `v100_scf_balanced.selected.pt` (`[v100 DivNorm]`) is promoted ahead of prior experimental candidates (`v98`, `v99`, `v97`) in the registry and chat UIs.
+
+### 5. `v101_scf_cognitive` & Extended Math / Problem-Solving / Ideation / Conversation Upgrades
+- **Sibling-Project Inspired Cognitive & Symbolic Upgrades**:
+  - Zero-`eval` `ast.parse` math evaluator, implicit-coefficient quadratics & 2x2 linear systems, finite-difference/geometric/Fibonacci sequences, polynomial derivatives & definite integrals, stats/GCD/LCM, algebraic equivalence verifier, and exposed `derivation_steps` ([`source/nexus_solver.py`](../source/nexus_solver.py), [`source/scf/verification/__init__.py`](../source/scf/verification/__init__.py)).
+  - Normalized 2D `MAP-Elites` + `NoveltySearch` topic/constraint-grounded creative ideation ([`source/nexus_ideation.py`](../source/nexus_ideation.py)).
+  - `SCFCollectiveOrchestrator` inline step-arithmetic trace check ([`source/scf/collective/__init__.py`](../source/scf/collective/__init__.py)) and `SCFReasoningCoordinator` `CROSSWIRE` ambiguity probing + `SONAPSE` falsification critic decomposition ([`source/scf/reasoning/__init__.py`](../source/scf/reasoning/__init__.py)).
+  - `OMNIS/Mnemorph` importance-scored layered memory continuity ([`source/scf/memory/__init__.py`](../source/scf/memory/__init__.py)) integrated with bounded session-turn forwarding and the live `SCF Cognitive Synthesis` UI drawer in [`source/supermix_chat_server.py`](../source/supermix_chat_server.py).
+- **Exact-Grammar `v101_scf_cognitive` Continuation (`output/v101_scf_cognitive/v101_scf_cognitive.pt`)** warm-started from `v100_scf_balanced.selected.pt` on `10,100`-row `datasets/v101/v101_cognitive_mix.jsonl` (`--steps 64 --lr 0.00008 --freeze_trunk_steps 8 --extend_vocab` `+45` IDs -> `9,460` vocab, `36,614,279` params):
+  - Best `dev_loss = 0.01745` at step `32` (`ppl = 1.02`, `tier3/tier1 = 1.047x`, all `5/5` `v58` checks `[PASS]`, connectome ablation `+0.00015 nats`, step-`64` probe `0.90`).
+  - Paired benchmark across `3` seeds (`205` total novel tasks):
+    - `seed=82` (`41`): **`35 / 41 (0.854)`** (ties `v96` and `v100`)
+    - `seed=83` (`82`): **`72 / 82 (0.878)`** (ties `v96` and `v100`)
+    - `seed=84` (`82`): **`71 / 82 (0.866)`** (`within10% = 0.878`) vs `v100` `72/82` & `v96` `73/82`
+    - Combined standalone: **`178 / 205 (86.8%)`** | `python -m scf bench --seed 82 --neural`: **`41 / 41 (1.0000)`**.
+  - Per Rule 9, `v96_physio_neurogenesis.selected.pt` remains `#1` promoted default, `v100_scf_balanced.selected.pt` stays `#2`, and `v101_scf_cognitive.pt` (`[v101 Cognitive]`) is registered at `#3` experimental.

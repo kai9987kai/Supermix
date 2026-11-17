@@ -418,8 +418,8 @@
     },
     {
       "path": "source/nexus_ideation.py",
-      "sha256": "b547b09191c2178e2205b8ab4c0d17e72ac064df042d5f8f264767b50f16736e",
-      "size_bytes": 16050
+      "sha256": "d9b5a2f435a9a626aba6146895db8e1d850e7e55613dc28b5f429265b62812fe",
+      "size_bytes": 22791
     },
     {
       "path": "source/nexus_independent_checker.py",
@@ -448,8 +448,8 @@
     },
     {
       "path": "source/nexus_solver.py",
-      "sha256": "5382e866b36582152ba6c9eb490006009ab2b77b91e97d252e5b08ff1b12604f",
-      "size_bytes": 87126
+      "sha256": "02751afe05f186057559e1e89c42f00195382dfc3206e415125890ad6af71fee",
+      "size_bytes": 117318
     },
     {
       "path": "source/nexus_speculative_bidirectional.py",
