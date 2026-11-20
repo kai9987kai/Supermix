@@ -57,6 +57,7 @@ V85_ADDED_FIELDS = {
     "attention_output_gate": False,
     "attention_sink_kinds": "all",
     "cns_commissural_gate": False,
+    "cns_dendritic_apical": False,
     "cns_divisive_norm": False,
     "cns_dual_soma": False,
     "cns_glial_homeostasis": False,
@@ -65,7 +66,18 @@ V85_ADDED_FIELDS = {
     "cns_predictive_error": False,
     "cns_slow_leak_init": 0.05,
     "cns_trunk_dropout": 0.0,
+    "deltanet_after_layer": 1,
+    "deltanet_dim": 32,
+    "engram_after_layer": 0,
+    "engram_n_heads": 2,
+    "engram_table_size": 2048,
+    "mhc_sinkhorn_iters": 20,
+    "mhc_streams": 2,
+    "thinking_ctm_synchrony": False,
     "thinking_entropy_halt": False,
+    "use_deltanet_memory": False,
+    "use_engram_memory": False,
+    "use_mhc_residual": False,
     "differential_lambda_init": 0.8,
     "differential_noise_ratio": 1,
     "differential_output_norm": True,
@@ -217,7 +229,7 @@ CI_REQUIRED = [
 #: This is a ratchet, not a target. It fails when coverage drops and never
 #: demands it be perfect. Raise it when you add suites; never lower it without
 #: saying why in the commit.
-CI_COVERAGE_FLOOR = 91
+CI_COVERAGE_FLOOR = 93
 
 
 def _root_test_files():

@@ -300,7 +300,9 @@ class NexusSolver:
             self._solve_waves_optics,
             self._solve_chemistry_solutions,
             self._solve_quadratic_algebra,
+            self._solve_linear_system_3x3,
             self._solve_linear_system_2x2,
+            self._solve_matrix_linear_algebra,
             self._solve_compound_interest,
             self._solve_series_progressions,
             self._solve_geometry_trig,
@@ -308,6 +310,7 @@ class NexusSolver:
             self._solve_natural_combinatorics,
             self._solve_general_sequences_and_laws,
             self._solve_calculus_stats_number_theory,
+            self._solve_number_theory_and_probability,
             self._solve_code_expression,
             self._solve_python_ast_trace,
             self._solve_safe_ast_math,
@@ -1982,6 +1985,417 @@ class NexusSolver:
             "probes_checked": len(probes),
             "answer_authority": bool(equivalent),
         }
+
+    def _solve_linear_system_3x3(self, q: str) -> Optional[SolverResult]:
+        """Exact rational Gaussian elimination for 3x3 linear systems in x, y, z."""
+        lower = q.lower()
+        if any(neg in lower for neg in ("not", "never", "approx", "verify proof", "check proof")):
+            return None
+        if not all(v in lower for v in ("x", "y", "z")) or q.count("=") < 3:
+            return None
+
+        eq_pattern = re.compile(
+            r"([+-]?\s*(?:\d+(?:\.\d+)?)?\s*\*?\s*x)\s*"
+            r"([+-]\s*(?:\d+(?:\.\d+)?)?\s*\*?\s*y)\s*"
+            r"([+-]\s*(?:\d+(?:\.\d+)?)?\s*\*?\s*z)\s*=\s*(-?\d+(?:\.\d+)?)",
+            re.I,
+        )
+        matches = eq_pattern.findall(q)
+        if len(matches) != 3:
+            return None
+
+        def _parse_coeff(term: str, var: str) -> Fraction:
+            c = term.replace(" ", "").replace("*", "").lower().replace(var, "")
+            if c in ("", "+"):
+                return Fraction(1)
+            if c == "-":
+                return Fraction(-1)
+            return self._normalize_num(c)
+
+        aug: List[List[Fraction]] = []
+        for tx, ty, tz, rhs_s in matches:
+            aug.append([
+                _parse_coeff(tx, "x"),
+                _parse_coeff(ty, "y"),
+                _parse_coeff(tz, "z"),
+                self._normalize_num(rhs_s),
+            ])
+        orig = [list(row) for row in aug]
+
+        # Exact rational Gaussian elimination with partial pivoting
+        for col in range(3):
+            pivot_row = max(range(col, 3), key=lambda r: abs(aug[r][col]))
+            if aug[pivot_row][col] == 0:
+                return None
+            if pivot_row != col:
+                aug[col], aug[pivot_row] = aug[pivot_row], aug[col]
+            piv = aug[col][col]
+            aug[col] = [val / piv for val in aug[col]]
+            for r in range(3):
+                if r == col:
+                    continue
+                factor = aug[r][col]
+                if factor != 0:
+                    aug[r] = [aug[r][c] - factor * aug[col][c] for c in range(4)]
+
+        sol_x, sol_y, sol_z = aug[0][3], aug[1][3], aug[2][3]
+        # Independent substitution check across all 3 equations
+        for a, b, c, rhs in orig:
+            if a * sol_x + b * sol_y + c * sol_z != rhs:
+                return None
+
+        disp = (
+            f"x = {self._format_fraction(sol_x)}, "
+            f"y = {self._format_fraction(sol_y)}, "
+            f"z = {self._format_fraction(sol_z)}"
+        )
+        steps = [
+            DerivationStep(1, "Form augmented 3x3 rational system [A|b]", "A\\mathbf{x} = \\mathbf{b}", f"3 equations in (x, y, z)", disp),
+            DerivationStep(2, "Perform exact Fraction Gauss-Jordan elimination and verify residuals = 0", "\\mathbf{x} = A^{-1}\\mathbf{b}", disp, disp),
+        ]
+        receipt = self._build_receipt(
+            "linear_system_3x3",
+            "mathematics",
+            "solution_xyz",
+            "alg.linear_system_3x3",
+            {"equations": "3"},
+            f"({sol_x},{sol_y},{sol_z})",
+            disp,
+            "dimensionless",
+            steps,
+        )
+        return SolverResult(
+            True,
+            q,
+            "mathematics",
+            "linear_system_3x3",
+            "solution_xyz",
+            "alg.linear_system_3x3",
+            float(sol_x),
+            disp,
+            "",
+            steps,
+            receipt,
+            f"Exact 3x3 rational solution: {disp}.",
+        )
+
+    def _solve_matrix_linear_algebra(self, q: str) -> Optional[SolverResult]:
+        """Exact rational matrix determinant, trace, 2x2 inverse, 2x2 eigenvalues & vector ops."""
+        lower = q.lower()
+        if any(neg in lower for neg in ("not", "never", "approx", "verify proof", "check proof")):
+            return None
+
+        # Vector dot product & 3D cross product (ast.literal_eval, zero eval)
+        if "dot product" in lower or "cross product" in lower:
+            vecs = re.findall(r"(\[\s*-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?)*\s*\])", q)
+            if len(vecs) == 2:
+                try:
+                    raw_u = ast.literal_eval(vecs[0])
+                    raw_v = ast.literal_eval(vecs[1])
+                except Exception:
+                    return None
+                if (
+                    isinstance(raw_u, list)
+                    and isinstance(raw_v, list)
+                    and len(raw_u) == len(raw_v)
+                    and 1 <= len(raw_u) <= 16
+                    and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in raw_u + raw_v)
+                ):
+                    u = [Fraction(Decimal(str(x))) if isinstance(x, float) else Fraction(x) for x in raw_u]
+                    v = [Fraction(Decimal(str(x))) if isinstance(x, float) else Fraction(x) for x in raw_v]
+                    if "dot product" in lower:
+                        val = sum((a * b for a, b in zip(u, v)), Fraction(0))
+                        disp = self._format_fraction(val)
+                        steps = [DerivationStep(1, "Compute exact Euclidean dot product", "\\mathbf{u}\\cdot\\mathbf{v} = \\sum_i u_i v_i", f"{vecs[0]} \\cdot {vecs[1]} = {disp}", disp)]
+                        receipt = self._build_receipt("linear_algebra", "mathematics", "dot_product", "linalg.dot_product", {"dim": str(len(u))}, str(val), disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "linear_algebra", "dot_product", "linalg.dot_product", float(val), disp, "", steps, receipt, f"Exact dot product is {disp}.")
+                    if "cross product" in lower and len(u) == 3:
+                        cx = u[1] * v[2] - u[2] * v[1]
+                        cy = u[2] * v[0] - u[0] * v[2]
+                        cz = u[0] * v[1] - u[1] * v[0]
+                        disp = f"[{self._format_fraction(cx)}, {self._format_fraction(cy)}, {self._format_fraction(cz)}]"
+                        steps = [DerivationStep(1, "Compute exact 3D cross product", "\\mathbf{u}\\times\\mathbf{v}", f"{vecs[0]} \\times {vecs[1]} = {disp}", disp)]
+                        receipt = self._build_receipt("linear_algebra", "mathematics", "cross_product", "linalg.cross_product", {"dim": "3"}, disp, disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "linear_algebra", "cross_product", "linalg.cross_product", None, disp, "", steps, receipt, f"Exact 3D cross product is {disp}.")
+
+        if not any(k in lower for k in ("determinant", "det(", "det ", "trace", "inverse", "eigenvalue")):
+            return None
+        mat_m = re.search(r"(\[\s*\[[^\]]+\](?:\s*,\s*\[[^\]]+\]){1,2}\s*\])", q)
+        if not mat_m:
+            return None
+        try:
+            raw_mat = ast.literal_eval(mat_m.group(1))
+        except Exception:
+            return None
+        if not isinstance(raw_mat, list) or len(raw_mat) not in (2, 3):
+            return None
+        n = len(raw_mat)
+        mat: List[List[Fraction]] = []
+        for row in raw_mat:
+            if not isinstance(row, list) or len(row) != n:
+                return None
+            f_row: List[Fraction] = []
+            for v in row:
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    return None
+                f_row.append(Fraction(Decimal(str(v))) if isinstance(v, float) else Fraction(v))
+            mat.append(f_row)
+
+        if "inverse" in lower and n == 2:
+            det = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0]
+            if det == 0:
+                return None
+            inv = [
+                [mat[1][1] / det, -mat[0][1] / det],
+                [-mat[1][0] / det, mat[0][0] / det],
+            ]
+            # Independent exact check: A * A^-1 == I
+            if (
+                mat[0][0] * inv[0][0] + mat[0][1] * inv[1][0] != 1
+                or mat[0][0] * inv[0][1] + mat[0][1] * inv[1][1] != 0
+                or mat[1][0] * inv[0][0] + mat[1][1] * inv[1][0] != 0
+                or mat[1][0] * inv[0][1] + mat[1][1] * inv[1][1] != 1
+            ):
+                return None
+            def _fstr(f: Fraction) -> str:
+                return str(f.numerator) if f.denominator == 1 else f"{f.numerator}/{f.denominator}"
+            disp = f"[[{_fstr(inv[0][0])}, {_fstr(inv[0][1])}], [{_fstr(inv[1][0])}, {_fstr(inv[1][1])}]]"
+            steps = [
+                DerivationStep(1, "Compute 2x2 determinant", "\\det(A) = ad - bc", f"\\det(A) = {self._format_fraction(det)}", self._format_fraction(det)),
+                DerivationStep(2, "Compute exact adjugate / det and verify A A^-1 = I", "A^{-1} = \\frac{1}{\\det(A)}\\begin{pmatrix}d & -b\\\\-c & a\\end{pmatrix}", disp, disp),
+            ]
+            receipt = self._build_receipt("linear_algebra", "mathematics", "matrix_inverse", "linalg.inv_2x2", {"dim": "2x2"}, disp, disp, "dimensionless", steps)
+            return SolverResult(True, q, "mathematics", "linear_algebra", "matrix_inverse", "linalg.inv_2x2", None, disp, "", steps, receipt, f"Exact 2x2 matrix inverse is {disp}.")
+
+        if "eigenvalue" in lower and n == 2:
+            tr = mat[0][0] + mat[1][1]
+            det = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0]
+            disc = tr * tr - Fraction(4) * det
+            if disc < 0:
+                return None
+            disc_f = float(disc)
+            sqrt_d = math.sqrt(disc_f)
+            l1 = (float(tr) + sqrt_d) / 2.0
+            l2 = (float(tr) - sqrt_d) / 2.0
+            def _fmt_ev(val: float) -> str:
+                if abs(val - round(val)) < 1e-9:
+                    return str(int(round(val)))
+                return f"{val:.4f}".rstrip("0").rstrip(".") or "0"
+            disp = f"lambda1 = {_fmt_ev(l1)}, lambda2 = {_fmt_ev(l2)}"
+            steps = [
+                DerivationStep(1, "Form characteristic polynomial", "\\lambda^2 - \\operatorname{tr}(A)\\lambda + \\det(A) = 0", f"\\operatorname{{tr}}={self._format_fraction(tr)}, \\det={self._format_fraction(det)}", disp),
+            ]
+            receipt = self._build_receipt("linear_algebra", "mathematics", "matrix_eigenvalues", "linalg.eig_2x2", {"dim": "2x2"}, disp, disp, "dimensionless", steps)
+            return SolverResult(True, q, "mathematics", "linear_algebra", "matrix_eigenvalues", "linalg.eig_2x2", l1, disp, "", steps, receipt, f"Real eigenvalues are {disp}.")
+
+        if "trace" in lower:
+            val = sum((mat[i][i] for i in range(n)), Fraction(0))
+            disp = self._format_fraction(val)
+            steps = [DerivationStep(1, f"Sum diagonal entries of {n}x{n} matrix", "\\operatorname{tr}(A) = \\sum_i A_{ii}", f"\\operatorname{{tr}}(A) = {disp}", disp)]
+            receipt = self._build_receipt("linear_algebra", "mathematics", "matrix_trace", f"linalg.trace_{n}x{n}", {"dim": f"{n}x{n}"}, str(val), disp, "dimensionless", steps)
+            return SolverResult(True, q, "mathematics", "linear_algebra", "matrix_trace", f"linalg.trace_{n}x{n}", float(val), disp, "", steps, receipt, f"Matrix trace is {disp}.")
+
+        if n == 2:
+            val = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0]
+            formula_tex = "\\det(A) = a d - b c"
+        else:
+            val = (
+                mat[0][0] * (mat[1][1] * mat[2][2] - mat[1][2] * mat[2][1])
+                - mat[0][1] * (mat[1][0] * mat[2][2] - mat[1][2] * mat[2][0])
+                + mat[0][2] * (mat[1][0] * mat[2][1] - mat[1][1] * mat[2][0])
+            )
+            formula_tex = "\\det(A) = \\sum_{j} (-1)^j A_{0j} M_{0j}"
+        disp = self._format_fraction(val)
+        steps = [DerivationStep(1, f"Compute exact {n}x{n} determinant via cofactor expansion", formula_tex, f"\\det(A) = {disp}", disp)]
+        receipt = self._build_receipt("linear_algebra", "mathematics", "matrix_determinant", f"linalg.det_{n}x{n}", {"dim": f"{n}x{n}"}, str(val), disp, "dimensionless", steps)
+        return SolverResult(True, q, "mathematics", "linear_algebra", "matrix_determinant", f"linalg.det_{n}x{n}", float(val), disp, "", steps, receipt, f"Exact {n}x{n} determinant is {disp}.")
+
+    def _solve_number_theory_and_probability(self, q: str) -> Optional[SolverResult]:
+        """Exact modular arithmetic, prime factorization, Euler totient, binomial, Bayes, resistors & thin lens."""
+        lower = q.lower()
+        if any(neg in lower for neg in ("not", "never", "approx", "verify proof", "check proof")):
+            return None
+
+        # 1. Modular inverse: "modular inverse of 3 mod 11"
+        inv_m = re.search(r"modular\s+inverse\s+of\s+(-?\d+)\s+(?:mod|modulo)\s+(\d+)", q, re.I)
+        if inv_m:
+            a, m = int(inv_m.group(1)), int(inv_m.group(2))
+            if 2 <= m <= 10**12 and math.gcd(a, m) == 1:
+                inv = pow(a, -1, m)
+                disp = str(inv)
+                steps = [DerivationStep(1, "Compute modular inverse via extended Euclidean algorithm", "a \\cdot a^{-1} \\equiv 1 \\pmod m", f"{a} \\cdot {inv} \\equiv 1 \\pmod{{{m}}}", disp)]
+                receipt = self._build_receipt("number_theory", "mathematics", "mod_inverse", "nt.mod_inverse", {"a": str(a), "m": str(m)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "number_theory", "mod_inverse", "nt.mod_inverse", float(inv), disp, "", steps, receipt, f"Modular inverse of {a} mod {m} is {disp}.")
+
+        # 2. Modular exponentiation: "7^13 mod 11" or "7**13 mod 11"
+        modpow_m = re.search(r"(-?\d+)\s*(?:\^|\*\*)\s*(\d+)\s*(?:mod|modulo)\s*(\d+)", q, re.I)
+        if modpow_m:
+            base, exp, mod = int(modpow_m.group(1)), int(modpow_m.group(2)), int(modpow_m.group(3))
+            if 1 <= mod <= 10**12 and 0 <= exp <= 10**9:
+                val = pow(base, exp, mod)
+                disp = str(val)
+                steps = [DerivationStep(1, "Fast binary modular exponentiation", "a^b \\bmod m", f"{base}^{{{exp}}} \\bmod {mod} = {disp}", disp)]
+                receipt = self._build_receipt("number_theory", "mathematics", "mod_pow", "nt.mod_pow", {"base": str(base), "exp": str(exp), "mod": str(mod)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "number_theory", "mod_pow", "nt.mod_pow", float(val), disp, "", steps, receipt, f"{base}^{exp} mod {mod} = {disp}.")
+
+        # 3. Prime factorization: "prime factorization of 360"
+        pf_m = re.search(r"prime\s+factori[sz]ation\s+of\s+(\d+)", q, re.I)
+        if pf_m:
+            n = int(pf_m.group(1))
+            if 2 <= n <= 10**10:
+                rem = n
+                factors: List[Tuple[int, int]] = []
+                d = 2
+                while d * d <= rem:
+                    if rem % d == 0:
+                        cnt = 0
+                        while rem % d == 0:
+                            rem //= d
+                            cnt += 1
+                        factors.append((d, cnt))
+                    d = 3 if d == 2 else d + 2
+                if rem > 1:
+                    factors.append((rem, 1))
+                disp = " * ".join(f"{p}^{e}" if e > 1 else str(p) for p, e in factors)
+                steps = [DerivationStep(1, "Trial-division exact prime factorization", "n = \\prod p_i^{e_i}", f"{n} = {disp}", disp)]
+                receipt = self._build_receipt("number_theory", "mathematics", "prime_factorization", "nt.prime_factorization", {"n": str(n)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "number_theory", "prime_factorization", "nt.prime_factorization", float(factors[0][0]), disp, "", steps, receipt, f"Prime factorization of {n} is {disp}.")
+
+        # 4. Euler's totient: "euler totient of 36" or "phi(36)"
+        phi_m = re.search(r"(?:euler(?:'s)?\s+totient(?:\s+of)?\s+|phi\s*\(\s*)(\d+)\s*\)?", q, re.I)
+        if phi_m:
+            n = int(phi_m.group(1))
+            if 1 <= n <= 10**9:
+                result = n
+                rem = n
+                d = 2
+                while d * d <= rem:
+                    if rem % d == 0:
+                        while rem % d == 0:
+                            rem //= d
+                        result -= result // d
+                    d = 3 if d == 2 else d + 2
+                if rem > 1:
+                    result -= result // rem
+                disp = str(result)
+                steps = [DerivationStep(1, "Apply Euler product formula", "\\varphi(n) = n \\prod_{p|n} (1 - 1/p)", f"\\varphi({n}) = {disp}", disp)]
+                receipt = self._build_receipt("number_theory", "mathematics", "euler_totient", "nt.euler_totient", {"n": str(n)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "number_theory", "euler_totient", "nt.euler_totient", float(result), disp, "", steps, receipt, f"Euler's totient phi({n}) = {disp}.")
+
+        # 5. Exact Binomial Probability: "binomial probability of k=2 successes in n=5 trials with p=0.4"
+        binom_m = re.search(
+            r"binomial\s+probability.*?\bk\s*=\s*(\d+).*?\bn\s*=\s*(\d+).*?\bp\s*=\s*(\d+(?:\.\d+)?(?:/\d+)?)",
+            q,
+            re.I,
+        ) or re.search(
+            r"binomial\s+probability.*?\bn\s*=\s*(\d+).*?\bk\s*=\s*(\d+).*?\bp\s*=\s*(\d+(?:\.\d+)?(?:/\d+)?)",
+            q,
+            re.I,
+        )
+        if binom_m:
+            first_is_k = bool(re.search(r"\bk\s*=\s*\d+.*?\bn\s*=\s*\d+", q, re.I))
+            k_val = int(binom_m.group(1) if first_is_k else binom_m.group(2))
+            n_val = int(binom_m.group(2) if first_is_k else binom_m.group(1))
+            p_val = self._normalize_num(binom_m.group(3))
+            if 0 <= k_val <= n_val <= 60 and Fraction(0) <= p_val <= Fraction(1):
+                prob = Fraction(math.comb(n_val, k_val)) * (p_val ** k_val) * ((Fraction(1) - p_val) ** (n_val - k_val))
+                disp = self._format_fraction(prob, max_decimals=6)
+                steps = [
+                    DerivationStep(1, "Evaluate exact binomial PMF", "P(X=k) = \\binom{n}{k} p^k (1-p)^{n-k}", f"\\binom{{{n_val}}}{{{k_val}}} ({p_val})^{{{k_val}}} ({Fraction(1)-p_val})^{{{n_val-k_val}}} = {disp}", disp)
+                ]
+                receipt = self._build_receipt("probability", "mathematics", "binomial_pmf", "prob.binomial_pmf", {"n": str(n_val), "k": str(k_val), "p": str(p_val)}, str(prob), disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "probability", "binomial_pmf", "prob.binomial_pmf", float(prob), disp, "", steps, receipt, f"Exact binomial probability P(X={k_val}) = {disp}.")
+
+        # 6. Exact Bayes' Theorem: "Bayes: prior 0.01, sensitivity 0.95, false positive rate 0.05"
+        if "bayes" in lower and "prior" in lower:
+            pr_m = re.search(r"prior\s*(?:=|:|of|is)?\s*(\d+(?:\.\d+)?(?:/\d+)?)", q, re.I)
+            sn_m = re.search(r"(?:sensitivity|true\s+positive(?:\s+rate)?|likelihood)\s*(?:=|:|of|is)?\s*(\d+(?:\.\d+)?(?:/\d+)?)", q, re.I)
+            fp_m = re.search(r"(?:false\s+positive(?:\s+rate)?|fpr)\s*(?:=|:|of|is)?\s*(\d+(?:\.\d+)?(?:/\d+)?)", q, re.I)
+            if pr_m and sn_m and fp_m:
+                prior = self._normalize_num(pr_m.group(1))
+                sens = self._normalize_num(sn_m.group(1))
+                fpr = self._normalize_num(fp_m.group(1))
+                if Fraction(0) <= prior <= Fraction(1) and Fraction(0) <= sens <= Fraction(1) and Fraction(0) <= fpr <= Fraction(1):
+                    num = sens * prior
+                    den = num + fpr * (Fraction(1) - prior)
+                    if den > 0:
+                        post = num / den
+                        disp = self._format_fraction(post, max_decimals=6)
+                        steps = [
+                            DerivationStep(1, "Apply exact Bayes' theorem", "P(H|E) = \\frac{P(E|H)P(H)}{P(E|H)P(H) + P(E|\\neg H)P(\\neg H)}", f"P(H|E) = \\frac{{{num}}}{{{den}}} = {disp}", disp)
+                        ]
+                        receipt = self._build_receipt("probability", "mathematics", "bayes_posterior", "prob.bayes_theorem", {"prior": str(prior), "sensitivity": str(sens), "fpr": str(fpr)}, str(post), disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "probability", "bayes_posterior", "prob.bayes_theorem", float(post), disp, "", steps, receipt, f"Exact Bayes posterior probability is {disp} ({post.numerator}/{post.denominator}).")
+
+        # 7. Parallel resistors: "parallel resistors 6 ohm and 3 ohm"
+        par_m = re.search(
+            r"parallel\s+resistors?\s+(?:of\s+)?(\d+(?:\.\d+)?)\s*(?:ohm|ohms|Ω)?\s*(?:and|,)\s*(\d+(?:\.\d+)?)\s*(?:ohm|ohms|Ω)?",
+            q,
+            re.I,
+        )
+        if par_m:
+            r1, r2 = self._normalize_num(par_m.group(1)), self._normalize_num(par_m.group(2))
+            if r1 > 0 and r2 > 0:
+                req = (r1 * r2) / (r1 + r2)
+                disp = self._format_fraction(req)
+                steps = [DerivationStep(1, "Compute parallel equivalent resistance", "R_{\\text{eq}} = \\frac{R_1 R_2}{R_1 + R_2}", f"\\frac{{{r1}\\cdot{r2}}}{{{r1}+{r2}}} = {disp}\\,\\Omega", disp, "ohm")]
+                receipt = self._build_receipt("circuits", "physics", "parallel_resistance", "circuits.parallel_resistors", {"R1": str(r1), "R2": str(r2)}, str(req), disp, "ohm", steps)
+                return SolverResult(True, q, "physics", "circuits", "parallel_resistance", "circuits.parallel_resistors", float(req), disp, "ohm", steps, receipt, f"Equivalent parallel resistance is {disp} ohm.")
+
+        # 8. Thin-lens equation: "thin lens with f = 10 cm and u = 30 cm"
+        lens_m = re.search(
+            r"thin\s+lens.*?\bf\s*=\s*(-?\d+(?:\.\d+)?)\s*(cm|m|mm)?.*?\bu\s*=\s*(-?\d+(?:\.\d+)?)\s*(cm|m|mm)?",
+            q,
+            re.I,
+        )
+        if lens_m:
+            f_val = self._normalize_num(lens_m.group(1))
+            u_val = self._normalize_num(lens_m.group(3))
+            unit = (lens_m.group(2) or lens_m.group(4) or "cm").lower()
+            if f_val != 0 and u_val != 0 and (Fraction(1) / f_val - Fraction(1) / u_val) != 0:
+                inv_v = (Fraction(1) / f_val) - (Fraction(1) / u_val)
+                v_val = Fraction(1) / inv_v
+                disp = self._format_fraction(v_val)
+                steps = [DerivationStep(1, "Apply Gaussian thin-lens equation", "\\frac{1}{v} = \\frac{1}{f} - \\frac{1}{u}", f"v = {disp}\\,{unit}", disp, unit)]
+                receipt = self._build_receipt("optics", "physics", "image_distance", "optics.thin_lens", {"f": str(f_val), "u": str(u_val)}, str(v_val), disp, unit, steps)
+                return SolverResult(True, q, "physics", "optics", "image_distance", "optics.thin_lens", float(v_val), disp, unit, steps, receipt, f"Image distance v = {disp} {unit}.")
+
+        # 9. Geometric series (finite and convergent infinite)
+        if "geometric series" in lower:
+            a_m = re.search(r"\ba\s*=\s*(-?\d+(?:\.\d+)?(?:/\d+)?)", q, re.I)
+            r_m = re.search(r"\br\s*=\s*(-?\d+(?:\.\d+)?(?:/\d+)?)", q, re.I)
+            n_m = re.search(r"\bn\s*=\s*(\d+)", q, re.I)
+            if a_m and r_m:
+                a_v = self._normalize_num(a_m.group(1))
+                r_v = self._normalize_num(r_m.group(1))
+                if "infinite" in lower and abs(r_v) < Fraction(1):
+                    s_inf = a_v / (Fraction(1) - r_v)
+                    disp = self._format_fraction(s_inf, max_decimals=6)
+                    steps = [DerivationStep(1, "Evaluate convergent infinite geometric series", "S_\\infty = \\frac{a}{1 - r}", f"\\frac{{{a_v}}}{{1 - ({r_v})}} = {disp}", disp)]
+                    receipt = self._build_receipt("series", "mathematics", "infinite_geometric_sum", "math.geom_series_inf", {"a": str(a_v), "r": str(r_v)}, str(s_inf), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "series", "infinite_geometric_sum", "math.geom_series_inf", float(s_inf), disp, "", steps, receipt, f"Convergent infinite geometric series sum is {disp}.")
+                if n_m:
+                    n_v = int(n_m.group(1))
+                    if 1 <= n_v <= 64:
+                        s_fin = a_v * n_v if r_v == 1 else a_v * (Fraction(1) - (r_v ** n_v)) / (Fraction(1) - r_v)
+                        disp = self._format_fraction(s_fin, max_decimals=6)
+                        steps = [DerivationStep(1, "Evaluate exact finite geometric series", "S_n = a\\frac{1 - r^n}{1 - r}", f"S_{{{n_v}}} = {disp}", disp)]
+                        receipt = self._build_receipt("series", "mathematics", "finite_geometric_sum", "math.geom_series_fin", {"a": str(a_v), "r": str(r_v), "n": str(n_v)}, str(s_fin), disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "series", "finite_geometric_sum", "math.geom_series_fin", float(s_fin), disp, "", steps, receipt, f"Finite geometric series sum is {disp}.")
+
+        # 10. Exact polynomial evaluation: "evaluate 2x^3 - 3x^2 + 5 at x = 4"
+        poly_ev = re.search(r"evaluate\s+(?:f\(x\)\s*=\s*)?([0-9xX\^\+\-\.\*\s]+?)\s+at\s+x\s*=\s*(-?\d+(?:\.\d+)?(?:/\d+)?)", q, re.I)
+        if poly_ev and "x" in poly_ev.group(1).lower():
+            terms = self._parse_poly_terms(poly_ev.group(1))
+            if terms is not None:
+                xv = self._normalize_num(poly_ev.group(2))
+                val = sum((c * (xv ** deg) for deg, c in terms.items()), Fraction(0))
+                disp = self._format_fraction(val, max_decimals=6)
+                steps = [DerivationStep(1, f"Evaluate polynomial at x = {xv}", "f(x) = \\sum c_k x^k", f"f({xv}) = {disp}", disp)]
+                receipt = self._build_receipt("algebra", "mathematics", "polynomial_eval", "alg.poly_eval", {"poly": poly_ev.group(1).strip(), "x": str(xv)}, str(val), disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "algebra", "polynomial_eval", "alg.poly_eval", float(val), disp, "", steps, receipt, f"Polynomial evaluates to {disp}.")
+
+        return None
 
     def _build_receipt(
         self,

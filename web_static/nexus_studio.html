@@ -39,10 +39,16 @@
 
     /* ── TABS ──────────────────────────────────────────── */
     .tab-bar{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;}
-    .tab{padding:0 20px;height:var(--tab-h);display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s;}
+    .tab{padding:0 20px;height:var(--tab-h);display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;border:none;border-bottom:2px solid transparent;background:transparent;font-family:inherit;flex:none;white-space:nowrap;transition:all .15s;}
+    .tab:focus-visible,#panel-v103-frontier button:focus-visible,#panel-v103-frontier input:focus-visible,#panel-v103-frontier textarea:focus-visible,#panel-v103-frontier select:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
     .tab:hover{color:var(--text);}
-    .tab.active{color:var(--primary);border-bottom-color:var(--primary);}
+    .tab.active,.tab[aria-selected="true"]{color:var(--primary);border-bottom-color:var(--primary);}
     .tab-icon{font-size:15px;}
+    #panel-v103-frontier{flex-direction:row;}
+    .v103-heading{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin:0 0 12px 0;}
+    .v103-table{width:100%;font-size:12px;border-collapse:collapse;}
+    .v103-table caption{text-align:left;font-size:11px;color:var(--dim);margin-bottom:6px;}
+    .v103-table th,.v103-table td{padding:5px 8px;border-bottom:1px solid var(--border);text-align:left;}
 
     /* ── WORKSPACE ──────────────────────────────────────── */
     .workspace{flex:1;overflow:hidden;display:flex;}
@@ -250,6 +256,7 @@
   <div class="tab" onclick="switchTab('causal-dag',this)"><span class="tab-icon">&#x1F578;</span> Causal DAG</div>
   <div class="tab" onclick="switchTab('v95-ecosystem',this)"><span class="tab-icon">&#x1F52D;</span> v95 Ecosystem Lab</div>
   <div class="tab" onclick="switchTab('scf',this)"><span class="tab-icon">&#x1F9EC;</span> SCF Cognitive Fabric</div>
+  <button type="button" class="tab" id="tab-v103-frontier" role="tab" aria-selected="false" onclick="switchTab('v103-frontier',this)"><span class="tab-icon" aria-hidden="true">&#x1F680;</span> v102/v103 Frontier Lab</button>
 </div>
 
 <!-- ══ WORKSPACE ════════════════════════════════════════════ -->
@@ -1132,6 +1139,65 @@ total 42</textarea>
     </div>
   </div>
 
+  <!-- v102/v103 FRONTIER SYNTHESIS LAB PANEL -->
+  <div class="tab-panel" id="panel-v103-frontier" role="tabpanel" aria-labelledby="tab-v103-frontier">
+    <div class="sidebar" style="width:340px;overflow-y:auto;">
+      <div class="section">
+        <h2 class="v103-heading">1. Continuum + BTSP + Hopfield (MNEMOSYNE)</h2>
+        <label for="v103MemPatterns">Stored Patterns</label>
+        <input type="number" id="v103MemPatterns" value="8" min="3" max="32">
+        <label for="v103MemSteps" style="margin-top:6px;">Continuum Steps</label>
+        <input type="number" id="v103MemSteps" value="24" min="4" max="128">
+        <button type="button" class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV103ContinuumMemory()">Run Memory &amp; 5-Mode Lesion Assay</button>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">2. Top-K SAE Causal Feature Probe</h2>
+        <label for="v103SaeDict">Dictionary Size</label>
+        <input type="number" id="v103SaeDict" value="24" min="8" max="128">
+        <label for="v103SaeK" style="margin-top:6px;">Active Top-K Features</label>
+        <input type="number" id="v103SaeK" value="3" min="1" max="16">
+        <button type="button" class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV103SaeProbe()">Fit Top-K SAE &amp; Causal Ablation</button>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">3. SONAPSE-FRACTAL Connectome Topologies</h2>
+        <label for="v103FractalNodes">Node Count (6-64)</label>
+        <input type="number" id="v103FractalNodes" value="27" min="6" max="64">
+        <button type="button" class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV103FractalTopology()">Compare Fractal vs Small-World Graphs</button>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">4. Causeway Assumption Sensitivity Lenses</h2>
+        <label for="v103CausewayStress">Flipped Stress Amplitude</label>
+        <input type="number" id="v103CausewayStress" value="0.90" step="0.05" min="0.10" max="1.50">
+        <label for="v103CausewayRisk" style="margin-top:6px;">Flipped Risk Aversion</label>
+        <input type="number" id="v103CausewayRisk" value="1.60" step="0.10" min="0.10" max="3.00">
+        <button type="button" class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV103Causeway()">Run Paired-Seed Sensitivity Lenses</button>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">5. NEUROHIVE Thermal/Fault Dispatch</h2>
+        <label for="v103HiveBudget">Token Budget</label>
+        <input type="number" id="v103HiveBudget" value="1000" min="64" max="10000">
+        <label for="v103HiveFault" style="margin-top:6px;">Fault Injection Rate</label>
+        <input type="number" id="v103HiveFault" value="0.25" step="0.05" min="0" max="1">
+        <button type="button" class="btn-primary" style="margin-top:8px;width:100%;" onclick="runV103NeuroHive()">Simulate Dispatch &amp; Conservation</button>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">6. v102 COUNTERFORM CVaR &amp; Carrier Atlas</h2>
+        <label for="v103CvarAlpha">CVaR Tail Alpha</label>
+        <input type="number" id="v103CvarAlpha" value="0.25" step="0.05" min="0.05" max="0.95">
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV102CvarAudit()">CVaR Audit</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV102CarrierAtlas()">Carrier Atlas</button>
+        </div>
+      </div>
+    </div>
+    <div class="main-area" style="padding:20px;overflow-y:auto;">
+      <div class="analysis-note" id="v103Status" role="status" style="margin-bottom:16px;">Supermix v102/v103 Frontier Synthesis Lab: experimental memory lesion assays, Top-K SAE causal probes, fractal topology metrics, Causeway sensitivity lenses, NeuroHive dispatch, COUNTERFORM CVaR audits, and M&ouml;bius carrier decomposition (all strictly <code>answer_authority: false</code>). Live results require a running NexusMind API server.</div>
+      <div id="v103Output" style="display:flex;flex-direction:column;gap:14px;">
+        <div style="color:var(--dim);font-size:13px;text-align:center;margin-top:40px;">Select any v102/v103 Frontier Synthesis probe on the left to inspect live receipts from the NexusMind API.</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1334,9 +1400,16 @@ function classifyThinkResponse(result) {
 
 /* ─── Tab Switching ────────────────────────────────────── */
 function switchTab(id, el) {
-  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.classList.remove('active');
+    if (t.getAttribute('role') === 'tab') t.setAttribute('aria-selected', 'false');
+  });
   document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active');});
   el.classList.add('active');
+  if (el.getAttribute('role') === 'tab') el.setAttribute('aria-selected', 'true');
+  if (typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
   document.getElementById('panel-'+id).classList.add('active');
   if (id==='telem') renderTelemetry();
   if (id==='risk') loadRiskProtocol();
@@ -2503,6 +2576,7 @@ function drawSpecTreeCanvas(d) {
     ctx.fillStyle = '#e8f1fc'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('PRM ' + Math.round(n.prm_score * 100), pt.x, pt.y - rad - 2);
   });
+}
 /* ─── V88: Circuit Prober & Causal Register ───────────────── */
 function runCircuitProber() {
   var prompt = document.getElementById('circuitPrompt').value || 'Calculate 15 + 27 =';
@@ -3617,6 +3691,224 @@ function runSCFTask() {
     document.getElementById('scfOutput').innerHTML = html;
   })
   .catch(function(){ renderUnavailable('scfOutput', 'SCF Cognitive Fabric'); });
+}
+
+/* ═══ v102/v103 FRONTIER SYNTHESIS LAB ═════════════════════ */
+function _v103Loading(label) {
+  document.getElementById('v103Output').innerHTML =
+    '<div style="color:var(--dim);font-size:12px;display:flex;align-items:center;gap:10px;"><progress aria-label="' + esc(label) + '"></progress><span>' + esc(label) + '</span></div>';
+}
+
+function _v103Announce(text) {
+  var st = document.getElementById('v103Status');
+  if (st) st.textContent = text;
+}
+
+function runV103ContinuumMemory() {
+  var nPatterns = parseInt(document.getElementById('v103MemPatterns').value, 10) || 8;
+  var steps = parseInt(document.getElementById('v103MemSteps').value, 10) || 24;
+  _v103Loading('Running Continuum + One-Shot BTSP + MNEMOSYNE 5-mode lesion assay...');
+  fetch('/v1/v103/continuum_memory', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({n_patterns: nPatterns, steps: steps})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var les = d.mnemosyne_lesion_cosine || {};
+    var rows = Object.keys(les).map(function(mode){
+      return '<tr><th scope="row">' + esc(mode) + '</th><td>' + esc(les[mode]) + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--primary);">';
+    html += '<div class="step-header"><span class="step-label">Continuum + BTSP + Modern Hopfield (MNEMOSYNE)</span><span>answer_authority: ' + esc(!!d.answer_authority) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:10px;">';
+    html += '<div>Continuum MSE: <strong>' + esc(d.continuum_initial_mse) + ' &rarr; ' + esc(d.continuum_final_mse) + '</strong> | One-Shot BTSP Overlap: <strong>' + esc(d.btsp_one_shot_overlap) + '</strong> | Intact&minus;Erased Delta: <strong>' + esc(d.intact_vs_erased_delta) + '</strong></div>';
+    html += '<table class="v103-table"><caption>MNEMOSYNE 5-mode matched lesion cosine retrieval</caption><thead><tr><th scope="col">Lesion Mode</th><th scope="col">Mean Cosine</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('Continuum + BTSP + Hopfield assay complete (analysis-only, answer_authority: false).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v103 Continuum/BTSP/Hopfield Memory');
+    _v103Announce('v103 Continuum Memory unavailable — live NexusMind API required.');
+  });
+}
+
+function runV103SaeProbe() {
+  var dictSize = parseInt(document.getElementById('v103SaeDict').value, 10) || 24;
+  var kActive = parseInt(document.getElementById('v103SaeK').value, 10) || 3;
+  _v103Loading('Fitting overcomplete Top-K Sparse Autoencoder & running causal ablation...');
+  fetch('/v1/v103/sae_probe', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({dict_size: dictSize, k_active: kActive})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">Top-K Sparse Autoencoder &amp; Causal Feature Ablation</span><span>answer_authority: ' + esc(!!d.answer_authority) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<div>MSE: <strong>' + esc(d.initial_mse) + ' &rarr; ' + esc(d.final_mse) + '</strong> | Reconstruction R&sup2;: <strong>' + esc(d.reconstruction_r2) + '</strong> | Mean L0: <strong>' + esc(d.mean_l0_active) + '</strong> | Dead Fraction: <strong>' + esc(d.dead_feature_fraction) + '</strong></div>';
+    html += '<div>Top Feature #' + esc(d.top_feature_index) + ' Ablation Shift: <strong>' + esc(d.causal_ablation_shift) + '</strong> vs Control: <strong>' + esc(d.control_ablation_shift) + '</strong> (Specificity Ratio: <strong>' + esc(d.causal_specificity_ratio) + 'x</strong>)</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('Top-K SAE causal probe complete (analysis-only, answer_authority: false).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v103 Top-K SAE Causal Probe');
+    _v103Announce('v103 Top-K SAE Probe unavailable — live NexusMind API required.');
+  });
+}
+
+function runV103FractalTopology() {
+  var nNodes = parseInt(document.getElementById('v103FractalNodes').value, 10) || 27;
+  _v103Loading('Comparing Sierpinski, Hilbert, Small-World, and Random Control topologies...');
+  fetch('/v1/v103/fractal_topology', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({n_nodes: nNodes})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var topos = d.topologies || {};
+    var rows = Object.keys(topos).map(function(name){
+      var t = topos[name] || {};
+      return '<tr><th scope="row">' + esc(name) + '</th><td>' + esc(t.edges) + '</td><td>' + esc(t.clustering_coefficient) + '</td><td>' + esc(t.characteristic_path_length) + '</td><td>' + esc(t.modularity_q) + '</td><td>' + esc(t.spectral_radius) + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--success);">';
+    html += '<div class="step-header"><span class="step-label">SONAPSE-FRACTAL Connectome Topologies (N=' + esc(d.n_nodes) + ')</span><span>answer_authority: ' + esc(!!d.answer_authority) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<table class="v103-table"><caption>Exact graph invariants across fractal, small-world, and random control topologies</caption><thead><tr><th scope="col">Topology</th><th scope="col">Edges</th><th scope="col">Clustering</th><th scope="col">Avg Path</th><th scope="col">Modularity Q</th><th scope="col">Spectral Radius</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    html += '<div>Highest Clustering: <strong>' + esc(d.highest_clustering) + '</strong> | Highest Modularity: <strong>' + esc(d.highest_modularity) + '</strong></div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('Fractal connectome topology comparison complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v103 Fractal Connectome Analyzer');
+    _v103Announce('v103 Fractal Connectome Analyzer unavailable — live NexusMind API required.');
+  });
+}
+
+function runV103Causeway() {
+  var stressFlip = parseFloat(document.getElementById('v103CausewayStress').value) || 0.90;
+  var riskFlip = parseFloat(document.getElementById('v103CausewayRisk').value) || 1.60;
+  _v103Loading('Running Causeway paired-seed sensitivity lenses...');
+  fetch('/v1/v103/causeway_sensitivity', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sensitivity_flips: {stress_amplitude: stressFlip, risk_aversion: riskFlip, cost_sensitivity: 0.75}})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var rows = (d.sensitivity_lenses || []).map(function(l){
+      return '<tr><th scope="row">' + esc(l.assumption) + '</th><td>' + esc(l.baseline_value) + ' &rarr; ' + esc(l.flipped_value) + '</td><td>' + esc(l.winner) + '</td><td>' + esc(l.winner_reversed ? 'REVERSED' : 'Stable') + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--warn);">';
+    html += '<div class="step-header"><span class="step-label">Causeway One-Change Assumption Sensitivity</span><span>Baseline Winner: ' + esc(d.baseline_winner) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<table class="v103-table"><caption>Paired common-random-numbers policy sensitivity lenses</caption><thead><tr><th scope="col">Assumption</th><th scope="col">Perturbation</th><th scope="col">Winner</th><th scope="col">Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    html += '<div>Winner-Reversing Assumptions: <strong>' + esc((d.winner_reversing_assumptions || []).join(', ') || 'None') + '</strong> | Robust: <strong>' + esc(!!d.decision_robust_across_lenses) + '</strong></div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('Causeway sensitivity workbench complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v103 Causeway Sensitivity Workbench');
+    _v103Announce('v103 Causeway Sensitivity Workbench unavailable — live NexusMind API required.');
+  });
+}
+
+function runV103NeuroHive() {
+  var budget = parseInt(document.getElementById('v103HiveBudget').value, 10) || 1000;
+  var faultRate = parseFloat(document.getElementById('v103HiveFault').value);
+  if (isNaN(faultRate)) faultRate = 0.25;
+  _v103Loading('Simulating NEUROHIVE thermal & fault-resilient dispatch...');
+  fetch('/v1/v103/neurohive_plan', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token_budget: budget, fault_rate: faultRate})
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--primary);">';
+    html += '<div class="step-header"><span class="step-label">NEUROHIVE Thermal/Fault Resource Dispatch</span><span>SII: ' + esc(d.swarm_intelligence_index) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<div>Completed: <strong>' + esc((d.completed_tasks || []).join(', ') || 'None') + '</strong> | Deferred: <strong>' + esc((d.deferred_tasks || []).join(', ') || 'None') + '</strong></div>';
+    html += '<div>Tokens Spent / Remaining: <strong>' + esc(d.spent_tokens) + ' / ' + esc(d.remaining_tokens) + '</strong> (Budget Conserved: <strong>' + esc(!!d.budget_conserved) + '</strong>)</div>';
+    html += '<div>Final Temp: <strong>' + esc(d.final_station_temp_c) + ' C</strong> | Faults Injected / Repaired: <strong>' + esc(d.faults_injected) + ' / ' + esc(d.faults_repaired) + '</strong></div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('NEUROHIVE resource dispatch simulation complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v103 NEUROHIVE Resource Planner');
+    _v103Announce('v103 NEUROHIVE Resource Planner unavailable — live NexusMind API required.');
+  });
+}
+
+function runV102CvarAudit() {
+  var alpha = parseFloat(document.getElementById('v103CvarAlpha').value) || 0.25;
+  _v103Loading('Running v102 COUNTERFORM CVaR tail-risk & dual-audit gate...');
+  fetch('/v1/frontier/cvar_audit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      candidate_losses: {safe_verified: [0.05, 0.08, 0.12, 0.14], risky_tail: [0.01, 0.02, 0.03, 0.95]},
+      cvar_alpha: alpha
+    })
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v102 COUNTERFORM CVaR Dual-Audit Gate</span><span>Decision: ' + esc(d.decision) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<div>Selected Candidate: <strong>' + esc(d.selected_candidate || 'ABSTAIN_UNSUPPORTED') + '</strong> | alpha=' + esc(d.cvar_alpha) + ' | answer_authority: <strong>' + esc(!!d.answer_authority) + '</strong></div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v102 COUNTERFORM CVaR audit complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v102 COUNTERFORM CVaR Audit');
+    _v103Announce('v102 COUNTERFORM CVaR Audit unavailable — live NexusMind API required.');
+  });
+}
+
+function runV102CarrierAtlas() {
+  _v103Loading('Computing v102 2^k Mobius Carrier Interaction Atlas...');
+  fetch('/v1/frontier/carrier_atlas', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      carriers: ['cns', 'engram', 'deltanet'],
+      subset_outcomes: {'': 0.10, 'cns': 0.35, 'engram': 0.30, 'deltanet': 0.25, 'cns,engram': 0.68, 'cns,deltanet': 0.62, 'engram,deltanet': 0.58, 'cns,engram,deltanet': 0.96}
+    })
+  })
+  .then(requireBackendJson)
+  .then(function(d){
+    var mob = d.mobius_interactions || {};
+    var rows = Object.keys(mob).map(function(k){
+      return '<tr><th scope="row">' + esc(k || '(baseline)') + '</th><td>' + esc(mob[k]) + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v102 Memory-Carrier 2^k M&ouml;bius Interaction Atlas</span><span>Max Recon Error: ' + esc(d.max_reconstruction_error) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<table class="v103-table"><caption>Exact 2^k subset-factorial M&ouml;bius decomposition</caption><thead><tr><th scope="col">Carrier Subset</th><th scope="col">Interaction Weight</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc(d.receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v102 Carrier Interaction Atlas decomposition complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v102 Carrier Interaction Atlas');
+    _v103Announce('v102 Carrier Interaction Atlas unavailable — live NexusMind API required.');
+  });
 }
 
 

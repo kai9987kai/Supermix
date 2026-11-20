@@ -283,8 +283,8 @@
     },
     {
       "path": "source/mimomix_core.py",
-      "sha256": "e0efc0f0078cb0a923f4bce0ea93f13e4a6e4e7e5fdd989bdc5ce5566824d624",
-      "size_bytes": 208170
+      "sha256": "4d3fcbb09dd21889eb104a09ef0856287fe281a707e68c2572fd88130d8df310",
+      "size_bytes": 237815
     },
     {
       "path": "source/mimomix_observatory.py",
@@ -448,8 +448,8 @@
     },
     {
       "path": "source/nexus_solver.py",
-      "sha256": "02751afe05f186057559e1e89c42f00195382dfc3206e415125890ad6af71fee",
-      "size_bytes": 117318
+      "sha256": "ec172ddca361b972b45211bca547287cb4639b4d4e5c247f81083b21469157b5",
+      "size_bytes": 143426
     },
     {
       "path": "source/nexus_speculative_bidirectional.py",

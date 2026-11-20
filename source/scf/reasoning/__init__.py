@@ -19,6 +19,61 @@ __all__ = ["SCFReasoningCoordinator"]
 class SCFReasoningCoordinator:
     """Coordinates Graph-of-Thought, Active Inference, Causal DAG, Ideation, and Problem Solving."""
 
+    def __init__(self) -> None:
+        self._tessera_commons: Optional[Any] = None
+
+    def _get_tessera_commons(self) -> Any:
+        if self._tessera_commons is None:
+            import nexus_v102_frontier as v102
+
+            self._tessera_commons = v102.TesseraRatifiedLemmaCommons()
+        return self._tessera_commons
+
+    def audit_decision_cvar(
+        self,
+        *,
+        candidate_losses: Dict[str, Sequence[float]],
+        particle_weights: Optional[Sequence[float]] = None,
+        consistency_residuals: Optional[Dict[str, float]] = None,
+        projection_residuals: Optional[Dict[str, float]] = None,
+        cvar_alpha: float = 0.25,
+        cvar_weight: float = 0.5,
+        max_consistency_residual: float = 0.15,
+        max_projection_residual: float = 0.20,
+        max_cvar_risk: float = 0.65,
+    ) -> Dict[str, Any]:
+        """Run COUNTERFORM CVaR tail-risk & dual consistency/projection audit (advisory only)."""
+        import nexus_v102_frontier as v102
+
+        return v102.CounterformFalsificationAuditor().audit_candidates(
+            candidate_losses=candidate_losses,
+            particle_weights=particle_weights,
+            consistency_residuals=consistency_residuals,
+            projection_residuals=projection_residuals,
+            cvar_alpha=cvar_alpha,
+            cvar_weight=cvar_weight,
+            max_consistency_residual=max_consistency_residual,
+            max_projection_residual=max_projection_residual,
+            max_cvar_risk=max_cvar_risk,
+        )
+
+    def ratify_lemma(
+        self,
+        *,
+        expression: str,
+        lineage: str,
+        task_family: str,
+        verified_passed: bool = True,
+    ) -> Dict[str, Any]:
+        """Submit a reasoning motif/lemma to the TESSERA independent-rediscovery commons."""
+        commons = self._get_tessera_commons()
+        return commons.submit_discovery(
+            expression=expression,
+            lineage=lineage,
+            task_family=task_family,
+            verified_passed=verified_passed,
+        )
+
     @staticmethod
     def decompose_and_probe(
         query: str,

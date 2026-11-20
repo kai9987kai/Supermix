@@ -2474,7 +2474,172 @@ class NexusApiService:
                 "labeled_conformal_risk_control": True,
                 "cns_v95_physiological_gates": True,
             },
+            "v102_frontier_synthesis": {
+                "mhc_birkhoff_residual": True,
+                "cns_dendritic_apical": True,
+                "ctm_temporal_synchrony": True,
+                "muon_hybrid_optimizer": True,
+                "nexus_search_hybrid_rrf": True,
+                "tessera_ratified_lemma_commons": True,
+                "counterform_cvar_auditor": True,
+                "carrier_interaction_atlas": True,
+                "sonapse_discovery_monitor": True,
+                "hyperion_compute_scheduler": True,
+            },
+            "v103_frontier_synthesis": {
+                "engram_conditional_memory": True,
+                "gated_deltanet2_memory": True,
+                "shy_synaptic_homeostasis": True,
+                "continuum_btsp_hopfield_memory": True,
+                "topk_sae_causal_probe": True,
+                "fractal_connectome_analyzer": True,
+                "causeway_sensitivity_workbench": True,
+                "neurohive_resource_planner": True,
+            },
         }
+
+    def handle_frontier_cvar_audit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v102_frontier as v102
+
+        return v102.CounterformFalsificationAuditor().audit_candidates(
+            candidate_losses=payload.get("candidate_losses") or {},
+            particle_weights=payload.get("particle_weights"),
+            consistency_residuals=payload.get("consistency_residuals"),
+            projection_residuals=payload.get("projection_residuals"),
+            cvar_alpha=float(payload.get("cvar_alpha", 0.25)),
+            cvar_weight=float(payload.get("cvar_weight", 0.5)),
+            max_consistency_residual=float(payload.get("max_consistency_residual", 0.15)),
+            max_projection_residual=float(payload.get("max_projection_residual", 0.20)),
+            max_cvar_risk=float(payload.get("max_cvar_risk", 0.65)),
+        )
+
+    def handle_frontier_carrier_atlas(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v102_frontier as v102
+
+        return v102.CarrierInteractionAtlas.decompose_subset_factorial(
+            carriers=payload.get("carriers") or [],
+            subset_outcomes=payload.get("subset_outcomes") or {},
+        )
+
+    def handle_frontier_tessera_commons(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v102_frontier as v102
+
+        commons = v102.TesseraRatifiedLemmaCommons(
+            min_independent_lineages=int(payload.get("min_independent_lineages", 2)),
+            expiry_epochs=int(payload.get("expiry_epochs", 2)),
+        )
+        events = []
+        for sub in payload.get("submissions") or []:
+            events.append(
+                commons.submit_discovery(
+                    expression=str(sub.get("expression", "")),
+                    lineage=str(sub.get("lineage", "unknown")),
+                    task_family=str(sub.get("task_family", "general")),
+                    verified_passed=bool(sub.get("verified_passed", True)),
+                )
+            )
+        advance = int(payload.get("advance_epochs", 0))
+        expiry_info = commons.advance_epoch(advance) if advance > 0 else None
+        return {
+            "submissions": events,
+            "expiry_info": expiry_info,
+            "snapshot": commons.snapshot(),
+            "answer_authority": False,
+        }
+
+    def handle_frontier_hyperion_schedule(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v102_frontier as v102
+
+        return v102.HyperionComputeScheduler().schedule(
+            domain=str(payload.get("domain", "general")),
+            submode=str(payload.get("submode", "dialogue")),
+            complexity=str(payload.get("complexity", "medium")),
+            speculative_allowed=bool(payload.get("speculative_allowed", True)),
+            has_memory_turns=bool(payload.get("has_memory_turns", False)),
+        )
+
+    def handle_v103_continuum_memory(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v103_synthesis as v103
+
+        mem = v103.ContinuumBTSPHopfieldMemory(
+            dim=int(payload.get("dim", 12)),
+            out_dim=int(payload.get("out_dim", 4)),
+            btsp_bits=int(payload.get("btsp_bits", 32)),
+            hopfield_beta=float(payload.get("hopfield_beta", 6.0)),
+            seed=int(payload.get("seed", 103)),
+        )
+        return mem.run_benchmark(
+            n_patterns=int(payload.get("n_patterns", 8)),
+            steps=int(payload.get("steps", 24)),
+        )
+
+    def handle_v103_sae_probe(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v103_synthesis as v103
+
+        samples = payload.get("samples")
+        input_dim = int(payload.get("input_dim", len(samples[0]) if samples else 8))
+        if not samples:
+            import numpy as np
+
+            rng = np.random.default_rng(int(payload.get("seed", 103)))
+            latent_codes = rng.exponential(1.0, size=(32, 3))
+            basis = rng.normal(0.0, 1.0, size=(3, input_dim))
+            samples = (latent_codes @ basis + rng.normal(0.0, 0.05, size=(32, input_dim))).tolist()
+        probe = v103.TopKSparseAutoencoderProbe(
+            input_dim=input_dim,
+            dict_size=int(payload.get("dict_size", max(16, input_dim * 3))),
+            k_active=int(payload.get("k_active", 3)),
+            seed=int(payload.get("seed", 103)),
+        )
+        return probe.fit_and_probe(
+            samples,
+            epochs=int(payload.get("epochs", 35)),
+            lr=float(payload.get("lr", 0.08)),
+            probe_weights=payload.get("probe_weights"),
+        )
+
+    def handle_v103_fractal_topology(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v103_synthesis as v103
+
+        kinds = payload.get("kinds") or ["sierpinski", "hilbert", "small_world", "random_control"]
+        return v103.FractalConnectomeAnalyzer.compare_topologies(
+            kinds=kinds,
+            n_nodes=int(payload.get("n_nodes", 27)),
+            seed=int(payload.get("seed", 103)),
+        )
+
+    def handle_v103_causeway_sensitivity(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v103_synthesis as v103
+
+        policies = payload.get("policies") or {
+            "aggressive_fast": {"accuracy_weight": 0.90, "cost_penalty": 0.25, "safety_margin": 0.20},
+            "balanced_verified": {"accuracy_weight": 0.84, "cost_penalty": 0.35, "safety_margin": 0.78},
+            "minimal_safe": {"accuracy_weight": 0.72, "cost_penalty": 0.10, "safety_margin": 0.92},
+        }
+        return v103.CausewaySensitivityWorkbench.evaluate_policies(
+            policies=policies,
+            assumptions=payload.get("assumptions"),
+            sensitivity_flips=payload.get("sensitivity_flips"),
+            seeds=payload.get("seeds") or (11, 29, 47, 73),
+        )
+
+    def handle_v103_neurohive_plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v103_synthesis as v103
+
+        tasks = payload.get("tasks") or [
+            {"id": "verify_ast", "token_cost": 40, "thermal_delta": 5.0},
+            {"id": "cns_probe", "token_cost": 96, "thermal_delta": 14.0},
+            {"id": "collective_fuse", "token_cost": 128, "thermal_delta": 18.0},
+            {"id": "cvar_audit", "token_cost": 64, "thermal_delta": 9.0},
+        ]
+        return v103.NeuroHiveResourcePlanner().simulate_dispatch(
+            tasks=tasks,
+            token_budget=int(payload.get("token_budget", 1000)),
+            thermal_limit=float(payload.get("thermal_limit", 85.0)),
+            fault_rate=float(payload.get("fault_rate", 0.15)),
+            enable_mnt_repair=bool(payload.get("enable_mnt_repair", True)),
+            seed=int(payload.get("seed", 103)),
+        )
 
     def handle_telemetry(self) -> Dict[str, Any]:
         with self._lock:
@@ -2818,6 +2983,74 @@ def create_app(service: Optional[NexusApiService] = None):
             enable_neural_candidates: bool = False
             max_neural_tokens: int = 64
             adaptive_thinking: bool = False
+
+        class PyFrontierCVaRRequest(BaseModel):
+            candidate_losses: Dict[str, List[float]]
+            particle_weights: Optional[List[float]] = None
+            consistency_residuals: Optional[Dict[str, float]] = None
+            projection_residuals: Optional[Dict[str, float]] = None
+            cvar_alpha: float = 0.25
+            cvar_weight: float = 0.5
+            max_consistency_residual: float = 0.15
+            max_projection_residual: float = 0.20
+            max_cvar_risk: float = 0.65
+
+        class PyFrontierCarrierAtlasRequest(BaseModel):
+            carriers: List[str]
+            subset_outcomes: Dict[str, float]
+
+        class PyFrontierTesseraRequest(BaseModel):
+            submissions: List[Dict[str, Any]] = Field(default_factory=list)
+            min_independent_lineages: int = 2
+            expiry_epochs: int = 2
+            advance_epochs: int = 0
+
+        class PyFrontierHyperionRequest(BaseModel):
+            domain: str = "general"
+            submode: str = "dialogue"
+            complexity: str = "medium"
+            speculative_allowed: bool = True
+            has_memory_turns: bool = False
+
+        class PyV103ContinuumRequest(BaseModel):
+            dim: int = 12
+            out_dim: int = 4
+            btsp_bits: int = 32
+            hopfield_beta: float = 6.0
+            n_patterns: int = 8
+            steps: int = 24
+            seed: int = 103
+
+        class PyV103SAEProbeRequest(BaseModel):
+            samples: Optional[List[List[float]]] = None
+            input_dim: int = 8
+            dict_size: int = 24
+            k_active: int = 3
+            epochs: int = 35
+            lr: float = 0.08
+            probe_weights: Optional[List[float]] = None
+            seed: int = 103
+
+        class PyV103FractalRequest(BaseModel):
+            kinds: List[str] = Field(
+                default_factory=lambda: ["sierpinski", "hilbert", "small_world", "random_control"]
+            )
+            n_nodes: int = 27
+            seed: int = 103
+
+        class PyV103CausewayRequest(BaseModel):
+            policies: Optional[Dict[str, Dict[str, float]]] = None
+            assumptions: Optional[Dict[str, float]] = None
+            sensitivity_flips: Optional[Dict[str, float]] = None
+            seeds: Optional[List[int]] = None
+
+        class PyV103NeuroHiveRequest(BaseModel):
+            tasks: Optional[List[Dict[str, Any]]] = None
+            token_budget: int = 1000
+            thermal_limit: float = 85.0
+            fault_rate: float = 0.15
+            enable_mnt_repair: bool = True
+            seed: int = 103
 
         class PyEntropyRequest(BaseModel):
             source: str = "crypto"
@@ -3268,6 +3501,69 @@ def create_app(service: Optional[NexusApiService] = None):
             )
             try:
                 return svc.handle_scf_run(s_req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/frontier/cvar_audit")
+        async def frontier_cvar_audit_endpoint(req: PyFrontierCVaRRequest):
+            try:
+                return svc.handle_frontier_cvar_audit(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/frontier/carrier_atlas")
+        async def frontier_carrier_atlas_endpoint(req: PyFrontierCarrierAtlasRequest):
+            try:
+                return svc.handle_frontier_carrier_atlas(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/frontier/tessera_commons")
+        async def frontier_tessera_commons_endpoint(req: PyFrontierTesseraRequest):
+            try:
+                return svc.handle_frontier_tessera_commons(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/frontier/hyperion_schedule")
+        async def frontier_hyperion_schedule_endpoint(req: PyFrontierHyperionRequest):
+            try:
+                return svc.handle_frontier_hyperion_schedule(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v103/continuum_memory")
+        async def v103_continuum_memory_endpoint(req: PyV103ContinuumRequest):
+            try:
+                return svc.handle_v103_continuum_memory(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v103/sae_probe")
+        async def v103_sae_probe_endpoint(req: PyV103SAEProbeRequest):
+            try:
+                return svc.handle_v103_sae_probe(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v103/fractal_topology")
+        async def v103_fractal_topology_endpoint(req: PyV103FractalRequest):
+            try:
+                return svc.handle_v103_fractal_topology(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v103/causeway_sensitivity")
+        async def v103_causeway_sensitivity_endpoint(req: PyV103CausewayRequest):
+            try:
+                return svc.handle_v103_causeway_sensitivity(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v103/neurohive_plan")
+        async def v103_neurohive_plan_endpoint(req: PyV103NeuroHiveRequest):
+            try:
+                return svc.handle_v103_neurohive_plan(req.model_dump())
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 

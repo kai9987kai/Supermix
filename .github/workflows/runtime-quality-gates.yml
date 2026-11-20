@@ -141,11 +141,16 @@ jobs:
             source/scf/routing/__init__.py \
             source/scf/verification/__init__.py \
             source/build_v101_cognitive_mix.py \
+            source/muon_optimizer.py \
+            source/nexus_v102_frontier.py \
+            source/nexus_v103_synthesis.py \
             test_scf_v91_cognitive_fabric.py \
             test_v97_scf_evolution.py \
             test_v98_scf_evolution.py \
             test_v100_scf_evolution.py \
-            test_v101_cognitive_capabilities.py
+            test_v101_cognitive_capabilities.py \
+            test_v102_frontier_evolution.py \
+            test_v103_frontier_synthesis.py
 
       - name: Check self-contained runtime snapshot
         run: python source/sync_runtime_model_variants.py --check
@@ -233,11 +238,16 @@ jobs:
             source/scf/routing/__init__.py \
             source/scf/verification/__init__.py \
             source/build_v101_cognitive_mix.py \
+            source/muon_optimizer.py \
+            source/nexus_v102_frontier.py \
+            source/nexus_v103_synthesis.py \
             test_scf_v91_cognitive_fabric.py \
             test_v97_scf_evolution.py \
             test_v98_scf_evolution.py \
             test_v100_scf_evolution.py \
-            test_v101_cognitive_capabilities.py
+            test_v101_cognitive_capabilities.py \
+            test_v102_frontier_evolution.py \
+            test_v103_frontier_synthesis.py
 
       - name: Run runtime and routing regression tests
         run: |
@@ -259,7 +269,7 @@ jobs:
           python -m pytest -q test_mimomix_multimodal.py test_nexus_compare.py test_nexus_quantum_bell.py test_nexus_resonance.py test_nexus_studio_v83.py test_nexus_studio_v84.py test_nexus_v84_innovations.py
           python -m pytest -q test_v85_release_contract.py
           python -m pytest -q test_nexus_proof.py test_nexus_epistemics.py test_nexus_engine.py test_nexus_api.py test_nexus_swarm.py test_nexus_got.py test_nexus_ideation.py test_nexus_chat.py test_nexus_solver.py test_nexus_studio_contract.py test_nexus_hybrid_advancements.py test_nexus_adaptive.py test_nexus_risk_control.py test_nexus_independent_checker.py test_nexus_nonce_ledger.py
-          python -m pytest -q test_v95_neurogenesis_and_connectome.py test_nexus_v95_ecosystem.py test_v96_physio_training_and_criticality.py test_scf_v91_cognitive_fabric.py test_v97_scf_evolution.py test_v98_scf_evolution.py test_v100_scf_evolution.py test_v101_cognitive_capabilities.py
+          python -m pytest -q test_v95_neurogenesis_and_connectome.py test_nexus_v95_ecosystem.py test_v96_physio_training_and_criticality.py test_scf_v91_cognitive_fabric.py test_v97_scf_evolution.py test_v98_scf_evolution.py test_v100_scf_evolution.py test_v101_cognitive_capabilities.py test_v102_frontier_evolution.py test_v103_frontier_synthesis.py
 
       - name: Freeze and smoke-test protocol console
         if: runner.os == 'Windows'

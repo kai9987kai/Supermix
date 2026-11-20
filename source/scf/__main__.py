@@ -171,6 +171,127 @@ def cmd_bench(
     return 0
 
 
+def cmd_frontier(*, as_json: bool = False) -> int:
+    """Run deterministic self-verification of Supermix v102/v103 frontier modules."""
+    import torch
+
+    import mimomix_core as mc
+    import muon_optimizer as mo
+    import nexus_v102_frontier as v102
+    import nexus_v103_synthesis as v103
+
+    torch.manual_seed(102)
+    cfg = mc.MiMoMixConfig(
+        vocab_size=64,
+        hidden_size=32,
+        n_layers=2,
+        n_heads=4,
+        n_kv_heads=2,
+        intermediate_size=48,
+        moe_intermediate_size=24,
+        n_routed_experts=4,
+        n_shared_experts=1,
+        use_mhc_residual=True,
+        mhc_streams=2,
+        mhc_sinkhorn_iters=20,
+        use_engram_memory=True,
+        engram_table_size=128,
+        engram_n_heads=2,
+        engram_after_layer=0,
+        use_deltanet_memory=True,
+        deltanet_dim=16,
+        deltanet_after_layer=1,
+        use_cns_core=True,
+        cns_nodes=8,
+        cns_steps=2,
+        cns_after_layer=0,
+        cns_dendritic_apical=True,
+        use_thinking_core=True,
+        thinking_latent_dim=16,
+        thinking_cycles=2,
+        thinking_ctm_synchrony=True,
+    )
+    model = mc.MiMoMixModel(cfg)
+    model.eval()
+    with torch.no_grad():
+        x = torch.randint(0, 64, (1, 6))
+        _ = model(x)
+    tele = model.telemetry()
+
+    # Muon Newton-Schulz orthogonality check
+    g = torch.randn(16, 16)
+    ortho = mo.newton_schulz_orthogonalize(g, steps=5)
+    gram = ortho @ ortho.t()
+    ortho_diag_mean = float(gram.diagonal().mean())
+
+    # Carrier 2^3 exact Mobius atlas check
+    atlas = v102.CarrierInteractionAtlas.decompose_subset_factorial(
+        ["trunk", "cns", "thinking"],
+        {
+            "": 0.90,
+            "trunk": 0.40,
+            "cns": 0.82,
+            "thinking": 0.85,
+            "cns,trunk": 0.30,
+            "thinking,trunk": 0.35,
+            "cns,thinking": 0.74,
+            "cns,thinking,trunk": 0.20,
+        },
+    )
+    flops = v102.CarrierInteractionAtlas.profile_mimomix_compute(cfg, seq_len=64)
+    cvar = v102.CounterformFalsificationAuditor().audit_candidates(
+        candidate_losses={"conservative": [0.10, 0.12, 0.15, 0.18], "risky": [0.05, 0.08, 0.10, 0.95]},
+        consistency_residuals={"conservative": 0.04, "risky": 0.05},
+        projection_residuals={"conservative": 0.06, "risky": 0.07},
+    )
+    commons = v102.TesseraRatifiedLemmaCommons(min_independent_lineages=2)
+    commons.submit_discovery(expression="a^2 - b^2 = (a-b)(a+b)", lineage="NexusMind", task_family="algebra")
+    rat = commons.submit_discovery(expression="a^2 - b^2 = (a-b)(a+b)", lineage="MiMoMix", task_family="quadratics")
+    sched = v102.HyperionComputeScheduler().schedule(
+        domain="math_science", submode="problem_solving", complexity="high", has_memory_turns=True
+    )
+
+    # v103 synthesis checks (Continuum/BTSP/Hopfield, SAE, Fractal, Causeway, NeuroHive)
+    mem_bench = v103.ContinuumBTSPHopfieldMemory(seed=103).run_benchmark(n_patterns=6, steps=16)
+    topo_cmp = v103.FractalConnectomeAnalyzer.compare_topologies(n_nodes=18, seed=103)
+    hive = v103.NeuroHiveResourcePlanner().simulate_dispatch(
+        tasks=[{"id": "t1", "token_cost": 40}, {"id": "t2", "token_cost": 60}],
+        token_budget=500,
+        seed=103,
+    )
+
+    payload: Dict[str, Any] = {
+        "frontier_version": v102.FRONTIER_V102_VERSION,
+        "synthesis_version": v103.FRONTIER_V103_VERSION,
+        "mhc": tele.get("mhc"),
+        "engram": tele.get("engram"),
+        "deltanet": tele.get("deltanet"),
+        "cns_dendritic_apical": (tele.get("cns_core") or {}).get("dendritic_apical"),
+        "ctm_synchrony": (tele.get("thinking") or {}).get("ctm_synchrony"),
+        "muon_ortho_diag_mean": round(ortho_diag_mean, 4),
+        "carrier_atlas_exact": atlas["exact_reconstruction_verified"],
+        "aether_flops_per_token": flops["active_flops_per_token"],
+        "counterform_decision": cvar["decision"],
+        "counterform_selected": cvar["selected_candidate"],
+        "tessera_ratified": rat["ratified"],
+        "hyperion_waves": sched["wave_count"],
+        "btsp_one_shot_overlap": mem_bench["btsp_one_shot_overlap"],
+        "mnemosyne_intact_vs_erased": mem_bench["intact_vs_erased_delta"],
+        "fractal_highest_clustering": topo_cmp["highest_clustering"],
+        "neurohive_budget_conserved": hive["budget_conserved"],
+        "answer_authority": False,
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2, default=str))
+        return 0
+    print(f"Supermix Frontier {payload['frontier_version']} self-check OK")
+    print(f"  mHC Birkhoff error: {payload['mhc']['max_doubly_stochastic_error']:.2e}")
+    print(f"  CNS apical: {payload['cns_dendritic_apical']} | CTM sync: {payload['ctm_synchrony']}")
+    print(f"  Carrier Atlas exact: {payload['carrier_atlas_exact']} | CVaR: {payload['counterform_decision']} ({payload['counterform_selected']})")
+    print(f"  Tessera ratified: {payload['tessera_ratified']} | Hyperion waves: {payload['hyperion_waves']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m scf",
@@ -199,6 +320,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_bench.add_argument("--neural", action="store_true")
     p_bench.add_argument("--checkpoint", type=str, default=None)
     p_bench.add_argument("--json", action="store_true")
+
+    p_frontier = sub.add_parser("frontier", help="Run Supermix v102 frontier modules self-check")
+    p_frontier.add_argument("--json", action="store_true")
     return parser
 
 
@@ -226,6 +350,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             checkpoint=args.checkpoint,
             as_json=args.json,
         )
+    if args.command == "frontier":
+        return cmd_frontier(as_json=args.json)
     return 2
 
 

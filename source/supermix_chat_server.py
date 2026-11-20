@@ -137,7 +137,12 @@ class ModelRegistry:
                             "cns_hebbian_trace": bool(getattr(cfg, "cns_hebbian_trace", False)),
                             "cns_predictive_error": bool(getattr(cfg, "cns_predictive_error", False)),
                             "cns_divisive_norm": bool(getattr(cfg, "cns_divisive_norm", False)),
+                            "cns_dendritic_apical": bool(getattr(cfg, "cns_dendritic_apical", False)),
+                            "use_mhc_residual": bool(getattr(cfg, "use_mhc_residual", False)),
+                            "use_engram_memory": bool(getattr(cfg, "use_engram_memory", False)),
+                            "use_deltanet_memory": bool(getattr(cfg, "use_deltanet_memory", False)),
                             "thinking_entropy_halt": bool(getattr(cfg, "thinking_entropy_halt", False)),
+                            "thinking_ctm_synchrony": bool(getattr(cfg, "thinking_ctm_synchrony", False)),
                             "run_name": loaded.extra.get("run_name"),
                         }
                 except Exception:  # noqa: BLE001 - detail is optional, listing is not
@@ -233,7 +238,32 @@ def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
                 "divisive_norm": cns.get("divisive_norm", False),
                 "div_norm_factor_mean": cns.get("div_norm_factor_mean"),
                 "div_norm_strength_mean_abs": cns.get("div_norm_strength_mean_abs"),
+                "dendritic_apical": cns.get("dendritic_apical", False),
+                "apical_mod_mean": cns.get("apical_mod_mean"),
                 "spectral_radius_est": cns.get("spectral_radius_est"),
+            }
+        mhc = tele.get("mhc")
+        if isinstance(mhc, dict):
+            summary["mhc"] = {
+                "enabled": bool(mhc.get("enabled", False)),
+                "streams": mhc.get("streams"),
+                "max_doubly_stochastic_error": mhc.get("max_doubly_stochastic_error"),
+            }
+        eng = tele.get("engram")
+        if isinstance(eng, dict):
+            summary["engram"] = {
+                "enabled": bool(eng.get("enabled", False)),
+                "table_size": eng.get("table_size"),
+                "mean_context_gate": eng.get("mean_context_gate"),
+            }
+        dn = tele.get("deltanet")
+        if isinstance(dn, dict):
+            summary["deltanet"] = {
+                "enabled": bool(dn.get("enabled", False)),
+                "state_dim": dn.get("state_dim"),
+                "mean_erase_gate": dn.get("mean_erase_gate"),
+                "mean_write_gate": dn.get("mean_write_gate"),
+                "state_frobenius_norm": dn.get("state_frobenius_norm"),
             }
         thk = tele.get("thinking")
         if isinstance(thk, dict):
@@ -241,6 +271,8 @@ def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
                 "cycles_used": thk.get("cycles_used"),
                 "exit_reason": thk.get("exit_reason"),
                 "cycle_entropies": thk.get("cycle_entropies"),
+                "ctm_synchrony": thk.get("ctm_synchrony", False),
+                "ctm_synchrony_coherence": thk.get("ctm_synchrony_coherence"),
             }
         return summary or None
     except Exception:
@@ -329,7 +361,11 @@ def _scf_runtime_trace(
                 "style_preference": ws.get("style_preference") or "",
                 "active_commitments": len(ws.get("active_commitments") or []),
                 "open_questions": len(ws.get("open_questions") or []),
+                "rrf_hits": len(ws.get("rrf_memory_hits") or []),
+                "query_surprise": ws.get("query_surprise", 0.0),
+                "memory_classes": ws.get("memory_classes_active") or [],
             },
+            "hyperion_schedule": routing.get("hyperion_schedule"),
             "decoding_policy": (res.get("adaptive_budget") or {}).get("decoding_policy"),
             "experimental_components_used": rec.get("experimental_components_used") or [],
             "production_ready_claim": bool(rec.get("production_ready_claim", False)),
@@ -944,7 +980,7 @@ def build_app(registry: ModelRegistry, max_concurrency: int = 2,
 
 
 PAGE = r"""<!doctype html><meta charset="utf-8">
-<title>Supermix Chat · v101 / SCF Cognitive Fabric</title>
+<title>Supermix Chat · v103 Synthesis / SCF Cognitive Fabric</title>
 <style>
 :root{--bg:#0b101b;--panel:#131b2b;--card:#182236;--ink:#e9eff8;--dim:#8ea0be;--line:#26344f;--accent:#60a5fa;--accent2:#a78bfa;--ok:#34d399;--bad:#f87171}
 *{box-sizing:border-box}
@@ -1019,6 +1055,12 @@ textarea{background:var(--panel);color:var(--ink);border:1px solid var(--line);b
     <button type="button" class="chip" onclick="usePrompt('In the male CNS, how many synapses does type Tm2 make onto type Dm3c?')">Connectome Tm2-&gt;Dm3c</button>
     <button type="button" class="chip" onclick="usePrompt('Find the impulse delivered by 41 N applied for 5 s.')">Physics impulse</button>
     <button type="button" class="chip" onclick="usePrompt('Solve x + y = 10 and x - y = 2')">System 2x2</button>
+    <button type="button" class="chip" onclick="usePrompt('Solve x + y + z = 6, 2x - y + z = 3, x + 2y - z = 2')">System 3x3</button>
+    <button type="button" class="chip" onclick="usePrompt('Find the determinant of [[2, 1, 0], [1, 3, 1], [0, 2, 4]]')">Matrix 3x3 Det</button>
+    <button type="button" class="chip" onclick="usePrompt('Find the inverse of [[4, 7], [2, 6]]')">Matrix 2x2 Inv</button>
+    <button type="button" class="chip" onclick="usePrompt('Find the eigenvalues of [[4, 1], [2, 3]]')">Eigenvalues</button>
+    <button type="button" class="chip" onclick="usePrompt('Bayes: prior 0.01, sensitivity 0.95, false positive rate 0.05')">Bayes Posterior</button>
+    <button type="button" class="chip" onclick="usePrompt('What is 7^13 mod 11?')">Mod Pow</button>
     <button type="button" class="chip" onclick="usePrompt('Integrate 6x^2 + 2x from x = 0 to x = 2')">Calculus Integral</button>
     <button type="button" class="chip" onclick="usePrompt('Brainstorm ways to cut Python CPU inference latency cleanly')">Brainstorm Ideas</button>
     <button type="button" class="chip" onclick="usePrompt('How should I debug an intermittent async race condition step by step?')">Debug Race Bug</button>
@@ -1046,7 +1088,9 @@ async function loadModels(){
   el('model').innerHTML = d.models.map(m => {
     const a = m.architecture || {};
     const rname = String(a.run_name||m.name);
-    const tag = rname.includes('v101') ? ' [v101 Cognitive]'
+    const tag = (a.use_engram_memory || a.use_deltanet_memory) ? ' [v103 Engram/Delta]'
+      : a.use_mhc_residual ? ' [v102 mHC]'
+      : rname.includes('v101') ? ' [v101 Cognitive]'
       : a.cns_divisive_norm ? ' [v100 DivNorm]'
       : a.cns_predictive_error ? (rname.includes('v99') ? ' [v99 PredErr]' : ' [v98 PredErr]')
       : a.cns_hebbian_trace ? ' [v97 Hebbian]' : a.cns_core ? ' [CNS]' : '';
@@ -1086,10 +1130,21 @@ function renderAnnotations(bot, data){
       if(t.cns_core.hebbian_trace) bits.push(`Hebbian gain=${Number(t.cns_core.hebbian_gain_mean||1).toFixed(3)}`);
       if(t.cns_core.predictive_error) bits.push(`PredErr norm=${Number(t.cns_core.pred_error_norm||0).toFixed(4)}`);
       if(t.cns_core.divisive_norm) bits.push(`DivNorm=${Number(t.cns_core.div_norm_factor_mean||1).toFixed(3)}`);
+      if(t.cns_core.dendritic_apical) bits.push(`Apical=${Number(t.cns_core.apical_mod_mean||1).toFixed(3)}`);
       if(t.cns_core.spectral_radius_est!==undefined && t.cns_core.spectral_radius_est!==null) bits.push(`ρ=${Number(t.cns_core.spectral_radius_est).toFixed(3)}`);
+    }
+    if(t.mhc && t.mhc.enabled){
+      bits.push(`mHC=${t.mhc.streams}x (err=${Number(t.mhc.max_doubly_stochastic_error||0).toExponential(1)})`);
+    }
+    if(t.engram && t.engram.enabled){
+      bits.push(`Engram=${t.engram.table_size} (α=${Number(t.engram.mean_context_gate||0).toFixed(2)})`);
+    }
+    if(t.deltanet && t.deltanet.enabled){
+      bits.push(`DeltaNet2=${t.deltanet.state_dim}d (e=${Number(t.deltanet.mean_erase_gate||0).toFixed(2)}/w=${Number(t.deltanet.mean_write_gate||0).toFixed(2)})`);
     }
     if(t.thinking){
       bits.push(`Think cycles=${t.thinking.cycles_used} (${t.thinking.exit_reason})`);
+      if(t.thinking.ctm_synchrony) bits.push(`CTM-Sync=${Number(t.thinking.ctm_synchrony_coherence||0).toFixed(3)}`);
       if(t.thinking.cycle_entropies) bits.push(`H=[${t.thinking.cycle_entropies.map(v=>v.toFixed(2)).join(', ')}]`);
     }
     if(bits.length) bot.appendChild(badge('tele', bits.join(' · ')));

@@ -66,11 +66,16 @@ class SCFCollectiveOrchestrator:
                 pass
             return " ".join(text.lower().split())
 
-        def _audit_trace_arithmetic(raw_ans: str) -> int:
-            """Count inconsistent inline `a op b = c` steps inside a neural candidate."""
+        def _audit_trace_arithmetic(raw_ans: str) -> Dict[str, Any]:
+            """Audit inline arithmetic, power, and percentage steps inside a candidate trace."""
+            text = str(raw_ans or "")
+            checked = 0
             bad_steps = 0
-            step_re = re.compile(r"(-?\d+(?:\.\d+)?)\s*([+\-xX*/])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)")
-            for a_s, op_s, b_s, c_s in step_re.findall(str(raw_ans or "")):
+            failures: List[str] = []
+
+            # 1. Binary arithmetic steps: a op b = c
+            step_re = re.compile(r"(-?\d+(?:\.\d+)?)\s*([+\-xX*/^])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)")
+            for a_s, op_s, b_s, c_s in step_re.findall(text):
                 try:
                     a_v, b_v, c_v = float(a_s), float(b_s), float(c_s)
                 except ValueError:
@@ -83,14 +88,42 @@ class SCFCollectiveOrchestrator:
                     exp_v = a_v * b_v
                 elif op_s == "/":
                     if b_v == 0.0:
+                        checked += 1
                         bad_steps += 1
+                        failures.append(f"{a_s}/{b_s}={c_s} (div0)")
                         continue
                     exp_v = a_v / b_v
+                elif op_s == "^":
+                    if abs(b_v) > 32:
+                        continue
+                    exp_v = a_v ** b_v
                 else:
                     continue
+                checked += 1
                 if abs(exp_v - c_v) > max(1e-4, 1e-4 * abs(exp_v)):
                     bad_steps += 1
-            return bad_steps
+                    failures.append(f"{a_s} {op_s} {b_s} = {c_s} (expected {exp_v:.6g})")
+
+            # 2. Inline percentage steps: p% of b = c
+            pct_re = re.compile(r"(-?\d+(?:\.\d+)?)\s*%\s+of\s+(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)", re.I)
+            for p_s, b_s, c_s in pct_re.findall(text):
+                try:
+                    exp_v = (float(p_s) * float(b_s)) / 100.0
+                    c_v = float(c_s)
+                except ValueError:
+                    continue
+                checked += 1
+                if abs(exp_v - c_v) > max(1e-4, 1e-4 * abs(exp_v)):
+                    bad_steps += 1
+                    failures.append(f"{p_s}% of {b_s} = {c_s} (expected {exp_v:.6g})")
+
+            fidelity = 1.0 if checked == 0 else max(0.0, float(checked - bad_steps) / float(checked))
+            return {
+                "steps_checked": checked,
+                "failures": bad_steps,
+                "failure_details": failures[:4],
+                "process_fidelity_score": round(fidelity, 4),
+            }
 
         answers = [
             _canonical_value(str(c.get("answer") or ""))
@@ -106,7 +139,11 @@ class SCFCollectiveOrchestrator:
             verified_bonus = 0.35 if bool(cand.get("verified")) else 0.0
             conf = max(0.0, min(1.0, float(cand.get("confidence", 0.0))))
             nonempty_bonus = 0.10 if ans else -0.20
-            trace_errors = 0 if cand.get("verified") else _audit_trace_arithmetic(ans)
+            if cand.get("verified"):
+                audit = {"steps_checked": 0, "failures": 0, "failure_details": [], "process_fidelity_score": 1.0}
+            else:
+                audit = _audit_trace_arithmetic(ans)
+            trace_errors = int(audit["failures"])
             trace_penalty = min(0.24, 0.12 * trace_errors)
             total_score = round(conf + consensus_bonus + verified_bonus + nonempty_bonus - trace_penalty, 4)
             note = (
@@ -128,6 +165,9 @@ class SCFCollectiveOrchestrator:
                     "canonical_answer": canon,
                     "consensus_agreement": agree_count,
                     "trace_audit_failures": trace_errors,
+                    "trace_steps_checked": int(audit["steps_checked"]),
+                    "process_fidelity_score": float(audit["process_fidelity_score"]),
+                    "trace_failure_details": list(audit["failure_details"]),
                     "composite_score": total_score,
                     "critique_notes": note,
                 }

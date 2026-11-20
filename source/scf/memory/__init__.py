@@ -149,6 +149,39 @@ class SCFLayeredMemory:
             "salient_turns": scored_memories[:3],
         }
 
+        # v102 NexusSearch BM25 + Sparse Cosine Vector RRF + Titans surprise + 7-class taxonomy
+        rrf_res: Dict[str, Any] = {
+            "hits": [],
+            "query_surprise": 0.0,
+            "memory_classes_active": [],
+            "rrf_k": 60,
+            "answer_authority": False,
+        }
+        try:
+            import nexus_v102_frontier as v102
+
+            rrf_docs: List[Dict[str, Any]] = []
+            for idx, turn in enumerate(list(recent_turns)[-16:]):
+                u_txt = str(turn.get("user", "") if isinstance(turn, dict) else (turn[0] if isinstance(turn, (list, tuple)) and turn else "")).strip()
+                if u_txt:
+                    rrf_docs.append({"id": f"turn_{idx}", "text": u_txt})
+            for idx, adm in enumerate(self.admitted_memories[-16:]):
+                if adm.get("authority", {}).get("active"):
+                    rrf_docs.append(
+                        {
+                            "id": f"admitted_{idx}",
+                            "text": str(adm.get("text") or ""),
+                            "memory_class": "long_term",
+                        }
+                    )
+            if rrf_docs:
+                rrf_res = v102.NexusSearchHybridRRF().rank_documents(prompt, rrf_docs, top_k=4)
+        except Exception:
+            pass
+        self.working_state["rrf_memory_hits"] = list(rrf_res.get("hits") or [])
+        self.working_state["query_surprise"] = float(rrf_res.get("query_surprise", 0.0))
+        self.working_state["memory_classes_active"] = list(rrf_res.get("memory_classes_active") or [])
+
         latent_summary: Optional[Dict[str, Any]] = None
         if enable_latent_memory:
             try:

@@ -63,6 +63,9 @@ __all__ = [
     "DenseFeedForward",
     "SparseMoEFeedForward",
     "MiMoMixBlock",
+    "ManifoldHyperConnection",
+    "EngramConditionalMemory",
+    "GatedDeltaNetMemory",
     "MultiTokenPredictionModule",
     "RecursiveThinkingCore",
     "MultimodalProjectionHead",
@@ -219,6 +222,33 @@ class MiMoMixConfig:
     #: Track normalized Shannon entropy across latent refinement states for
     #: entropy-stability telemetry/halting (v97, default off).
     thinking_entropy_halt: bool = False
+    #: Continuous Thought Machine (Sakana AI 2025) pairwise temporal neural
+    #: synchrony readout S_t = (1/T) Z_t Z_t^T across recursive thinking cycles
+    #: (v102, default off, zero-initialized readout for exact identity at birth).
+    thinking_ctm_synchrony: bool = False
+
+    # --- v102 manifold-constrained hyper-connections (DeepSeek mHC) -------
+    #: Project multi-stream residual mixing matrices onto the Birkhoff polytope
+    #: (doubly stochastic via Sinkhorn-Knopp) to guarantee identity-preserving,
+    #: non-expansive multi-stream residual flow (v102, default off).
+    use_mhc_residual: bool = False
+    mhc_streams: int = 2
+    mhc_sinkhorn_iters: int = 20
+
+    # --- v103 DeepSeek Engram conditional O(1) N-gram memory --------------
+    #: Multi-head hashed causal N-gram lookup memory with context-aware gating
+    #: and zero-initialized residual gate (v103, default off, bit-exact at birth).
+    use_engram_memory: bool = False
+    engram_table_size: int = 2048
+    engram_n_heads: int = 2
+    engram_after_layer: int = 0
+
+    # --- v103 Gated DeltaNet-2 decoupled erase/write associative memory ---
+    #: Fast-weight matrix state S_t updated with independent channel-wise decay,
+    #: erase (b_t), and write (w_t) gates (v103, default off, bit-exact at birth).
+    use_deltanet_memory: bool = False
+    deltanet_dim: int = 32
+    deltanet_after_layer: int = 1
 
     # --- differential attention (Microsoft ICLR 2025) ---------------------
     use_differential_attention: bool = False
@@ -340,6 +370,10 @@ class MiMoMixConfig:
     #: rescales rate / (1 + clamp(softplus(strength) - ln(2), 0, 2) * mean_inhib_pool)
     #: (v100, default off, exact identity at init).
     cns_divisive_norm: bool = False
+    #: Active apical dendritic compartment for basal-apical coincidence gating
+    #: integrating recurrent feedback separately from sensory drive (v102,
+    #: default off, exact identity at init, mitosis-safe).
+    cns_dendritic_apical: bool = False
 
     # --- v93 MoE expert slots ---------------------------------------------
     #: Dead expert slots per MoE layer, appended after ``n_routed_experts``.
@@ -447,6 +481,22 @@ class MiMoMixConfig:
             raise ValueError(f"cns_trunk_dropout {self.cns_trunk_dropout} must be in [0, 1)")
         if float(self.cns_homeostatic_radius) < 0.0:
             raise ValueError(f"cns_homeostatic_radius {self.cns_homeostatic_radius} must be >= 0")
+        if int(self.mhc_streams) < 1:
+            raise ValueError("mhc_streams must be >= 1")
+        if int(self.mhc_sinkhorn_iters) < 1:
+            raise ValueError("mhc_sinkhorn_iters must be >= 1")
+        if int(self.engram_table_size) < 16 or int(self.engram_n_heads) < 1:
+            raise ValueError("engram_table_size must be >= 16 and engram_n_heads >= 1")
+        if self.use_engram_memory and not (0 <= int(self.engram_after_layer) < int(self.n_layers)):
+            raise ValueError(
+                f"engram_after_layer {self.engram_after_layer} out of range for n_layers={self.n_layers}"
+            )
+        if int(self.deltanet_dim) < 2:
+            raise ValueError("deltanet_dim must be >= 2")
+        if self.use_deltanet_memory and not (0 <= int(self.deltanet_after_layer) < int(self.n_layers)):
+            raise ValueError(
+                f"deltanet_after_layer {self.deltanet_after_layer} out of range for n_layers={self.n_layers}"
+            )
         if int(self.cns_spare_nodes) < 0:
             raise ValueError("cns_spare_nodes must be >= 0")
         if int(self.moe_spare_experts) < 0:
@@ -2119,6 +2169,283 @@ class MiMoMixBlock(nn.Module):
             return hidden_states, present
 
 
+class ManifoldHyperConnection(nn.Module):
+    """Manifold-Constrained Hyper-Connection (mHC) on the Birkhoff polytope (v102).
+
+    Projects an ``(n_streams, n_streams)`` residual mixing matrix onto the
+    Birkhoff polytope of doubly stochastic matrices via stabilized log-domain
+    Sinkhorn-Knopp iterations so every row sum == 1, every column sum == 1,
+    every entry >= 0, and the spectral norm is bounded by 1.
+
+    At initialization ``res_logits = 12 * I``, ``pre_logits = 0``,
+    ``post_logits = 0``, giving exact identity mapping across identical streams
+    and exact pointwise token causality (preserving KV-cache & MTP parity).
+    """
+
+    def __init__(self, n_streams: int = 2, sinkhorn_iters: int = 20):
+        super().__init__()
+        self.n_streams = max(1, int(n_streams))
+        self.sinkhorn_iters = max(1, int(sinkhorn_iters))
+        self.res_logits = nn.Parameter(torch.zeros(self.n_streams, self.n_streams))
+        self.pre_logits = nn.Parameter(torch.zeros(self.n_streams))
+        self.post_logits = nn.Parameter(torch.zeros(self.n_streams))
+        self.register_buffer("last_ds_error", torch.zeros(()), persistent=False)
+        self.register_buffer("last_stream_entropy", torch.zeros(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.res_logits.zero_()
+            self.res_logits.diagonal().fill_(12.0)
+            self.pre_logits.zero_()
+            self.post_logits.zero_()
+
+    def doubly_stochastic_matrix(self, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+        log_m = self.res_logits.float()
+        for _ in range(self.sinkhorn_iters):
+            log_m = log_m - torch.logsumexp(log_m, dim=-1, keepdim=True)
+            log_m = log_m - torch.logsumexp(log_m, dim=-2, keepdim=True)
+        h_res = torch.exp(log_m)
+        with torch.no_grad():
+            row_err = (h_res.sum(dim=-1) - 1.0).abs().max()
+            col_err = (h_res.sum(dim=-2) - 1.0).abs().max()
+            self.last_ds_error = torch.maximum(row_err, col_err)
+            ent = -(h_res * h_res.clamp_min(1e-12).log()).sum(dim=-1).mean()
+            denom = math.log(max(2, self.n_streams))
+            self.last_stream_entropy = (ent / denom) if self.n_streams > 1 else torch.zeros_like(ent)
+        return h_res.to(dtype=dtype)
+
+    def collapse(self, streams: torch.Tensor) -> torch.Tensor:
+        """Weighted convex read from ``(B, T, n_streams, D)`` -> ``(B, T, D)``."""
+        w_pre = F.softmax(self.pre_logits.float(), dim=0).to(dtype=streams.dtype)
+        return torch.einsum("s,btsd->btd", w_pre, streams)
+
+    def mix_and_inject(self, streams: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
+        """Mix ``streams`` on the Birkhoff polytope and inject block ``delta``."""
+        h_res = self.doubly_stochastic_matrix(dtype=streams.dtype)
+        mixed = torch.einsum("ij,btjd->btid", h_res, streams)
+        w_post = (float(self.n_streams) * F.softmax(self.post_logits.float(), dim=0)).to(
+            dtype=streams.dtype
+        )
+        return mixed + delta.unsqueeze(2) * w_post.view(1, 1, self.n_streams, 1)
+
+
+class EngramConditionalMemory(nn.Module):
+    """DeepSeek-style Engram O(1) multi-head hashed causal N-gram conditional memory (v103).
+
+    Hashes causal token windows ``(x_{t-2}, x_{t-1}, x_t)`` across ``n_heads``
+    independent prime tables, applies context-aware dot-product gating
+    ``alpha_t = sigmoid(<RMSNorm(h_t), RMSNorm(W_k e_t)> / sqrt(D))`` to suppress
+    contextually mismatched lookups, and injects through a zero-initialized
+    per-channel residual gate (exact forward identity at birth).
+    """
+
+    _HEAD_PRIMES = (
+        (1000003, 1000033, 1000037),
+        (1000039, 1000081, 1000099),
+        (1000117, 1000121, 1000133),
+        (1000151, 1000159, 1000171),
+    )
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        hidden = int(config.hidden_size)
+        self.hidden_size = hidden
+        self.table_size = int(getattr(config, "engram_table_size", 2048))
+        self.n_heads = int(getattr(config, "engram_n_heads", 2))
+        self.after_layer = int(getattr(config, "engram_after_layer", 0))
+        self.head_dim = max(8, hidden // max(1, self.n_heads))
+        concat_dim = self.n_heads * self.head_dim
+
+        self.tables = nn.ModuleList(
+            [nn.Embedding(self.table_size, self.head_dim) for _ in range(self.n_heads)]
+        )
+        self.key_proj = nn.Linear(concat_dim, hidden, bias=False)
+        self.val_proj = nn.Linear(concat_dim, hidden, bias=False)
+        self.hidden_norm = RMSNorm(hidden, config.rms_norm_eps)
+        self.key_norm = RMSNorm(hidden, config.rms_norm_eps)
+        self.gate = nn.Parameter(torch.zeros(hidden))
+        self.register_buffer("last_context_gate_mean", torch.full((), 0.5), persistent=False)
+        self.register_buffer("last_hash_utilization", torch.zeros(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.gate.zero_()
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        input_ids: torch.Tensor,
+        prev_token_ids: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Apply causal N-gram conditional memory over ``input_ids`` ``(B, T)``."""
+        bsz, seq_len = input_ids.shape
+        device = input_ids.device
+        # Build exact causal window [x_{t-2}, x_{t-1}, x_t] using sentinel -1 for BOS.
+        if prev_token_ids is not None and prev_token_ids.numel() > 0:
+            prev = prev_token_ids.to(device=device, dtype=torch.long)
+            if prev.shape[1] >= 2:
+                prefix = prev[:, -2:]
+            else:
+                pad_need = 2 - prev.shape[1]
+                prefix = torch.cat(
+                    [torch.full((bsz, pad_need), -1, device=device, dtype=torch.long), prev],
+                    dim=1,
+                )
+        else:
+            prefix = torch.full((bsz, 2), -1, device=device, dtype=torch.long)
+
+        full_ids = torch.cat([prefix, input_ids.to(dtype=torch.long)], dim=1)  # (B, T + 2)
+        t0 = full_ids[:, 2:] + 1  # shift by +1 so sentinel -1 -> 0, token 0 -> 1
+        t1 = full_ids[:, 1 : seq_len + 1] + 1
+        t2 = full_ids[:, 0:seq_len] + 1
+
+        head_embs: List[torch.Tensor] = []
+        unique_total = 0
+        for h_idx, table in enumerate(self.tables):
+            p1, p2, p3 = self._HEAD_PRIMES[h_idx % len(self._HEAD_PRIMES)]
+            # Head 0 emphasizes bigram + trigram mix; additional heads use distinct primes.
+            slot = ((t0 * p1) ^ (t1 * p2) ^ (t2 * p3) ^ ((h_idx + 1) * 2654435761)) % self.table_size
+            head_embs.append(table(slot))
+            unique_total += int(torch.unique(slot).numel())
+
+        e = torch.cat(head_embs, dim=-1).to(dtype=hidden_states.dtype)
+        k_norm = self.key_norm(self.key_proj(e))
+        h_norm = self.hidden_norm(hidden_states)
+        ctx_logits = (h_norm * k_norm).sum(dim=-1, keepdim=True) / math.sqrt(float(self.hidden_size))
+        alpha = torch.sigmoid(ctx_logits)
+        with torch.no_grad():
+            self.last_context_gate_mean = alpha.detach().mean()
+            denom = float(max(1, self.n_heads * min(self.table_size, bsz * seq_len)))
+            self.last_hash_utilization = torch.tensor(unique_total / denom, device=device)
+
+        val = self.val_proj(e)
+        return hidden_states + self.gate.to(dtype=hidden_states.dtype) * (alpha * val)
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "table_size": int(self.table_size),
+            "n_heads": int(self.n_heads),
+            "after_layer": int(self.after_layer),
+            "mean_context_gate": float(self.last_context_gate_mean.detach()),
+            "hash_utilization": float(self.last_hash_utilization.detach()),
+            "gate_mean_abs": float(self.gate.detach().abs().mean()),
+        }
+
+
+class GatedDeltaNetMemory(nn.Module):
+    """Gated DeltaNet-2 decoupled channel-wise erase/write fast-weight memory (v103).
+
+    Maintains a causal associative matrix state ``S_t`` of shape ``(B, d, d)``:
+        ``recalled = S_{t-1} k_t``
+        ``S_t = diag(gamma_t) S_{t-1} - diag(b_t)(recalled k_t^T) + diag(w_t)(v_t k_t^T)``
+        ``y_t = S_t q_t``
+    where retention ``gamma_t``, erase ``b_t``, and write ``w_t`` are independent
+    input-conditioned channel-wise gates. Zero-initialized output residual gate
+    guarantees exact forward identity at birth; per-position flattened state history
+    ``(B, T', d*d)`` threads cleanly through ``past_key_values`` for bit-exact
+    incremental KV-cache and MTP speculative decode parity.
+    """
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        hidden = int(config.hidden_size)
+        d = int(getattr(config, "deltanet_dim", 32))
+        self.hidden_size = hidden
+        self.state_dim = d
+        self.after_layer = int(getattr(config, "deltanet_after_layer", 1))
+
+        self.norm = RMSNorm(hidden, config.rms_norm_eps)
+        self.k_proj = nn.Linear(hidden, d, bias=False)
+        self.v_proj = nn.Linear(hidden, d, bias=False)
+        self.q_proj = nn.Linear(hidden, d, bias=False)
+        self.decay_proj = nn.Linear(hidden, d, bias=True)
+        self.erase_proj = nn.Linear(hidden, d, bias=True)
+        self.write_proj = nn.Linear(hidden, d, bias=True)
+        self.out_proj = nn.Linear(d, hidden, bias=False)
+        self.gate = nn.Parameter(torch.zeros(hidden))
+
+        self.register_buffer("last_decay_mean", torch.full((), 0.8), persistent=False)
+        self.register_buffer("last_erase_mean", torch.full((), 0.25), persistent=False)
+        self.register_buffer("last_write_mean", torch.full((), 0.25), persistent=False)
+        self.register_buffer("last_state_norm", torch.zeros(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.gate.zero_()
+            self.decay_proj.bias.fill_(1.5)
+            self.erase_proj.bias.fill_(-1.0)
+            self.write_proj.bias.fill_(-1.0)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        prev_state_flat: Optional[torch.Tensor] = None,
+        keep_states: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        bsz, seq_len, _ = hidden_states.shape
+        d = self.state_dim
+        normed = self.norm(hidden_states)
+        k_all = F.normalize(self.k_proj(normed), p=2, dim=-1, eps=1e-6)
+        v_all = self.v_proj(normed)
+        q_all = F.normalize(self.q_proj(normed), p=2, dim=-1, eps=1e-6)
+        decay_all = torch.sigmoid(self.decay_proj(normed))
+        erase_all = torch.sigmoid(self.erase_proj(normed))
+        write_all = torch.sigmoid(self.write_proj(normed))
+
+        if prev_state_flat is not None and prev_state_flat.numel() > 0:
+            state = prev_state_flat.to(dtype=hidden_states.dtype).reshape(bsz, d, d)
+        else:
+            state = hidden_states.new_zeros((bsz, d, d))
+
+        outputs: List[torch.Tensor] = []
+        state_hist: List[torch.Tensor] = []
+        for t in range(seq_len):
+            k_t = k_all[:, t]  # (B, d)
+            v_t = v_all[:, t]
+            q_t = q_all[:, t]
+            gamma_t = decay_all[:, t].unsqueeze(-1)  # (B, d, 1)
+            beta_e = erase_all[:, t].unsqueeze(-1)
+            beta_w = write_all[:, t].unsqueeze(-1)
+
+            recalled = torch.bmm(state, k_t.unsqueeze(-1)).squeeze(-1)  # (B, d)
+            erase_term = beta_e * torch.bmm(recalled.unsqueeze(-1), k_t.unsqueeze(1))
+            write_term = beta_w * torch.bmm(v_t.unsqueeze(-1), k_t.unsqueeze(1))
+            state = (gamma_t * state - erase_term + write_term).clamp(-10.0, 10.0)
+            y_t = torch.bmm(state, q_t.unsqueeze(-1)).squeeze(-1)
+            outputs.append(y_t)
+            state_hist.append(state.reshape(bsz, d * d))
+
+        y_seq = torch.stack(outputs, dim=1)
+        hist = torch.stack(state_hist, dim=1)  # (B, T, d*d)
+        if keep_states is not None and hist.shape[1] > int(keep_states):
+            hist = hist[:, -int(keep_states) :]
+
+        with torch.no_grad():
+            self.last_decay_mean = decay_all.detach().mean()
+            self.last_erase_mean = erase_all.detach().mean()
+            self.last_write_mean = write_all.detach().mean()
+            self.last_state_norm = state.detach().pow(2).sum(dim=(-1, -2)).sqrt().mean()
+
+        out = hidden_states + self.gate.to(dtype=hidden_states.dtype) * self.out_proj(y_seq)
+        return out, hist
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "state_dim": int(self.state_dim),
+            "after_layer": int(self.after_layer),
+            "mean_decay_gate": float(self.last_decay_mean.detach()),
+            "mean_erase_gate": float(self.last_erase_mean.detach()),
+            "mean_write_gate": float(self.last_write_mean.detach()),
+            "state_frobenius_norm": float(self.last_state_norm.detach()),
+            "gate_mean_abs": float(self.gate.detach().abs().mean()),
+        }
+
+
 # ---------------------------------------------------------------------------
 # Multi-token prediction
 # ---------------------------------------------------------------------------
@@ -2225,6 +2552,21 @@ class RecursiveThinkingCore(nn.Module):
 
         self.quality_encoder = nn.Sequential(nn.Linear(latent + 3, latent), nn.GELU())
         self.quality_head = nn.Linear(latent, 2)
+        self.ctm_synchrony = bool(getattr(config, "thinking_ctm_synchrony", False))
+        if self.ctm_synchrony:
+            self.ctm_dim = min(8, latent)
+            self.ctm_proj = nn.Linear(latent, self.ctm_dim, bias=False)
+            n_pairs = self.ctm_dim * (self.ctm_dim + 1) // 2
+            self.ctm_out = nn.Linear(n_pairs, hidden, bias=False)
+            tri_i, tri_j = torch.triu_indices(self.ctm_dim, self.ctm_dim)
+            self.register_buffer("ctm_triu_i", tri_i, persistent=False)
+            self.register_buffer("ctm_triu_j", tri_j, persistent=False)
+        else:
+            self.ctm_dim = 0
+            self.ctm_proj = None
+            self.ctm_out = None
+        self.register_buffer("last_ctm_synchrony_coherence", torch.zeros(()), persistent=False)
+        self.register_buffer("last_ctm_synchrony_norm", torch.zeros(()), persistent=False)
         self.reset_special_parameters()
 
         self.register_buffer("last_cycles_used", torch.zeros(()), persistent=False)
@@ -2251,6 +2593,8 @@ class RecursiveThinkingCore(nn.Module):
         nn.init.zeros_(self.quality_head.weight)
         nn.init.zeros_(self.quality_head.bias)
         nn.init.normal_(self.to_residual.weight, std=0.01)
+        if self.ctm_out is not None:
+            nn.init.zeros_(self.ctm_out.weight)
 
     @property
     def temperature(self) -> torch.Tensor:
@@ -2292,12 +2636,15 @@ class RecursiveThinkingCore(nn.Module):
         cycles_used = 0
         exit_reason = "budget_exhausted"
         cycle_entropies: List[float] = []
+        sync_hist: List[torch.Tensor] = []
 
         for cycle in range(budget):
             cycles_used = cycle + 1
             for _ in range(self.inner_steps):
                 state = self.cell(self.refine(z), state)
             z = z + state
+            if self.ctm_synchrony and self.ctm_proj is not None:
+                sync_hist.append(F.normalize(self.ctm_proj(z), p=2, dim=-1, eps=1e-6))
             if self.entropy_halt:
                 z_probs = F.softmax(z.detach().float(), dim=-1)
                 ent = -(z_probs * z_probs.clamp_min(1e-12).log()).sum(dim=-1).mean()
@@ -2349,6 +2696,19 @@ class RecursiveThinkingCore(nn.Module):
 
         scale = self.residual_scale + (1e-4 if self.training else 0.0)
         refined = flat + scale * residual_mixture
+        if self.ctm_synchrony and self.ctm_out is not None and sync_hist:
+            z_stack = torch.stack(sync_hist, dim=-1)  # (N, k, T)
+            sync_mat = torch.bmm(z_stack, z_stack.transpose(1, 2)) / float(z_stack.shape[-1])
+            sync_feat = sync_mat[:, self.ctm_triu_i, self.ctm_triu_j]
+            ctm_delta = self.ctm_out(sync_feat)
+            refined = refined + ctm_delta
+            with torch.no_grad():
+                off_mask = self.ctm_triu_i != self.ctm_triu_j
+                if bool(off_mask.any()):
+                    self.last_ctm_synchrony_coherence = sync_feat[:, off_mask].abs().mean()
+                else:
+                    self.last_ctm_synchrony_coherence = sync_feat.abs().mean()
+                self.last_ctm_synchrony_norm = ctm_delta.detach().pow(2).mean().sqrt()
 
         confidence = torch.sigmoid(residual_mixture.abs().mean(dim=-1, keepdim=True))
         depth_feature = torch.full_like(confidence, float(cycles_used) / float(self.max_cycles))
@@ -2584,6 +2944,14 @@ class ConnectomeCore(nn.Module):
             self.div_norm_strength = nn.Parameter(torch.zeros(n))
         else:
             self.div_norm_strength = None
+        self.dendritic_apical = bool(getattr(config, "cns_dendritic_apical", False))
+        self.register_buffer("last_apical_mod_mean", torch.ones(()), persistent=False)
+        if self.dendritic_apical:
+            self.apical_gain = nn.Parameter(torch.zeros(n))
+            self.apical_leak_logit = nn.Parameter(torch.zeros(n))
+        else:
+            self.apical_gain = None
+            self.apical_leak_logit = None
         #: What the most recent growth primitive changed, for the event log.
         self.last_event: Dict[str, object] = {}
         self.graph_info: Dict[str, object] = {"loaded": False}
@@ -2656,6 +3024,10 @@ class ConnectomeCore(nn.Module):
                 self.pred_error_strength.zero_()
             if self.div_norm_strength is not None:
                 self.div_norm_strength.zero_()
+            if self.apical_gain is not None:
+                self.apical_gain.zero_()
+            if self.apical_leak_logit is not None:
+                self.apical_leak_logit.zero_()
             target = (self.init_fraction * self.spectral_scale).clamp_min(1e-6)
             # softplus^-1(y) = log(expm1(y)); masked entries sit far below zero.
             inverse = torch.log(torch.expm1(target))
@@ -2906,6 +3278,14 @@ class ConnectomeCore(nn.Module):
         self.last_div_norm_factor = denom.detach().mean()
         return rate / denom
 
+    def _apical_modulation(self, rate: torch.Tensor, apical: torch.Tensor) -> torch.Tensor:
+        if not self.dendritic_apical or self.apical_gain is None:
+            return rate
+        gain = 0.5 * torch.tanh(self.apical_gain.to(rate.dtype))
+        mod = (1.0 + gain * (2.0 * torch.sigmoid(apical) - 1.0)).clamp(0.5, 1.5)
+        self.last_apical_mod_mean = mod.detach().mean()
+        return rate * mod
+
     def _per_token_rates(
         self,
         drive: torch.Tensor,
@@ -2916,6 +3296,12 @@ class ConnectomeCore(nn.Module):
     ) -> torch.Tensor:
         rate = torch.zeros_like(drive)
         slow = torch.zeros_like(drive) if self.dual_soma else None
+        apical = torch.zeros_like(drive) if self.dendritic_apical else None
+        apical_alpha = (
+            torch.sigmoid(self.apical_leak_logit).to(drive.dtype)
+            if self.dendritic_apical and self.apical_leak_logit is not None
+            else None
+        )
         slow_alpha = (
             torch.sigmoid(self.slow_leak_logit).to(drive.dtype)
             if self.dual_soma and self.slow_leak_logit is not None
@@ -2939,6 +3325,9 @@ class ConnectomeCore(nn.Module):
                 rec = rate @ w_t
             eff_drive = self._predictive_drive(drive, rec)
             rate = (1.0 - alpha) * rate + alpha * F.relu(rec + eff_drive)
+            if apical is not None and apical_alpha is not None:
+                apical = (1.0 - apical_alpha) * apical + apical_alpha * rec
+                rate = self._apical_modulation(rate, apical)
             if slow is not None and slow_alpha is not None and slow_coup is not None:
                 slow = (1.0 - slow_alpha) * slow + slow_alpha * rate
                 rate = F.relu(rate + slow_coup * slow)
@@ -2974,6 +3363,11 @@ class ConnectomeCore(nn.Module):
         else:
             state = state.to(dtype=drive.dtype)
         slow = state.clone() if self.dual_soma else None
+        apical_alpha = (
+            torch.sigmoid(self.apical_leak_logit).to(drive.dtype)
+            if self.dendritic_apical and self.apical_leak_logit is not None
+            else None
+        )
         slow_alpha = (
             torch.sigmoid(self.slow_leak_logit).to(drive.dtype)
             if self.dual_soma and self.slow_leak_logit is not None
@@ -2993,6 +3387,7 @@ class ConnectomeCore(nn.Module):
         states: List[torch.Tensor] = []
         for t in range(seq_len):
             u = drive[:, t]
+            apical = torch.zeros_like(u) if self.dendritic_apical else None
             if comm_gates is not None:
                 g_lr = comm_seq[:, t, 0:1]
                 g_rl = comm_seq[:, t, 1:2]
@@ -3003,6 +3398,9 @@ class ConnectomeCore(nn.Module):
                     rec = state @ w_t
                 eff_u = self._predictive_drive(u, rec)
                 state = (1.0 - alpha) * state + alpha * F.relu(rec + eff_u)
+                if apical is not None and apical_alpha is not None:
+                    apical = (1.0 - apical_alpha) * apical + apical_alpha * rec
+                    state = self._apical_modulation(state, apical)
                 if slow is not None and slow_alpha is not None and slow_coup is not None:
                     slow = (1.0 - slow_alpha) * slow + slow_alpha * state
                     state = F.relu(state + slow_coup * slow)
@@ -3262,6 +3660,10 @@ class ConnectomeCore(nn.Module):
             self.pred_error_strength[child] = self.pred_error_strength[parent]
         if self.div_norm_strength is not None:
             self.div_norm_strength[child] = self.div_norm_strength[parent]
+        if self.apical_gain is not None:
+            self.apical_gain[child] = self.apical_gain[parent]
+        if self.apical_leak_logit is not None:
+            self.apical_leak_logit[child] = self.apical_leak_logit[parent]
         self.alive[child] = 1
         self.born_step[child] = int(step)
         # taps: afferent rows copied, efferent columns halved and shared
@@ -3573,6 +3975,56 @@ class ConnectomeCore(nn.Module):
             "target_radius": float(target),
         }
 
+    @torch.no_grad()
+    def synaptic_homeostasis_sleep_cycle(
+        self,
+        *,
+        downscale_factor: float = 0.94,
+        prune_floor: float = 0.002,
+        target_radius: float = 0.90,
+        power_iters: int = 8,
+    ) -> Dict[str, float]:
+        """Evo-OMEGA SHY (Synaptic Homeostasis Hypothesis) consolidation cycle (v103).
+
+        Applies Dale-sign-preserving synaptic downscaling to active edges, prunes
+        ultra-weak noise edges below ``prune_floor`` (keeping at least one live
+        connection per postsynaptic neuron where present), and re-projects the
+        spectral radius toward criticality ``target_radius``.
+        """
+        factor = min(1.0, max(0.5, float(downscale_factor)))
+        floor = max(0.0, float(prune_floor))
+        edges_before = int((self.mask > 0).sum())
+        rho_before = self.estimate_spectral_radius(power_iters=power_iters)
+
+        if edges_before > 0:
+            mag = (F.softplus(self.edge_logit) * factor).clamp_min(1e-6)
+            # Prune only ultra-weak edges while protecting each row's strongest synapse
+            row_max = (mag * self.mask).max(dim=1, keepdim=True).values
+            weak = (self.mask > 0) & (mag < floor) & (mag < row_max)
+            if bool(weak.any()):
+                self.mask.copy_(torch.where(weak, torch.zeros_like(self.mask), self.mask))
+                self.edge_grown.copy_(
+                    torch.where(weak, torch.zeros_like(self.edge_grown), self.edge_grown)
+                )
+            inv = torch.log(torch.expm1(mag))
+            self.edge_logit.copy_(
+                torch.where(self.mask > 0, inv, torch.full_like(inv, -10.0))
+            )
+
+        proj = self.project_spectral_radius(
+            target_radius=target_radius, max_scale_step=0.25, power_iters=power_iters
+        )
+        edges_after = int((self.mask > 0).sum())
+        return {
+            "edges_before": float(edges_before),
+            "edges_after": float(edges_after),
+            "edges_pruned": float(max(0, edges_before - edges_after)),
+            "downscale_factor": float(factor),
+            "rho_before": float(rho_before),
+            "rho_after": float(proj["rho_after"]),
+            "target_radius": float(target_radius),
+        }
+
     # -- telemetry -------------------------------------------------------------
 
     @staticmethod
@@ -3677,6 +4129,10 @@ class ConnectomeCore(nn.Module):
             snapshot["divisive_norm"] = True
             snapshot["div_norm_strength_mean_abs"] = float(self.div_norm_strength.detach().abs().mean())
             snapshot["div_norm_factor_mean"] = float(self.last_div_norm_factor.detach())
+        if self.dendritic_apical and self.apical_gain is not None:
+            snapshot["dendritic_apical"] = True
+            snapshot["apical_gain_mean_abs"] = float(self.apical_gain.detach().abs().mean())
+            snapshot["apical_mod_mean"] = float(self.last_apical_mod_mean.detach())
         return snapshot
 
 
@@ -3754,6 +4210,19 @@ class MiMoMixModel(nn.Module):
                 for i, kind in enumerate(self.layout)
             ]
         )
+        self.use_mhc_residual = bool(getattr(config, "use_mhc_residual", False))
+        if self.use_mhc_residual:
+            self.mhc_layers = nn.ModuleList(
+                [
+                    ManifoldHyperConnection(
+                        n_streams=int(getattr(config, "mhc_streams", 2)),
+                        sinkhorn_iters=int(getattr(config, "mhc_sinkhorn_iters", 20)),
+                    )
+                    for _ in range(len(self.layout))
+                ]
+            )
+        else:
+            self.mhc_layers = None
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         if config.tie_word_embeddings:
@@ -3766,6 +4235,16 @@ class MiMoMixModel(nn.Module):
         # Built empty; the trainer installs the wiring with load_graph(), and a
         # checkpoint restores it from the buffers.
         self.cns_core = ConnectomeCore(config) if getattr(config, "use_cns_core", False) else None
+        self.engram_memory = (
+            EngramConditionalMemory(config)
+            if getattr(config, "use_engram_memory", False)
+            else None
+        )
+        self.deltanet_memory = (
+            GatedDeltaNetMemory(config)
+            if getattr(config, "use_deltanet_memory", False)
+            else None
+        )
 
         self.multimodal_projector = (
             MultimodalProjectionHead(
@@ -4029,9 +4508,33 @@ class MiMoMixModel(nn.Module):
             }
             if self.thinking_core.entropy_halt:
                 thinking_payload["cycle_entropies"] = list(self.thinking_core.last_cycle_entropies)
+            if self.thinking_core.ctm_synchrony:
+                thinking_payload["ctm_synchrony"] = True
+                thinking_payload["ctm_synchrony_coherence"] = float(
+                    self.thinking_core.last_ctm_synchrony_coherence.detach()
+                )
+                thinking_payload["ctm_synchrony_norm"] = float(
+                    self.thinking_core.last_ctm_synchrony_norm.detach()
+                )
             snapshot["thinking"] = thinking_payload
+        if self.mhc_layers is not None:
+            ds_errs = [float(m.last_ds_error.detach()) for m in self.mhc_layers]
+            entropies = [float(m.last_stream_entropy.detach()) for m in self.mhc_layers]
+            snapshot["mhc"] = {
+                "enabled": True,
+                "streams": int(getattr(self.config, "mhc_streams", 2)),
+                "sinkhorn_iters": int(getattr(self.config, "mhc_sinkhorn_iters", 20)),
+                "max_doubly_stochastic_error": max(ds_errs) if ds_errs else 0.0,
+                "mean_stream_entropy": (
+                    float(sum(entropies) / len(entropies)) if entropies else 0.0
+                ),
+            }
         if self.cns_core is not None:
             snapshot["cns_core"] = self.cns_core.telemetry()
+        if self.engram_memory is not None:
+            snapshot["engram"] = self.engram_memory.telemetry()
+        if self.deltanet_memory is not None:
+            snapshot["deltanet"] = self.deltanet_memory.telemetry()
         return snapshot
 
     def forward(
@@ -4086,6 +4589,10 @@ class MiMoMixModel(nn.Module):
         local_cos, local_sin = self.rotary_local(query_positions)
 
         hidden = self.embed_tokens(input_ids)
+        streams: Optional[torch.Tensor] = None
+        if self.mhc_layers is not None:
+            n_streams = int(getattr(self.config, "mhc_streams", 2))
+            streams = hidden.unsqueeze(2).expand(-1, -1, n_streams, -1).contiguous()
         presents: List[Optional[Tuple[torch.Tensor, torch.Tensor]]] = []
         # v93 connectome core plumbing. `core_simple` is v91's exact path (one
         # site, per-token): the core is called as a whole module after its
@@ -4095,10 +4602,29 @@ class MiMoMixModel(nn.Module):
         core_reads: List[torch.Tensor] = []
         core_read: Optional[torch.Tensor] = None
         core_state_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        tail_cursor = len(self.layers)
         if core is not None and not core_simple:
             read_sites, write_sites, run_after = core.read_sites, core.write_sites, core.read_sites[-1]
             if core.temporal:
                 core_state_entry = self._cns_cache_entry(past_key_values, past_len)
+                tail_cursor += 1
+        engram_prev_ids: Optional[torch.Tensor] = None
+        engram_cache_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if self.engram_memory is not None:
+            if past_key_values is not None and tail_cursor < len(past_key_values):
+                e_entry = past_key_values[tail_cursor]
+                if e_entry is not None and e_entry[0].numel() > 0:
+                    engram_prev_ids = e_entry[0].squeeze(-1).to(dtype=torch.long)
+            tail_cursor += 1
+        deltanet_prev_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        deltanet_cache_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if self.deltanet_memory is not None:
+            if past_key_values is not None and tail_cursor < len(past_key_values):
+                d_entry = past_key_values[tail_cursor]
+                if d_entry is not None and d_entry[0].numel() > 0:
+                    deltanet_prev_entry = d_entry
+            tail_cursor += 1
+
         for index, layer in enumerate(self.layers):
             past_kv = None
             if past_key_values is not None and index < len(past_key_values):
@@ -4109,39 +4635,100 @@ class MiMoMixModel(nn.Module):
                 cached = int(past_kv[0].shape[1] if past_kv[0].ndim == 3 else past_kv[0].shape[2])
             key_positions = torch.arange(past_len - cached, past_len, device=device)
             layer_cos, layer_sin = (local_cos, local_sin) if layer.kind == "swa" else (cos, sin)
-            hidden, present = layer(
-                hidden,
-                layer_cos,
-                layer_sin,
-                query_positions,
-                key_positions,
-                past_kv=past_kv,
-                attention_mask=attention_mask,
-                use_cache=use_cache,
-                cache_slack=cache_slack,
-            )
+            if streams is not None and self.mhc_layers is not None:
+                mhc_layer = self.mhc_layers[index]
+                block_in = mhc_layer.collapse(streams)
+                block_out, present = layer(
+                    block_in,
+                    layer_cos,
+                    layer_sin,
+                    query_positions,
+                    key_positions,
+                    past_kv=past_kv,
+                    attention_mask=attention_mask,
+                    use_cache=use_cache,
+                    cache_slack=cache_slack,
+                )
+                streams = mhc_layer.mix_and_inject(streams, block_out - block_in)
+                hidden = streams.mean(dim=2)
+            else:
+                hidden, present = layer(
+                    hidden,
+                    layer_cos,
+                    layer_sin,
+                    query_positions,
+                    key_positions,
+                    past_kv=past_kv,
+                    attention_mask=attention_mask,
+                    use_cache=use_cache,
+                    cache_slack=cache_slack,
+                )
             presents.append(present)
-            if core is None:
-                continue
-            if core_simple:
-                if index == int(self.config.cns_after_layer):
-                    hidden = core(hidden)
-                continue
-            if index in read_sites:
-                core_reads.append(hidden)
-            if index == run_after:
-                previous_state = None
-                if core_state_entry is not None and core_state_entry[0].numel() > 0:
-                    previous_state = core_state_entry[0][:, -1]
-                keep = (1 + max(0, int(cache_slack))) if use_cache else None
-                core_read, history = core.compute(core_reads, state=previous_state, keep_states=keep)
-                if use_cache and history is not None:
-                    if core_state_entry is not None and core_state_entry[0].numel() > 0:
-                        history = torch.cat([core_state_entry[0], history], dim=1)[:, -int(keep):]
-                    companion = history.new_zeros((history.shape[0], history.shape[1], 0))
-                    core_state_entry = (history, companion)
-            if index in write_sites:
-                hidden = core.write(write_sites.index(index), hidden, core_read)
+
+            if self.engram_memory is not None and index == self.engram_memory.after_layer:
+                pre_eng = hidden
+                hidden = self.engram_memory(hidden, input_ids, prev_token_ids=engram_prev_ids)
+                if streams is not None:
+                    streams = streams + (hidden - pre_eng).unsqueeze(2)
+                if use_cache:
+                    keep_e = 2 + max(0, int(cache_slack))
+                    if engram_prev_ids is not None and engram_prev_ids.numel() > 0:
+                        hist_ids = torch.cat([engram_prev_ids, input_ids.to(dtype=torch.long)], dim=1)
+                    else:
+                        hist_ids = input_ids.to(dtype=torch.long)
+                    hist_ids = hist_ids[:, -keep_e:].unsqueeze(-1)
+                    engram_cache_entry = (
+                        hist_ids,
+                        hist_ids.new_zeros((hist_ids.shape[0], hist_ids.shape[1], 0)),
+                    )
+
+            if self.deltanet_memory is not None and index == self.deltanet_memory.after_layer:
+                pre_dn = hidden
+                prev_dn_state = (
+                    deltanet_prev_entry[0][:, -1]
+                    if (deltanet_prev_entry is not None and deltanet_prev_entry[0].numel() > 0)
+                    else None
+                )
+                keep_d = (1 + max(0, int(cache_slack))) if use_cache else None
+                hidden, dn_hist = self.deltanet_memory(
+                    hidden, prev_state_flat=prev_dn_state, keep_states=keep_d
+                )
+                if streams is not None:
+                    streams = streams + (hidden - pre_dn).unsqueeze(2)
+                if use_cache:
+                    if deltanet_prev_entry is not None and deltanet_prev_entry[0].numel() > 0:
+                        dn_hist = torch.cat([deltanet_prev_entry[0], dn_hist], dim=1)[:, -int(keep_d):]
+                    deltanet_cache_entry = (
+                        dn_hist,
+                        dn_hist.new_zeros((dn_hist.shape[0], dn_hist.shape[1], 0)),
+                    )
+
+            if core is not None:
+                if core_simple:
+                    if index == int(self.config.cns_after_layer):
+                        pre_cns = hidden
+                        hidden = core(hidden)
+                        if streams is not None:
+                            streams = streams + (hidden - pre_cns).unsqueeze(2)
+                else:
+                    if index in read_sites:
+                        core_reads.append(hidden)
+                    if index == run_after:
+                        previous_state = None
+                        if core_state_entry is not None and core_state_entry[0].numel() > 0:
+                            previous_state = core_state_entry[0][:, -1]
+                        keep = (1 + max(0, int(cache_slack))) if use_cache else None
+                        core_read, history = core.compute(core_reads, state=previous_state, keep_states=keep)
+                        if use_cache and history is not None:
+                            if core_state_entry is not None and core_state_entry[0].numel() > 0:
+                                history = torch.cat([core_state_entry[0], history], dim=1)[:, -int(keep):]
+                            companion = history.new_zeros((history.shape[0], history.shape[1], 0))
+                            core_state_entry = (history, companion)
+                    if index in write_sites:
+                        pre_cns = hidden
+                        hidden = core.write(write_sites.index(index), hidden, core_read)
+                        if streams is not None:
+                            streams = streams + (hidden - pre_cns).unsqueeze(2)
 
         trunk_hidden = hidden
         thinking_info: Dict[str, torch.Tensor] = {}
@@ -4157,6 +4744,10 @@ class MiMoMixModel(nn.Module):
             # companion (B, T', 0)). trim_past narrows both on axis 1, the layer
             # loop never reads index n_layers, and past_len inference skips it.
             presents.append(core_state_entry)
+        if use_cache and self.engram_memory is not None and engram_cache_entry is not None:
+            presents.append(engram_cache_entry)
+        if use_cache and self.deltanet_memory is not None and deltanet_cache_entry is not None:
+            presents.append(deltanet_cache_entry)
 
         hidden = self.norm(hidden)
         logits = self.lm_head(hidden)

@@ -374,6 +374,17 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "ponder_loss_weight": "ponder_loss_weight",
     "consistency_loss_weight": "consistency_loss_weight",
     "thinking_entropy_halt": "thinking_entropy_halt",
+    "thinking_ctm_synchrony": "thinking_ctm_synchrony",
+    "use_mhc_residual": "use_mhc_residual",
+    "mhc_streams": "mhc_streams",
+    "mhc_sinkhorn_iters": "mhc_sinkhorn_iters",
+    "use_engram_memory": "use_engram_memory",
+    "engram_table_size": "engram_table_size",
+    "engram_n_heads": "engram_n_heads",
+    "engram_after_layer": "engram_after_layer",
+    "use_deltanet_memory": "use_deltanet_memory",
+    "deltanet_dim": "deltanet_dim",
+    "deltanet_after_layer": "deltanet_after_layer",
     "use_differential_attention": "use_differential_attention",
     "differential_lambda_init": "differential_lambda_init",
     "differential_output_norm": lambda a: not a.no_differential_output_norm,
@@ -412,6 +423,7 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "cns_hebbian_trace": "cns_hebbian_trace",
     "cns_predictive_error": "cns_predictive_error",
     "cns_divisive_norm": "cns_divisive_norm",
+    "cns_dendritic_apical": "cns_dendritic_apical",
     "moe_spare_experts": "moe_spare_experts",
 }
 
@@ -781,7 +793,20 @@ RECORDED_HYPERPARAMETERS: Tuple[str, ...] = (
     "cns_hebbian_trace",
     "cns_predictive_error",
     "cns_divisive_norm",
+    "cns_dendritic_apical",
     "thinking_entropy_halt",
+    "thinking_ctm_synchrony",
+    "use_mhc_residual",
+    "mhc_streams",
+    "mhc_sinkhorn_iters",
+    "use_engram_memory",
+    "engram_table_size",
+    "engram_n_heads",
+    "engram_after_layer",
+    "use_deltanet_memory",
+    "deltanet_dim",
+    "deltanet_after_layer",
+    "optimizer",
     "freeze_trunk_steps",
     "witness_rollback_tolerance",
     "maturity_steps",
@@ -1030,15 +1055,33 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
           f"  window {config.sliding_window}")
     print(f"  device       {device_info.get('resolved', device)}", flush=True)
 
-    groups = parameter_groups(model, args.weight_decay, args.decay_mode)
-    optimiser = torch.optim.AdamW(
-        [{k: v for k, v in g.items() if not k.startswith("_")} for g in groups],
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimiser, max_lr=args.lr, total_steps=max(1, args.steps), pct_start=args.pct_start
-    )
+    opt_kind = str(getattr(args, "optimizer", "adamw") or "adamw")
+    if opt_kind == "muon_hybrid":
+        from muon_optimizer import MuonHybridOptimizer, build_muon_hybrid_param_groups
+
+        muon_groups, _ = build_muon_hybrid_param_groups(
+            model,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            no_decay_1d=(args.decay_mode == "no_norm_bias"),
+        )
+        optimiser = MuonHybridOptimizer(
+            muon_groups, lr=args.lr, weight_decay=args.weight_decay
+        )
+        max_lrs = [float(g["lr"]) for g in muon_groups]
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimiser, max_lr=max_lrs, total_steps=max(1, args.steps), pct_start=args.pct_start
+        )
+    else:
+        groups = parameter_groups(model, args.weight_decay, args.decay_mode)
+        optimiser = torch.optim.AdamW(
+            [{k: v for k, v in g.items() if not k.startswith("_")} for g in groups],
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+        )
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimiser, max_lr=args.lr, total_steps=max(1, args.steps), pct_start=args.pct_start
+        )
     repeat_subset_size = int(args.repeat_subset_fraction * train_x.shape[0])
 
     history: List[Dict[str, Any]] = []
@@ -1255,6 +1298,39 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="enable normalized latent Shannon entropy stability halting & telemetry (v97, default off)",
     )
+    parser.add_argument(
+        "--thinking_ctm_synchrony",
+        action="store_true",
+        help="enable Continuous Thought Machine pairwise temporal synchrony readout (v102, default off)",
+    )
+    parser.add_argument(
+        "--use_mhc_residual",
+        action="store_true",
+        help="enable Manifold-Constrained Hyper-Connections (Birkhoff doubly stochastic residual streams, v102, default off)",
+    )
+    parser.add_argument("--mhc_streams", type=int, default=2)
+    parser.add_argument("--mhc_sinkhorn_iters", type=int, default=20)
+    parser.add_argument(
+        "--use_engram_memory",
+        action="store_true",
+        help="enable DeepSeek-style Engram O(1) multi-head hashed causal N-gram conditional memory (v103, default off)",
+    )
+    parser.add_argument("--engram_table_size", type=int, default=2048)
+    parser.add_argument("--engram_n_heads", type=int, default=2)
+    parser.add_argument("--engram_after_layer", type=int, default=0)
+    parser.add_argument(
+        "--use_deltanet_memory",
+        action="store_true",
+        help="enable Gated DeltaNet-2 decoupled channel-wise erase/write associative fast-weight memory (v103, default off)",
+    )
+    parser.add_argument("--deltanet_dim", type=int, default=32)
+    parser.add_argument("--deltanet_after_layer", type=int, default=1)
+    parser.add_argument(
+        "--optimizer",
+        choices=("adamw", "muon_hybrid"),
+        default="adamw",
+        help="optimizer choice: 'adamw' (default, reproduces prior runs) or 'muon_hybrid' (Newton-Schulz Muon for 2D matrices + AdamW)",
+    )
     # v91: the male-CNS connectome core. Off by default; every flag below is
     # inert unless --cns_core is given.
     parser.add_argument(
@@ -1367,6 +1443,10 @@ def build_parser() -> argparse.ArgumentParser:
     growth.add_argument(
         "--cns_divisive_norm", action="store_true",
         help="enable Carandini-Heeger E/I divisive rate normalization on connectome modules (v100, default off)",
+    )
+    growth.add_argument(
+        "--cns_dendritic_apical", action="store_true",
+        help="enable active apical dendritic compartment basal-apical coincidence gating (v102, default off)",
     )
 
     # --- v82: the 33 MiMoMixConfig fields no trainer could previously set ---

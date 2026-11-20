@@ -22,8 +22,10 @@ class SCFRouter:
 
     _MATH_SCIENCE_RE = re.compile(
         r"\b(force|acceleration|momentum|kinetic|impulse|voltage|current|ohm|"
-        r"resistance|spring|velocity|work|power|permutation|combination|solve|"
-        r"calculate|compute|molarity|wave|frequency|wavelength)\b|[\d\)]\s*[\+\-\*/=]",
+        r"resistance|resistors?|spring|velocity|work|power|permutation|combination|solve|"
+        r"calculate|compute|molarity|wave|frequency|wavelength|determinant|trace|"
+        r"inverse|eigenvalues?|dot\s+product|cross\s+product|geometric\s+series|"
+        r"modulo|mod\b|totient|phi\(|factori[sz]ation|binomial|bayes|thin\s+lens)\b|[\d\)]\s*[\+\-\*/=]",
         re.IGNORECASE,
     )
     _CODE_RE = re.compile(
@@ -179,11 +181,24 @@ class SCFRouter:
         hmoe_active = bool(active_flags.SCF_HIERARCHICAL_MOE_ENABLED)
         selected = candidates[0]
         fallback = candidates[1] if len(candidates) > 1 else candidates[0]
+        hyperion_plan: Optional[Dict[str, Any]] = None
+        try:
+            import nexus_v102_frontier as v102
+
+            hyperion_plan = v102.HyperionComputeScheduler().schedule(
+                domain=domain,
+                submode=assessment["submode"],
+                complexity=assessment["complexity"],
+                speculative_allowed=bool(active_flags.SCF_SPECULATIVE_DECODING_ENABLED),
+            )
+        except Exception:
+            hyperion_plan = None
         return {
             "router_active": True,
             "selected_family": selected,
             "fallback_family": fallback,
             "hierarchical_moe": hmoe_active,
             "specialist_candidates": candidates,
+            "hyperion_schedule": hyperion_plan,
             "assessment": assessment,
         }
