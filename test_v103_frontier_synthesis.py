@@ -555,3 +555,67 @@ def test_studio_and_chat_server_expose_v103_surfaces():
         check=False,
     )
     assert js_check.returncode == 0, js_check.stderr
+
+
+def test_warm_start_grafting_supports_v102_v103_zero_init_modules(tmp_path):
+    import mimomix_text as text_utils
+    import train_mimomix_generalisation as gen
+
+    tok = text_utils.WordTokenizer.build(["hello world", "test math 2 + 2 = 4"], max_vocab=64)
+    base_cfg = mc.MiMoMixConfig(
+        vocab_size=tok.vocab_size,
+        hidden_size=32,
+        n_layers=3,
+        n_heads=4,
+        n_kv_heads=2,
+        intermediate_size=64,
+        use_moe=False,
+        n_mtp_layers=1,
+        use_thinking_core=True,
+        thinking_cycles=2,
+    )
+    base_model = mc.MiMoMixModel(base_cfg).eval()
+    ckpt_path = tmp_path / "base.pt"
+    torch.save(
+        {
+            "config": base_cfg.to_dict(),
+            "state_dict": base_model.state_dict(),
+            "tokenizer": tok.to_dict(),
+            "extra": {"run_name": "base", "steps": 10},
+        },
+        ckpt_path,
+    )
+
+    graft_cfg = mc.MiMoMixConfig(
+        **{
+            **base_cfg.to_dict(),
+            "use_mhc_residual": True,
+            "mhc_streams": 2,
+            "thinking_ctm_synchrony": True,
+            "use_engram_memory": True,
+            "engram_table_size": 64,
+            "engram_n_heads": 2,
+            "engram_after_layer": 0,
+            "use_deltanet_memory": True,
+            "deltanet_dim": 16,
+            "deltanet_after_layer": 1,
+        }
+    )
+    graft_model = mc.MiMoMixModel(graft_cfg).eval()
+    prov = gen.load_initial_weights(graft_model, tok, str(ckpt_path))
+    assert set(prov["allowed_missing"].keys()) == {
+        "mhc_layers",
+        "ctm_synchrony",
+        "engram_memory",
+        "deltanet_memory",
+    }
+    prefixes = gen.new_parameter_prefixes(graft_cfg)
+    for expected in ("mhc_layers.", "thinking_core.ctm_", "engram_memory.", "deltanet_memory."):
+        assert expected in prefixes
+    ids = torch.randint(0, tok.vocab_size, (1, 5))
+    with torch.no_grad():
+        assert torch.allclose(
+            base_model(ids, return_mtp=False).logits,
+            graft_model(ids, return_mtp=False).logits,
+            atol=1e-5,
+        )

@@ -1343,6 +1343,8 @@ def discover_default_models(root: Optional[Path] = None) -> Dict[str, str]:
         ("v96_physio_neurogenesis", "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt"),
         ("v100_scf_balanced", "output/v100_scf_balanced/v100_scf_balanced.selected.pt"),
         ("v101_scf_cognitive", "output/v101_scf_cognitive/v101_scf_cognitive.pt"),
+        ("v102_scf_frontier", "output/v102_scf_frontier/v102_scf_frontier.pt"),
+        ("v103_scf_synthesis", "output/v103_scf_synthesis/v103_scf_synthesis.pt"),
         ("v98_scf_predictive", "output/v98_scf_predictive/v98_scf_predictive.selected.pt"),
         ("v99_scf_evolution", "output/v99_scf_evolution/v99_scf_evolution.selected.pt"),
         ("v97_scf_connectome", "output/v97_scf_connectome/v97_scf_connectome.selected.pt"),

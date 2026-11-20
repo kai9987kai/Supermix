@@ -176,9 +176,18 @@ def new_parameter_prefixes(config: Any) -> Tuple[str, ...]:
 
     grown = int(getattr(config, "grow_layers", 0) or 0)
     n_layers = int(getattr(config, "n_layers", 0) or 0)
-    return NEW_PARAMETER_PREFIXES + tuple(
+    extra: List[str] = [
         f"layers.{index}." for index in range(n_layers - grown, n_layers)
-    )
+    ]
+    if bool(getattr(config, "use_mhc_residual", False)):
+        extra.append("mhc_layers.")
+    if bool(getattr(config, "thinking_ctm_synchrony", False)):
+        extra.append("thinking_core.ctm_")
+    if bool(getattr(config, "use_engram_memory", False)):
+        extra.append("engram_memory.")
+    if bool(getattr(config, "use_deltanet_memory", False)):
+        extra.append("deltanet_memory.")
+    return NEW_PARAMETER_PREFIXES + tuple(extra)
 
 
 def split_new_parameter_groups(
@@ -448,6 +457,14 @@ def load_initial_weights(
     def allowed_group(key: str) -> Optional[str]:
         if key.startswith("cns_core."):
             return "cns_core"
+        if key.startswith("mhc_layers.") and bool(getattr(model.config, "use_mhc_residual", False)):
+            return "mhc_layers"
+        if key.startswith("thinking_core.ctm_") and bool(getattr(model.config, "thinking_ctm_synchrony", False)):
+            return "ctm_synchrony"
+        if key.startswith("engram_memory.") and bool(getattr(model.config, "use_engram_memory", False)):
+            return "engram_memory"
+        if key.startswith("deltanet_memory.") and bool(getattr(model.config, "use_deltanet_memory", False)):
+            return "deltanet_memory"
         block = re.match(r"layers\.(\d+)\.", key)
         if block and grow_layers > 0 and int(block.group(1)) >= first_new_layer:
             return "grown_layers"
@@ -1537,26 +1554,46 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # Resolved before the loop so mid-run checkpoints have somewhere to go.
     output_dir = Path(args.output_dir)
 
-    decay_groups = split_new_parameter_groups(
-        model,
-        parameter_groups(model, args.weight_decay, args.decay_mode),
-        prefixes=new_parameter_prefixes(config),
-        lr_mult=float(getattr(args, "new_param_lr_mult", 1.0)),
-    )
-    group_max_lr = [args.lr * float(g.get("_lr_mult", 1.0)) for g in decay_groups]
-    optimiser = torch.optim.AdamW(
-        [
-            {
-                **{k: v for k, v in g.items() if not k.startswith("_")},
-                # Only grafted groups carry a rate; the rest inherit args.lr
-                # exactly as before v91.
-                **({"lr": args.lr * float(g["_lr_mult"])} if "_lr_mult" in g else {}),
-            }
-            for g in decay_groups
-        ],
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
+    optimizer_name = str(getattr(args, "optimizer", "adamw") or "adamw").lower()
+    if optimizer_name == "muon_hybrid":
+        from muon_optimizer import MuonHybridOptimizer, build_muon_hybrid_param_groups
+
+        muon_groups, _muon_counts = build_muon_hybrid_param_groups(
+            model,
+            lr=args.lr,
+            muon_lr_scale=float(getattr(args, "muon_lr_scale", 5.0)),
+            weight_decay=args.weight_decay,
+            momentum=float(getattr(args, "muon_momentum", 0.95)),
+            ns_steps=int(getattr(args, "muon_ns_steps", 5)),
+        )
+        optimiser = MuonHybridOptimizer(
+            muon_groups,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+        )
+        group_max_lr = [float(g["lr"]) for g in optimiser.param_groups]
+        decay_groups = list(optimiser.param_groups)
+    else:
+        decay_groups = split_new_parameter_groups(
+            model,
+            parameter_groups(model, args.weight_decay, args.decay_mode),
+            prefixes=new_parameter_prefixes(config),
+            lr_mult=float(getattr(args, "new_param_lr_mult", 1.0)),
+        )
+        group_max_lr = [args.lr * float(g.get("_lr_mult", 1.0)) for g in decay_groups]
+        optimiser = torch.optim.AdamW(
+            [
+                {
+                    **{k: v for k, v in g.items() if not k.startswith("_")},
+                    # Only grafted groups carry a rate; the rest inherit args.lr
+                    # exactly as before v91.
+                    **({"lr": args.lr * float(g["_lr_mult"])} if "_lr_mult" in g else {}),
+                }
+                for g in decay_groups
+            ],
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+        )
     # OneCycleLR splits training into a warmup phase of `pct_start * total_steps`
     # and a decay phase. When that product is <= 1 the two phase boundaries
     # coincide and `get_lr` divides by zero on the very first step, so every run
@@ -1575,6 +1612,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             max_lr=group_max_lr if len(set(group_max_lr)) > 1 else args.lr,
             total_steps=total_steps,
             pct_start=args.pct_start,
+            cycle_momentum=(optimizer_name != "muon_hybrid"),
         )
     else:
         # No warmup phase can exist: `pct_start * total_steps <= 1` collapses the

@@ -82,6 +82,7 @@ def is_muon_eligible_parameter(name: str, param: torch.Tensor) -> bool:
             "embedding",
             "edge_logit",
             "mhc_",
+            "engram_memory.tables",
         )
     ):
         return False
