@@ -29,6 +29,28 @@ import supermix_chat_server as server  # noqa: E402
 # -- spec parsing -----------------------------------------------------------
 
 
+def test_chat_and_studio_discover_checkout_and_release_weights(tmp_path, monkeypatch):
+    from scf import models
+
+    names = ("v96_physio_neurogenesis", "v102_scf_frontier", "v103_scf_synthesis")
+    filenames = (names[0] + ".selected.pt", names[1] + ".pt", names[2] + ".pt")
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    for filename in (*filenames, "unknown.pt"):
+        (weights / filename).touch()
+    monkeypatch.setattr(models, "ROOT", tmp_path)
+    adapter = models.MiMoMixAdapter()
+    assert adapter.discover_talk_checkpoints() == [f"weights/{f}" for f in filenames]
+    assert list(server.discover_default_models(tmp_path)) == list(names)
+
+    checkout = tmp_path / "output" / names[1] / filenames[1]
+    checkout.parent.mkdir(parents=True)
+    checkout.touch()
+    expected = [f"weights/{filenames[0]}", checkout.relative_to(tmp_path).as_posix(), f"weights/{filenames[2]}"]
+    assert adapter.discover_talk_checkpoints() == expected
+    assert list(server.discover_default_models(tmp_path).values()) == [str(tmp_path / p) for p in expected]
+
+
 def test_model_spec_accepts_name_equals_path(tmp_path):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")

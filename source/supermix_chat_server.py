@@ -55,6 +55,7 @@ import answer_check  # noqa: E402
 import prompt_normaliser  # noqa: E402
 import eval_problem_solving as solving  # noqa: E402
 import recall_index  # noqa: E402
+from mimomix_checkpoints import discover_talk_models  # noqa: E402
 from train_mimomix_talk import load_talk_checkpoint  # noqa: E402
 
 MAX_NEW_TOKENS = 256
@@ -1337,25 +1338,9 @@ loadModels();
 """
 
 def discover_default_models(root: Optional[Path] = None) -> Dict[str, str]:
-    """Auto-discover local MiMoMix talk checkpoints (v96/v97/v93/v89) for zero-arg startup."""
+    """Return installed talk checkpoints in the shared release preference order."""
     base = Path(root) if root is not None else Path(__file__).resolve().parents[1]
-    candidates = (
-        ("v96_physio_neurogenesis", "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt"),
-        ("v100_scf_balanced", "output/v100_scf_balanced/v100_scf_balanced.selected.pt"),
-        ("v101_scf_cognitive", "output/v101_scf_cognitive/v101_scf_cognitive.pt"),
-        ("v102_scf_frontier", "output/v102_scf_frontier/v102_scf_frontier.pt"),
-        ("v103_scf_synthesis", "output/v103_scf_synthesis/v103_scf_synthesis.pt"),
-        ("v98_scf_predictive", "output/v98_scf_predictive/v98_scf_predictive.selected.pt"),
-        ("v99_scf_evolution", "output/v99_scf_evolution/v99_scf_evolution.selected.pt"),
-        ("v97_scf_connectome", "output/v97_scf_connectome/v97_scf_connectome.selected.pt"),
-        ("v93_neurogenesis", "output/v93_neurogenesis/v93_neurogenesis.selected.pt"),
-        ("v91_cns_connectome", "output/v91_cns_connectome/v91_cns_connectome.selected.pt"),
-        ("v89_corpus", "output/v89_corpus/v89_corpus.pt"),
-        ("v80_omni", "output/v80_omni/v80_omni.pt"),
-        ("v74_broad", "output/v74_broad/v74_broad.pt"),
-        ("v57_talk_v2", "output/hf_v57_publish/v57_talk_v2.pt"),
-    )
-    return {name: str(base / rel) for name, rel in candidates if (base / rel).is_file()}
+    return {name: str(base / path) for name, path in discover_talk_models(base).items()}
 
 
 def parse_model_spec(values: Sequence[str]) -> Dict[str, str]:

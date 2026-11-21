@@ -19,6 +19,7 @@ def _ensure_source_path() -> None:
 
 _ensure_source_path()
 
+from mimomix_checkpoints import discover_talk_models  # noqa: E402
 from scf.config import SCFFeatureFlags, resolve_decoding_policy  # noqa: E402
 
 __all__ = [
@@ -292,40 +293,19 @@ class MiMoMixAdapter(BaseModelAdapter):
     _TALK_CACHE: Dict[str, Any] = {}
 
     def discover_talk_checkpoints(self) -> List[str]:
-        candidates = (
-            "output/v96_physio_neurogenesis/v96_physio_neurogenesis.selected.pt",
-            "output/v100_scf_balanced/v100_scf_balanced.selected.pt",
-            "output/v101_scf_cognitive/v101_scf_cognitive.pt",
-            "output/v98_scf_predictive/v98_scf_predictive.selected.pt",
-            "output/v99_scf_evolution/v99_scf_evolution.selected.pt",
-            "output/v97_scf_connectome/v97_scf_connectome.selected.pt",
-            "output/v93_neurogenesis/v93_neurogenesis.selected.pt",
-            "output/v91_cns_connectome/v91_cns_connectome.selected.pt",
-            "output/v89_corpus/v89_corpus.pt",
-            "output/v80_omni/v80_omni.pt",
-            "output/hf_v57_publish/v57_talk_v2.pt",
-        )
-        return [rel for rel in candidates if (ROOT / rel).is_file()]
+        return [path.as_posix() for path in discover_talk_models(ROOT).values()]
 
     def status(self) -> ModelFamilyStatus:
+        talk_checkpoints = self.discover_talk_checkpoints()
         weights = [
             rel
             for rel in (
                 "output/hf_v56_publish/v56b_randslots_entropy.pt",
-                "output/hf_v57_publish/v57_talk_v2.pt",
-                "output/v80_omni/v80_omni.pt",
-                "output/v89_corpus/v89_corpus.pt",
-                "output/v91_cns_connectome/v91_cns_connectome.selected.pt",
-                "output/v93_neurogenesis/v93_neurogenesis.selected.pt",
                 "output/v96_physio_neurogenesis/v96_physio_neurogenesis.pt",
-                "output/v97_scf_connectome/v97_scf_connectome.selected.pt",
-                "output/v98_scf_predictive/v98_scf_predictive.selected.pt",
-                "output/v99_scf_evolution/v99_scf_evolution.selected.pt",
-                "output/v100_scf_balanced/v100_scf_balanced.selected.pt",
-                "output/v101_scf_cognitive/v101_scf_cognitive.pt",
             )
             if (ROOT / rel).is_file()
         ]
+        weights.extend(talk_checkpoints)
         try:
             import mimomix_core as core_mod
             import mimomix_decoding as dec_mod
@@ -350,7 +330,7 @@ class MiMoMixAdapter(BaseModelAdapter):
                 "supports_latent_state_reasoner": True,
                 "supports_mtp_speculative": True,
                 "supports_connectome_core": True,
-                "talk_checkpoints_available": self.discover_talk_checkpoints(),
+                "talk_checkpoints_available": talk_checkpoints,
             },
         )
 
