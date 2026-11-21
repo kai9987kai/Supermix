@@ -19,7 +19,6 @@ def _ensure_source_path() -> None:
 
 _ensure_source_path()
 
-from mimomix_checkpoints import discover_talk_models  # noqa: E402
 from scf.config import SCFFeatureFlags, resolve_decoding_policy  # noqa: E402
 
 __all__ = [
@@ -293,6 +292,8 @@ class MiMoMixAdapter(BaseModelAdapter):
     _TALK_CACHE: Dict[str, Any] = {}
 
     def discover_talk_checkpoints(self) -> List[str]:
+        from mimomix_checkpoints import discover_talk_models
+
         return [path.as_posix() for path in discover_talk_models(ROOT).values()]
 
     def status(self) -> ModelFamilyStatus:
