@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import heapq
 import json
 import math
 import operator as _op
@@ -69,6 +70,7 @@ CONSTANTS: Dict[str, Dict[str, Any]] = {
     "k_B": {"symbol": "k_B", "value": Fraction(1380649, 10**29), "unit": "J/K", "name": "boltzmann_constant"},
     "N_A": {"symbol": "N_A", "value": Fraction(602214076, 10**15) * Fraction(10**23, 1), "unit": "1/mol", "name": "avogadro_number"},
     "R": {"symbol": "R", "value": Fraction(831446261815324, 10**14), "unit": "J/(mol*K)", "name": "gas_constant"},
+    "F": {"symbol": "F", "value": Fraction(964853321233100184, 10**13), "unit": "C/mol", "name": "faraday_constant"},
     "e": {"symbol": "e", "value": Fraction(1602176634, 10**28), "unit": "C", "name": "elementary_charge"},
     "k_e": {"symbol": "k_e", "value": Fraction(89875517923, 10), "unit": "N*m^2/C^2", "name": "coulomb_constant"},
     "pi": {"symbol": "pi", "value": Fraction(3141592653589793, 10**15), "unit": "dimensionless", "name": "pi"},
@@ -1355,7 +1357,7 @@ class NexusSolver:
         k_m = re.search(r"\b(?:k|r)\s*(?:=|is)?\s*(\d+)", q, re.I)
 
         # Combinations: C(n, k) = n! / (k! * (n-k)!)
-        if n_m and k_m and ("combination" in q.lower() or "choose" in q.lower() or "c(n,k)" in q.lower() or "n choose k" in q.lower()):
+        if n_m and k_m and "repetition" not in q.lower() and "multiset" not in q.lower() and ("combination" in q.lower() or "choose" in q.lower() or "c(n,k)" in q.lower() or "n choose k" in q.lower()):
             n = int(n_m.group(1))
             k = int(k_m.group(1))
             if 0 <= k <= n:
@@ -1662,9 +1664,9 @@ class NexusSolver:
                 receipt = self._build_receipt("calculus", "mathematics", "definite_integral", "calc.poly_definite_integral", {"poly": integ_m.group(1).strip(), "a": str(a_lo), "b": str(b_hi)}, str(res), disp, "dimensionless", steps)
                 return SolverResult(True, q, "mathematics", "calculus", "definite_integral", "calc.poly_definite_integral", float(res), disp, "", steps, receipt, f"Definite integral evaluates to {disp}.")
 
-        # GCD / LCM
+        # GCD / LCM (defer extended gcd / Bezout requests to the extended Euclidean solver)
         gcd_m = re.search(r"\b(gcd|greatest common divisor|lcm|least common multiple)\b(?:\s+of)?\s*[:(]?\s*(-?\d+(?:\s*(?:,|and)\s*-?\d+)+)", q, re.I)
-        if gcd_m:
+        if gcd_m and "extended" not in q.lower() and "bezout" not in q.lower() and "bézout" not in q.lower():
             kind = gcd_m.group(1).lower()
             nums = [abs(int(x)) for x in re.findall(r"-?\d+", gcd_m.group(2))]
             if len(nums) >= 2 and len(nums) <= 16:
@@ -2050,7 +2052,7 @@ class NexusSolver:
             f"z = {self._format_fraction(sol_z)}"
         )
         steps = [
-            DerivationStep(1, "Form augmented 3x3 rational system [A|b]", "A\\mathbf{x} = \\mathbf{b}", f"3 equations in (x, y, z)", disp),
+            DerivationStep(1, "Form augmented 3x3 rational system [A|b]", "A\\mathbf{x} = \\mathbf{b}", "3 equations in (x, y, z)", disp),
             DerivationStep(2, "Perform exact Fraction Gauss-Jordan elimination and verify residuals = 0", "\\mathbf{x} = A^{-1}\\mathbf{b}", disp, disp),
         ]
         receipt = self._build_receipt(
@@ -2394,6 +2396,1358 @@ class NexusSolver:
                 steps = [DerivationStep(1, f"Evaluate polynomial at x = {xv}", "f(x) = \\sum c_k x^k", f"f({xv}) = {disp}", disp)]
                 receipt = self._build_receipt("algebra", "mathematics", "polynomial_eval", "alg.poly_eval", {"poly": poly_ev.group(1).strip(), "x": str(xv)}, str(val), disp, "dimensionless", steps)
                 return SolverResult(True, q, "mathematics", "algebra", "polynomial_eval", "alg.poly_eval", float(val), disp, "", steps, receipt, f"Polynomial evaluates to {disp}.")
+
+        # --- v104 Extended Zero-Eval Exact Solvers ---
+
+        # 11. Exact Catalan number C_n = comb(2n, n) // (n + 1)
+        cat_m = re.search(
+            r"(?:(\d+)(?:st|nd|rd|th)?\s+catalan(?:\s+number)?|catalan(?:\s+number)?\s*(?:C_?|\()?\s*(\d+)\)?)",
+            q,
+            re.I,
+        )
+        if cat_m:
+            n_val = int(cat_m.group(1) or cat_m.group(2))
+            if 0 <= n_val <= 30:
+                c_val = math.comb(2 * n_val, n_val) // (n_val + 1)
+                disp = str(c_val)
+                steps = [
+                    DerivationStep(
+                        1,
+                        f"Compute exact Catalan number C_{n_val}",
+                        "C_n = \\frac{1}{n+1}\\binom{2n}{n}",
+                        f"C_{{{n_val}}} = \\frac{{1}}{{{n_val + 1}}}\\binom{{{2 * n_val}}}{{{n_val}}} = {disp}",
+                        disp,
+                    )
+                ]
+                receipt = self._build_receipt("combinatorics", "mathematics", "catalan_number", "comb.catalan", {"n": str(n_val)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "combinatorics", "catalan_number", "comb.catalan", float(c_val), disp, "", steps, receipt, f"The Catalan number C_{n_val} is {disp}.")
+
+        # 12. Exact Fibonacci number F_n (F_0 = 0, F_1 = 1)
+        fib_m = re.search(
+            r"(?:(\d+)(?:st|nd|rd|th)\s+fibonacci(?:\s+number)?|fibonacci(?:\s+number)?\s*(?:F_?|\()?\s*(\d+)\)?)",
+            q,
+            re.I,
+        )
+        if fib_m:
+            n_val = int(fib_m.group(1) or fib_m.group(2))
+            if 0 <= n_val <= 200:
+                a_f, b_f = 0, 1
+                for _ in range(n_val):
+                    a_f, b_f = b_f, a_f + b_f
+                disp = str(a_f)
+                steps = [
+                    DerivationStep(
+                        1,
+                        f"Compute exact Fibonacci number F_{n_val} (F_0=0, F_1=1)",
+                        "F_n = F_{n-1} + F_{n-2}",
+                        f"F_{{{n_val}}} = {disp}",
+                        disp,
+                    )
+                ]
+                receipt = self._build_receipt("combinatorics", "mathematics", "fibonacci_number", "comb.fibonacci", {"n": str(n_val)}, disp, disp, "dimensionless", steps)
+                return SolverResult(True, q, "mathematics", "combinatorics", "fibonacci_number", "comb.fibonacci", float(a_f), disp, "", steps, receipt, f"The Fibonacci number F_{n_val} is {disp}.")
+
+        # 13. Exact Chinese Remainder Theorem: "x = 2 (mod 3) and x = 3 (mod 5)"
+        crt_pairs = re.findall(
+            r"x\s*(?:=|≡|==|congruent\s+to)\s*(-?\d+)\s*\(?\s*mod(?:ulo)?\s*(\d+)\s*\)?",
+            q,
+            re.I,
+        )
+        if 2 <= len(crt_pairs) <= 4:
+            rems = [int(a) for a, _ in crt_pairs]
+            mods = [int(m) for _, m in crt_pairs]
+            if all(m >= 2 for m in mods):
+                pairwise_coprime = all(
+                    math.gcd(mods[i], mods[j]) == 1
+                    for i in range(len(mods))
+                    for j in range(i + 1, len(mods))
+                )
+                if pairwise_coprime:
+                    prod_m = 1
+                    for m in mods:
+                        prod_m *= m
+                    total = 0
+                    for a_i, m_i in zip(rems, mods):
+                        big_m = prod_m // m_i
+                        inv_m = pow(big_m, -1, m_i)
+                        total += (a_i % m_i) * big_m * inv_m
+                    x_sol = total % prod_m
+                    if all(x_sol % m_i == (a_i % m_i) for a_i, m_i in zip(rems, mods)):
+                        disp = f"{x_sol} (mod {prod_m})"
+                        steps = [
+                            DerivationStep(
+                                1,
+                                "Verify pairwise coprime moduli and apply CRT construction",
+                                "x \\equiv \\sum a_i M_i (M_i^{-1} \\bmod m_i) \\pmod{M}",
+                                f"M = {prod_m},\\; x = {x_sol}",
+                                str(x_sol),
+                            ),
+                            DerivationStep(
+                                2,
+                                "Verify solution against every input congruence",
+                                "\\forall i:\\; x \\bmod m_i = a_i \\bmod m_i",
+                                "verified",
+                                disp,
+                            ),
+                        ]
+                        receipt = self._build_receipt("number_theory", "mathematics", "crt_solution", "numtheory.crt", {"congruences": str(crt_pairs)}, str(x_sol), disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "number_theory", "crt_solution", "numtheory.crt", float(x_sol), disp, "", steps, receipt, f"By the Chinese Remainder Theorem, x ≡ {disp}.")
+
+        # 14. Shannon Entropy in bits: "shannon entropy of [0.5, 0.25, 0.25]"
+        if "shannon entropy" in lower or ("entropy" in lower and "[" in q and "kl" not in lower):
+            list_m = re.search(r"\[([^\[\]]+)\]", q)
+            if list_m:
+                try:
+                    raw_items = [tok.strip() for tok in list_m.group(1).split(",") if tok.strip()]
+                    probs = [self._normalize_num(tok) for tok in raw_items]
+                except Exception:
+                    probs = []
+                if probs and all(p >= 0 for p in probs) and abs(float(sum(probs)) - 1.0) <= 1e-6:
+                    h_bits = -sum(float(p) * math.log2(float(p)) for p in probs if p > 0)
+                    disp = f"{h_bits:.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Validate probability simplex and compute Shannon entropy in bits",
+                            "H(P) = -\\sum_i p_i \\log_2 p_i",
+                            f"H(P) = {disp}\\text{{ bits}}",
+                            disp,
+                            "bits",
+                        )
+                    ]
+                    receipt = self._build_receipt("information_theory", "mathematics", "shannon_entropy", "infotheory.shannon_entropy", {"p": str([str(p) for p in probs])}, disp, disp, "bits", steps)
+                    return SolverResult(True, q, "mathematics", "information_theory", "shannon_entropy", "infotheory.shannon_entropy", h_bits, disp, "bits", steps, receipt, f"Shannon entropy is {disp} bits.")
+
+        # 15. KL Divergence in bits: "kl divergence between [0.5, 0.5] and [0.25, 0.75]"
+        if "kl divergence" in lower or "kullback" in lower:
+            lists = re.findall(r"\[([^\[\]]+)\]", q)
+            if len(lists) >= 2:
+                try:
+                    p_dist = [self._normalize_num(tok.strip()) for tok in lists[0].split(",") if tok.strip()]
+                    q_dist = [self._normalize_num(tok.strip()) for tok in lists[1].split(",") if tok.strip()]
+                except Exception:
+                    p_dist, q_dist = [], []
+                if (
+                    p_dist
+                    and len(p_dist) == len(q_dist)
+                    and all(p >= 0 for p in p_dist)
+                    and all(qv >= 0 for qv in q_dist)
+                    and abs(float(sum(p_dist)) - 1.0) <= 1e-6
+                    and abs(float(sum(q_dist)) - 1.0) <= 1e-6
+                    and all(not (p > 0 and qv == 0) for p, qv in zip(p_dist, q_dist))
+                ):
+                    kl_bits = sum(
+                        float(p) * math.log2(float(p) / float(qv))
+                        for p, qv in zip(p_dist, q_dist)
+                        if p > 0
+                    )
+                    disp = f"{kl_bits:.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Validate distributions and compute KL divergence D_KL(P || Q) in bits",
+                            "D_{\\text{KL}}(P \\| Q) = \\sum_i p_i \\log_2\\frac{p_i}{q_i}",
+                            f"D_{{\\text{{KL}}}} = {disp}\\text{{ bits}}",
+                            disp,
+                            "bits",
+                        )
+                    ]
+                    receipt = self._build_receipt("information_theory", "mathematics", "kl_divergence", "infotheory.kl_divergence", {"P": str([str(p) for p in p_dist]), "Q": str([str(qv) for qv in q_dist])}, disp, disp, "bits", steps)
+                    return SolverResult(True, q, "mathematics", "information_theory", "kl_divergence", "infotheory.kl_divergence", kl_bits, disp, "bits", steps, receipt, f"KL divergence D_KL(P || Q) is {disp} bits.")
+
+        # 16. Poisson PMF: "poisson with lambda = 3 and k = 2"
+        if "poisson" in lower:
+            lam_m = re.search(r"(?:lambda|rate|mean)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            k_m = re.search(r"\bk\s*=\s*(\d+)", q, re.I)
+            if lam_m and k_m:
+                lam = float(lam_m.group(1))
+                kv = int(k_m.group(1))
+                if lam > 0 and 0 <= kv <= 100:
+                    pmf = (lam ** kv) * math.exp(-lam) / float(math.factorial(kv))
+                    disp = f"{pmf:.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate Poisson probability mass function",
+                            "P(X = k) = \\frac{\\lambda^k e^{-\\lambda}}{k!}",
+                            f"P(X = {kv}) = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("probability", "mathematics", "poisson_pmf", "prob.poisson_pmf", {"lambda": str(lam), "k": str(kv)}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "probability", "poisson_pmf", "prob.poisson_pmf", pmf, disp, "", steps, receipt, f"Poisson probability P(X = {kv}) = {disp}.")
+
+        # 17. Ideal Gas Law PV = nRT (SI units, R = 8.314462618 J/(mol*K))
+        if "ideal gas" in lower or "pv = nrt" in lower or "pv=nrt" in lower:
+            p_m = re.search(r"\bP\s*=\s*(\d+(?:\.\d+)?)", q)
+            v_m = re.search(r"\bV\s*=\s*(\d+(?:\.\d+)?)", q)
+            n_m = re.search(r"\bn\s*=\s*(\d+(?:\.\d+)?)", q)
+            t_m = re.search(r"\bT\s*=\s*(\d+(?:\.\d+)?)", q)
+            known = {
+                "P": float(p_m.group(1)) if p_m else None,
+                "V": float(v_m.group(1)) if v_m else None,
+                "n": float(n_m.group(1)) if n_m else None,
+                "T": float(t_m.group(1)) if t_m else None,
+            }
+            missing = [k for k, v in known.items() if v is None]
+            if len(missing) == 1 and all(v > 0 for v in known.values() if v is not None):
+                r_const = 8.314462618
+                target_var = missing[0]
+                if target_var == "P":
+                    val, unit = (known["n"] * r_const * known["T"]) / known["V"], "Pa"
+                elif target_var == "V":
+                    val, unit = (known["n"] * r_const * known["T"]) / known["P"], "m^3"
+                elif target_var == "n":
+                    val, unit = (known["P"] * known["V"]) / (r_const * known["T"]), "mol"
+                else:
+                    val, unit = (known["P"] * known["V"]) / (known["n"] * r_const), "K"
+                disp = f"{val:.6f}".rstrip("0").rstrip(".") or "0"
+                steps = [
+                    DerivationStep(
+                        1,
+                        f"Solve ideal gas law PV = nRT for {target_var}",
+                        "PV = nRT,\\; R = 8.314462618\\text{ J/(mol}\\cdot\\text{K)}",
+                        f"{target_var} = {disp}\\text{{ {unit}}}",
+                        disp,
+                        unit,
+                    )
+                ]
+                receipt = self._build_receipt("thermodynamics", "physics", f"ideal_gas_{target_var}", "thermo.ideal_gas", {k: str(v) for k, v in known.items() if v is not None}, disp, disp, unit, steps)
+                return SolverResult(True, q, "physics", "thermodynamics", f"ideal_gas_{target_var}", "thermo.ideal_gas", val, disp, unit, steps, receipt, f"By the ideal gas law PV = nRT, {target_var} = {disp} {unit}.")
+
+        # 18. Capacitors in Series / Parallel: "capacitors 6 uF and 3 uF in series"
+        if "capacitor" in lower and ("series" in lower or "parallel" in lower):
+            cap_nums = re.findall(r"(\d+(?:\.\d+)?)\s*(?:u|µ|m|n|p)?f\b", q, re.I)
+            if len(cap_nums) >= 2:
+                caps = [self._normalize_num(c) for c in cap_nums[:8]]
+                if all(c > 0 for c in caps):
+                    if "series" in lower:
+                        inv_sum = sum((Fraction(1) / c for c in caps), Fraction(0))
+                        ceq = Fraction(1) / inv_sum
+                        fid, eq = "circuits.capacitors_series", "\\frac{1}{C_{\\text{eq}}} = \\sum \\frac{1}{C_i}"
+                    else:
+                        ceq = sum(caps, Fraction(0))
+                        fid, eq = "circuits.capacitors_parallel", "C_{\\text{eq}} = \\sum C_i"
+                    disp = self._format_fraction(ceq)
+                    steps = [DerivationStep(1, "Compute equivalent capacitance", eq, f"C_{{\\text{{eq}}}} = {disp}", disp)]
+                    receipt = self._build_receipt("circuits", "physics", "equivalent_capacitance", fid, {"capacitors": str([str(c) for c in caps])}, str(ceq), disp, "F", steps)
+                    return SolverResult(True, q, "physics", "circuits", "equivalent_capacitance", fid, float(ceq), disp, "", steps, receipt, f"Equivalent capacitance is {disp}.")
+
+        # 19. Relativistic Lorentz Factor: "lorentz factor at v = 0.6c" or "beta = 0.8"
+        if "lorentz factor" in lower or ("lorentz" in lower and ("beta" in lower or "0." in lower)):
+            beta_m = re.search(r"(?:beta\s*=\s*|v\s*=\s*)?(\d+(?:\.\d+)?)\s*c?\b", q, re.I)
+            if beta_m:
+                beta = float(beta_m.group(1))
+                if 0.0 <= beta < 1.0:
+                    gamma = 1.0 / math.sqrt(1.0 - beta * beta)
+                    disp = f"{gamma:.6f}".rstrip("0").rstrip(".") or "1"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate relativistic Lorentz factor",
+                            "\\gamma = \\frac{1}{\\sqrt{1 - \\beta^2}}",
+                            f"\\gamma({beta}) = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("relativity", "physics", "lorentz_factor", "relativity.lorentz_gamma", {"beta": str(beta)}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "physics", "relativity", "lorentz_factor", "relativity.lorentz_gamma", gamma, disp, "", steps, receipt, f"The Lorentz factor γ for β = {beta} is {disp}.")
+
+        # 20. Exact Compound Interest: "compound interest P = 1000, r = 0.05, n = 4, t = 2"
+        if "compound interest" in lower:
+            p_m = re.search(r"\b(?:P|principal)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            r_m = re.search(r"\b(?:r|rate)\s*=\s*(\d+(?:\.\d+)?)(%?)", q, re.I)
+            n_m = re.search(r"\b(?:n|compounds?)\s*=\s*(\d+)", q, re.I)
+            t_m = re.search(r"\b(?:t|years?)\s*=\s*(\d+)", q, re.I)
+            if p_m and r_m and t_m:
+                p_v = self._normalize_num(p_m.group(1))
+                r_v = self._normalize_num(r_m.group(1))
+                if r_m.group(2) == "%":
+                    r_v = r_v / Fraction(100)
+                n_v = int(n_m.group(1)) if n_m else 1
+                t_v = int(t_m.group(1))
+                if p_v > 0 and r_v >= 0 and 1 <= n_v <= 365 and 0 <= t_v <= 100 and (n_v * t_v) <= 1000:
+                    amount = p_v * ((Fraction(1) + r_v / Fraction(n_v)) ** (n_v * t_v))
+                    disp = f"{float(amount):.2f}"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Apply exact compound interest formula",
+                            "A = P\\left(1 + \\frac{r}{n}\\right)^{nt}",
+                            f"A = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("finance", "mathematics", "compound_interest", "finance.compound_interest", {"P": str(p_v), "r": str(r_v), "n": str(n_v), "t": str(t_v)}, str(amount), disp, "currency", steps)
+                    return SolverResult(True, q, "mathematics", "finance", "compound_interest", "finance.compound_interest", float(amount), disp, "", steps, receipt, f"Final compound amount A = {disp}.")
+
+        # 21. Exact Extended GCD & Bezout Coefficients: "extended gcd of 240 and 46"
+        if "extended gcd" in lower or "bezout" in lower or "bézout" in lower:
+            nums = re.findall(r"-?\d+", q)
+            if len(nums) == 2:
+                a_v, b_v = int(nums[0]), int(nums[1])
+                if not (a_v == 0 and b_v == 0) and abs(a_v) <= 10**12 and abs(b_v) <= 10**12:
+                    old_r, r = a_v, b_v
+                    old_s, s = 1, 0
+                    old_t, t = 0, 1
+                    while r != 0:
+                        quot = old_r // r
+                        old_r, r = r, old_r - quot * r
+                        old_s, s = s, old_s - quot * s
+                        old_t, t = t, old_t - quot * t
+                    if old_r < 0:
+                        old_r, old_s, old_t = -old_r, -old_s, -old_t
+                    if a_v * old_s + b_v * old_t == old_r:
+                        disp = f"gcd={old_r}, s={old_s}, t={old_t}"
+                        steps = [
+                            DerivationStep(
+                                1,
+                                "Run iterative Extended Euclidean Algorithm and verify Bezout identity",
+                                "a s + b t = \\gcd(a, b)",
+                                f"{a_v}({old_s}) + {b_v}({old_t}) = {old_r}",
+                                disp,
+                            )
+                        ]
+                        receipt = self._build_receipt("number_theory", "mathematics", "extended_gcd", "numtheory.extended_gcd", {"a": str(a_v), "b": str(b_v)}, str(old_r), disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "number_theory", "extended_gcd", "numtheory.extended_gcd", float(old_r), disp, "", steps, receipt, f"Extended GCD: {disp}.")
+
+        # 22. Exact Harmonic Number H_n = sum_{k=1}^n 1/k: "harmonic number H_4"
+        if "harmonic number" in lower or re.search(r"\bH_?\(?\d+\)?\b", q):
+            hm = re.search(
+                r"(?:(\d+)(?:st|nd|rd|th)?\s+harmonic\s+number|harmonic\s+number\s*(?:H_?|\()?\s*(\d+)\)?)",
+                q,
+                re.I,
+            )
+            if hm:
+                n_v = int(hm.group(1) or hm.group(2))
+                if 1 <= n_v <= 500:
+                    h_frac = sum((Fraction(1, k) for k in range(1, n_v + 1)), Fraction(0))
+                    disp = str(h_frac.numerator) if h_frac.denominator == 1 else f"{h_frac.numerator}/{h_frac.denominator}"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            f"Compute exact rational harmonic number H_{n_v}",
+                            "H_n = \\sum_{k=1}^{n} \\frac{1}{k}",
+                            f"H_{{{n_v}}} = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("series", "mathematics", "harmonic_number", "series.harmonic_number", {"n": str(n_v)}, str(h_frac), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "series", "harmonic_number", "series.harmonic_number", float(h_frac), disp, "", steps, receipt, f"Exact harmonic number H_{n_v} = {disp}.")
+
+        # 23. Exact Multinomial Coefficient: "multinomial(6; 2, 2, 2)"
+        if "multinomial" in lower:
+            semi_m = re.search(r"multinomial\s*\(\s*(\d+)\s*;\s*([\d,\s]+)\)", q, re.I)
+            plain_m = re.search(r"multinomial(?:\s+coefficient)?(?:\s+of)?\s*\(([\d,\s]+)\)", q, re.I)
+            n_explicit: Optional[int] = None
+            k_parts: List[int] = []
+            if semi_m:
+                n_explicit = int(semi_m.group(1))
+                k_parts = [int(tok.strip()) for tok in semi_m.group(2).split(",") if tok.strip()]
+            elif plain_m:
+                k_parts = [int(tok.strip()) for tok in plain_m.group(1).split(",") if tok.strip()]
+            if k_parts and all(k >= 0 for k in k_parts):
+                k_sum = sum(k_parts)
+                if k_sum <= 200 and (n_explicit is None or n_explicit == k_sum):
+                    num = math.factorial(k_sum)
+                    den = 1
+                    for k_i in k_parts:
+                        den *= math.factorial(k_i)
+                    val_int = num // den
+                    disp = str(val_int)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Compute exact multinomial coefficient",
+                            "\\binom{n}{k_1, \\dots, k_m} = \\frac{n!}{k_1! \\cdots k_m!}",
+                            f"\\frac{{{k_sum}!}}{{{' \\cdot '.join(f'{k}!' for k in k_parts)}}} = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("combinatorics", "mathematics", "multinomial", "comb.multinomial", {"n": str(k_sum), "k": str(k_parts)}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "combinatorics", "multinomial", "comb.multinomial", float(val_int), disp, "", steps, receipt, f"Multinomial coefficient = {disp}.")
+
+        # 24. Exact Euclidean / Manhattan Distance between Vectors
+        if ("euclidean distance" in lower or "manhattan distance" in lower) and (
+            "(" in q or "[" in q
+        ):
+            vecs = re.findall(r"[\(\[]([^\(\)\[\]]+)[\)\]]", q)
+            if len(vecs) >= 2:
+                try:
+                    u_v = [self._normalize_num(tok.strip()) for tok in vecs[0].split(",") if tok.strip()]
+                    v_v = [self._normalize_num(tok.strip()) for tok in vecs[1].split(",") if tok.strip()]
+                except Exception:
+                    u_v, v_v = [], []
+                if u_v and len(u_v) == len(v_v):
+                    if "manhattan" in lower:
+                        dist_f = sum((abs(a - b) for a, b in zip(u_v, v_v)), Fraction(0))
+                        disp = self._format_fraction(dist_f)
+                        fid, eq = "geometry.manhattan_distance", "d_1(u, v) = \\sum_i |u_i - v_i|"
+                        fval = float(dist_f)
+                    else:
+                        sq_sum = sum(((a - b) * (a - b) for a, b in zip(u_v, v_v)), Fraction(0))
+                        fval = math.sqrt(float(sq_sum))
+                        if sq_sum.denominator == 1:
+                            r_int = math.isqrt(sq_sum.numerator)
+                            if r_int * r_int == sq_sum.numerator:
+                                disp = str(r_int)
+                            else:
+                                disp = f"{fval:.6f}".rstrip("0").rstrip(".") or "0"
+                        else:
+                            disp = f"{fval:.6f}".rstrip("0").rstrip(".") or "0"
+                        fid, eq = "geometry.euclidean_distance", "d_2(u, v) = \\sqrt{\\sum_i (u_i - v_i)^2}"
+                    steps = [DerivationStep(1, "Compute exact vector distance", eq, f"d = {disp}", disp)]
+                    receipt = self._build_receipt("geometry", "mathematics", "vector_distance", fid, {"u": str([str(x) for x in u_v]), "v": str([str(x) for x in v_v])}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "geometry", "vector_distance", fid, fval, disp, "", steps, receipt, f"Distance = {disp}.")
+
+        # 25. Exact Cosine Similarity between Vectors: "cosine similarity of [1, 0] and [1, 1]"
+        if "cosine similarity" in lower:
+            vecs = re.findall(r"[\(\[]([^\(\)\[\]]+)[\)\]]", q)
+            if len(vecs) >= 2:
+                try:
+                    u_v = [self._normalize_num(tok.strip()) for tok in vecs[0].split(",") if tok.strip()]
+                    v_v = [self._normalize_num(tok.strip()) for tok in vecs[1].split(",") if tok.strip()]
+                except Exception:
+                    u_v, v_v = [], []
+                if u_v and len(u_v) == len(v_v):
+                    dot = sum((a * b for a, b in zip(u_v, v_v)), Fraction(0))
+                    nu2 = sum((a * a for a in u_v), Fraction(0))
+                    nv2 = sum((b * b for b in v_v), Fraction(0))
+                    if nu2 > 0 and nv2 > 0:
+                        cos_val = float(dot) / math.sqrt(float(nu2) * float(nv2))
+                        cos_val = max(-1.0, min(1.0, cos_val))
+                        disp = f"{cos_val:.6f}".rstrip("0").rstrip(".") or "0"
+                        steps = [
+                            DerivationStep(
+                                1,
+                                "Compute exact vector cosine similarity",
+                                "\\cos(\\theta) = \\frac{u \\cdot v}{\\|u\\|_2 \\|v\\|_2}",
+                                f"\\cos(\\theta) = {disp}",
+                                disp,
+                            )
+                        ]
+                        receipt = self._build_receipt("linear_algebra", "mathematics", "cosine_similarity", "linalg.cosine_similarity", {"u": str([str(x) for x in u_v]), "v": str([str(x) for x in v_v])}, disp, disp, "dimensionless", steps)
+                        return SolverResult(True, q, "mathematics", "linear_algebra", "cosine_similarity", "linalg.cosine_similarity", cos_val, disp, "", steps, receipt, f"Cosine similarity = {disp}.")
+
+        # 26. Exact Standard Normal Z-Score: "z-score of x = 85 with mean = 70 and std = 10"
+        if "z-score" in lower or "z score" in lower:
+            x_m = re.search(r"\bx\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            mu_m = re.search(r"\b(?:mean|mu)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            sd_m = re.search(r"\b(?:std|sigma|sd)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if x_m and mu_m and sd_m:
+                x_v = self._normalize_num(x_m.group(1))
+                mu_v = self._normalize_num(mu_m.group(1))
+                sd_v = self._normalize_num(sd_m.group(1))
+                if sd_v > 0:
+                    z_v = (x_v - mu_v) / sd_v
+                    disp = self._format_fraction(z_v)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate exact standard score z = (x - mu) / sigma",
+                            "z = \\frac{x - \\mu}{\\sigma}",
+                            f"z = \\frac{{{x_v} - {mu_v}}}{{{sd_v}}} = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("statistics", "mathematics", "z_score", "stats.z_score", {"x": str(x_v), "mean": str(mu_v), "std": str(sd_v)}, str(z_v), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "statistics", "z_score", "stats.z_score", float(z_v), disp, "", steps, receipt, f"Standard z-score = {disp}.")
+
+        # 27. Exact Radioactive Half-Life Decay: "half-life decay N0 = 100, t = 15, half_life = 5"
+        if "half-life" in lower or "half life" in lower or "radioactive decay" in lower:
+            n0_m = re.search(r"\b(?:N0|N_0|initial)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            t_m = re.search(r"\bt\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            hl_m = re.search(r"\b(?:half_life|half-life|hl|T_half|T1/2)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            if n0_m and t_m and hl_m:
+                n0_v = self._normalize_num(n0_m.group(1))
+                t_v = self._normalize_num(t_m.group(1))
+                hl_v = self._normalize_num(hl_m.group(1))
+                if n0_v >= 0 and t_v >= 0 and hl_v > 0:
+                    ratio_f = t_v / hl_v
+                    if ratio_f.denominator == 1 and ratio_f.numerator <= 200:
+                        rem = n0_v / Fraction(1 << ratio_f.numerator)
+                        disp = self._format_fraction(rem)
+                        fval = float(rem)
+                    else:
+                        fval = float(n0_v) * (2.0 ** (-float(ratio_f)))
+                        disp = f"{fval:.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate exponential radioactive decay N(t) = N_0 * 2^(-t / T_{1/2})",
+                            "N(t) = N_0 \\cdot 2^{-t / T_{1/2}}",
+                            f"N({t_v}) = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("nuclear_physics", "physics", "half_life_decay", "physics.half_life_decay", {"N0": str(n0_v), "t": str(t_v), "half_life": str(hl_v)}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "physics", "nuclear_physics", "half_life_decay", "physics.half_life_decay", fval, disp, "", steps, receipt, f"Remaining quantity after half-life decay is {disp}.")
+
+        # 28. Exact Acoustic Doppler Shift: "doppler shift f0 = 500, v_obs = 0, v_src = 34, v = 340"
+        if "doppler" in lower:
+            f0_m = re.search(r"\b(?:f0|f_0|freq(?:uency)?)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            v_m = re.search(r"\bv\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            vo_m = re.search(r"\b(?:v_obs|vo)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            vs_m = re.search(r"\b(?:v_src|vs)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if f0_m and (vo_m or vs_m):
+                f0_v = self._normalize_num(f0_m.group(1))
+                v_v = self._normalize_num(v_m.group(1)) if v_m else Fraction(340)
+                vo_v = self._normalize_num(vo_m.group(1)) if vo_m else Fraction(0)
+                vs_v = self._normalize_num(vs_m.group(1)) if vs_m else Fraction(0)
+                if f0_v > 0 and v_v > 0 and (v_v - vs_v) > 0 and (v_v + vo_v) >= 0:
+                    f_obs = f0_v * (v_v + vo_v) / (v_v - vs_v)
+                    disp = f"{float(f_obs):.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate exact acoustic Doppler observed frequency",
+                            "f' = f_0 \\frac{v + v_{\\text{obs}}}{v - v_{\\text{src}}}",
+                            f"f' = {disp}\\text{{ Hz}}",
+                            disp,
+                            "Hz",
+                        )
+                    ]
+                    receipt = self._build_receipt("waves", "physics", "doppler_shift", "physics.doppler_shift", {"f0": str(f0_v), "v": str(v_v), "v_obs": str(vo_v), "v_src": str(vs_v)}, str(f_obs), disp, "Hz", steps)
+                    return SolverResult(True, q, "physics", "waves", "doppler_shift", "physics.doppler_shift", float(f_obs), disp, "Hz", steps, receipt, f"Observed Doppler frequency f' = {disp} Hz.")
+
+        # 29. Exact Amdahl's Law Speedup: "amdahl speedup p = 0.8, n = 4"
+        if "amdahl" in lower:
+            p_m = re.search(r"\bp\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            n_m = re.search(r"\b(?:n|s|cores?|processors?)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            if p_m and n_m:
+                p_v = self._normalize_num(p_m.group(1))
+                n_v = self._normalize_num(n_m.group(1))
+                if Fraction(0) <= p_v <= Fraction(1) and n_v > 0:
+                    speedup = Fraction(1) / ((Fraction(1) - p_v) + (p_v / n_v))
+                    disp = self._format_fraction(speedup)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Apply exact Amdahl's Law parallel speedup formula",
+                            "S(n) = \\frac{1}{(1 - p) + p / n}",
+                            f"S({n_v}) = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("systems", "computer_science", "amdahl_speedup", "cs.amdahl_speedup", {"p": str(p_v), "n": str(n_v)}, str(speedup), disp, "x", steps)
+                    return SolverResult(True, q, "computer_science", "systems", "amdahl_speedup", "cs.amdahl_speedup", float(speedup), disp, "x", steps, receipt, f"Amdahl's Law speedup S = {disp}x.")
+
+        # 30. Exact Integer Base Conversion (Radix 2..36): "convert 255 from base 10 to base 16"
+        base_m = re.search(
+            r"convert\s+(-?[0-9A-Za-z]+)\s+from\s+base\s+(\d+)\s+to\s+base\s+(\d+)",
+            q,
+            re.I,
+        )
+        if base_m:
+            raw_digits, b_from, b_to = base_m.group(1).upper(), int(base_m.group(2)), int(base_m.group(3))
+            if 2 <= b_from <= 36 and 2 <= b_to <= 36 and len(raw_digits) <= 64:
+                alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                neg = raw_digits.startswith("-")
+                body = raw_digits[1:] if neg else raw_digits
+                if body and all(ch in alphabet[:b_from] for ch in body):
+                    val_int = int(body, b_from)
+                    if val_int == 0:
+                        converted = "0"
+                    else:
+                        out_chars: List[str] = []
+                        tmp = val_int
+                        while tmp > 0:
+                            tmp, rem = divmod(tmp, b_to)
+                            out_chars.append(alphabet[rem])
+                        converted = ("-" if neg else "") + "".join(reversed(out_chars))
+                    steps = [
+                        DerivationStep(
+                            1,
+                            f"Validate base-{b_from} digits and convert exact integer to base-{b_to}",
+                            f"({raw_digits})_{{{b_from}}} \\to ({converted})_{{{b_to}}}",
+                            f"{val_int}_{{10}} = ({converted})_{{{b_to}}}",
+                            converted,
+                        )
+                    ]
+                    receipt = self._build_receipt("number_systems", "computer_science", "base_conversion", "cs.base_conversion", {"value": raw_digits, "from_base": str(b_from), "to_base": str(b_to)}, str(-val_int if neg else val_int), converted, "", steps)
+                    return SolverResult(True, q, "computer_science", "number_systems", "base_conversion", "cs.base_conversion", float(-val_int if neg else val_int), converted, "", steps, receipt, f"{raw_digits} (base {b_from}) = {converted} (base {b_to}).")
+
+        # 31. Exact Rational Matrix Multiplication: "matrix multiply [[1, 2], [3, 4]] and [[5, 6], [7, 8]]"
+        if "matrix multiply" in lower or "matrix product" in lower or "multiply matrices" in lower:
+            raw_mats = re.findall(r"\[\s*\[[^\]]*\](?:\s*,\s*\[[^\]]*\])*\s*\]", q)
+            if len(raw_mats) == 2:
+                try:
+                    m_a_raw = json.loads(raw_mats[0])
+                    m_b_raw = json.loads(raw_mats[1])
+                except Exception:
+                    m_a_raw, m_b_raw = None, None
+                if (
+                    isinstance(m_a_raw, list)
+                    and isinstance(m_b_raw, list)
+                    and 1 <= len(m_a_raw) <= 6
+                    and 1 <= len(m_b_raw) <= 6
+                    and all(isinstance(r, list) and 1 <= len(r) <= 6 for r in m_a_raw)
+                    and all(isinstance(r, list) and 1 <= len(r) <= 6 for r in m_b_raw)
+                ):
+                    cols_a = len(m_a_raw[0])
+                    cols_b = len(m_b_raw[0])
+                    if (
+                        all(len(r) == cols_a for r in m_a_raw)
+                        and all(len(r) == cols_b for r in m_b_raw)
+                        and cols_a == len(m_b_raw)
+                    ):
+                        try:
+                            mat_a = [[self._normalize_num(str(x)) for x in row] for row in m_a_raw]
+                            mat_b = [[self._normalize_num(str(x)) for x in row] for row in m_b_raw]
+                        except Exception:
+                            mat_a, mat_b = [], []
+                        if mat_a and mat_b:
+                            prod = [
+                                [
+                                    sum((mat_a[i][k] * mat_b[k][j] for k in range(cols_a)), Fraction(0))
+                                    for j in range(cols_b)
+                                ]
+                                for i in range(len(mat_a))
+                            ]
+                            disp = "[" + ", ".join(
+                                "[" + ", ".join(self._format_fraction(c) for c in row) + "]"
+                                for row in prod
+                            ) + "]"
+                            mat_sum = sum((c for row in prod for c in row), Fraction(0))
+                            steps = [
+                                DerivationStep(
+                                    1,
+                                    f"Multiply {len(mat_a)}x{cols_a} and {len(mat_b)}x{cols_b} matrices in exact rational arithmetic",
+                                    "(AB)_{ij} = \\sum_k A_{ik} B_{kj}",
+                                    f"AB = {disp}",
+                                    disp,
+                                )
+                            ]
+                            receipt = self._build_receipt("linear_algebra", "mathematics", "matrix_multiply", "linalg.matrix_multiply", {"A": raw_mats[0], "B": raw_mats[1]}, disp, disp, "matrix", steps)
+                            return SolverResult(True, q, "mathematics", "linear_algebra", "matrix_multiply", "linalg.matrix_multiply", float(mat_sum), disp, "", steps, receipt, f"Exact matrix product AB = {disp}.")
+
+        # 32. Exact Rational Matrix Rank via RREF: "matrix rank of [[1, 2, 3], [2, 4, 6], [0, 1, 1]]"
+        if "matrix rank" in lower:
+            raw_mats = re.findall(r"\[\s*\[[^\]]*\](?:\s*,\s*\[[^\]]*\])*\s*\]", q)
+            if len(raw_mats) == 1:
+                try:
+                    m_raw = json.loads(raw_mats[0])
+                except Exception:
+                    m_raw = None
+                if (
+                    isinstance(m_raw, list)
+                    and 1 <= len(m_raw) <= 8
+                    and all(isinstance(r, list) and 1 <= len(r) <= 8 for r in m_raw)
+                ):
+                    n_cols = len(m_raw[0])
+                    if all(len(r) == n_cols for r in m_raw):
+                        try:
+                            mat = [[self._normalize_num(str(x)) for x in row] for row in m_raw]
+                        except Exception:
+                            mat = []
+                        if mat:
+                            n_rows = len(mat)
+                            rank = 0
+                            row_idx = 0
+                            for col in range(n_cols):
+                                pivot = None
+                                for r in range(row_idx, n_rows):
+                                    if mat[r][col] != 0:
+                                        pivot = r
+                                        break
+                                if pivot is None:
+                                    continue
+                                mat[row_idx], mat[pivot] = mat[pivot], mat[row_idx]
+                                p_val = mat[row_idx][col]
+                                mat[row_idx] = [v / p_val for v in mat[row_idx]]
+                                for r in range(n_rows):
+                                    if r != row_idx and mat[r][col] != 0:
+                                        factor = mat[r][col]
+                                        mat[r] = [mat[r][c] - factor * mat[row_idx][c] for c in range(n_cols)]
+                                rank += 1
+                                row_idx += 1
+                                if row_idx == n_rows:
+                                    break
+                            disp = str(rank)
+                            steps = [
+                                DerivationStep(
+                                    1,
+                                    "Reduce matrix to Reduced Row Echelon Form (RREF) in exact Fraction arithmetic and count pivot rows",
+                                    "\\operatorname{rank}(A) = \\text{number of non-zero pivots in } \\operatorname{RREF}(A)",
+                                    f"\\operatorname{{rank}}(A) = {disp}",
+                                    disp,
+                                )
+                            ]
+                            receipt = self._build_receipt("linear_algebra", "mathematics", "matrix_rank", "linalg.matrix_rank", {"A": raw_mats[0]}, disp, disp, "dimensionless", steps)
+                            return SolverResult(True, q, "mathematics", "linear_algebra", "matrix_rank", "linalg.matrix_rank", float(rank), disp, "", steps, receipt, f"Exact matrix rank = {disp}.")
+
+        # 33. Exact Complex Arithmetic & Modulus: "complex (3+4i) * (1-2i)" or "modulus of 3+4i"
+        if "complex" in lower or "modulus of" in lower:
+            def _parse_complex_pair(expr: str) -> Optional[Tuple[Fraction, Fraction]]:
+                s_clean = expr.replace(" ", "").replace("j", "i")
+                cm = re.fullmatch(
+                    r"([+-]?\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)i",
+                    s_clean,
+                    re.I,
+                )
+                if cm:
+                    return self._normalize_num(cm.group(1)), self._normalize_num(cm.group(2))
+                return None
+
+            def _fmt_complex(re_v: Fraction, im_v: Fraction) -> str:
+                re_s = self._format_fraction(re_v)
+                if im_v == 0:
+                    return re_s
+                sign = "+" if im_v > 0 else "-"
+                im_abs = self._format_fraction(abs(im_v))
+                if re_v == 0:
+                    return f"{'' if im_v > 0 else '-'}{im_abs}i"
+                return f"{re_s}{sign}{im_abs}i"
+
+            bin_m = re.search(
+                r"\(\s*([+-]?\d+(?:\.\d+)?\s*[+-]\s*\d+(?:\.\d+)?\s*[ij])\s*\)\s*([+\-*/])\s*\(\s*([+-]?\d+(?:\.\d+)?\s*[+-]\s*\d+(?:\.\d+)?\s*[ij])\s*\)",
+                q,
+                re.I,
+            )
+            if bin_m:
+                z1 = _parse_complex_pair(bin_m.group(1))
+                op_ch = bin_m.group(2)
+                z2 = _parse_complex_pair(bin_m.group(3))
+                if z1 is not None and z2 is not None:
+                    a1, b1 = z1
+                    a2, b2 = z2
+                    ok_op = True
+                    if op_ch == "+":
+                        rr, ri = a1 + a2, b1 + b2
+                    elif op_ch == "-":
+                        rr, ri = a1 - a2, b1 - b2
+                    elif op_ch == "*":
+                        rr, ri = a1 * a2 - b1 * b2, a1 * b2 + b1 * a2
+                    else:
+                        denom = a2 * a2 + b2 * b2
+                        if denom == 0:
+                            ok_op = False
+                            rr, ri = Fraction(0), Fraction(0)
+                        else:
+                            rr = (a1 * a2 + b1 * b2) / denom
+                            ri = (b1 * a2 - a1 * b2) / denom
+                    if ok_op:
+                        disp = _fmt_complex(rr, ri)
+                        mod_val = math.hypot(float(rr), float(ri))
+                        steps = [
+                            DerivationStep(
+                                1,
+                                f"Perform exact rational complex '{op_ch}' operation",
+                                f"({bin_m.group(1).strip()}) {op_ch} ({bin_m.group(3).strip()})",
+                                f"= {disp}",
+                                disp,
+                            )
+                        ]
+                        receipt = self._build_receipt("complex_analysis", "mathematics", "complex_arithmetic", "math.complex_arithmetic", {"z1": bin_m.group(1).strip(), "op": op_ch, "z2": bin_m.group(3).strip()}, disp, disp, "complex", steps)
+                        return SolverResult(True, q, "mathematics", "complex_analysis", "complex_arithmetic", "math.complex_arithmetic", mod_val, disp, "", steps, receipt, f"Complex result = {disp}.")
+            mod_m = re.search(
+                r"(?:modulus|magnitude|abs)\s*(?:of\s*)?\(?\s*([+-]?\d+(?:\.\d+)?\s*[+-]\s*\d+(?:\.\d+)?\s*[ij])\s*\)?",
+                q,
+                re.I,
+            )
+            if mod_m:
+                z_val = _parse_complex_pair(mod_m.group(1))
+                if z_val is not None:
+                    a_c, b_c = z_val
+                    sq_c = a_c * a_c + b_c * b_c
+                    fval = math.sqrt(float(sq_c))
+                    if sq_c.denominator == 1 and math.isqrt(sq_c.numerator) ** 2 == sq_c.numerator:
+                        disp = str(math.isqrt(sq_c.numerator))
+                    else:
+                        disp = f"{fval:.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Compute exact complex modulus |a + bi| = sqrt(a^2 + b^2)",
+                            "|a + bi| = \\sqrt{a^2 + b^2}",
+                            f"|{mod_m.group(1).strip()}| = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("complex_analysis", "mathematics", "complex_modulus", "math.complex_modulus", {"z": mod_m.group(1).strip()}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "complex_analysis", "complex_modulus", "math.complex_modulus", fval, disp, "", steps, receipt, f"Complex modulus = {disp}.")
+
+        # 34. Exact Dijkstra Shortest Path: "shortest path from A to D in graph A-B:4, A-C:1, C-B:2, B-D:1, C-D:5"
+        if ("dijkstra" in lower or "shortest path" in lower) and "from" in lower and "to" in lower:
+            ft_m = re.search(r"from\s+([A-Za-z0-9_]+)\s+to\s+([A-Za-z0-9_]+)", q, re.I)
+            edge_matches = re.findall(
+                r"([A-Za-z0-9_]+)\s*(->|-)\s*([A-Za-z0-9_]+)\s*:\s*(-?\d+(?:\.\d+)?)",
+                q,
+            )
+            if ft_m and edge_matches and len(edge_matches) <= 128:
+                src, dst = ft_m.group(1), ft_m.group(2)
+                adj: Dict[str, List[Tuple[str, Fraction]]] = {}
+                valid_edges = True
+                for u_n, arrow, v_n, w_s in edge_matches:
+                    w_f = self._normalize_num(w_s)
+                    if w_f < 0:
+                        valid_edges = False
+                        break
+                    adj.setdefault(u_n, []).append((v_n, w_f))
+                    adj.setdefault(v_n, [])
+                    if arrow == "-":
+                        adj[v_n].append((u_n, w_f))
+                if valid_edges and src in adj and dst in adj:
+                    dist: Dict[str, Fraction] = {src: Fraction(0)}
+                    prev_node: Dict[str, str] = {}
+                    pq: List[Tuple[Fraction, str]] = [(Fraction(0), src)]
+                    while pq:
+                        d_u, u_cur = heapq.heappop(pq)
+                        if d_u > dist.get(u_cur, Fraction(10**18)):
+                            continue
+                        if u_cur == dst:
+                            break
+                        for v_nxt, w_uv in adj.get(u_cur, []):
+                            cand = d_u + w_uv
+                            if v_nxt not in dist or cand < dist[v_nxt]:
+                                dist[v_nxt] = cand
+                                prev_node[v_nxt] = u_cur
+                                heapq.heappush(pq, (cand, v_nxt))
+                    if dst in dist:
+                        path_nodes: List[str] = [dst]
+                        cur = dst
+                        while cur != src and cur in prev_node:
+                            cur = prev_node[cur]
+                            path_nodes.append(cur)
+                        path_nodes.reverse()
+                        d_exact = dist[dst]
+                        disp_num = self._format_fraction(d_exact)
+                        path_str = " -> ".join(path_nodes)
+                        steps = [
+                            DerivationStep(
+                                1,
+                                f"Run Dijkstra's algorithm from {src} to {dst} over {len(edge_matches)} non-negative edges",
+                                "d(v) = \\min_{(u,v)\\in E} (d(u) + w(u,v))",
+                                f"\\text{{path: }} {path_str},\\; d = {disp_num}",
+                                disp_num,
+                            )
+                        ]
+                        receipt = self._build_receipt("graph_algorithms", "computer_science", "dijkstra_shortest_path", "cs.dijkstra_shortest_path", {"src": src, "dst": dst, "edges": str(len(edge_matches))}, str(d_exact), disp_num, "weight", steps)
+                        return SolverResult(True, q, "computer_science", "graph_algorithms", "dijkstra_shortest_path", "cs.dijkstra_shortest_path", float(d_exact), disp_num, "", steps, receipt, f"Shortest path distance from {src} to {dst} is {disp_num} via {path_str}.")
+
+        # 35. Exact Master Theorem Recurrence Solver: "master theorem T(n) = 2T(n/2) + n^1" or "a=4, b=2, d=1"
+        if "master theorem" in lower:
+            rec_m = re.search(
+                r"T\s*\(\s*n\s*\)\s*=\s*(\d+(?:\.\d+)?)\s*\*?\s*T\s*\(\s*n\s*/\s*(\d+(?:\.\d+)?)\s*\)\s*\+\s*(?:O\s*\(\s*)?n(?:\^(\d+(?:\.\d+)?))?\)?",
+                q,
+                re.I,
+            )
+            a_v: Optional[float] = None
+            b_v: Optional[float] = None
+            d_v: Optional[float] = None
+            if rec_m:
+                a_v = float(rec_m.group(1))
+                b_v = float(rec_m.group(2))
+                d_v = float(rec_m.group(3)) if rec_m.group(3) is not None else 1.0
+            else:
+                am = re.search(r"\ba\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+                bm = re.search(r"\bb\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+                dm = re.search(r"\bd\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+                if am and bm and dm:
+                    a_v, b_v, d_v = float(am.group(1)), float(bm.group(1)), float(dm.group(1))
+            if a_v is not None and b_v is not None and d_v is not None and a_v >= 1.0 and b_v > 1.0 and d_v >= 0.0:
+                c_crit = math.log(a_v, b_v)
+
+                def _fmt_exp(e: float) -> str:
+                    if abs(e - round(e)) < 1e-9:
+                        ei = int(round(e))
+                        return "" if ei == 1 else f"^{ei}"
+                    return f"^{e:.4f}".rstrip("0").rstrip(".")
+
+                if d_v < c_crit - 1e-9:
+                    case_num = 1
+                    disp = f"Theta(n{_fmt_exp(c_crit)})"
+                elif abs(d_v - c_crit) <= 1e-9:
+                    case_num = 2
+                    if abs(d_v) < 1e-9:
+                        disp = "Theta(log n)"
+                    else:
+                        disp = f"Theta(n{_fmt_exp(d_v)} log n)"
+                else:
+                    case_num = 3
+                    disp = f"Theta(n{_fmt_exp(d_v)})"
+                steps = [
+                    DerivationStep(
+                        1,
+                        f"Compare d = {d_v} against critical exponent log_b(a) = {c_crit:.6f} (Master Theorem Case {case_num})",
+                        "c_{\\text{crit}} = \\log_b(a)",
+                        f"\\text{{Case {case_num}: }} T(n) = {disp}",
+                        disp,
+                    )
+                ]
+                receipt = self._build_receipt("algorithms", "computer_science", "master_theorem", "cs.master_theorem", {"a": str(a_v), "b": str(b_v), "d": str(d_v)}, f"{c_crit:.6f}", disp, "asymptotic", steps)
+                return SolverResult(True, q, "computer_science", "algorithms", "master_theorem", "cs.master_theorem", round(c_crit, 6), disp, "", steps, receipt, f"By Master Theorem Case {case_num} (log_b(a) = {c_crit:.4f}), T(n) = {disp}.")
+
+        # 36. Exact Beer-Lambert Absorbance Law: "beer-lambert absorbance epsilon = 150, l = 1, c = 0.02"
+        if "beer-lambert" in lower or "beer lambert" in lower:
+            eps_m = re.search(r"\b(?:epsilon|eps)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            l_m = re.search(r"\b(?:l|path|length)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            c_m = re.search(r"\b(?:c|conc(?:entration)?)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            if eps_m and l_m and c_m:
+                eps_v = self._normalize_num(eps_m.group(1))
+                l_v = self._normalize_num(l_m.group(1))
+                c_v = self._normalize_num(c_m.group(1))
+                if eps_v > 0 and l_v > 0 and c_v > 0:
+                    abs_f = eps_v * l_v * c_v
+                    disp = self._format_fraction(abs_f)
+                    trans = 10.0 ** (-float(abs_f))
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate exact Beer-Lambert absorbance A = epsilon * l * c",
+                            "A = \\varepsilon \\cdot l \\cdot c,\\quad T = 10^{-A}",
+                            f"A = {eps_v} \\cdot {l_v} \\cdot {c_v} = {disp},\\; T \\approx {trans:.6f}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("spectroscopy", "chemistry", "beer_lambert_absorbance", "chemistry.beer_lambert", {"epsilon": str(eps_v), "l": str(l_v), "c": str(c_v)}, str(abs_f), disp, "dimensionless", steps)
+                    return SolverResult(True, q, "chemistry", "spectroscopy", "beer_lambert_absorbance", "chemistry.beer_lambert", float(abs_f), disp, "", steps, receipt, f"Beer-Lambert absorbance A = {disp} (transmittance T = {trans:.6f}).")
+
+        # 37. Exact Arrhenius Rate Constant: "arrhenius rate A = 1000, Ea = 8314.46261815324, T = 1000"
+        if "arrhenius" in lower:
+            a_m = re.search(r"\bA\s*=\s*(\d+(?:\.\d+)?(?:e[+-]?\d+)?)", q, re.I)
+            ea_m = re.search(r"\b(?:Ea|E_a)\s*=\s*(\d+(?:\.\d+)?(?:e[+-]?\d+)?)", q, re.I)
+            t_m = re.search(r"\bT\s*=\s*(\d+(?:\.\d+)?)", q)
+            if a_m and ea_m and t_m:
+                a_val = float(a_m.group(1))
+                ea_val = float(ea_m.group(1))
+                t_val = float(t_m.group(1))
+                if a_val > 0.0 and ea_val >= 0.0 and t_val > 0.0:
+                    r_val = float(CONSTANTS["R"]["value"])
+                    exponent = -ea_val / (r_val * t_val)
+                    if exponent >= -700.0:
+                        k_val = a_val * math.exp(exponent)
+                        disp = f"{k_val:.6f}".rstrip("0").rstrip(".") if (abs(k_val) >= 1e-4 and abs(k_val) < 1e9) else f"{k_val:.6e}"
+                        steps = [
+                            DerivationStep(
+                                1,
+                                "Evaluate Arrhenius rate constant k = A * exp(-Ea / (R * T)) using CODATA R = 8.314462618 J/(mol*K)",
+                                "k = A \\exp\\left(-\\frac{E_a}{RT}\\right)",
+                                f"k = {disp}\\text{{ s}}^{{-1}}",
+                                disp,
+                                "1/s",
+                            )
+                        ]
+                        receipt = self._build_receipt("kinetics", "chemistry", "arrhenius_rate", "chemistry.arrhenius_rate", {"A": str(a_val), "Ea": str(ea_val), "T": str(t_val)}, disp, disp, "1/s", steps)
+                        return SolverResult(True, q, "chemistry", "kinetics", "arrhenius_rate", "chemistry.arrhenius_rate", k_val, disp, "1/s", steps, receipt, f"Arrhenius rate constant k = {disp} s^-1.")
+
+        # 38. Exact Present Value of Ordinary Annuity: "annuity present value pmt = 1000, r = 0.05, n = 10"
+        if "annuity" in lower and ("present value" in lower or "pv" in lower):
+            pmt_m = re.search(r"\b(?:pmt|payment|c)\s*=\s*(\d+(?:\.\d+)?)", q, re.I)
+            r_m = re.search(r"\b(?:r|rate)\s*=\s*(\d+(?:\.\d+)?)(%?)", q, re.I)
+            n_m = re.search(r"\b(?:n|periods?)\s*=\s*(\d+)", q, re.I)
+            if pmt_m and r_m and n_m:
+                pmt_v = self._normalize_num(pmt_m.group(1))
+                r_v = self._normalize_num(r_m.group(1))
+                if r_m.group(2) == "%":
+                    r_v = r_v / Fraction(100)
+                n_v = int(n_m.group(1))
+                if pmt_v > 0 and r_v >= 0 and 1 <= n_v <= 600:
+                    if r_v == 0:
+                        pv_f = float(pmt_v * n_v)
+                        raw_str = str(pmt_v * n_v)
+                    elif n_v <= 60:
+                        pv_exact = pmt_v * (Fraction(1) - (Fraction(1) + r_v) ** (-n_v)) / r_v
+                        pv_f = float(pv_exact)
+                        raw_str = str(pv_exact)
+                    else:
+                        rf = float(r_v)
+                        pv_f = float(pmt_v) * (1.0 - (1.0 + rf) ** (-n_v)) / rf
+                        raw_str = f"{pv_f:.8f}"
+                    disp = f"{pv_f:.2f}"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Apply ordinary annuity present value formula",
+                            "PV = \\text{PMT} \\cdot \\frac{1 - (1 + r)^{-n}}{r}",
+                            f"PV = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("finance", "mathematics", "annuity_pv", "finance.annuity_pv", {"pmt": str(pmt_v), "r": str(r_v), "n": str(n_v)}, raw_str, disp, "currency", steps)
+                    return SolverResult(True, q, "mathematics", "finance", "annuity_pv", "finance.annuity_pv", round(pv_f, 6), disp, "", steps, receipt, f"Present value of ordinary annuity PV = {disp}.")
+
+        # 39. Exact Combinations with Repetition (Stars & Bars): "combinations with repetition n = 5, k = 3"
+        if "combinations with repetition" in lower or "stars and bars" in lower or "multiset combination" in lower:
+            n_m = re.search(r"\bn\s*=\s*(\d+)", q, re.I)
+            k_m = re.search(r"\b(?:k|r)\s*=\s*(\d+)", q, re.I)
+            if n_m and k_m:
+                n_v, k_v = int(n_m.group(1)), int(k_m.group(1))
+                if 1 <= n_v <= 500 and 0 <= k_v <= 500:
+                    val_int = math.comb(n_v + k_v - 1, k_v)
+                    disp = str(val_int)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Apply stars-and-bars multiset combination formula",
+                            "\\left(\\!\\!\\binom{n}{k}\\!\\!\\right) = \\binom{n + k - 1}{k}",
+                            f"\\binom{{{n_v} + {k_v} - 1}}{{{k_v}}} = \\binom{{{n_v + k_v - 1}}}{{{k_v}}} = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("combinatorics", "mathematics", "multiset_combinations", "comb.multiset_combinations", {"n": str(n_v), "k": str(k_v)}, disp, disp, "dimensionless", steps)
+                    return SolverResult(True, q, "mathematics", "combinatorics", "multiset_combinations", "comb.multiset_combinations", float(val_int), disp, "", steps, receipt, f"Combinations with repetition = {disp}.")
+
+        # 40. Exact Jensen-Shannon Divergence (bits): "jensen-shannon divergence between [0.5, 0.5] and [0.25, 0.75]"
+        if "jensen-shannon" in lower or "jensen shannon" in lower:
+            vecs = re.findall(r"\[([^\[\]]+)\]", q)
+            if len(vecs) >= 2:
+                try:
+                    p_dist = [self._normalize_num(tok.strip()) for tok in vecs[0].split(",") if tok.strip()]
+                    q_dist = [self._normalize_num(tok.strip()) for tok in vecs[1].split(",") if tok.strip()]
+                except Exception:
+                    p_dist, q_dist = [], []
+                if (
+                    p_dist
+                    and len(p_dist) == len(q_dist)
+                    and all(p >= 0 for p in p_dist)
+                    and all(qv >= 0 for qv in q_dist)
+                    and abs(float(sum(p_dist, Fraction(0))) - 1.0) <= 1e-6
+                    and abs(float(sum(q_dist, Fraction(0))) - 1.0) <= 1e-6
+                ):
+                    jsd_bits = 0.0
+                    for p_i, q_i in zip(p_dist, q_dist):
+                        m_i = (p_i + q_i) / Fraction(2)
+                        if p_i > 0:
+                            jsd_bits += 0.5 * float(p_i) * math.log2(float(p_i / m_i))
+                        if q_i > 0:
+                            jsd_bits += 0.5 * float(q_i) * math.log2(float(q_i / m_i))
+                    disp = f"{jsd_bits:.6f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Validate discrete distributions and compute symmetric Jensen-Shannon divergence in bits",
+                            "\\text{JSD}(P \\| Q) = \\frac{1}{2} D_{\\text{KL}}(P \\| M) + \\frac{1}{2} D_{\\text{KL}}(Q \\| M),\\; M = \\frac{P+Q}{2}",
+                            f"\\text{{JSD}}(P \\| Q) = {disp}\\text{{ bits}}",
+                            disp,
+                            "bits",
+                        )
+                    ]
+                    receipt = self._build_receipt("information_theory", "mathematics", "jensen_shannon_divergence", "infotheory.jensen_shannon_divergence", {"P": str([str(p) for p in p_dist]), "Q": str([str(qv) for qv in q_dist])}, disp, disp, "bits", steps)
+                    return SolverResult(True, q, "mathematics", "information_theory", "jensen_shannon_divergence", "infotheory.jensen_shannon_divergence", jsd_bits, disp, "bits", steps, receipt, f"Jensen-Shannon divergence JSD(P || Q) = {disp} bits.")
+
+        # 41. Exact Nernst Equilibrium Potential (mV): "Nernst potential z = 1, T = 310, out = 5, in = 140"
+        if "nernst" in lower:
+            z_m = re.search(r"\bz\s*=\s*([+-]?\d+)", q, re.I)
+            t_m = re.search(r"\bT\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            out_m = re.search(r"\b(?:out|c_out|ext(?:racellular)?)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            in_m = re.search(r"\b(?:in|c_in|int(?:racellular)?)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if z_m and t_m and out_m and in_m:
+                z_v = int(z_m.group(1))
+                t_v = float(t_m.group(1))
+                c_out = float(out_m.group(1))
+                c_in = float(in_m.group(1))
+                if z_v != 0 and t_v > 0.0 and c_out > 0.0 and c_in > 0.0:
+                    r_c = float(CONSTANTS["R"]["value"])
+                    f_c = float(CONSTANTS["F"]["value"])
+                    e_mv = (r_c * t_v / (float(z_v) * f_c)) * math.log(c_out / c_in) * 1000.0
+                    disp = f"{e_mv:.4f}".rstrip("0").rstrip(".")
+                    if disp == "-0":
+                        disp = "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate Nernst equilibrium potential E = (R*T / (z*F)) * ln([out]/[in]) in mV",
+                            "E_{\\text{ion}} = \\frac{RT}{zF} \\ln\\!\\left(\\frac{[\\text{ion}]_{\\text{out}}}{[\\text{ion}]_{\\text{in}}}\\right)",
+                            f"E = {disp}\\text{{ mV}}",
+                            disp,
+                            "mV",
+                        )
+                    ]
+                    receipt = self._build_receipt("electrophysiology", "neuroscience", "nernst_potential", "neuroscience.nernst_potential", {"z": str(z_v), "T": str(t_v), "out": str(c_out), "in": str(c_in)}, disp, disp, "mV", steps)
+                    return SolverResult(True, q, "neuroscience", "electrophysiology", "nernst_potential", "neuroscience.nernst_potential", round(e_mv, 6), disp, "mV", steps, receipt, f"Nernst equilibrium potential E = {disp} mV.")
+
+        # 42. Exact Goldman-Hodgkin-Katz (GHK) Membrane Potential (mV):
+        # "GHK potential T = 310, pK = 1, K_out = 5, K_in = 140, pNa = 0.04, Na_out = 145, Na_in = 12, pCl = 0.45, Cl_out = 110, Cl_in = 4"
+        if "ghk" in lower or "goldman-hodgkin-katz" in lower or "goldman hodgkin katz" in lower:
+            t_m = re.search(r"\bT\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            pk_m = re.search(r"\bp_?K\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            ko_m = re.search(r"\bK_?out\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            ki_m = re.search(r"\bK_?in\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            pna_m = re.search(r"\bp_?Na\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            nao_m = re.search(r"\bNa_?out\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            nai_m = re.search(r"\bNa_?in\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            pcl_m = re.search(r"\bp_?Cl\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            clo_m = re.search(r"\bCl_?out\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            cli_m = re.search(r"\bCl_?in\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if t_m and pk_m and ko_m and ki_m and pna_m and nao_m and nai_m:
+                t_v = float(t_m.group(1))
+                pk, ko, ki = float(pk_m.group(1)), float(ko_m.group(1)), float(ki_m.group(1))
+                pna, nao, nai = float(pna_m.group(1)), float(nao_m.group(1)), float(nai_m.group(1))
+                pcl = float(pcl_m.group(1)) if pcl_m else 0.0
+                clo = float(clo_m.group(1)) if clo_m else 1.0
+                cli = float(cli_m.group(1)) if cli_m else 1.0
+                if (
+                    t_v > 0.0
+                    and pk >= 0.0
+                    and pna >= 0.0
+                    and pcl >= 0.0
+                    and min(ko, ki, nao, nai, clo, cli) > 0.0
+                ):
+                    numer = pk * ko + pna * nao + pcl * cli
+                    denom = pk * ki + pna * nai + pcl * clo
+                    if numer > 0.0 and denom > 0.0:
+                        r_c = float(CONSTANTS["R"]["value"])
+                        f_c = float(CONSTANTS["F"]["value"])
+                        vm_mv = (r_c * t_v / f_c) * math.log(numer / denom) * 1000.0
+                        disp = f"{vm_mv:.4f}".rstrip("0").rstrip(".")
+                        steps = [
+                            DerivationStep(
+                                1,
+                                "Evaluate Goldman-Hodgkin-Katz voltage equation (note Cl- valence inversion)",
+                                "V_m = \\frac{RT}{F} \\ln\\!\\left(\\frac{P_K[K^+]_o + P_{Na}[Na^+]_o + P_{Cl}[Cl^-]_i}{P_K[K^+]_i + P_{Na}[Na^+]_i + P_{Cl}[Cl^-]_o}\\right)",
+                                f"V_m = {disp}\\text{{ mV}}",
+                                disp,
+                                "mV",
+                            )
+                        ]
+                        receipt = self._build_receipt("electrophysiology", "neuroscience", "ghk_potential", "neuroscience.ghk_potential", {"T": str(t_v), "pK": str(pk), "pNa": str(pna), "pCl": str(pcl)}, disp, disp, "mV", steps)
+                        return SolverResult(True, q, "neuroscience", "electrophysiology", "ghk_potential", "neuroscience.ghk_potential", round(vm_mv, 6), disp, "mV", steps, receipt, f"GHK resting membrane potential V_m = {disp} mV.")
+
+        # 43. Exact Rall Passive Cable Constants: "Cable constants rm = 4000, ri = 1000, cm = 0.001"
+        if "cable constant" in lower or "rall cable" in lower:
+            rm_m = re.search(r"\br_?m\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            ri_m = re.search(r"\br_?i\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            cm_m = re.search(r"\bc_?m\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if rm_m and ri_m and cm_m:
+                rm_v = self._normalize_num(rm_m.group(1))
+                ri_v = self._normalize_num(ri_m.group(1))
+                cm_v = self._normalize_num(cm_m.group(1))
+                if rm_v > 0 and ri_v > 0 and cm_v > 0:
+                    ratio = rm_v / ri_v
+                    tau_exact = rm_v * cm_v
+                    lam_f = math.sqrt(float(ratio))
+                    if ratio.denominator == 1 and math.isqrt(ratio.numerator) ** 2 == ratio.numerator:
+                        lam_disp = str(math.isqrt(ratio.numerator))
+                    else:
+                        lam_disp = f"{lam_f:.6f}".rstrip("0").rstrip(".")
+                    tau_disp = self._format_fraction(tau_exact)
+                    disp = f"lambda={lam_disp}, tau={tau_disp}"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Compute passive dendritic cable space constant lambda = sqrt(r_m / r_i) and time constant tau_m = r_m * c_m",
+                            "\\lambda = \\sqrt{\\frac{r_m}{r_i}},\\quad \\tau_m = r_m c_m",
+                            f"\\lambda = {lam_disp},\\; \\tau_m = {tau_disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("cable_theory", "neuroscience", "cable_constants", "neuroscience.cable_constants", {"rm": str(rm_v), "ri": str(ri_v), "cm": str(cm_v)}, str(tau_exact), disp, "", steps)
+                    return SolverResult(True, q, "neuroscience", "cable_theory", "cable_constants", "neuroscience.cable_constants", round(lam_f, 6), disp, "", steps, receipt, f"Passive cable space constant lambda = {lam_disp}, membrane time constant tau = {tau_disp}.")
+
+        # 44. Exact Michaelis-Menten Enzyme Kinetics: "Michaelis-Menten Vmax = 120, Km = 4, S = 12"
+        if "michaelis-menten" in lower or "michaelis menten" in lower:
+            vm_m = re.search(r"\bV_?max\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            km_m = re.search(r"\bK_?m\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            s_m = re.search(r"\bS\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if vm_m and km_m and s_m:
+                vmax_v = self._normalize_num(vm_m.group(1))
+                km_v = self._normalize_num(km_m.group(1))
+                s_v = self._normalize_num(s_m.group(1))
+                if vmax_v > 0 and km_v > 0 and s_v >= 0:
+                    v_exact = (vmax_v * s_v) / (km_v + s_v)
+                    disp = self._format_fraction(v_exact)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate exact Michaelis-Menten reaction velocity v = (Vmax * [S]) / (Km + [S])",
+                            "v = \\frac{V_{\\max}[S]}{K_m + [S]}",
+                            f"v = \\frac{{{vmax_v} \\cdot {s_v}}}{{{km_v} + {s_v}}} = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("enzyme_kinetics", "biochemistry", "michaelis_menten", "biochemistry.michaelis_menten", {"Vmax": str(vmax_v), "Km": str(km_v), "S": str(s_v)}, str(v_exact), disp, "", steps)
+                    return SolverResult(True, q, "biochemistry", "enzyme_kinetics", "michaelis_menten", "biochemistry.michaelis_menten", float(v_exact), disp, "", steps, receipt, f"Michaelis-Menten reaction velocity v = {disp}.")
+
+        # 45. Exact Henderson-Hasselbalch Buffer pH: "Henderson-Hasselbalch pKa = 4.76, base = 0.2, acid = 0.02"
+        if "henderson-hasselbalch" in lower or "henderson hasselbalch" in lower:
+            pka_m = re.search(r"\bpK_?a\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            base_m = re.search(r"\b(?:base|conjugate_base|A_minus)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            acid_m = re.search(r"\b(?:acid|weak_acid|HA)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if pka_m and base_m and acid_m:
+                pka_v = float(pka_m.group(1))
+                base_v = float(base_m.group(1))
+                acid_v = float(acid_m.group(1))
+                if base_v > 0.0 and acid_v > 0.0:
+                    ph_val = pka_v + math.log10(base_v / acid_v)
+                    disp = f"{ph_val:.4f}".rstrip("0").rstrip(".") or "0"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Apply Henderson-Hasselbalch buffer equation pH = pKa + log10([base]/[acid])",
+                            "\\text{pH} = \\text{p}K_a + \\log_{10}\\!\\left(\\frac{[\\text{A}^-]}{[\\text{HA}]}\\right)",
+                            f"\\text{{pH}} = {pka_v} + \\log_{{10}}({base_v}/{acid_v}) = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("acid_base", "chemistry", "henderson_hasselbalch", "chemistry.henderson_hasselbalch", {"pKa": str(pka_v), "base": str(base_v), "acid": str(acid_v)}, disp, disp, "pH", steps)
+                    return SolverResult(True, q, "chemistry", "acid_base", "henderson_hasselbalch", "chemistry.henderson_hasselbalch", round(ph_val, 6), disp, "pH", steps, receipt, f"Henderson-Hasselbalch buffer pH = {disp}.")
+
+        # 46. Exact Shannon-Hartley Channel Capacity (bps): "Shannon-Hartley bandwidth = 1000, snr = 15"
+        if "shannon-hartley" in lower or "shannon hartley" in lower:
+            bw_m = re.search(r"\b(?:bandwidth|B)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            snr_m = re.search(r"\bsnr\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if bw_m and snr_m:
+                bw_v = float(bw_m.group(1))
+                snr_v = float(snr_m.group(1))
+                if bw_v > 0.0 and snr_v >= 0.0:
+                    cap = bw_v * math.log2(1.0 + snr_v)
+                    disp = str(int(round(cap))) if abs(cap - round(cap)) < 1e-9 else f"{cap:.4f}".rstrip("0").rstrip(".")
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Evaluate Shannon-Hartley AWGN channel capacity C = B * log2(1 + SNR)",
+                            "C = B \\log_2(1 + \\text{SNR})",
+                            f"C = {bw_v} \\cdot \\log_2(1 + {snr_v}) = {disp}\\text{{ bps}}",
+                            disp,
+                            "bps",
+                        )
+                    ]
+                    receipt = self._build_receipt("information_theory", "mathematics", "shannon_hartley", "infotheory.shannon_hartley", {"bandwidth": str(bw_v), "snr": str(snr_v)}, disp, disp, "bps", steps)
+                    return SolverResult(True, q, "mathematics", "information_theory", "shannon_hartley", "infotheory.shannon_hartley", round(cap, 6), disp, "bps", steps, receipt, f"Shannon-Hartley channel capacity C = {disp} bps.")
+
+        # 47. Exact M/M/1 Queueing Steady-State Mean System Size: "M/M/1 queue lambda = 3, mu = 5"
+        if "m/m/1" in lower or "mm1 queue" in lower:
+            lam_m = re.search(r"\b(?:lambda|arrival)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            mu_m = re.search(r"\b(?:mu|service)\s*=\s*(-?\d+(?:\.\d+)?)", q, re.I)
+            if lam_m and mu_m:
+                lam_v = self._normalize_num(lam_m.group(1))
+                mu_v = self._normalize_num(mu_m.group(1))
+                if lam_v > 0 and mu_v > 0 and lam_v < mu_v:
+                    rho_exact = lam_v / mu_v
+                    l_exact = lam_v / (mu_v - lam_v)
+                    w_exact = Fraction(1) / (mu_v - lam_v)
+                    disp = self._format_fraction(l_exact)
+                    w_disp = self._format_fraction(w_exact)
+                    rho_disp = self._format_fraction(rho_exact)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Verify stability rho = lambda/mu < 1 and compute steady-state mean customers L = lambda / (mu - lambda)",
+                            "\\rho = \\frac{\\lambda}{\\mu} < 1,\\quad L = \\frac{\\lambda}{\\mu - \\lambda},\\quad W = \\frac{1}{\\mu - \\lambda}",
+                            f"\\rho = {rho_disp},\\; L = {disp},\\; W = {w_disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("queueing_theory", "computer_science", "mm1_queue", "cs.mm1_queue", {"lambda": str(lam_v), "mu": str(mu_v)}, str(l_exact), disp, "customers", steps)
+                    return SolverResult(True, q, "computer_science", "queueing_theory", "mm1_queue", "cs.mm1_queue", float(l_exact), disp, "customers", steps, receipt, f"M/M/1 steady-state mean customers L = {disp} (utilization rho = {rho_disp}, mean sojourn W = {w_disp}).")
+
+        # 48. Exact 2-State Ergodic Markov Stationary Distribution: "Markov stationary distribution of [[0.7, 0.3], [0.4, 0.6]]"
+        if "markov" in lower and "stationary" in lower:
+            row_matches = re.findall(r"\[\s*(-?\d+(?:\.\d+)?(?:/\d+)?)\s*,\s*(-?\d+(?:\.\d+)?(?:/\d+)?)\s*\]", q)
+            if len(row_matches) == 2:
+                try:
+                    p00, p01 = self._normalize_num(row_matches[0][0]), self._normalize_num(row_matches[0][1])
+                    p10, p11 = self._normalize_num(row_matches[1][0]), self._normalize_num(row_matches[1][1])
+                except Exception:
+                    p00 = Fraction(-1)
+                    p01 = p10 = p11 = Fraction(0)
+                if (
+                    min(p00, p01, p10, p11) >= 0
+                    and p00 + p01 == Fraction(1)
+                    and p10 + p11 == Fraction(1)
+                    and (p01 + p10) > 0
+                ):
+                    pi0 = p10 / (p01 + p10)
+                    pi1 = p01 / (p01 + p10)
+                    disp = f"[{self._format_fraction(pi0)}, {self._format_fraction(pi1)}]"
+                    steps = [
+                        DerivationStep(
+                            1,
+                            "Solve pi * P = pi with pi_0 + pi_1 = 1: pi = [p10/(p01+p10), p01/(p01+p10)]",
+                            "\\pi = \\left[\\frac{p_{10}}{p_{01}+p_{10}},\\; \\frac{p_{01}}{p_{01}+p_{10}}\\right]",
+                            f"\\pi = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("stochastic_processes", "mathematics", "markov_stationary", "math.markov_stationary", {"P": f"[[{p00},{p01}],[{p10},{p11}]]"}, f"{pi0},{pi1}", disp, "", steps)
+                    return SolverResult(True, q, "mathematics", "stochastic_processes", "markov_stationary", "math.markov_stationary", float(pi0), disp, "", steps, receipt, f"Stationary distribution pi = {disp}.")
+
+        # 49. Exact Quadratic Form x^T A x: "Quadratic form x = [1, 2], A = [[3, 1], [1, 2]]"
+        if "quadratic form" in lower:
+            x_m = re.search(r"\bx\s*=\s*\[([^\[\]]+)\]", q, re.I)
+            a_m = re.search(r"\bA\s*=\s*(\[\s*\[.*?\]\s*\])", q, re.I)
+            if x_m and a_m:
+                try:
+                    x_vec = [self._normalize_num(tok.strip()) for tok in x_m.group(1).split(",") if tok.strip()]
+                    row_strs = re.findall(r"\[([^\[\]]+)\]", a_m.group(1))
+                    a_mat = [
+                        [self._normalize_num(tok.strip()) for tok in r_s.split(",") if tok.strip()]
+                        for r_s in row_strs
+                    ]
+                except Exception:
+                    x_vec, a_mat = [], []
+                n_q = len(x_vec)
+                if 1 <= n_q <= 8 and len(a_mat) == n_q and all(len(row) == n_q for row in a_mat):
+                    qf_val = Fraction(0)
+                    for i_q in range(n_q):
+                        for j_q in range(n_q):
+                            qf_val += x_vec[i_q] * a_mat[i_q][j_q] * x_vec[j_q]
+                    disp = self._format_fraction(qf_val)
+                    steps = [
+                        DerivationStep(
+                            1,
+                            f"Evaluate exact {n_q}x{n_q} quadratic form x^T A x = sum_{{i,j}} x_i A_{{ij}} x_j",
+                            "q(x) = x^\\top A x = \\sum_{i=1}^{n}\\sum_{j=1}^{n} x_i A_{ij} x_j",
+                            f"x^\\top A x = {disp}",
+                            disp,
+                        )
+                    ]
+                    receipt = self._build_receipt("linear_algebra", "mathematics", "quadratic_form", "linalg.quadratic_form", {"n": str(n_q)}, str(qf_val), disp, "", steps)
+                    return SolverResult(True, q, "mathematics", "linear_algebra", "quadratic_form", "linalg.quadratic_form", float(qf_val), disp, "", steps, receipt, f"Quadratic form x^T A x = {disp}.")
+
+        # 50. Exact European Option Put-Call Parity: "Put-call parity S = 100, K = 100, r = 0.05, T = 1, P = 5.57"
+        if "put-call parity" in lower or "put call parity" in lower:
+            s_m = re.search(r"\bS\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            k_m = re.search(r"\bK\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            r_m = re.search(r"\br\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            t_m = re.search(r"\bT\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            p_m = re.search(r"\bP\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            c_m = re.search(r"\bC\s*=\s*(-?\d+(?:\.\d+)?)", q)
+            if s_m and k_m and r_m and t_m and (p_m is not None) ^ (c_m is not None):
+                s_v = float(s_m.group(1))
+                k_v = float(k_m.group(1))
+                r_v = float(r_m.group(1))
+                t_v = float(t_m.group(1))
+                pv_k = k_v * math.exp(-r_v * t_v)
+                if s_v > 0.0 and k_v > 0.0 and t_v >= 0.0:
+                    if p_m is not None:
+                        p_v = float(p_m.group(1))
+                        if p_v >= 0.0:
+                            c_fair = p_v + s_v - pv_k
+                            if c_fair >= -1e-9:
+                                c_fair = max(0.0, c_fair)
+                                disp = f"{c_fair:.4f}".rstrip("0").rstrip(".") or "0"
+                                steps = [
+                                    DerivationStep(
+                                        1,
+                                        "Apply European put-call parity C = P + S - K * exp(-r*T)",
+                                        "C = P + S - K e^{-rT}",
+                                        f"C = {p_v} + {s_v} - {k_v} e^{{-{r_v}\\cdot {t_v}}} = {disp}",
+                                        disp,
+                                    )
+                                ]
+                                receipt = self._build_receipt("derivatives", "mathematics", "put_call_parity", "finance.put_call_parity", {"S": str(s_v), "K": str(k_v), "r": str(r_v), "T": str(t_v), "P": str(p_v)}, disp, disp, "currency", steps)
+                                return SolverResult(True, q, "mathematics", "derivatives", "put_call_parity", "finance.put_call_parity", round(c_fair, 6), disp, "", steps, receipt, f"By European put-call parity, fair call value C = {disp}.")
+                    else:
+                        assert c_m is not None
+                        c_v = float(c_m.group(1))
+                        if c_v >= 0.0:
+                            p_fair = c_v - s_v + pv_k
+                            if p_fair >= -1e-9:
+                                p_fair = max(0.0, p_fair)
+                                disp = f"{p_fair:.4f}".rstrip("0").rstrip(".") or "0"
+                                steps = [
+                                    DerivationStep(
+                                        1,
+                                        "Apply European put-call parity P = C - S + K * exp(-r*T)",
+                                        "P = C - S + K e^{-rT}",
+                                        f"P = {c_v} - {s_v} + {k_v} e^{{-{r_v}\\cdot {t_v}}} = {disp}",
+                                        disp,
+                                    )
+                                ]
+                                receipt = self._build_receipt("derivatives", "mathematics", "put_call_parity", "finance.put_call_parity", {"S": str(s_v), "K": str(k_v), "r": str(r_v), "T": str(t_v), "C": str(c_v)}, disp, disp, "currency", steps)
+                                return SolverResult(True, q, "mathematics", "derivatives", "put_call_parity", "finance.put_call_parity", round(p_fair, 6), disp, "", steps, receipt, f"By European put-call parity, fair put value P = {disp}.")
 
         return None
 

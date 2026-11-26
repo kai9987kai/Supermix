@@ -347,27 +347,14 @@ class ThinkingDecision:
         }
 
 
-def _probe(
-    model: MiMoMixModel,
-    input_ids: torch.Tensor,
-    budget: int,
-    rank_depth: int,
-) -> Tuple[MiMoMixOutput, BudgetProbe]:
-    with torch.no_grad():
-        output = model(
-            input_ids,
-            thinking_cycles=budget,
-            adaptive_thinking=False,
-            return_mtp=False,
-            past_length=0,
-        )
+def _build_probe(output: MiMoMixOutput, budget: int, rank_depth: int) -> BudgetProbe:
     # The decision is read at the last position of the first row: this is a
     # next-token decision probe, not a claim about the whole batch.
     ordered, confidence, entropy, decision_margin, boundary_margin = _decision_signature(
         output.logits[0, -1], rank_depth
     )
     thinking = output.telemetry.get("thinking", {}) if output.telemetry else {}
-    probe = BudgetProbe(
+    return BudgetProbe(
         budget=int(budget),
         ordered_top_k=ordered,
         confidence=confidence,
@@ -379,7 +366,34 @@ def _probe(
         cycles_used=float(thinking.get("cycles_used", budget)),
         exit_reason=str(thinking.get("exit_reason", "no_thinking_core")),
     )
-    return output, probe
+
+
+def _probe(
+    model: MiMoMixModel,
+    input_ids: torch.Tensor,
+    budget: int,
+    rank_depth: int,
+    *,
+    trunk_state: Optional[Dict[str, object]] = None,
+) -> Tuple[MiMoMixOutput, BudgetProbe]:
+    with torch.no_grad():
+        if trunk_state is not None and isinstance(model, MiMoMixModel):
+            output = model.finish_from_trunk(
+                trunk_state,
+                thinking_cycles=budget,
+                adaptive_thinking=False,
+                return_mtp=False,
+                collect_telemetry=True,
+            )
+        else:
+            output = model(
+                input_ids,
+                thinking_cycles=budget,
+                adaptive_thinking=False,
+                return_mtp=False,
+                past_length=0,
+            )
+    return output, _build_probe(output, budget, rank_depth)
 
 
 def decide(
@@ -389,6 +403,9 @@ def decide(
     policy: Optional[ThinkingPolicy] = None,
     mode: Optional[ThinkingMode] = None,
     plan: Optional[ThinkingPlan] = None,
+    *,
+    reuse_trunk: bool = True,
+    _trunk_state: Optional[Dict[str, object]] = None,
 ) -> Tuple[MiMoMixOutput, ThinkingDecision]:
     """Run the progressive budget ladder and return the accepted probe's output.
 
@@ -396,6 +413,12 @@ def decide(
     budget* -- literally reused, not recomputed and not merged. If no budget
     earns an early exit, the ceiling budget's output is returned exactly, which
     is the same thing a fixed-budget runtime would have produced.
+
+    v106 acceleration: when ``reuse_trunk=True`` (default) and ``model`` is a
+    :class:`MiMoMixModel`, the transformer trunk executes **once** via
+    :meth:`MiMoMixModel.run_trunk` and every rung in ``plan.ladder`` sweeps the
+    thinking core via :meth:`MiMoMixModel.finish_from_trunk`, guaranteeing
+    bit-identical logits at a fraction of the latency.
     """
 
     policy = policy or ThinkingPolicy()
@@ -403,13 +426,24 @@ def decide(
     max_cycles = model.config.thinking_max_cycles if model.thinking_core is not None else 1
     plan = plan or plan_request(features, policy=policy, mode=mode, max_model_cycles=max_cycles)
 
+    trunk_state = _trunk_state
+    if trunk_state is None and reuse_trunk and isinstance(model, MiMoMixModel):
+        with torch.no_grad():
+            trunk_state = model.run_trunk(input_ids, past_length=0)
+
     probes: List[BudgetProbe] = []
     outputs: List[MiMoMixOutput] = []
     accepted_index: Optional[int] = None
     exit_reason = "ceiling_budget"
 
     for index, budget in enumerate(plan.ladder):
-        output, probe = _probe(model, input_ids, budget, policy.agreement_rank_depth)
+        output, probe = _probe(
+            model,
+            input_ids,
+            budget,
+            policy.agreement_rank_depth,
+            trunk_state=trunk_state,
+        )
         probes.append(probe)
         outputs.append(output)
 
@@ -496,14 +530,30 @@ def audit_decision_fidelity(
 
     for index, ids in enumerate(requests):
         feats = features[index] if features is not None else RequestFeatures(prompt_tokens=int(ids.shape[1]))
-        _, decision = decide(model, ids, features=feats, policy=policy, mode=mode)
+        shared_trunk: Optional[Dict[str, object]] = None
+        if isinstance(model, MiMoMixModel):
+            with torch.no_grad():
+                shared_trunk = model.run_trunk(ids, past_length=0)
+        _, decision = decide(
+            model, ids, features=feats, policy=policy, mode=mode, _trunk_state=shared_trunk
+        )
         exits[decision.exit_reason] = exits.get(decision.exit_reason, 0) + 1
         spent_cycles += sum(p.budget for p in decision.probes)
         ceiling_cycles += decision.plan.ceiling_cycles
 
-        _, reference = _probe(
-            model, ids, decision.plan.ceiling_cycles, policy.agreement_rank_depth
+        existing_ref = next(
+            (p for p in decision.probes if p.budget == decision.plan.ceiling_cycles), None
         )
+        if existing_ref is not None:
+            reference = existing_ref
+        else:
+            _, reference = _probe(
+                model,
+                ids,
+                decision.plan.ceiling_cycles,
+                policy.agreement_rank_depth,
+                trunk_state=shared_trunk,
+            )
         accepted = next(p for p in decision.probes if p.budget == decision.accepted_budget)
         if accepted.ordered_top_k[:1] != reference.ordered_top_k[:1]:
             top1_bad += 1

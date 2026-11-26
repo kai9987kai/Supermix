@@ -2496,6 +2496,15 @@ class NexusApiService:
                 "causeway_sensitivity_workbench": True,
                 "neurohive_resource_planner": True,
             },
+            "v107_universal_morphogenesis": {
+                "universal_fast_weight_memory_uttt": True,
+                "sonapse_synthetic_neuron_foundry": True,
+                "connectome_btsp_spine_astrocyte_plasticity": True,
+                "antipode_failure_distiller": True,
+                "symbiosis_continual_retention_auditor": True,
+                "outlier_protected_int4_kv_cache": True,
+                "mars_muon_variance_reduced_optimizer": True,
+            },
         }
 
     def handle_frontier_cvar_audit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2639,6 +2648,350 @@ class NexusApiService:
             fault_rate=float(payload.get("fault_rate", 0.15)),
             enable_mnt_repair=bool(payload.get("enable_mnt_repair", True)),
             seed=int(payload.get("seed", 103)),
+        )
+
+    def handle_v104_conformal_route(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v104_evolution as v104
+
+        cal = payload.get("calibration_scores") or [0.05, 0.08, 0.11, 0.14, 0.19, 0.24, 0.31, 0.42, 0.55]
+        cands = payload.get("candidate_scores") or {
+            "NexusMind": 0.91,
+            "MiMoMix": 0.72,
+            "ChampionNet": 0.44,
+        }
+        return v104.ConformalCalibratedRouter().calibrate_and_route(
+            calibration_scores=cal,
+            candidate_scores=cands,
+            alpha=float(payload.get("alpha", 0.15)),
+            max_set_size=int(payload.get("max_set_size", 2)),
+        )
+
+    def handle_v104_circuit_trace(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v104_evolution as v104
+
+        clean = payload.get("clean_activations") or {
+            "engram_mlp": 0.85,
+            "attn_deltanet": 1.15,
+            "connectome_titans": 1.40,
+            "thinking_readout": 0.65,
+        }
+        corrupt = payload.get("corrupted_activations") or {
+            "engram_mlp": 0.20,
+            "attn_deltanet": 0.25,
+            "connectome_titans": 0.15,
+            "thinking_readout": 0.10,
+        }
+        return v104.MechanisticCircuitTracer().trace_circuit(
+            clean_activations=clean,
+            corrupted_activations=corrupt,
+            edge_weights=payload.get("edge_weights"),
+            sufficiency_threshold=float(payload.get("sufficiency_threshold", 0.80)),
+        )
+
+    def handle_v104_graph_consolidate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v104_evolution as v104
+
+        triples = payload.get("triples") or [
+            {"subject": "Supermix", "predicate": "baseline_checkpoint", "object": "v96_physio_neurogenesis", "confidence": 0.98, "timestamp": 10},
+            {"subject": "Supermix", "predicate": "latest_evolution", "object": "v103_scf_synthesis", "confidence": 0.80, "timestamp": 12},
+            {"subject": "Supermix", "predicate": "latest_evolution", "object": "v104_titans_attnres", "confidence": 0.96, "timestamp": 20},
+            {"subject": "v104_titans_attnres", "predicate": "adds_memory", "object": "TitansSurpriseMemory", "confidence": 0.95, "timestamp": 21},
+            {"subject": "Supermix", "predicate": "noisy_tag", "object": "discard", "confidence": 0.10, "timestamp": 5},
+        ]
+        return v104.EpisodicGraphConsolidator().consolidate(
+            triples=triples,
+            min_salience=float(payload.get("min_salience", 0.25)),
+            query_source=payload.get("query_source") or "Supermix",
+            query_target=payload.get("query_target") or "TitansSurpriseMemory",
+        )
+
+    def handle_v104_process_audit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v104_evolution as v104
+
+        prompt = str(payload.get("prompt") or "Compute 12 * 4 + 7 and double the result.")
+        steps = payload.get("steps") or [
+            "First multiply 12 * 4 = 48.",
+            "Next add 48 + 7 = 55.",
+            "Finally double the result: 55 * 2 = 110.",
+        ]
+        return v104.VerifiableProcessRewardAuditor().audit_trace(prompt=prompt, steps=steps)
+
+    def handle_v104_pareto_tune(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v104_evolution as v104
+
+        candidates = payload.get("candidates") or [
+            {"name": "v96_promoted_cpu", "quality_score": 0.878, "latency_ms": 140.0, "memory_mb": 210.0, "calibration_error": 0.04},
+            {"name": "v103_synthesis_cpu", "quality_score": 0.863, "latency_ms": 175.0, "memory_mb": 245.0, "calibration_error": 0.045},
+            {"name": "v104_scf_hybrid", "quality_score": 0.992, "latency_ms": 195.0, "memory_mb": 260.0, "calibration_error": 0.015},
+            {"name": "v104_edge_fast", "quality_score": 0.835, "latency_ms": 68.0, "memory_mb": 120.0, "calibration_error": 0.055},
+        ]
+        return v104.ParetoFrontierAutoTuner().optimize(candidates=candidates)
+
+    def handle_v105_speculative_optimize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v105_hyperopt as v105
+
+        probs = payload.get("depth_accept_probs")
+        if probs is None:
+            probs = [0.86, 0.78, 0.68, 0.52]
+        return v105.SpeculativeDraftOptimizer().optimize(
+            depth_accept_probs=probs,
+            draft_cost_ratio=float(payload.get("draft_cost_ratio", 0.08)),
+            verify_overhead_per_token=float(payload.get("verify_overhead_per_token", 0.04)),
+        )
+
+    def handle_v105_kv_plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v105_hyperopt as v105
+
+        return v105.KVCacheCompressionPlanner().plan(
+            seq_len=int(payload.get("seq_len", 32768)),
+            batch_size=int(payload.get("batch_size", 1)),
+            n_layers=int(payload.get("n_layers", 24)),
+            hybrid_ratio=int(payload.get("hybrid_ratio", 5)),
+            sliding_window=int(payload.get("sliding_window", 128)),
+            n_kv_heads=int(payload.get("n_kv_heads", 4)),
+            head_dim=int(payload.get("head_dim", 64)),
+            use_mla=bool(payload.get("use_mla", False)),
+            mla_latent_dim=int(payload.get("mla_latent_dim", 64)),
+            mla_pe_dim=int(payload.get("mla_pe_dim", 32)),
+            deltanet_dim=int(payload.get("deltanet_dim", 32)),
+            titans_dim=int(payload.get("titans_dim", 32)),
+            cns_nodes=int(payload.get("cns_nodes", 512)),
+            memory_budget_mb=float(payload.get("memory_budget_mb", 64.0)),
+        )
+
+    def handle_v105_roofline_profile(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v105_hyperopt as v105
+
+        return v105.RooflineComputeProfiler().profile(
+            hidden_size=int(payload.get("hidden_size", 512)),
+            n_layers=int(payload.get("n_layers", 8)),
+            intermediate_size=int(payload.get("intermediate_size", 1024)),
+            moe_intermediate_size=int(payload.get("moe_intermediate_size", 512)),
+            moe_top_k=int(payload.get("moe_top_k", 2)),
+            n_shared_experts=int(payload.get("n_shared_experts", 1)),
+            use_moe=bool(payload.get("use_moe", True)),
+            vocab_size=int(payload.get("vocab_size", 9460)),
+            seq_len=int(payload.get("seq_len", 256)),
+            batch_size=int(payload.get("batch_size", 1)),
+            weight_bytes_per_param=float(payload.get("weight_bytes_per_param", 2.0)),
+            peak_gflops=float(payload.get("peak_gflops", 400.0)),
+            memory_bandwidth_gbs=float(payload.get("memory_bandwidth_gbs", 50.0)),
+        )
+
+    def handle_v105_cascade_route(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v105_hyperopt as v105
+
+        records = payload.get("calibration_records")
+        if records is None:
+            records = [
+                {"fast_confidence": 0.96, "fast_correct": True, "deep_correct": True},
+                {"fast_confidence": 0.91, "fast_correct": True, "deep_correct": True},
+                {"fast_confidence": 0.84, "fast_correct": True, "deep_correct": True},
+                {"fast_confidence": 0.62, "fast_correct": False, "deep_correct": True},
+                {"fast_confidence": 0.45, "fast_correct": False, "deep_correct": True},
+                {"fast_confidence": 0.30, "fast_correct": False, "deep_correct": True},
+            ]
+        return v105.CascadeEnsembleRouter().optimize_cascade(
+            calibration_records=records,
+            fast_cost_ms=float(payload.get("fast_cost_ms", 18.0)),
+            deep_cost_ms=float(payload.get("deep_cost_ms", 180.0)),
+            max_avg_latency_ms=float(payload.get("max_avg_latency_ms", 110.0)),
+        )
+
+    def handle_v105_regression_guard(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v105_hyperopt as v105
+
+        b_lat = payload.get("baseline_latencies_ms")
+        c_lat = payload.get("candidate_latencies_ms")
+        if b_lat is None:
+            b_lat = [1266.0, 1310.0, 1280.0, 1295.0, 1327.0]
+        if c_lat is None:
+            c_lat = [28.0, 26.5, 29.0, 25.4, 27.1]
+        return v105.SelfHealingBenchmarkGuard().evaluate(
+            baseline_latencies_ms=b_lat,
+            candidate_latencies_ms=c_lat,
+            baseline_scores=payload.get("baseline_scores"),
+            candidate_scores=payload.get("candidate_scores"),
+            max_quality_drop=float(payload.get("max_quality_drop", 0.005)),
+            max_latency_regression_pct=float(payload.get("max_latency_regression_pct", 5.0)),
+        )
+
+    def handle_v106_ttc_allocate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v106_frontier as v106
+
+        return v106.TestTimeComputeAllocator().allocate(
+            total_token_budget=int(payload.get("total_token_budget", 4096)),
+            base_pass1=float(payload.get("base_pass1", 0.35)),
+            tokens_per_sample=int(payload.get("tokens_per_sample", 256)),
+            refinement_gain_per_step=float(payload.get("refinement_gain_per_step", 0.08)),
+            tokens_per_refinement=int(payload.get("tokens_per_refinement", 192)),
+            verifier_accuracy=float(payload.get("verifier_accuracy", 0.85)),
+            tokens_per_verify=int(payload.get("tokens_per_verify", 64)),
+            max_parallel_n=int(payload.get("max_parallel_n", 16)),
+            max_refinement_steps=int(payload.get("max_refinement_steps", 6)),
+        )
+
+    def handle_v106_spectral_diagnostics(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v106_frontier as v106
+
+        svs = payload.get("singular_values")
+        if svs is None:
+            svs = [5.2, 3.1, 2.0, 1.45, 1.10, 0.85, 0.65, 0.50, 0.38, 0.28]
+        return v106.SpectralWeightDiagnostics().diagnose(
+            singular_values=svs,
+            matrix_shape=payload.get("matrix_shape", [256, 256]),
+            layer_name=str(payload.get("layer_name", "layers.0.self_attn.q_proj")),
+        )
+
+    def handle_v106_counterfactual_verify(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v106_frontier as v106
+
+        weights = payload.get("weights")
+        observed = payload.get("observed")
+        intervention = payload.get("intervention")
+        if weights is None:
+            weights = {"X": 1.8, "Z": 0.6}
+        if observed is None:
+            observed = {"X": 1.0, "Z": 2.0, "M": 2.5, "Y": 8.4}
+        if intervention is None:
+            intervention = {"X": 3.0}
+        return v106.CausalCounterfactualVerifier().verify_counterfactual(
+            weights=weights,
+            observed=observed,
+            intervention=intervention,
+            outcome_var=str(payload.get("outcome_var", "Y")),
+            treatment_var=str(payload.get("treatment_var", "X")),
+            mediator_var=payload.get("mediator_var", "M"),
+            treatment_to_mediator=float(payload.get("treatment_to_mediator", 1.2)),
+            mediator_to_outcome=float(payload.get("mediator_to_outcome", 0.9)),
+            outcome_std=float(payload.get("outcome_std", 1.5)),
+        )
+
+    def handle_v106_quant_plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v106_frontier as v106
+
+        layers = payload.get("layers")
+        if layers is None:
+            layers = [
+                {"name": "embed_tokens", "params": 1200000, "sensitivity": 14.0, "min_bits": 4},
+                {"name": "layers.0.self_attn", "params": 800000, "sensitivity": 9.5},
+                {"name": "layers.1.self_attn", "params": 800000, "sensitivity": 6.2},
+                {"name": "layers.0.mlp_moe", "params": 3200000, "sensitivity": 2.1},
+                {"name": "layers.1.mlp_moe", "params": 3200000, "sensitivity": 1.4},
+                {"name": "cns_core", "params": 400000, "sensitivity": 11.0, "min_bits": 4},
+            ]
+        return v106.AdaptiveQuantizationPlanner().plan(
+            layers=layers,
+            target_avg_bits=float(payload.get("target_avg_bits", 4.5)),
+            allowed_bits=payload.get("allowed_bits", [2, 3, 4, 6, 8, 16]),
+        )
+
+    def handle_v106_drift_detect(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v106_frontier as v106
+
+        stream = payload.get("stream")
+        if stream is None:
+            stream = [26.0, 27.1, 25.4, 26.8, 26.2, 27.0, 38.5, 42.1, 44.0, 46.2]
+        return v106.TelemetryDriftDetector().detect(
+            stream=stream,
+            baseline_hist=payload.get("baseline_hist", [0.45, 0.35, 0.20]),
+            recent_hist=payload.get("recent_hist", [0.15, 0.25, 0.60]),
+            slack_k=float(payload.get("slack_k", 0.5)),
+            threshold=float(payload.get("threshold", 4.0)),
+            warmup=int(payload.get("warmup", 5)),
+        )
+
+    def handle_v107_ufwm_profile(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v107_frontier as v107
+
+        return v107.UniversalFastWeightProfiler().profile(
+            hidden_size=int(payload.get("hidden_size", 128)),
+            n_layers=int(payload.get("n_layers", 6)),
+            n_kv_heads=int(payload.get("n_kv_heads", 2)),
+            head_dim=int(payload.get("head_dim", 32)),
+            fast_dim=int(payload.get("fast_dim", 24)),
+            n_banks=int(payload.get("n_banks", 4)),
+            top_k=int(payload.get("top_k", 2)),
+            seq_len=int(payload.get("seq_len", 512)),
+            mode=str(payload.get("mode", "moe")),
+            surprise_trace=payload.get("surprise_trace"),
+        )
+
+    def handle_v107_plasticity_orchestrate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v107_frontier as v107
+
+        mags = payload.get("edge_magnitudes")
+        pre = payload.get("pre_rates")
+        post = payload.get("post_rates")
+        if mags is None:
+            mags = [0.12, 0.22, 0.45, 0.60, 0.18, 0.52]
+        if pre is None:
+            pre = [0.8, 0.4, 0.9, 0.5, 0.7, 0.6]
+        if post is None:
+            post = [0.7, 0.3, 0.85, 0.4, 0.65, 0.55]
+        return v107.ConnectomePlasticityOrchestrator().orchestrate(
+            edge_magnitudes=mags,
+            pre_rates=pre,
+            post_rates=post,
+            modulatory_signal=float(payload.get("modulatory_signal", 0.5)),
+            astrocyte_calcium=float(payload.get("astrocyte_calcium", 0.35)),
+            spine_threshold=float(payload.get("spine_threshold", 0.35)),
+            lr=float(payload.get("lr", 0.05)),
+            dale_signs=payload.get("dale_signs"),
+        )
+
+    def handle_v107_neuron_assay(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v107_frontier as v107
+
+        stim = payload.get("stimulus_series")
+        if stim is None:
+            stim = [0.2, 0.85, -0.3, 1.15, 0.4, -0.6, 0.9, 0.3, -0.2, 0.75]
+        return v107.SyntheticNeuronFoundryAssay().assay(
+            stimulus_series=stim,
+            foundry_dim=int(payload.get("foundry_dim", 32)),
+            metabolic_budget=float(payload.get("metabolic_budget", 40.0)),
+        )
+
+    def handle_v107_antipode_distill(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v107_frontier as v107
+
+        records = payload.get("records")
+        if records is None:
+            records = [
+                {"category": "algebra", "loss": 0.22, "entropy": 0.30, "failed": False},
+                {"category": "algebra", "loss": 0.31, "entropy": 0.35, "failed": False},
+                {"category": "multi_step_word", "loss": 1.65, "entropy": 1.20, "failed": True},
+                {"category": "multi_step_word", "loss": 1.42, "entropy": 1.05, "failed": True},
+                {"category": "electrophysiology", "loss": 1.10, "entropy": 0.90, "failed": True},
+                {"category": "electrophysiology", "loss": 0.45, "entropy": 0.50, "failed": False},
+            ]
+        return v107.AntipodeFailureDistiller().distill(
+            records=records,
+            temperature=float(payload.get("temperature", 0.5)),
+            uniform_floor=float(payload.get("uniform_floor", 0.15)),
+        )
+
+    def handle_v107_symbiosis_retention(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import nexus_v107_frontier as v107
+
+        anchor = payload.get("anchor_weights")
+        current = payload.get("current_weights")
+        fisher = payload.get("fisher_importances")
+        if anchor is None:
+            anchor = [0.50, -0.30, 0.80, 0.15, -0.60]
+        if current is None:
+            current = [0.62, -0.45, 0.82, 0.35, -0.58]
+        if fisher is None:
+            fisher = [4.5, 1.2, 8.0, 0.5, 6.0]
+        return v107.SymbiosisContinualRetentionAuditor().audit(
+            anchor_weights=anchor,
+            current_weights=current,
+            fisher_importances=fisher,
+            old_task_loss_before=float(payload.get("old_task_loss_before", 0.42)),
+            old_task_loss_after=float(payload.get("old_task_loss_after", 0.44)),
+            new_task_loss_before=float(payload.get("new_task_loss_before", 1.25)),
+            new_task_loss_after=float(payload.get("new_task_loss_after", 0.68)),
+            ewc_lambda=float(payload.get("ewc_lambda", 0.15)),
         )
 
     def handle_telemetry(self) -> Dict[str, Any]:
@@ -3051,6 +3404,163 @@ def create_app(service: Optional[NexusApiService] = None):
             fault_rate: float = 0.15
             enable_mnt_repair: bool = True
             seed: int = 103
+
+        class PyV104ConformalRouteRequest(BaseModel):
+            calibration_scores: Optional[List[float]] = None
+            candidate_scores: Optional[Dict[str, float]] = None
+            alpha: float = 0.15
+            max_set_size: int = 2
+
+        class PyV104CircuitTraceRequest(BaseModel):
+            clean_activations: Optional[Dict[str, float]] = None
+            corrupted_activations: Optional[Dict[str, float]] = None
+            edge_weights: Optional[Dict[str, float]] = None
+            sufficiency_threshold: float = 0.80
+
+        class PyV104GraphConsolidateRequest(BaseModel):
+            triples: Optional[List[Dict[str, Any]]] = None
+            min_salience: float = 0.25
+            query_source: Optional[str] = None
+            query_target: Optional[str] = None
+
+        class PyV104ProcessAuditRequest(BaseModel):
+            prompt: str = "Compute 12 * 4 + 7 and double the result."
+            steps: Optional[List[str]] = None
+
+        class PyV104ParetoTuneRequest(BaseModel):
+            candidates: Optional[List[Dict[str, Any]]] = None
+
+        class PyV105SpeculativeOptimizeRequest(BaseModel):
+            depth_accept_probs: Optional[List[float]] = None
+            draft_cost_ratio: float = 0.08
+            verify_overhead_per_token: float = 0.04
+
+        class PyV105KVPlanRequest(BaseModel):
+            seq_len: int = 32768
+            batch_size: int = 1
+            n_layers: int = 24
+            hybrid_ratio: int = 5
+            sliding_window: int = 128
+            n_kv_heads: int = 4
+            head_dim: int = 64
+            use_mla: bool = False
+            mla_latent_dim: int = 64
+            mla_pe_dim: int = 32
+            deltanet_dim: int = 32
+            titans_dim: int = 32
+            cns_nodes: int = 512
+            memory_budget_mb: float = 64.0
+
+        class PyV105RooflineRequest(BaseModel):
+            hidden_size: int = 512
+            n_layers: int = 8
+            intermediate_size: int = 1024
+            moe_intermediate_size: int = 512
+            moe_top_k: int = 2
+            n_shared_experts: int = 1
+            use_moe: bool = True
+            vocab_size: int = 9460
+            seq_len: int = 256
+            batch_size: int = 1
+            weight_bytes_per_param: float = 2.0
+            peak_gflops: float = 400.0
+            memory_bandwidth_gbs: float = 50.0
+
+        class PyV105CascadeRouteRequest(BaseModel):
+            calibration_records: Optional[List[Dict[str, Any]]] = None
+            fast_cost_ms: float = 18.0
+            deep_cost_ms: float = 180.0
+            max_avg_latency_ms: float = 110.0
+
+        class PyV105RegressionGuardRequest(BaseModel):
+            baseline_latencies_ms: Optional[List[float]] = None
+            candidate_latencies_ms: Optional[List[float]] = None
+            baseline_scores: Optional[List[float]] = None
+            candidate_scores: Optional[List[float]] = None
+            max_quality_drop: float = 0.005
+            max_latency_regression_pct: float = 5.0
+
+        class PyV106TTCAllocateRequest(BaseModel):
+            total_token_budget: int = 4096
+            base_pass1: float = 0.35
+            tokens_per_sample: int = 256
+            refinement_gain_per_step: float = 0.08
+            tokens_per_refinement: int = 192
+            verifier_accuracy: float = 0.85
+            tokens_per_verify: int = 64
+            max_parallel_n: int = 16
+            max_refinement_steps: int = 6
+
+        class PyV106SpectralDiagRequest(BaseModel):
+            singular_values: Optional[List[float]] = None
+            matrix_shape: Optional[List[int]] = None
+            layer_name: str = "layers.0.self_attn.q_proj"
+
+        class PyV106CounterfactualRequest(BaseModel):
+            weights: Optional[Dict[str, float]] = None
+            observed: Optional[Dict[str, float]] = None
+            intervention: Optional[Dict[str, float]] = None
+            outcome_var: str = "Y"
+            treatment_var: str = "X"
+            mediator_var: Optional[str] = "M"
+            treatment_to_mediator: float = 1.2
+            mediator_to_outcome: float = 0.9
+            outcome_std: float = 1.5
+
+        class PyV106QuantPlanRequest(BaseModel):
+            layers: Optional[List[Dict[str, Any]]] = None
+            target_avg_bits: float = 4.5
+            allowed_bits: List[int] = Field(default_factory=lambda: [2, 3, 4, 6, 8, 16])
+
+        class PyV106DriftDetectRequest(BaseModel):
+            stream: Optional[List[float]] = None
+            baseline_hist: Optional[List[float]] = None
+            recent_hist: Optional[List[float]] = None
+            slack_k: float = 0.5
+            threshold: float = 4.0
+            warmup: int = 5
+
+        class PyV107UFWMProfileRequest(BaseModel):
+            hidden_size: int = 128
+            n_layers: int = 6
+            n_kv_heads: int = 2
+            head_dim: int = 32
+            fast_dim: int = 24
+            n_banks: int = 4
+            top_k: int = 2
+            seq_len: int = 512
+            mode: str = "moe"
+            surprise_trace: Optional[List[float]] = None
+
+        class PyV107PlasticityOrchestrateRequest(BaseModel):
+            edge_magnitudes: Optional[List[float]] = None
+            pre_rates: Optional[List[float]] = None
+            post_rates: Optional[List[float]] = None
+            modulatory_signal: float = 0.5
+            astrocyte_calcium: float = 0.35
+            spine_threshold: float = 0.35
+            lr: float = 0.05
+            dale_signs: Optional[List[int]] = None
+
+        class PyV107NeuronAssayRequest(BaseModel):
+            stimulus_series: Optional[List[float]] = None
+            foundry_dim: int = 32
+            metabolic_budget: float = 40.0
+
+        class PyV107AntipodeDistillRequest(BaseModel):
+            records: Optional[List[Dict[str, Any]]] = None
+            temperature: float = 0.5
+            uniform_floor: float = 0.15
+
+        class PyV107SymbiosisRetentionRequest(BaseModel):
+            anchor_weights: Optional[List[float]] = None
+            current_weights: Optional[List[float]] = None
+            fisher_importances: Optional[List[float]] = None
+            old_task_loss_before: float = 0.42
+            old_task_loss_after: float = 0.44
+            new_task_loss_before: float = 1.25
+            new_task_loss_after: float = 0.68
+            ewc_lambda: float = 0.15
 
         class PyEntropyRequest(BaseModel):
             source: str = "crypto"
@@ -3564,6 +4074,146 @@ def create_app(service: Optional[NexusApiService] = None):
         async def v103_neurohive_plan_endpoint(req: PyV103NeuroHiveRequest):
             try:
                 return svc.handle_v103_neurohive_plan(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v104/conformal_route")
+        async def v104_conformal_route_endpoint(req: PyV104ConformalRouteRequest):
+            try:
+                return svc.handle_v104_conformal_route(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v104/circuit_trace")
+        async def v104_circuit_trace_endpoint(req: PyV104CircuitTraceRequest):
+            try:
+                return svc.handle_v104_circuit_trace(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v104/graph_consolidate")
+        async def v104_graph_consolidate_endpoint(req: PyV104GraphConsolidateRequest):
+            try:
+                return svc.handle_v104_graph_consolidate(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v104/process_audit")
+        async def v104_process_audit_endpoint(req: PyV104ProcessAuditRequest):
+            try:
+                return svc.handle_v104_process_audit(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v104/pareto_tune")
+        async def v104_pareto_tune_endpoint(req: PyV104ParetoTuneRequest):
+            try:
+                return svc.handle_v104_pareto_tune(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v105/speculative_optimize")
+        async def v105_speculative_optimize_endpoint(req: PyV105SpeculativeOptimizeRequest):
+            try:
+                return svc.handle_v105_speculative_optimize(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v105/kv_plan")
+        async def v105_kv_plan_endpoint(req: PyV105KVPlanRequest):
+            try:
+                return svc.handle_v105_kv_plan(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v105/roofline_profile")
+        async def v105_roofline_profile_endpoint(req: PyV105RooflineRequest):
+            try:
+                return svc.handle_v105_roofline_profile(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v105/cascade_route")
+        async def v105_cascade_route_endpoint(req: PyV105CascadeRouteRequest):
+            try:
+                return svc.handle_v105_cascade_route(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v105/regression_guard")
+        async def v105_regression_guard_endpoint(req: PyV105RegressionGuardRequest):
+            try:
+                return svc.handle_v105_regression_guard(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v106/ttc_allocate")
+        async def v106_ttc_allocate_endpoint(req: PyV106TTCAllocateRequest):
+            try:
+                return svc.handle_v106_ttc_allocate(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v106/spectral_diagnostics")
+        async def v106_spectral_diagnostics_endpoint(req: PyV106SpectralDiagRequest):
+            try:
+                return svc.handle_v106_spectral_diagnostics(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v106/counterfactual_verify")
+        async def v106_counterfactual_verify_endpoint(req: PyV106CounterfactualRequest):
+            try:
+                return svc.handle_v106_counterfactual_verify(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v106/quant_plan")
+        async def v106_quant_plan_endpoint(req: PyV106QuantPlanRequest):
+            try:
+                return svc.handle_v106_quant_plan(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v106/drift_detect")
+        async def v106_drift_detect_endpoint(req: PyV106DriftDetectRequest):
+            try:
+                return svc.handle_v106_drift_detect(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v107/ufwm_profile")
+        async def v107_ufwm_profile_endpoint(req: PyV107UFWMProfileRequest):
+            try:
+                return svc.handle_v107_ufwm_profile(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v107/plasticity_orchestrate")
+        async def v107_plasticity_orchestrate_endpoint(req: PyV107PlasticityOrchestrateRequest):
+            try:
+                return svc.handle_v107_plasticity_orchestrate(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v107/neuron_assay")
+        async def v107_neuron_assay_endpoint(req: PyV107NeuronAssayRequest):
+            try:
+                return svc.handle_v107_neuron_assay(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v107/antipode_distill")
+        async def v107_antipode_distill_endpoint(req: PyV107AntipodeDistillRequest):
+            try:
+                return svc.handle_v107_antipode_distill(req.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @app.post("/v1/v107/symbiosis_retention")
+        async def v107_symbiosis_retention_endpoint(req: PyV107SymbiosisRetentionRequest):
+            try:
+                return svc.handle_v107_symbiosis_retention(req.model_dump())
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 

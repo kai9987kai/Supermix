@@ -22,10 +22,13 @@ class SCFRouter:
 
     _MATH_SCIENCE_RE = re.compile(
         r"\b(force|acceleration|momentum|kinetic|impulse|voltage|current|ohm|"
-        r"resistance|resistors?|spring|velocity|work|power|permutation|combination|solve|"
+        r"resistance|resistors?|capacitors?|spring|velocity|work|power|permutation|combination|solve|"
         r"calculate|compute|molarity|wave|frequency|wavelength|determinant|trace|"
-        r"inverse|eigenvalues?|dot\s+product|cross\s+product|geometric\s+series|"
-        r"modulo|mod\b|totient|phi\(|factori[sz]ation|binomial|bayes|thin\s+lens)\b|[\d\)]\s*[\+\-\*/=]",
+        r"inverse|eigenvalues?|dot\s+product|cross\s+product|geometric\s+series|arithmetic\s+series|"
+        r"modulo|mod\b|totient|phi\(|factori[sz]ation|binomial|bayes|thin\s+lens|"
+        r"catalan|fibonacci|entropy|poisson|ideal\s+gas|lorentz|compound\s+interest|"
+        r"extended\s+gcd|b[eé]zout|harmonic\s+number|multinomial|euclidean\s+distance|manhattan\s+distance|"
+        r"cosine\s+similarity|z[\-\s]score|half[\-\s]life|doppler|amdahl|from\s+base)\b|[\d\)]\s*[\+\-\*/=]",
         re.IGNORECASE,
     )
     _CODE_RE = re.compile(
@@ -58,19 +61,25 @@ class SCFRouter:
 
     def __init__(self, registry: Optional[SCFModelRegistry] = None) -> None:
         self.registry = registry or SCFModelRegistry()
+        self._complexity_analyzer: Optional[Any] = None
+        self._hyperion_scheduler: Optional[Any] = None
 
     def assess_task(self, prompt: Any) -> Dict[str, Any]:
         """Understand objectives, normalize symbolic templates, and score complexity."""
 
-        import nexus_complexity as nc
         import prompt_normaliser as pn
         import prompt_understanding as pu
+
+        if self._complexity_analyzer is None:
+            import nexus_complexity as nc
+
+            self._complexity_analyzer = nc.AlgorithmicComplexityAnalyzer()
 
         text = str(prompt or "").strip()
         profile = pu.analyze_prompt(text)
         diag = pu.prompt_understanding_diagnostics(profile)
         norm = pn.normalise(text)
-        comp = nc.AlgorithmicComplexityAnalyzer().analyze_sequence(text).to_dict()
+        comp = self._complexity_analyzer.analyze_sequence(text).to_dict()
 
         is_math = bool(self._MATH_SCIENCE_RE.search(text)) or (
             norm.rule is not None and norm.rule not in {"causal_intervention", "diffusion_thought", "conformal_stopping"}
@@ -143,11 +152,10 @@ class SCFRouter:
 
         active_flags = flags or SCFFeatureFlags()
         assessment = self.assess_task(prompt)
-        status_map = self.registry.summary()
         if available_families is not None:
             allowed = set(available_families)
         else:
-            allowed = {k for k, v in status_map.items() if v.get("available_in_source")}
+            allowed = set(self.registry.available_source_families())
 
         domain = assessment["domain"]
         if not active_flags.SCF_ENABLED or not active_flags.SCF_ROUTER_ENABLED:
@@ -183,9 +191,12 @@ class SCFRouter:
         fallback = candidates[1] if len(candidates) > 1 else candidates[0]
         hyperion_plan: Optional[Dict[str, Any]] = None
         try:
-            import nexus_v102_frontier as v102
+            if self._hyperion_scheduler is None:
+                import nexus_v102_frontier as v102
 
-            hyperion_plan = v102.HyperionComputeScheduler().schedule(
+                self._hyperion_scheduler = v102.HyperionComputeScheduler()
+
+            hyperion_plan = self._hyperion_scheduler.schedule(
                 domain=domain,
                 submode=assessment["submode"],
                 complexity=assessment["complexity"],

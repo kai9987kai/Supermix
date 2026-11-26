@@ -268,13 +268,23 @@ class CognitiveFabricRuntime:
 
             # 6. Final independent verification pass
             if flags.SCF_VERIFICATION_ENABLED:
-                verify_final, st_ver_final = self.observability.measure_stage(
-                    "verify_final",
-                    self.verifier.verify,
-                    query=prompt,
-                    candidate_answer=candidate_answer,
-                    normalised_query=norm_prompt,
+                prelim_ans = str(verify_prelim.get("verified_answer") or "")
+                can_reuse_prelim = bool(verify_prelim.get("verified")) and (
+                    candidate_answer == "" or candidate_answer == prelim_ans
                 )
+                if can_reuse_prelim:
+                    verify_final, st_ver_final = self.observability.measure_stage(
+                        "verify_final",
+                        lambda: dict(verify_prelim),
+                    )
+                else:
+                    verify_final, st_ver_final = self.observability.measure_stage(
+                        "verify_final",
+                        self.verifier.verify,
+                        query=prompt,
+                        candidate_answer=candidate_answer,
+                        normalised_query=norm_prompt,
+                    )
             else:
                 verify_final, st_ver_final = self.observability.measure_stage(
                     "verify_final_disabled",

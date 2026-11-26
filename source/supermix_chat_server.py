@@ -139,9 +139,21 @@ class ModelRegistry:
                             "cns_predictive_error": bool(getattr(cfg, "cns_predictive_error", False)),
                             "cns_divisive_norm": bool(getattr(cfg, "cns_divisive_norm", False)),
                             "cns_dendritic_apical": bool(getattr(cfg, "cns_dendritic_apical", False)),
+                            "cns_neuromod_gate": bool(getattr(cfg, "cns_neuromod_gate", False)),
+                            "cns_stdp_trace": bool(getattr(cfg, "cns_stdp_trace", False)),
+                            "cns_oscillatory_phase": bool(getattr(cfg, "cns_oscillatory_phase", False)),
+                            "cns_astrocyte_gate": bool(getattr(cfg, "cns_astrocyte_gate", False)),
+                            "cns_retrograde_ephaptic": bool(getattr(cfg, "cns_retrograde_ephaptic", False)),
                             "use_mhc_residual": bool(getattr(cfg, "use_mhc_residual", False)),
                             "use_engram_memory": bool(getattr(cfg, "use_engram_memory", False)),
                             "use_deltanet_memory": bool(getattr(cfg, "use_deltanet_memory", False)),
+                            "use_titans_memory": bool(getattr(cfg, "use_titans_memory", False)),
+                            "use_attn_res": bool(getattr(cfg, "use_attn_res", False)),
+                            "use_value_residual": bool(getattr(cfg, "use_value_residual", False)),
+                            "use_short_conv": bool(getattr(cfg, "use_short_conv", False)),
+                            "use_shared_expert_gate": bool(getattr(cfg, "use_shared_expert_gate", False)),
+                            "use_ufwm": bool(getattr(cfg, "use_ufwm", False)),
+                            "use_neuron_foundry": bool(getattr(cfg, "use_neuron_foundry", False)),
                             "thinking_entropy_halt": bool(getattr(cfg, "thinking_entropy_halt", False)),
                             "thinking_ctm_synchrony": bool(getattr(cfg, "thinking_ctm_synchrony", False)),
                             "run_name": loaded.extra.get("run_name"),
@@ -241,6 +253,17 @@ def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
                 "div_norm_strength_mean_abs": cns.get("div_norm_strength_mean_abs"),
                 "dendritic_apical": cns.get("dendritic_apical", False),
                 "apical_mod_mean": cns.get("apical_mod_mean"),
+                "neuromod_gate": cns.get("neuromod_gate", False),
+                "neuromod_gain_mean": cns.get("neuromod_gain_mean"),
+                "stdp_trace": cns.get("stdp_trace", False),
+                "stdp_gain_mean": cns.get("stdp_gain_mean"),
+                "oscillatory_phase": cns.get("oscillatory_phase", False),
+                "osc_gain_mean": cns.get("osc_gain_mean"),
+                "astrocyte_gate": cns.get("astrocyte_gate", False),
+                "astro_gate_mean": cns.get("astro_gate_mean"),
+                "retrograde_ephaptic": cns.get("retrograde_ephaptic", False),
+                "ephaptic_field_rms": cns.get("ephaptic_field_rms"),
+                "retro_gain_mean": cns.get("retro_gain_mean"),
                 "spectral_radius_est": cns.get("spectral_radius_est"),
             }
         mhc = tele.get("mhc")
@@ -266,6 +289,58 @@ def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
                 "mean_write_gate": dn.get("mean_write_gate"),
                 "state_frobenius_norm": dn.get("state_frobenius_norm"),
             }
+        titans = tele.get("titans")
+        if isinstance(titans, dict):
+            summary["titans"] = {
+                "enabled": bool(titans.get("enabled", False)),
+                "state_dim": titans.get("state_dim"),
+                "mean_surprise": titans.get("mean_surprise"),
+                "memory_frobenius_norm": titans.get("memory_frobenius_norm"),
+            }
+        ares = tele.get("attn_res")
+        if isinstance(ares, dict):
+            summary["attn_res"] = {
+                "enabled": bool(ares.get("enabled", False)),
+                "last_depth_entropy": ares.get("last_depth_entropy"),
+                "last_self_weight_mean": ares.get("last_self_weight_mean"),
+            }
+        vres = tele.get("value_residual")
+        if isinstance(vres, dict):
+            summary["value_residual"] = {
+                "enabled": bool(vres.get("enabled", False)),
+                "last_mix_strength": vres.get("last_mix_strength"),
+                "gate_mean_abs": vres.get("gate_mean_abs"),
+            }
+        sconv = tele.get("short_conv")
+        if isinstance(sconv, dict):
+            summary["short_conv"] = {
+                "enabled": bool(sconv.get("enabled", False)),
+                "kernel_size": sconv.get("kernel_size"),
+                "last_conv_rms": sconv.get("last_conv_rms"),
+                "last_ctx_gate_mean": sconv.get("last_ctx_gate_mean"),
+            }
+        sgate = tele.get("shared_expert_gate")
+        if isinstance(sgate, dict):
+            summary["shared_expert_gate"] = {
+                "enabled": bool(sgate.get("enabled", False)),
+                "mean_gate": sgate.get("mean_gate"),
+            }
+        ufwm = tele.get("ufwm")
+        if isinstance(ufwm, dict):
+            summary["ufwm"] = {
+                "enabled": bool(ufwm.get("enabled", False)),
+                "mode": ufwm.get("mode"),
+                "n_banks": ufwm.get("n_banks"),
+                "depth_surprise": ufwm.get("depth_surprise"),
+                "temporal_surprise": ufwm.get("temporal_surprise"),
+            }
+        nfoundry = tele.get("neuron_foundry")
+        if isinstance(nfoundry, dict):
+            summary["neuron_foundry"] = {
+                "enabled": bool(nfoundry.get("enabled", False)),
+                "dominant_family": nfoundry.get("dominant_family"),
+                "metabolic_cost_estimate": nfoundry.get("metabolic_cost_estimate"),
+            }
         thk = tele.get("thinking")
         if isinstance(thk, dict):
             summary["thinking"] = {
@@ -280,11 +355,36 @@ def _architecture_telemetry_snapshot(model: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
+_SCF_GATE_LOCK = threading.Lock()
+_SCF_GATE_SINGLETON: Optional[Any] = None
+_SCF_RUNTIME_SINGLETON: Optional[Any] = None
+
+
+def _get_scf_gate() -> Any:
+    global _SCF_GATE_SINGLETON
+    if _SCF_GATE_SINGLETON is None:
+        with _SCF_GATE_LOCK:
+            if _SCF_GATE_SINGLETON is None:
+                from scf.verification import SCFVerificationGate
+
+                _SCF_GATE_SINGLETON = SCFVerificationGate()
+    return _SCF_GATE_SINGLETON
+
+
+def _get_scf_runtime() -> Any:
+    global _SCF_RUNTIME_SINGLETON
+    if _SCF_RUNTIME_SINGLETON is None:
+        with _SCF_GATE_LOCK:
+            if _SCF_RUNTIME_SINGLETON is None:
+                from scf import CognitiveFabricRuntime
+
+                _SCF_RUNTIME_SINGLETON = CognitiveFabricRuntime()
+    return _SCF_RUNTIME_SINGLETON
+
+
 def _scf_verify_reply(asked: str, normalised_query: str, reply: str) -> Optional[Dict[str, Any]]:
     try:
-        from scf.verification import SCFVerificationGate
-
-        res = SCFVerificationGate().verify(
+        res = _get_scf_gate().verify(
             query=asked,
             candidate_answer=reply,
             normalised_query=normalised_query,
@@ -324,10 +424,10 @@ def _scf_runtime_trace(
     recent_turns: Sequence[Tuple[str, str]] = (),
 ) -> Optional[Dict[str, Any]]:
     try:
-        from scf import CognitiveFabricRuntime, SCFFeatureFlags
+        from scf import SCFFeatureFlags
 
         flags = SCFFeatureFlags.all_enabled(speculative_decoding=(mode == "speculative"))
-        runtime = CognitiveFabricRuntime()
+        runtime = _get_scf_runtime()
         res = runtime.run_task(
             asked,
             flags_override=flags,
@@ -454,20 +554,18 @@ def stream_tokens(
     should_stop,
     progress: Optional[GenerationProgress] = None,
 ) -> Iterator[str]:
-    """Yield decoded text incrementally.
+    """Yield decoded text incrementally with O(T) KV-cached streaming (v105).
 
-    Recomputes the full prefix each step rather than carrying a KV cache. That
-    is O(n^2), and at these sizes and lengths it is not the bottleneck -- the
-    point of streaming here is that the caller sees progress, not that decoding
-    is optimal. `should_stop` is polled every token so a disconnected client
-    stops the work instead of paying for a reply nobody will read.
+    Uses exact incremental KV-cache decoding whenever the model supports
+    ``MiMoMixModel`` caching and the sequence fits inside ``MAX_CONTEXT``
+    (dropping per-step compute from O(T^2) to O(T) with bit-identical logits),
+    and falls back seamlessly to sliding-window recomputation otherwise.
+    ``should_stop`` is polled every token so a disconnected client stops immediately.
     """
+    from mimomix_core import MiMoMixModel
 
     progress = progress if progress is not None else GenerationProgress()
     tokenizer = loaded.tokenizer
-    # Prior turns first, so the model sees the conversation rather than an
-    # isolated question. The single-model app carried history and this server
-    # dropped it; that was a regression, not a simplification.
     ids: List[int] = []
     for past_user, past_reply in history:
         turn, _ = tokenizer.encode_turn(past_user, past_reply)
@@ -477,13 +575,50 @@ def stream_tokens(
     generated: List[int] = []
     emitted = ""
 
+    use_kv_cache = (
+        isinstance(loaded.model, MiMoMixModel)
+        and len(ids) > 0
+        and (len(ids) + int(max_new_tokens)) <= MAX_CONTEXT
+    )
+
     with torch.no_grad():
-        for _ in range(max_new_tokens):
+        past = None
+        position = 0
+        for step_idx in range(max_new_tokens):
             if should_stop():
                 progress.finish_reason = "cancelled"
                 break
-            window = torch.tensor([ids + generated][0][-MAX_CONTEXT:], dtype=torch.long).unsqueeze(0)
-            logits = loaded.model(window, return_mtp=False).logits[0, -1]
+            if use_kv_cache:
+                if step_idx == 0:
+                    prompt_t = torch.tensor([ids], dtype=torch.long)
+                    out = loaded.model(
+                        prompt_t,
+                        use_cache=True,
+                        return_mtp=False,
+                        past_length=0,
+                        collect_telemetry=False,
+                    )
+                    past = out.past_key_values
+                    position = len(ids)
+                else:
+                    tok_t = torch.tensor([[generated[-1]]], dtype=torch.long)
+                    out = loaded.model(
+                        tok_t,
+                        past_key_values=past,
+                        use_cache=True,
+                        return_mtp=False,
+                        past_length=position,
+                        collect_telemetry=False,
+                    )
+                    past = out.past_key_values
+                    position += 1
+                logits = out.logits[0, -1]
+            else:
+                window = torch.tensor([ids + generated][0][-MAX_CONTEXT:], dtype=torch.long).unsqueeze(0)
+                if isinstance(loaded.model, MiMoMixModel):
+                    logits = loaded.model(window, return_mtp=False, collect_telemetry=False).logits[0, -1]
+                else:
+                    logits = loaded.model(window, return_mtp=False).logits[0, -1]
 
             if greedy:
                 nxt = int(torch.argmax(logits))
@@ -503,10 +638,6 @@ def stream_tokens(
             generated.append(nxt)
             progress.tokens += 1
 
-            # Decode the whole reply each step and emit only the new suffix:
-            # tokens carry their own leading whitespace, so decoding one at a
-            # time and concatenating would be correct here, but decoding the
-            # whole prefix is robust to any future tokenizer that is not.
             full = tokenizer.decode(generated)
             if len(full) > len(emitted):
                 yield full[len(emitted):]
@@ -1089,7 +1220,11 @@ async function loadModels(){
   el('model').innerHTML = d.models.map(m => {
     const a = m.architecture || {};
     const rname = String(a.run_name||m.name);
-    const tag = (a.use_engram_memory || a.use_deltanet_memory) ? ' [v103 Engram/Delta]'
+    const tag = (a.use_ufwm || a.use_neuron_foundry || a.cns_astrocyte_gate || a.cns_retrograde_ephaptic) ? ' [v107 UFWM/Foundry]'
+      : (a.use_short_conv || a.use_shared_expert_gate || a.cns_oscillatory_phase) ? ' [v106 ShortConv/Osc]'
+      : (a.use_value_residual || a.cns_stdp_trace) ? ' [v105 ValueRes/STDP]'
+      : (a.use_titans_memory || a.use_attn_res) ? ' [v104 Titans/AttnRes]'
+      : (a.use_engram_memory || a.use_deltanet_memory) ? ' [v103 Engram/Delta]'
       : a.use_mhc_residual ? ' [v102 mHC]'
       : rname.includes('v101') ? ' [v101 Cognitive]'
       : a.cns_divisive_norm ? ' [v100 DivNorm]'
@@ -1132,7 +1267,27 @@ function renderAnnotations(bot, data){
       if(t.cns_core.predictive_error) bits.push(`PredErr norm=${Number(t.cns_core.pred_error_norm||0).toFixed(4)}`);
       if(t.cns_core.divisive_norm) bits.push(`DivNorm=${Number(t.cns_core.div_norm_factor_mean||1).toFixed(3)}`);
       if(t.cns_core.dendritic_apical) bits.push(`Apical=${Number(t.cns_core.apical_mod_mean||1).toFixed(3)}`);
+      if(t.cns_core.neuromod_gate) bits.push(`Neuromod=${Number(t.cns_core.neuromod_gain_mean||1).toFixed(3)}`);
+      if(t.cns_core.stdp_trace) bits.push(`STDP=${Number(t.cns_core.stdp_gain_mean||1).toFixed(3)}`);
+      if(t.cns_core.oscillatory_phase) bits.push(`Osc=${Number(t.cns_core.osc_gain_mean||1).toFixed(3)}`);
+      if(t.cns_core.astrocyte_gate) bits.push(`Astro=${Number(t.cns_core.astro_gate_mean||1).toFixed(3)}`);
+      if(t.cns_core.retrograde_ephaptic) bits.push(`Retro=${Number(t.cns_core.retro_gain_mean||1).toFixed(3)}`);
       if(t.cns_core.spectral_radius_est!==undefined && t.cns_core.spectral_radius_est!==null) bits.push(`ρ=${Number(t.cns_core.spectral_radius_est).toFixed(3)}`);
+    }
+    if(t.ufwm && t.ufwm.enabled){
+      bits.push(`UFWM(${t.ufwm.mode||'moe'}, E=${t.ufwm.n_banks}, sup=${Number(t.ufwm.temporal_surprise||0).toFixed(3)})`);
+    }
+    if(t.neuron_foundry && t.neuron_foundry.enabled){
+      bits.push(`Foundry(${t.neuron_foundry.dominant_family||'6x'}, ATP=${Number(t.neuron_foundry.metabolic_cost_estimate||0).toFixed(1)})`);
+    }
+    if(t.short_conv && t.short_conv.enabled){
+      bits.push(`ShortConv(k=${t.short_conv.kernel_size}, rms=${Number(t.short_conv.last_conv_rms||0).toFixed(3)})`);
+    }
+    if(t.shared_expert_gate && t.shared_expert_gate.enabled){
+      bits.push(`ShGate=${Number(t.shared_expert_gate.mean_gate||1).toFixed(3)}`);
+    }
+    if(t.value_residual && t.value_residual.enabled){
+      bits.push(`ValueRes(g=${Number(t.value_residual.last_mix_strength||0).toFixed(3)})`);
     }
     if(t.mhc && t.mhc.enabled){
       bits.push(`mHC=${t.mhc.streams}x (err=${Number(t.mhc.max_doubly_stochastic_error||0).toExponential(1)})`);
@@ -1142,6 +1297,12 @@ function renderAnnotations(bot, data){
     }
     if(t.deltanet && t.deltanet.enabled){
       bits.push(`DeltaNet2=${t.deltanet.state_dim}d (e=${Number(t.deltanet.mean_erase_gate||0).toFixed(2)}/w=${Number(t.deltanet.mean_write_gate||0).toFixed(2)})`);
+    }
+    if(t.titans && t.titans.enabled){
+      bits.push(`Titans=${t.titans.state_dim}d (σ=${Number(t.titans.mean_surprise||0).toFixed(2)})`);
+    }
+    if(t.attn_res && t.attn_res.enabled){
+      bits.push(`AttnRes(H=${Number(t.attn_res.last_depth_entropy||0).toFixed(2)})`);
     }
     if(t.thinking){
       bits.push(`Think cycles=${t.thinking.cycles_used} (${t.thinking.exit_reason})`);

@@ -47,8 +47,8 @@ VARIANTS = (
     "neurogenesis_expert", "omniscient_expert", "omniversal_expert",
     "paper_fusion_expert", "recursive_expert", "reflexive_expert", "smarter_expert",
     "test_time_diff_expert", "thought_expert", "transcendent_expert",
-    "tree_of_thought_expert", "ultra_expert", "ultralarge", "xlarge", "xxlarge",
-    "xxxlarge",
+    "tree_of_thought_expert", "ultra_expert", "ultralarge", "universal_fast_weight_expert",
+    "xlarge", "xxlarge", "xxxlarge",
 )
 
 #: `titan_dreamer_expert` imports `model_frontier_v43`, which is not in this

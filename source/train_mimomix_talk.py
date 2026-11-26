@@ -385,6 +385,23 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "use_deltanet_memory": "use_deltanet_memory",
     "deltanet_dim": "deltanet_dim",
     "deltanet_after_layer": "deltanet_after_layer",
+    "use_titans_memory": "use_titans_memory",
+    "titans_dim": "titans_dim",
+    "titans_after_layer": "titans_after_layer",
+    "use_attn_res": "use_attn_res",
+    "use_value_residual": "use_value_residual",
+    "use_short_conv": "use_short_conv",
+    "short_conv_kernel": "short_conv_kernel",
+    "short_conv_after_layer": "short_conv_after_layer",
+    "use_shared_expert_gate": "use_shared_expert_gate",
+    "use_ufwm": "use_ufwm",
+    "ufwm_dim": "ufwm_dim",
+    "ufwm_banks": "ufwm_banks",
+    "ufwm_top_k": "ufwm_top_k",
+    "ufwm_mode": "ufwm_mode",
+    "use_neuron_foundry": "use_neuron_foundry",
+    "neuron_foundry_dim": "neuron_foundry_dim",
+    "neuron_foundry_after_layer": "neuron_foundry_after_layer",
     "use_differential_attention": "use_differential_attention",
     "differential_lambda_init": "differential_lambda_init",
     "differential_output_norm": lambda a: not a.no_differential_output_norm,
@@ -424,6 +441,11 @@ _CONFIG_FROM_ARGS: Dict[str, Any] = {
     "cns_predictive_error": "cns_predictive_error",
     "cns_divisive_norm": "cns_divisive_norm",
     "cns_dendritic_apical": "cns_dendritic_apical",
+    "cns_neuromod_gate": "cns_neuromod_gate",
+    "cns_stdp_trace": "cns_stdp_trace",
+    "cns_oscillatory_phase": "cns_oscillatory_phase",
+    "cns_astrocyte_gate": "cns_astrocyte_gate",
+    "cns_retrograde_ephaptic": "cns_retrograde_ephaptic",
     "moe_spare_experts": "moe_spare_experts",
 }
 
@@ -794,6 +816,11 @@ RECORDED_HYPERPARAMETERS: Tuple[str, ...] = (
     "cns_predictive_error",
     "cns_divisive_norm",
     "cns_dendritic_apical",
+    "cns_neuromod_gate",
+    "cns_stdp_trace",
+    "cns_oscillatory_phase",
+    "cns_astrocyte_gate",
+    "cns_retrograde_ephaptic",
     "thinking_entropy_halt",
     "thinking_ctm_synchrony",
     "use_mhc_residual",
@@ -806,7 +833,29 @@ RECORDED_HYPERPARAMETERS: Tuple[str, ...] = (
     "use_deltanet_memory",
     "deltanet_dim",
     "deltanet_after_layer",
+    "use_titans_memory",
+    "titans_dim",
+    "titans_after_layer",
+    "use_attn_res",
+    "use_value_residual",
+    "use_short_conv",
+    "short_conv_kernel",
+    "short_conv_after_layer",
+    "use_shared_expert_gate",
+    "use_ufwm",
+    "ufwm_dim",
+    "ufwm_banks",
+    "ufwm_top_k",
+    "ufwm_mode",
+    "use_neuron_foundry",
+    "neuron_foundry_dim",
+    "neuron_foundry_after_layer",
     "optimizer",
+    "muon_polar_express",
+    "muon_cautious",
+    "muon_row_normalize",
+    "muon_spectral_clip",
+    "muon_mars_gamma",
     "freeze_trunk_steps",
     "witness_rollback_tolerance",
     "maturity_steps",
@@ -1064,6 +1113,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             lr=args.lr,
             weight_decay=args.weight_decay,
             no_decay_1d=(args.decay_mode == "no_norm_bias"),
+            cautious_mask=bool(getattr(args, "muon_cautious", False)),
+            row_normalize=bool(getattr(args, "muon_row_normalize", False)),
+            polar_express=bool(getattr(args, "muon_polar_express", False)),
+            spectral_clip_tau=float(getattr(args, "muon_spectral_clip", 0.0)),
+            mars_gamma=float(getattr(args, "muon_mars_gamma", 0.0)),
         )
         optimiser = MuonHybridOptimizer(
             muon_groups, lr=args.lr, weight_decay=args.weight_decay
@@ -1326,10 +1380,82 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deltanet_dim", type=int, default=32)
     parser.add_argument("--deltanet_after_layer", type=int, default=1)
     parser.add_argument(
+        "--use_titans_memory",
+        action="store_true",
+        help="enable Titans/MIRAS surprise-gated neural long-term memory with momentum (v104, default off)",
+    )
+    parser.add_argument("--titans_dim", type=int, default=32)
+    parser.add_argument("--titans_after_layer", type=int, default=1)
+    parser.add_argument(
+        "--use_attn_res",
+        action="store_true",
+        help="enable cross-layer Depth Attention Residuals / AttnRes (v104, default off)",
+    )
+    parser.add_argument(
+        "--use_value_residual",
+        action="store_true",
+        help="enable cross-layer Value Residual Learning / ResFormer mixer (v105, default off)",
+    )
+    parser.add_argument(
+        "--use_short_conv",
+        action="store_true",
+        help="enable causal depthwise short-range Conv1d memory with zero-init gate (v106, default off)",
+    )
+    parser.add_argument("--short_conv_kernel", type=int, default=4)
+    parser.add_argument("--short_conv_after_layer", type=int, default=0)
+    parser.add_argument(
+        "--use_shared_expert_gate",
+        action="store_true",
+        help="enable input-conditioned zero-init modulation gate on MoE shared expert (v106, default off)",
+    )
+    parser.add_argument(
+        "--use_ufwm",
+        action="store_true",
+        help="enable Universal Fast-Weight Memory / uTTT shared cross-depth + cross-time programmer (v107, default off)",
+    )
+    parser.add_argument("--ufwm_dim", type=int, default=24)
+    parser.add_argument("--ufwm_banks", type=int, default=4)
+    parser.add_argument("--ufwm_top_k", type=int, default=2)
+    parser.add_argument("--ufwm_mode", choices=("moe", "dense"), default="moe")
+    parser.add_argument(
+        "--use_neuron_foundry",
+        action="store_true",
+        help="enable Sonapse Synthetic Neuron Foundry 6-organelle layer (v107, default off)",
+    )
+    parser.add_argument("--neuron_foundry_dim", type=int, default=32)
+    parser.add_argument("--neuron_foundry_after_layer", type=int, default=2)
+    parser.add_argument(
         "--optimizer",
         choices=("adamw", "muon_hybrid"),
         default="adamw",
         help="optimizer choice: 'adamw' (default, reproduces prior runs) or 'muon_hybrid' (Newton-Schulz Muon for 2D matrices + AdamW)",
+    )
+    parser.add_argument(
+        "--muon_polar_express",
+        action="store_true",
+        help="use Polar Express minimax per-step polynomial coefficients in MuonHybridOptimizer (v105, default off)",
+    )
+    parser.add_argument(
+        "--muon_cautious",
+        action="store_true",
+        help="enable Cautious sign-alignment masking in MuonHybridOptimizer (v104, default off)",
+    )
+    parser.add_argument(
+        "--muon_row_normalize",
+        action="store_true",
+        help="enable NorMuon row-wise RMS normalization in MuonHybridOptimizer (v104, default off)",
+    )
+    parser.add_argument(
+        "--muon_spectral_clip",
+        type=float,
+        default=0.0,
+        help="optional MuonClip spectral-norm weight clipping threshold tau > 0 (v106, default 0.0 off)",
+    )
+    parser.add_argument(
+        "--muon_mars_gamma",
+        type=float,
+        default=0.0,
+        help="optional MARS variance-reduced preconditioning factor gamma >= 0 in MuonHybridOptimizer (v107, default 0.0 off)",
     )
     # v91: the male-CNS connectome core. Off by default; every flag below is
     # inert unless --cns_core is given.
@@ -1447,6 +1573,26 @@ def build_parser() -> argparse.ArgumentParser:
     growth.add_argument(
         "--cns_dendritic_apical", action="store_true",
         help="enable active apical dendritic compartment basal-apical coincidence gating (v102, default off)",
+    )
+    growth.add_argument(
+        "--cns_neuromod_gate", action="store_true",
+        help="enable novelty-driven neuromodulatory excitability gate in ConnectomeCore (v104, default off)",
+    )
+    growth.add_argument(
+        "--cns_stdp_trace", action="store_true",
+        help="enable causal STDP temporal coincidence plasticity gate in ConnectomeCore (v105, default off)",
+    )
+    growth.add_argument(
+        "--cns_oscillatory_phase", action="store_true",
+        help="enable theta/gamma oscillatory phase-coupling excitability gate in ConnectomeCore (v106, default off)",
+    )
+    growth.add_argument(
+        "--cns_astrocyte_gate", action="store_true",
+        help="enable Astrocyte-Gated Multi-Timescale Plasticity (AGMP) Ca2+ wave gate in ConnectomeCore (v107, default off)",
+    )
+    growth.add_argument(
+        "--cns_retrograde_ephaptic", action="store_true",
+        help="enable zero-lag ephaptic LFP + retrograde messenger coupling in ConnectomeCore (v107, default off)",
     )
 
     # --- v82: the 33 MiMoMixConfig fields no trainer could previously set ---

@@ -187,6 +187,18 @@ def new_parameter_prefixes(config: Any) -> Tuple[str, ...]:
         extra.append("engram_memory.")
     if bool(getattr(config, "use_deltanet_memory", False)):
         extra.append("deltanet_memory.")
+    if bool(getattr(config, "use_titans_memory", False)):
+        extra.append("titans_memory.")
+    if bool(getattr(config, "use_attn_res", False)):
+        extra.append("attn_res.")
+    if bool(getattr(config, "use_value_residual", False)):
+        extra.append("value_residual.")
+    if bool(getattr(config, "use_short_conv", False)):
+        extra.append("short_conv.")
+    if bool(getattr(config, "use_neuron_foundry", False)):
+        extra.append("neuron_foundry.")
+    if bool(getattr(config, "use_ufwm", False)):
+        extra.append("ufwm.")
     return NEW_PARAMETER_PREFIXES + tuple(extra)
 
 
@@ -465,6 +477,20 @@ def load_initial_weights(
             return "engram_memory"
         if key.startswith("deltanet_memory.") and bool(getattr(model.config, "use_deltanet_memory", False)):
             return "deltanet_memory"
+        if key.startswith("titans_memory.") and bool(getattr(model.config, "use_titans_memory", False)):
+            return "titans_memory"
+        if key.startswith("attn_res.") and bool(getattr(model.config, "use_attn_res", False)):
+            return "attn_res"
+        if key.startswith("value_residual.") and bool(getattr(model.config, "use_value_residual", False)):
+            return "value_residual"
+        if key.startswith("short_conv.") and bool(getattr(model.config, "use_short_conv", False)):
+            return "short_conv"
+        if key.startswith("neuron_foundry.") and bool(getattr(model.config, "use_neuron_foundry", False)):
+            return "neuron_foundry"
+        if key.startswith("ufwm.") and bool(getattr(model.config, "use_ufwm", False)):
+            return "ufwm"
+        if ".mlp.shared_expert_gate." in key and bool(getattr(model.config, "use_shared_expert_gate", False)):
+            return "shared_expert_gate"
         block = re.match(r"layers\.(\d+)\.", key)
         if block and grow_layers > 0 and int(block.group(1)) >= first_new_layer:
             return "grown_layers"
@@ -1565,6 +1591,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             weight_decay=args.weight_decay,
             momentum=float(getattr(args, "muon_momentum", 0.95)),
             ns_steps=int(getattr(args, "muon_ns_steps", 5)),
+            cautious_mask=bool(getattr(args, "muon_cautious", False)),
+            row_normalize=bool(getattr(args, "muon_row_normalize", False)),
+            polar_express=bool(getattr(args, "muon_polar_express", False)),
+            spectral_clip_tau=float(getattr(args, "muon_spectral_clip", 0.0)),
+            mars_gamma=float(getattr(args, "muon_mars_gamma", 0.0)),
         )
         optimiser = MuonHybridOptimizer(
             muon_groups,
