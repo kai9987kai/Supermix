@@ -278,13 +278,13 @@
     },
     {
       "path": "source/mimomix_controller.py",
-      "sha256": "021213c839f7dd07e1b625d22bf967146d74ed7289733a131745eb9c0ff301f1",
-      "size_bytes": 20031
+      "sha256": "17629b1dcdbf065bb7c5e3d6a4632ffc7e0fd210e6df1fb7492b9cd1e6d0d4c2",
+      "size_bytes": 21900
     },
     {
       "path": "source/mimomix_core.py",
-      "sha256": "4d3fcbb09dd21889eb104a09ef0856287fe281a707e68c2572fd88130d8df310",
-      "size_bytes": 237815
+      "sha256": "bae3acde6acaf6a0a9807ab1d45b1ae3c2eb976eb12463f1e051370eb2fb331f",
+      "size_bytes": 334705
     },
     {
       "path": "source/mimomix_observatory.py",
@@ -328,8 +328,8 @@
     },
     {
       "path": "source/model_variants.py",
-      "sha256": "d78fe95da64de88920398ae809302fae7c5d83e4aaf01ce2fc1b59ae361d481f",
-      "size_bytes": 399431
+      "sha256": "9a6a5ef53bba980e2b28e7e42d33bb7a11e23fed3c5d07290328809994d581af",
+      "size_bytes": 410234
     },
     {
       "path": "source/multimodel_catalog.py",
@@ -448,8 +448,8 @@
     },
     {
       "path": "source/nexus_solver.py",
-      "sha256": "ec172ddca361b972b45211bca547287cb4639b4d4e5c247f81083b21469157b5",
-      "size_bytes": 143426
+      "sha256": "c2d47d75edd4cbfdfd102c3006ed2087ffd37f5e9367fc440e0ed2b2e76dd09f",
+      "size_bytes": 228577
     },
     {
       "path": "source/nexus_speculative_bidirectional.py",
@@ -597,6 +597,11 @@
       "size_bytes": 15470
     },
     {
+      "path": "source/sonapse_neuron_foundry.py",
+      "sha256": "b42b68256acc456f8df359e8a9f264f46cd7a98091ed56e389fd67754869d0eb",
+      "size_bytes": 22132
+    },
+    {
       "path": "source/supermix_multimodel_web_app.py",
       "sha256": "753b19b4a2dd058a5b29f216b10a95ffe2bfffbdd45a5d63cb7b7c089084227e",
       "size_bytes": 181535
@@ -693,8 +698,8 @@
     },
     {
       "path": "runtime_python/model_variants.py",
-      "sha256": "d78fe95da64de88920398ae809302fae7c5d83e4aaf01ce2fc1b59ae361d481f",
-      "size_bytes": 399431
+      "sha256": "9a6a5ef53bba980e2b28e7e42d33bb7a11e23fed3c5d07290328809994d581af",
+      "size_bytes": 410234
     },
     {
       "path": "runtime_python/run.py",

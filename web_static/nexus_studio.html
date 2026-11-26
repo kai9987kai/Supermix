@@ -1189,6 +1189,62 @@ total 42</textarea>
           <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV102CarrierAtlas()">Carrier Atlas</button>
         </div>
       </div>
+      <div class="section">
+        <h2 class="v103-heading">7. v104 Evolution Suite (Titans / Conformal / PRM)</h2>
+        <label for="v104ConformalAlpha">Conformal Alpha (miscoverage)</label>
+        <input type="number" id="v104ConformalAlpha" value="0.15" step="0.05" min="0.05" max="0.50">
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button type="button" class="btn-primary" style="flex:1;justify-content:center;" onclick="runV104ConformalRoute()">Conformal Route</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV104CircuitTrace()">Circuit Trace</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV104GraphConsolidate()">Graph Revise</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV104ProcessAudit()">PRM Audit</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV104ParetoTune()">Pareto Tune</button>
+        </div>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">8. v105 Hyper-Optimization Lab (Roofline / KV / Spec)</h2>
+        <label for="v105KvBudgetMb">KV Memory Budget (MB)</label>
+        <input type="number" id="v105KvBudgetMb" value="64" step="16" min="4" max="4096">
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button type="button" class="btn-primary" style="flex:1;justify-content:center;" onclick="runV105SpeculativeOptimize()">Spec Depth</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV105KVPlan()">KV Plan</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV105RooflineProfile()">Roofline</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV105CascadeRoute()">Cascade</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV105RegressionGuard()">Perf Guard</button>
+        </div>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">9. v106 Frontier Synthesis &amp; Telemetry Lab</h2>
+        <label for="v106TokenBudget">Test-Time Compute Budget (tokens)</label>
+        <input type="number" id="v106TokenBudget" value="4096" step="512" min="256" max="1000000">
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button type="button" class="btn-primary" style="flex:1;justify-content:center;" onclick="runV106TTCAllocate()">TTC Alloc</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV106SpectralDiag()">Spectral</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV106CounterfactualVerify()">SCM CF</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV106QuantPlan()">Quant Plan</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV106DriftDetect()">Drift</button>
+        </div>
+      </div>
+      <div class="section">
+        <h2 class="v103-heading">10. v107 Universal Fast-Weight &amp; Morphogenesis Lab</h2>
+        <label for="v107UfwmBanks">UFWM Fast-Weight Banks</label>
+        <input type="number" id="v107UfwmBanks" value="4" step="1" min="1" max="64">
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button type="button" class="btn-primary" style="flex:1;justify-content:center;" onclick="runV107UfwmProfile()">UFWM Profile</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV107NeuronAssay()">Neuron Foundry</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV107PlasticityOrchestrate()">BTSP+Astro</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV107AntipodeDistill()">Antipode</button>
+          <button type="button" class="btn" style="flex:1;justify-content:center;" onclick="runV107SymbiosisRetention()">Symbiosis</button>
+        </div>
+      </div>
     </div>
     <div class="main-area" style="padding:20px;overflow-y:auto;">
       <div class="analysis-note" id="v103Status" role="status" style="margin-bottom:16px;">Supermix v102/v103 Frontier Synthesis Lab: experimental memory lesion assays, Top-K SAE causal probes, fractal topology metrics, Causeway sensitivity lenses, NeuroHive dispatch, COUNTERFORM CVaR audits, and M&ouml;bius carrier decomposition (all strictly <code>answer_authority: false</code>). Live results require a running NexusMind API server.</div>
@@ -3911,6 +3967,500 @@ function runV102CarrierAtlas() {
   });
 }
 
+function runV104ConformalRoute() {
+  var alpha = parseFloat(document.getElementById('v104ConformalAlpha').value) || 0.15;
+  _v103Loading('Running v104 Split-Conformal Calibrated Router...');
+  fetch('/v1/v104/conformal_route', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ alpha: alpha })
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v104 Conformal Calibrated Router (analysis-only)</span><span>Decision: ' + esc(d.decision) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Prediction Set:</strong> ' + esc((d.prediction_set || []).join(', ') || 'empty') + ' &nbsp;|&nbsp; <strong>q_hat:</strong> ' + esc(d.q_hat) + ' &nbsp;|&nbsp; <strong>Empirical Coverage:</strong> ' + esc(d.empirical_cal_coverage) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v104 Conformal Calibrated Router complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v104 Conformal Calibrated Router');
+    _v103Announce('v104 Conformal Calibrated Router unavailable — live NexusMind API required.');
+  });
+}
+
+function runV104CircuitTrace() {
+  _v103Loading('Running v104 Mechanistic Path-Patching Circuit Tracer...');
+  fetch('/v1/v104/circuit_trace', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var rows = (d.node_attributions || []).map(function(n){
+      return '<tr><th scope="row">' + esc(n.stage) + '</th><td>' + esc(n.sufficiency_ratio) + '</td><td>' + esc(n.necessity_ratio) + '</td></tr>';
+    }).join('');
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v104 Mechanistic Circuit Tracer</span><span>Dominant: ' + esc(d.dominant_stage) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:8px;">';
+    html += '<div><strong>Minimal Circuit:</strong> ' + esc((d.minimal_circuit || []).join(' -> ')) + ' (Recovery: ' + esc(d.minimal_circuit_recovery) + ', Sparsity: ' + esc(d.circuit_sparsity) + ')</div>';
+    html += '<table class="v103-table"><caption>Stage sufficiency and necessity ratios</caption><thead><tr><th scope="col">Stage</th><th scope="col">Sufficiency</th><th scope="col">Necessity</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v104 Mechanistic Circuit Tracer complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v104 Mechanistic Circuit Tracer');
+    _v103Announce('v104 Mechanistic Circuit Tracer unavailable — live NexusMind API required.');
+  });
+}
+
+function runV104GraphConsolidate() {
+  _v103Loading('Running v104 Episodic Graph Belief Revision...');
+  fetch('/v1/v104/graph_consolidate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v104 Episodic Graph Consolidator</span><span>Conflicts Resolved: ' + esc(d.conflict_count) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Consolidated Edges:</strong> ' + esc(d.consolidated_count) + ' &nbsp;|&nbsp; <strong>Pruned:</strong> ' + esc(d.pruned_low_salience) + ' &nbsp;|&nbsp; <strong>Consistent:</strong> ' + esc(d.post_revision_consistent) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v104 Episodic Graph Consolidator complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v104 Episodic Graph Consolidator');
+    _v103Announce('v104 Episodic Graph Consolidator unavailable — live NexusMind API required.');
+  });
+}
+
+function runV104ProcessAudit() {
+  _v103Loading('Running v104 Verifiable Process Reward Auditor...');
+  fetch('/v1/v104/process_audit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v104 Verifiable Process Reward Auditor</span><span>Geo-Mean Soundness: ' + esc(d.chain_soundness_geo_mean) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Equations Audited:</strong> ' + esc(d.equations_passed) + '/' + esc(d.equations_audited) + ' passed &nbsp;|&nbsp; <strong>Weakest Step:</strong> #' + esc(d.weakest_link_step) + ' (' + esc(d.weakest_link_reward) + ')</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v104 Verifiable Process Reward Auditor complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v104 Verifiable Process Reward Auditor');
+    _v103Announce('v104 Verifiable Process Reward Auditor unavailable — live NexusMind API required.');
+  });
+}
+
+function runV104ParetoTune() {
+  _v103Loading('Computing v104 Multi-Objective Pareto Frontier...');
+  fetch('/v1/v104/pareto_tune', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var rec = d.recommendations || {};
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v104 Pareto Frontier Auto-Tuner</span><span>Hypervolume: ' + esc(d.hypervolume_2d_quality_speed) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Edge CPU:</strong> ' + esc(rec.edge_cpu) + ' &nbsp;|&nbsp; <strong>Balanced Studio:</strong> ' + esc(rec.balanced_studio) + ' &nbsp;|&nbsp; <strong>Max Rigor:</strong> ' + esc(rec.max_rigor) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v104 Pareto Frontier Auto-Tuner complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v104 Pareto Frontier Auto-Tuner');
+    _v103Announce('v104 Pareto Frontier Auto-Tuner unavailable — live NexusMind API required.');
+  });
+}
+
+function runV105SpeculativeOptimize() {
+  _v103Loading('Running v105 MTP Speculative Draft Depth Optimizer...');
+  fetch('/v1/v105/speculative_optimize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v105 Speculative Draft Optimizer (analysis-only)</span><span>Optimal Depth k*=' + esc(d.optimal_draft_depth) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Net Speedup:</strong> ' + esc(d.optimal_net_speedup) + 'x &nbsp;|&nbsp; <strong>Expected Tokens/Step:</strong> ' + esc(d.optimal_expected_tokens) + ' &nbsp;|&nbsp; <strong>Mode:</strong> ' + esc(d.recommended_mode) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v105 Speculative Draft Optimizer complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v105 Speculative Draft Optimizer');
+    _v103Announce('v105 Speculative Draft Optimizer unavailable — live NexusMind API required.');
+  });
+}
+
+function runV105KVPlan() {
+  var budget = parseFloat(document.getElementById('v105KvBudgetMb').value) || 64;
+  _v103Loading('Running v105 Hybrid KV-Cache Compression Planner...');
+  fetch('/v1/v105/kv_plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memory_budget_mb: budget })
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v105 KV-Cache Compression Planner</span><span>Decision: ' + esc(d.decision) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Recommended Scheme:</strong> ' + esc(d.recommended_scheme || 'none') + ' &nbsp;|&nbsp; <strong>Hybrid Reduction:</strong> ' + esc(d.hybrid_vs_dense_reduction_factor) + 'x &nbsp;|&nbsp; <strong>Context:</strong> ' + esc(d.seq_len) + ' tokens</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v105 KV-Cache Compression Planner complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v105 KV-Cache Compression Planner');
+    _v103Announce('v105 KV-Cache Compression Planner unavailable — live NexusMind API required.');
+  });
+}
+
+function runV105RooflineProfile() {
+  _v103Loading('Computing v105 Hardware Roofline Profile...');
+  fetch('/v1/v105/roofline_profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var pre = d.prefill || {};
+    var dec = d.decode || {};
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v105 Roofline Compute Profiler</span><span>Ridge: ' + esc(d.hardware_ridge_point_flops_per_byte) + ' FLOP/B</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Prefill:</strong> ' + esc(pre.regime) + ' (' + esc(pre.ceiling_tokens_per_sec) + ' tok/s) &nbsp;|&nbsp; <strong>Decode:</strong> ' + esc(dec.regime) + ' (' + esc(dec.ceiling_tokens_per_sec) + ' tok/s)</div>';
+    html += '<div>' + esc(d.optimization_guidance) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v105 Roofline Compute Profiler complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v105 Roofline Compute Profiler');
+    _v103Announce('v105 Roofline Compute Profiler unavailable — live NexusMind API required.');
+  });
+}
+
+function runV105CascadeRoute() {
+  _v103Loading('Optimizing v105 Multi-Tier Cascade Router...');
+  fetch('/v1/v105/cascade_route', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v105 Cascade Ensemble Router</span><span>Threshold tau=' + esc(d.optimal_threshold) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Cascade Accuracy:</strong> ' + esc(d.cascade_accuracy) + ' (+' + esc(d.accuracy_gain_over_fast) + ') &nbsp;|&nbsp; <strong>Avg Latency:</strong> ' + esc(d.avg_latency_ms) + ' ms &nbsp;|&nbsp; <strong>Saved vs Deep:</strong> ' + esc(Math.round((d.latency_saved_vs_always_deep || 0) * 100)) + '%</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v105 Cascade Ensemble Router complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v105 Cascade Ensemble Router');
+    _v103Announce('v105 Cascade Ensemble Router unavailable — live NexusMind API required.');
+  });
+}
+
+function runV105RegressionGuard() {
+  _v103Loading('Evaluating v105 Paired Statistical Regression Guard...');
+  fetch('/v1/v105/regression_guard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v105 Self-Healing Benchmark Guard</span><span>Decision: ' + esc(d.decision) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Speedup:</strong> ' + esc(d.speedup_factor) + 'x (' + esc(d.baseline_mean_ms) + ' ms &rarr; ' + esc(d.candidate_mean_ms) + ' ms) &nbsp;|&nbsp; <strong>Cohen dz:</strong> ' + esc(d.cohens_dz_speedup) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v105 Self-Healing Benchmark Guard complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v105 Self-Healing Benchmark Guard');
+    _v103Announce('v105 Self-Healing Benchmark Guard unavailable — live NexusMind API required.');
+  });
+}
+
+function runV106TTCAllocate() {
+  var budget = parseInt(document.getElementById('v106TokenBudget').value, 10) || 4096;
+  _v103Loading('Optimizing v106 Test-Time Compute Allocation...');
+  fetch('/v1/v106/ttc_allocate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ total_token_budget: budget })
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var opt = d.optimal_strategy || {};
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v106 Test-Time Compute Allocator (analysis-only)</span><span>Regime: ' + esc(d.recommended_regime) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Optimal:</strong> N=' + esc(opt.n_samples) + ' samples, R=' + esc(opt.refinement_steps) + ' refinements, Verifier=' + esc(opt.use_verifier) + ' &nbsp;|&nbsp; <strong>Expected Pass:</strong> ' + esc(opt.expected_pass_prob) + ' (+' + esc(d.absolute_pass_gain) + ')</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v106 Test-Time Compute Allocator complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v106 Test-Time Compute Allocator');
+    _v103Announce('v106 Test-Time Compute Allocator unavailable — live NexusMind API required.');
+  });
+}
+
+function runV106SpectralDiag() {
+  _v103Loading('Running v106 Heavy-Tailed Spectral Weight Diagnostics...');
+  fetch('/v1/v106/spectral_diagnostics', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v106 Spectral Weight Diagnostics</span><span>Status: ' + esc(d.health_status) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Power-Law &alpha;:</strong> ' + esc(d.power_law_alpha) + ' &nbsp;|&nbsp; <strong>Stable Rank:</strong> ' + esc(d.stable_rank) + ' &nbsp;|&nbsp; <strong>Effective Rank:</strong> ' + esc(d.effective_rank) + ' &nbsp;|&nbsp; <strong>MP Spikes:</strong> ' + esc(d.mp_spike_count) + '</div>';
+    html += '<div>' + esc(d.guidance) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v106 Spectral Weight Diagnostics complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v106 Spectral Weight Diagnostics');
+    _v103Announce('v106 Spectral Weight Diagnostics unavailable — live NexusMind API required.');
+  });
+}
+
+function runV106CounterfactualVerify() {
+  _v103Loading('Executing v106 Twin-Network SCM Counterfactual Verifier...');
+  fetch('/v1/v106/counterfactual_verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v106 Causal Counterfactual Verifier</span><span>&Delta;Y: ' + esc(d.counterfactual_delta) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Observed Y:</strong> ' + esc(d.observed_outcome) + ' &rarr; <strong>Counterfactual Y:</strong> ' + esc(d.counterfactual_outcome) + ' &nbsp;|&nbsp; <strong>NDE/NIE:</strong> ' + esc(d.natural_direct_effect) + ' / ' + esc(d.natural_indirect_effect) + ' &nbsp;|&nbsp; <strong>E-Value:</strong> ' + esc(d.e_value_confounding_bound) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v106 Causal Counterfactual Verifier complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v106 Causal Counterfactual Verifier');
+    _v103Announce('v106 Causal Counterfactual Verifier unavailable — live NexusMind API required.');
+  });
+}
+
+function runV106QuantPlan() {
+  _v103Loading('Solving v106 Mixed-Precision Quantization Allocation...');
+  fetch('/v1/v106/quant_plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v106 Adaptive Quantization Planner</span><span>Avg Bits: ' + esc(d.achieved_avg_bits) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Compression vs FP16:</strong> ' + esc(d.compression_vs_fp16) + 'x &nbsp;|&nbsp; <strong>Distortion Reduction vs Uniform:</strong> ' + esc(Math.round((d.distortion_reduction_vs_uniform || 0) * 100)) + '%</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v106 Adaptive Quantization Planner complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v106 Adaptive Quantization Planner');
+    _v103Announce('v106 Adaptive Quantization Planner unavailable — live NexusMind API required.');
+  });
+}
+
+function runV106DriftDetect() {
+  _v103Loading('Running v106 CUSUM + Page-Hinkley + JSD Drift Detector...');
+  fetch('/v1/v106/drift_detect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v106 Telemetry Drift Detector</span><span>Severity: ' + esc(d.severity) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Drift Detected:</strong> ' + esc(d.drift_detected) + ' &nbsp;|&nbsp; <strong>Change Point:</strong> #' + esc(d.change_point_index) + ' (' + esc(d.shift_direction) + ') &nbsp;|&nbsp; <strong>JSD:</strong> ' + esc(d.histogram_jsd_bits) + ' bits</div>';
+    html += '<div>' + esc(d.recommendation) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v106 Telemetry Drift Detector complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v106 Telemetry Drift Detector');
+    _v103Announce('v106 Telemetry Drift Detector unavailable — live NexusMind API required.');
+  });
+}
+
+function runV107UfwmProfile() {
+  var banks = parseInt(document.getElementById('v107UfwmBanks').value, 10) || 4;
+  _v103Loading('Profiling v107 Universal Fast-Weight Memory (uTTT)...');
+  fetch('/v1/v107/ufwm_profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ n_banks: banks, top_k: Math.min(2, banks) })
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v107 Universal Fast-Weight Profiler (analysis-only)</span><span>Regime: ' + esc(d.regime) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Sharing Ratio:</strong> ' + esc(d.parameter_sharing_ratio) + 'x &nbsp;|&nbsp; <strong>KV vs UFWM:</strong> ' + esc(d.kv_vs_ufwm_compression_ratio) + 'x &nbsp;|&nbsp; <strong>SIR:</strong> ' + esc(d.estimated_sir_db) + ' dB</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v107 UFWM profile complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v107 Universal Fast-Weight Profiler');
+    _v103Announce('v107 Universal Fast-Weight Profiler unavailable — live NexusMind API required.');
+  });
+}
+
+function runV107PlasticityOrchestrate() {
+  _v103Loading('Simulating v107 BTSP + MICrONS Spine-Apparatus + Astrocyte Plasticity...');
+  fetch('/v1/v107/plasticity_orchestrate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v107 Connectome Plasticity Orchestrator</span><span>Dale Law: ' + esc(d.dale_law_preserved) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Nascent Spines:</strong> ' + esc(d.nascent_count) + ' &nbsp;|&nbsp; <strong>Mature Spine-Apparatus:</strong> ' + esc(d.mature_spine_apparatus_count) + ' &nbsp;|&nbsp; <strong>Astro Gate:</strong> ' + esc(d.astrocyte_gliotransmitter_gate) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v107 Connectome Plasticity Orchestrator complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v107 Connectome Plasticity Orchestrator');
+    _v103Announce('v107 Connectome Plasticity Orchestrator unavailable — live NexusMind API required.');
+  });
+}
+
+function runV107NeuronAssay() {
+  _v103Loading('Assaying v107 Synthetic Neuron Foundry (6 Organelle Families)...');
+  fetch('/v1/v107/neuron_assay', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v107 Synthetic Neuron Foundry Assay</span><span>Dominant: ' + esc(d.dominant_family) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Expected Metabolic Cost:</strong> ' + esc(d.expected_metabolic_cost) + ' / ' + esc(d.metabolic_budget) + ' ATP</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v107 Synthetic Neuron Foundry Assay complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v107 Synthetic Neuron Foundry Assay');
+    _v103Announce('v107 Synthetic Neuron Foundry Assay unavailable — live NexusMind API required.');
+  });
+}
+
+function runV107AntipodeDistill() {
+  _v103Loading('Distilling v107 SONAPSE-ANTIPODE Failure Curriculum...');
+  fetch('/v1/v107/antipode_distill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent2);">';
+    html += '<div class="step-header"><span class="step-label">v107 Antipode Failure Distiller</span><span>Primary: ' + esc(d.primary_antipode_category) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>Records:</strong> ' + esc(d.total_records) + ' &nbsp;|&nbsp; <strong>Clusters:</strong> ' + esc(d.cluster_count) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v107 Antipode Failure Distiller complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v107 Antipode Failure Distiller');
+    _v103Announce('v107 Antipode Failure Distiller unavailable — live NexusMind API required.');
+  });
+}
+
+function runV107SymbiosisRetention() {
+  _v103Loading('Auditing v107 SONAPSE-SYMBIOSIS Continual EWC Retention...');
+  fetch('/v1/v107/symbiosis_retention', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  .then(function(r){ if(!r.ok) throw new Error('API error'); return r.json(); })
+  .then(function(d){
+    var html = '<div class="step-card" style="border-color:var(--accent);">';
+    html += '<div class="step-header"><span class="step-label">v107 Symbiosis Continual Retention Auditor</span><span>Grade: ' + esc(d.retention_grade) + '</span></div>';
+    html += '<div class="step-body" style="display:flex;flex-direction:column;gap:6px;">';
+    html += '<div><strong>EWC Penalty:</strong> ' + esc(d.ewc_quadratic_penalty) + ' &nbsp;|&nbsp; <strong>Forgetting Δ:</strong> ' + esc(d.forgetting_loss_delta) + ' &nbsp;|&nbsp; <strong>Plasticity Gain:</strong> ' + esc(d.new_task_plasticity_gain) + '</div>';
+    html += '<div style="font-size:11px;color:var(--dim);">Receipt SHA-256: <code>' + esc((d.receipt || {}).receipt_sha256) + '</code></div>';
+    html += '</div></div>';
+    document.getElementById('v103Output').innerHTML = html;
+    _v103Announce('v107 Symbiosis Continual Retention Auditor complete (analysis-only).');
+  })
+  .catch(function(){
+    renderUnavailable('v103Output', 'v107 Symbiosis Continual Retention Auditor');
+    _v103Announce('v107 Symbiosis Continual Retention Auditor unavailable — live NexusMind API required.');
+  });
+}
 
 </script>
 </body>

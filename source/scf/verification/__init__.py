@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import re
 import sys
+from collections import OrderedDict
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE_DIR = Path(__file__).resolve().parents[2]
@@ -274,6 +275,22 @@ class ConnectomeAtlasVerifier:
         self._post: Optional[Any] = None
         self._weight: Optional[Any] = None
         self._type_node_ids: Dict[int, list] = {}
+        self._pair_synapse_index: Optional[Dict[Tuple[int, int], int]] = None
+
+    def _ensure_pair_index(self) -> Dict[Tuple[int, int], int]:
+        """Lazily build an O(1) (pre_type_idx, post_type_idx) -> total_synapses map."""
+        if self._pair_synapse_index is not None:
+            return self._pair_synapse_index
+        index: Dict[Tuple[int, int], int] = {}
+        if self._pre is not None and self._post is not None and self._weight is not None and self._node_types is not None:
+            pre_types = self._node_types[self._pre].tolist()
+            post_types = self._node_types[self._post].tolist()
+            weights = self._weight.tolist()
+            for pt, q_t, w in zip(pre_types, post_types, weights):
+                key = (int(pt), int(q_t))
+                index[key] = index.get(key, 0) + int(w)
+        self._pair_synapse_index = index
+        return index
 
     def _ensure_loaded(self) -> bool:
         if self._loaded:
@@ -321,12 +338,9 @@ class ConnectomeAtlasVerifier:
             if m:
                 pre_name, post_name = m.group("pre"), m.group("post")
                 if pre_name in self._type_to_idx and post_name in self._type_to_idx:
-                    import numpy as np
-
-                    pre_nodes = np.asarray(self._type_node_ids.get(self._type_to_idx[pre_name], []), dtype=np.int32)
-                    post_nodes = np.asarray(self._type_node_ids.get(self._type_to_idx[post_name], []), dtype=np.int32)
-                    mask = np.isin(self._pre, pre_nodes) & np.isin(self._post, post_nodes)
-                    val = int(self._weight[mask].sum())
+                    pair_idx = self._ensure_pair_index()
+                    key = (self._type_to_idx[pre_name], self._type_to_idx[post_name])
+                    val = int(pair_idx.get(key, 0))
                     return {
                         "solved": True,
                         "task": "cns_pair_synapses",
@@ -374,8 +388,13 @@ class ConnectomeAtlasVerifier:
 class SCFVerificationGate:
     """Runs independent deterministic solver, checker, grounding, and connectome atlas checks."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, cache_size: int = 256) -> None:
         self.connectome_atlas = ConnectomeAtlasVerifier()
+        self._cache_size = max(0, int(cache_size))
+        self._verify_cache: "OrderedDict[Tuple[str, Optional[str], str], Dict[str, Any]]" = OrderedDict()
+
+    def clear_cache(self) -> None:
+        self._verify_cache.clear()
 
     def verify(
         self,
@@ -384,6 +403,11 @@ class SCFVerificationGate:
         candidate_answer: str = "",
         normalised_query: Optional[str] = None,
     ) -> Dict[str, Any]:
+        cache_key = (str(query), None if normalised_query is None else str(normalised_query), str(candidate_answer))
+        if self._cache_size > 0 and cache_key in self._verify_cache:
+            self._verify_cache.move_to_end(cache_key)
+            return dict(self._verify_cache[cache_key])
+
         import answer_check as ac
         import grounding_runtime as gr
         import nexus_independent_checker as nic
@@ -391,7 +415,7 @@ class SCFVerificationGate:
         import nexus_solver as ns
         import science_plan as sp
 
-        solver = ns.NexusSolver()
+        solver = getattr(ns, "_DEFAULT_SOLVER", None) or ns.NexusSolver()
         probe_query = normalised_query or query
         solver_res = solver.solve(probe_query)
         if (solver_res is None or not solver_res.solved) and normalised_query and normalised_query != query:
@@ -521,7 +545,7 @@ class SCFVerificationGate:
             if chk is not None:
                 advisory_reply_check = {**chk.to_dict(), "verifier_authority": False}
 
-        return {
+        payload = {
             "verified": bool(verified),
             "verified_answer": verified_answer,
             "verifier_source": verifier_source,
@@ -535,3 +559,9 @@ class SCFVerificationGate:
             },
             "advisory_reply_check": advisory_reply_check,
         }
+        if self._cache_size > 0:
+            self._verify_cache[cache_key] = dict(payload)
+            self._verify_cache.move_to_end(cache_key)
+            while len(self._verify_cache) > self._cache_size:
+                self._verify_cache.popitem(last=False)
+        return payload

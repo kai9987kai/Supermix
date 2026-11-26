@@ -13,9 +13,21 @@ if str(SOURCE_DIR) not in sys.path:
 
 __all__ = ["SCFCollectiveOrchestrator"]
 
+_STEP_ARITH_RE = re.compile(
+    r"(-?\d+(?:\.\d+)?)\s*([+\-xX*/^])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)"
+)
+_STEP_PCT_RE = re.compile(
+    r"(-?\d+(?:\.\d+)?)\s*%\s+of\s+(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)",
+    re.I,
+)
+
 
 class SCFCollectiveOrchestrator:
     """Generates, critiques, and fuses independent candidate solutions with geometry telemetry."""
+
+    def __init__(self) -> None:
+        self._tether_engine: Optional[Any] = None
+        self._faultline_engine: Optional[Any] = None
 
     def gather_and_synthesize(
         self,
@@ -74,8 +86,7 @@ class SCFCollectiveOrchestrator:
             failures: List[str] = []
 
             # 1. Binary arithmetic steps: a op b = c
-            step_re = re.compile(r"(-?\d+(?:\.\d+)?)\s*([+\-xX*/^])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)")
-            for a_s, op_s, b_s, c_s in step_re.findall(text):
+            for a_s, op_s, b_s, c_s in _STEP_ARITH_RE.findall(text):
                 try:
                     a_v, b_v, c_v = float(a_s), float(b_s), float(c_s)
                 except ValueError:
@@ -105,8 +116,7 @@ class SCFCollectiveOrchestrator:
                     failures.append(f"{a_s} {op_s} {b_s} = {c_s} (expected {exp_v:.6g})")
 
             # 2. Inline percentage steps: p% of b = c
-            pct_re = re.compile(r"(-?\d+(?:\.\d+)?)\s*%\s+of\s+(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)", re.I)
-            for p_s, b_s, c_s in pct_re.findall(text):
+            for p_s, b_s, c_s in _STEP_PCT_RE.findall(text):
                 try:
                     exp_v = (float(p_s) * float(b_s)) / 100.0
                     c_v = float(c_s)
@@ -206,9 +216,13 @@ class SCFCollectiveOrchestrator:
         # Riemannian Fisher-Rao geometry (TetherForensicsEngine) & Faultline panel diversity
         ensemble_forensics: Dict[str, Any] = {"answer_authority": False}
         try:
-            import nexus_v95_ecosystem as v95
+            if self._tether_engine is None:
+                import nexus_v95_ecosystem as v95
 
-            tether = v95.TetherForensicsEngine()
+                self._tether_engine = v95.TetherForensicsEngine()
+                self._faultline_engine = v95.FaultlineEnsembleEngine()
+
+            tether = self._tether_engine
             probs = (
                 expert_probs
                 if expert_probs is not None
@@ -222,8 +236,8 @@ class SCFCollectiveOrchestrator:
             )
             if probs:
                 ensemble_forensics["tether"] = tether.analyze(probs)
-            if failure_matrix is not None:
-                ensemble_forensics["faultline"] = v95.FaultlineEnsembleEngine().select_panel(
+            if failure_matrix is not None and self._faultline_engine is not None:
+                ensemble_forensics["faultline"] = self._faultline_engine.select_panel(
                     failure_matrix
                 )
         except Exception as exc:

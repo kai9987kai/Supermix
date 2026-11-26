@@ -50,6 +50,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+try:
+    from sonapse_neuron_foundry import SonapseNeuronFoundryLayer
+except ImportError:  # pragma: no cover
+    from .sonapse_neuron_foundry import SonapseNeuronFoundryLayer  # type: ignore[no-redef]
+
 
 __all__ = [
     "MiMoMixConfig",
@@ -66,6 +71,12 @@ __all__ = [
     "ManifoldHyperConnection",
     "EngramConditionalMemory",
     "GatedDeltaNetMemory",
+    "TitansSurpriseMemory",
+    "DepthAttentionResidual",
+    "ValueResidualMixer",
+    "CausalShortConvMemory",
+    "UniversalFastWeightMemory",
+    "SonapseNeuronFoundryLayer",
     "MultiTokenPredictionModule",
     "RecursiveThinkingCore",
     "MultimodalProjectionHead",
@@ -250,6 +261,59 @@ class MiMoMixConfig:
     deltanet_dim: int = 32
     deltanet_after_layer: int = 1
 
+    # --- v104 Titans / MIRAS surprise-gated neural long-term memory -------
+    #: Causal associative matrix memory M_t with surprise-modulated momentum
+    #: trace S_t driven by prediction error ||M_{t-1} k_t - v_t|| (v104,
+    #: default off, zero-init residual gate, bit-exact KV-cache & MTP parity).
+    use_titans_memory: bool = False
+    titans_dim: int = 32
+    titans_after_layer: int = 1
+
+    # --- v104 Cross-layer Depth Attention Residuals (AttnRes) -------------
+    #: Per-layer learned depth-wise softmax attention over prior layer
+    #: representations with zero-initialized residual gates (v104, default off,
+    #: token-local along depth so KV-cache & MTP parity hold automatically).
+    use_attn_res: bool = False
+
+    # --- v105 Cross-layer Value Residual Learning (ResFormer) -------------
+    #: Per-layer per-KV-head learnable residual gate mixing layer-0's value
+    #: projection into deeper attention layers before KV caching (v105, default
+    #: off, exact zero-init birth identity, zero extra KV-cache slots, automatic
+    #: bit-exact KV-cache & MTP speculative parity).
+    use_value_residual: bool = False
+
+    # --- v106 Causal Short-Range Depthwise Conv Memory & Shared-Expert Gate
+    #: Mamba-2 / Qwen3-Next style causal depthwise Conv1d short-range memory
+    #: with input-conditioned gating and zero-initialized residual gate (v106,
+    #: default off, bit-exact birth identity, exact KV-cache & MTP parity).
+    use_short_conv: bool = False
+    short_conv_kernel: int = 4
+    short_conv_after_layer: int = 0
+    #: Qwen-MoE style input-conditioned residual modulation gate on the MoE
+    #: shared expert: ``(1 + tanh(W_g x)) * shared_expert(x)`` with zero-init
+    #: weight for exact birth identity (v106, default off).
+    use_shared_expert_gate: bool = False
+
+    # --- v107 Universal Fast-Weight Memory (uTTT) & Synthetic Neuron Foundry
+    #: Universal Fast-Weight Memory (grounded in Universal Test-Time Training,
+    #: Cai et al. Oct 2026, arXiv:2610.05484): a single shared multi-bank
+    #: fast-weight programmer recurring across BOTH depth (layers 0..L-1) and
+    #: causal time (tokens 0..T-1) via uTTT-MoE Top-K bank routing or uTTT-Dense,
+    #: with zero-init depth/temporal gates for exact birth identity and full
+    #: KV-cache + MTP speculative rollback parity (v107, default off).
+    use_ufwm: bool = False
+    ufwm_dim: int = 24
+    ufwm_banks: int = 4
+    ufwm_top_k: int = 2
+    ufwm_mode: str = "moe"  # "moe" | "dense"
+    #: Sonapse Synthetic Neuron Foundry causal layer fusing 6 new organelle-level
+    #: synthetic neuron families (Soliton axon, MICrONS Ca2+ spine apparatus,
+    #: Astrocytic tripartite, Ephaptic LFP field, Retrograde endocannabinoid,
+    #: Fast-weight cytoskeletal engram) with zero-init residual gate (v107, default off).
+    use_neuron_foundry: bool = False
+    neuron_foundry_dim: int = 32
+    neuron_foundry_after_layer: int = 2
+
     # --- differential attention (Microsoft ICLR 2025) ---------------------
     use_differential_attention: bool = False
     differential_lambda_init: float = 0.8
@@ -374,6 +438,26 @@ class MiMoMixConfig:
     #: integrating recurrent feedback separately from sensory drive (v102,
     #: default off, exact identity at init, mitosis-safe).
     cns_dendritic_apical: bool = False
+    #: Novelty-driven neuromodulatory excitability gate (ACh/DA-inspired)
+    #: scaling module rates by prediction-surprise magnitude (v104, default off,
+    #: exact identity at init, Dale-sign & mitosis-safe).
+    cns_neuromod_gate: bool = False
+    #: Causal Spike-Timing-Dependent Plasticity (STDP) modulation rewarding
+    #: pre-to-post rate transitions across recurrent/temporal steps (v105,
+    #: default off, exact identity at init, Dale-sign & mitosis-safe).
+    cns_stdp_trace: bool = False
+    #: Theta/gamma oscillatory phase-coupling excitability modulation across
+    #: recurrent micro-steps with zero-init amplitude (v106, default off,
+    #: exact birth identity, Dale-sign & mitosis-safe).
+    cns_oscillatory_phase: bool = False
+    #: Astrocyte-Gated Multi-Timescale Plasticity (AGMP): slow astrocytic Ca2+
+    #: wave and gliotransmitter gate modulating connectome excitability under
+    #: novelty bursts with zero-init strength (v107, default off, mitosis-safe).
+    cns_astrocyte_gate: bool = False
+    #: Zero-lag extracellular local field potential (ephaptic) + post-to-pre
+    #: retrograde messenger modulation across connectome modules with zero-init
+    #: strengths (v107, default off, Dale-sign & mitosis-safe).
+    cns_retrograde_ephaptic: bool = False
 
     # --- v93 MoE expert slots ---------------------------------------------
     #: Dead expert slots per MoE layer, appended after ``n_routed_experts``.
@@ -496,6 +580,34 @@ class MiMoMixConfig:
         if self.use_deltanet_memory and not (0 <= int(self.deltanet_after_layer) < int(self.n_layers)):
             raise ValueError(
                 f"deltanet_after_layer {self.deltanet_after_layer} out of range for n_layers={self.n_layers}"
+            )
+        if int(self.titans_dim) < 2:
+            raise ValueError("titans_dim must be >= 2")
+        if self.use_titans_memory and not (0 <= int(self.titans_after_layer) < int(self.n_layers)):
+            raise ValueError(
+                f"titans_after_layer {self.titans_after_layer} out of range for n_layers={self.n_layers}"
+            )
+        if int(self.short_conv_kernel) < 2:
+            raise ValueError("short_conv_kernel must be >= 2")
+        if self.use_short_conv and not (0 <= int(self.short_conv_after_layer) < int(self.n_layers)):
+            raise ValueError(
+                f"short_conv_after_layer {self.short_conv_after_layer} out of range for n_layers={self.n_layers}"
+            )
+        if int(self.ufwm_dim) < 2:
+            raise ValueError("ufwm_dim must be >= 2")
+        if int(self.ufwm_banks) < 1:
+            raise ValueError("ufwm_banks must be >= 1")
+        if self.ufwm_mode not in {"moe", "dense"}:
+            raise ValueError(
+                f"unknown ufwm_mode: {self.ufwm_mode!r} (expected 'moe' or 'dense')"
+            )
+        if self.ufwm_mode == "moe" and not (1 <= int(self.ufwm_top_k) <= int(self.ufwm_banks)):
+            raise ValueError("ufwm_top_k must be in [1, ufwm_banks] when ufwm_mode='moe'")
+        if int(self.neuron_foundry_dim) < 4:
+            raise ValueError("neuron_foundry_dim must be >= 4")
+        if self.use_neuron_foundry and not (0 <= int(self.neuron_foundry_after_layer) < int(self.n_layers)):
+            raise ValueError(
+                f"neuron_foundry_after_layer {self.neuron_foundry_after_layer} out of range for n_layers={self.n_layers}"
             )
         if int(self.cns_spare_nodes) < 0:
             raise ValueError("cns_spare_nodes must be >= 0")
@@ -712,6 +824,12 @@ class RMSNorm(nn.Module):
         self.eps = float(eps)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if (
+            x.dtype == torch.float32
+            and self.weight.dtype == torch.float32
+            and hasattr(F, "rms_norm")
+        ):
+            return F.rms_norm(x, (x.shape[-1],), self.weight, self.eps)
         dtype = x.dtype
         x = x.float()
         variance = x.pow(2).mean(dim=-1, keepdim=True)
@@ -817,9 +935,77 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.attention_scaling = float(attention_scaling)
         self.effective_base = float(base)
+        self._cos_cache: Optional[torch.Tensor] = None
+        self._sin_cache: Optional[torch.Tensor] = None
+        self._pos_long_cache: Optional[torch.Tensor] = None
+        self._cache_device: Optional[torch.device] = None
+
+    def _ensure_cache(self, needed: int, device: torch.device) -> None:
+        if (
+            self._cos_cache is not None
+            and self._sin_cache is not None
+            and self._pos_long_cache is not None
+            and self._cache_device == device
+            and self._cos_cache.shape[0] >= needed
+        ):
+            return
+        size = max(int(needed), int(getattr(self.config, "max_position_embeddings", 256)), 256)
+        # Round up to next power-of-two multiple of 256 to amortize growth
+        size = ((size + 255) // 256) * 256
+        pos_long = torch.arange(size, device=device, dtype=torch.long)
+        pos = pos_long.to(dtype=torch.float32)
+        freqs = pos.unsqueeze(-1) * self.inv_freq.to(device=device).unsqueeze(0)
+        emb = torch.cat([freqs, freqs], dim=-1)
+        self._cos_cache = emb.cos()
+        self._sin_cache = emb.sin()
+        self._pos_long_cache = pos_long
+        self._cache_device = device
+
+    def position_range(self, start: int, length: int, device: torch.device) -> torch.Tensor:
+        """Zero-copy cached ``torch.long`` slice for ``arange(start, start + length)``."""
+        s = int(start)
+        n = int(length)
+        if s >= 0 and n >= 0:
+            self._ensure_cache(s + n, device)
+            assert self._pos_long_cache is not None
+            return self._pos_long_cache[s : s + n]
+        return torch.arange(s, s + n, device=device, dtype=torch.long)
+
+    def forward_range(
+        self, start: int, length: int, device: torch.device
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Zero-copy contiguous slice for ``arange(start, start + length)``."""
+        s = int(start)
+        n = int(length)
+        if s >= 0 and n >= 0:
+            self._ensure_cache(s + n, device)
+            assert self._cos_cache is not None and self._sin_cache is not None
+            return self._cos_cache[s : s + n], self._sin_cache[s : s + n]
+        positions = torch.arange(s, s + n, device=device)
+        return self.forward(positions)
 
     def forward(self, positions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """``positions`` is ``(T,)`` -> ``(cos, sin)`` each ``(T, rotary_dim)``."""
+        if (
+            positions.ndim == 1
+            and positions.numel() > 0
+            and not positions.is_floating_point()
+        ):
+            n = int(positions.shape[0])
+            if n == 1:
+                p0 = int(positions[0].item())
+                if p0 >= 0:
+                    self._ensure_cache(p0 + 1, positions.device)
+                    assert self._cos_cache is not None and self._sin_cache is not None
+                    return self._cos_cache[p0 : p0 + 1], self._sin_cache[p0 : p0 + 1]
+            else:
+                p_min = int(positions.min().item())
+                if p_min >= 0:
+                    p_max = int(positions.max().item())
+                    self._ensure_cache(p_max + 1, positions.device)
+                    assert self._cos_cache is not None and self._sin_cache is not None
+                    idx = positions.to(dtype=torch.long)
+                    return self._cos_cache.index_select(0, idx), self._sin_cache.index_select(0, idx)
 
         freqs = positions.float().unsqueeze(-1) * self.inv_freq.unsqueeze(0)
         emb = torch.cat([freqs, freqs], dim=-1)
@@ -985,6 +1171,7 @@ class HybridAttention(nn.Module):
             self.register_parameter("sink", None)
 
         self.register_buffer("last_sink_mass", torch.zeros(1), persistent=False)
+        self.register_buffer("_zero_sink", torch.zeros(1), persistent=False)
 
     def cache_span(self, slack: int = 0) -> Optional[int]:
         """How many past keys this layer must retain, or ``None`` for all.
@@ -1018,6 +1205,10 @@ class HybridAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         cache_slack: int = 0,
+        value_residual_v0: Optional[torch.Tensor] = None,
+        value_residual_gate: Optional[torch.Tensor] = None,
+        capture_v0: Optional[List[torch.Tensor]] = None,
+        contiguous_causal: bool = False,
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         """Returns ``(output, present_kv)``.
 
@@ -1033,6 +1224,17 @@ class HybridAttention(nn.Module):
         k = self.k_proj(hidden_states).view(bsz, q_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(hidden_states).view(bsz, q_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
 
+        if capture_v0 is not None:
+            capture_v0.append(v)
+        elif (
+            value_residual_v0 is not None
+            and value_residual_gate is not None
+            and value_residual_v0.shape == v.shape
+        ):
+            v = v + value_residual_gate.view(1, self.n_kv_heads, 1, 1).to(v.dtype) * (
+                value_residual_v0.to(v.dtype) - v
+            )
+
         if self.q_norm is not None:
             # OLMo 2 / Gemma 3 / Qwen3 placement: normalise the per-head q and k
             # *before* the rotary, so the rotation still acts on unit-scale
@@ -1044,12 +1246,11 @@ class HybridAttention(nn.Module):
         q = apply_rotary(q, q_cos, q_sin)
         k = apply_rotary(k, q_cos, q_sin)
 
-        if past_kv is not None and past_kv[0].numel() > 0:
+        has_past = past_kv is not None and past_kv[0].numel() > 0
+        if has_past:
+            assert past_kv is not None
             k = torch.cat([past_kv[0], k], dim=2)
             v = torch.cat([past_kv[1], v], dim=2)
-            all_key_positions = torch.cat([key_positions, query_positions], dim=0)
-        else:
-            all_key_positions = query_positions
 
         present: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
         if use_cache:
@@ -1059,21 +1260,81 @@ class HybridAttention(nn.Module):
             else:
                 present = (k.detach(), v.detach())
 
-        key_repeat = self._repeat_kv(k)
-        value_repeat = self._repeat_kv(v)
+        # Single-token decode fast path: when keys are contiguous causal from
+        # MiMoMixModel (or there is only 1 key) and inside the sliding window,
+        # skip O(K) boolean mask allocation, position cat, and masked_fill.
+        k_len = int(k.shape[2])
+        all_keys_allowed = False
+        if q_len == 1 and attention_mask is None:
+            if k_len == 1:
+                all_keys_allowed = True
+            elif contiguous_causal and (self.window is None or k_len <= self.window):
+                all_keys_allowed = True
 
-        scores = torch.matmul(q, key_repeat.transpose(2, 3)) * self.scaling
-        # YaRN's logit temperature compensation, a no-op for other schedules.
-        scores = scores * self._attention_scaling
+        eff_scale = self.scaling * self._attention_scaling
+        if self.sink is None and attention_mask is None and not self.training:
+            if all_keys_allowed:
+                if self.n_rep > 1:
+                    q_g = q.reshape(bsz, self.n_kv_heads, self.n_rep * q_len, self.head_dim)
+                    out = F.scaled_dot_product_attention(
+                        q_g, k, v, attn_mask=None, dropout_p=0.0, scale=eff_scale
+                    ).view(bsz, self.n_heads, q_len, self.head_dim)
+                else:
+                    out = F.scaled_dot_product_attention(
+                        q, k, v, attn_mask=None, dropout_p=0.0, scale=eff_scale
+                    )
+            else:
+                all_key_positions = (
+                    torch.cat([key_positions, query_positions], dim=0)
+                    if has_past
+                    else query_positions
+                )
+                causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
+                if self.window is not None:
+                    causal = causal & (
+                        query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window
+                    )
+                key_repeat = self._repeat_kv(k)
+                value_repeat = self._repeat_kv(v)
+                out = F.scaled_dot_product_attention(
+                    q,
+                    key_repeat,
+                    value_repeat,
+                    attn_mask=causal.view(1, 1, q_len, k_len),
+                    dropout_p=0.0,
+                    scale=eff_scale,
+                )
+            self.last_sink_mass = self._zero_sink
+            out = out.transpose(1, 2).reshape(bsz, q_len, self.n_heads * self.head_dim)
+            if self.out_gate is not None:
+                out = self.out_gate(out, hidden_states)
+            return self.o_proj(out), present
 
-        causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
-        if self.window is not None:
-            causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
-        allowed = causal.view(1, 1, q_len, -1)
-        if attention_mask is not None:
-            allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
-        neg_inf = torch.finfo(scores.dtype).min
-        scores = scores.masked_fill(~allowed, neg_inf)
+        # Zero-copy grouped-query matmul (v107): reshape q to (B, H_kv, n_rep*q_len, D)
+        # so k and v are never expanded/copied across n_rep heads.
+        if self.n_rep > 1:
+            q_grouped = q.reshape(bsz, self.n_kv_heads, self.n_rep * q_len, self.head_dim)
+            scores = (
+                torch.matmul(q_grouped, k.transpose(2, 3)).view(bsz, self.n_heads, q_len, k_len)
+                * eff_scale
+            )
+        else:
+            scores = torch.matmul(q, k.transpose(2, 3)) * eff_scale
+
+        if not all_keys_allowed:
+            all_key_positions = (
+                torch.cat([key_positions, query_positions], dim=0)
+                if has_past
+                else query_positions
+            )
+            causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
+            if self.window is not None:
+                causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
+            allowed = causal.view(1, 1, q_len, -1)
+            if attention_mask is not None:
+                allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
+            neg_inf = torch.finfo(scores.dtype).min
+            scores = scores.masked_fill(~allowed, neg_inf)
 
         if self.sink is not None:
             sink = self.sink.view(1, self.n_heads, 1, 1).expand(bsz, self.n_heads, q_len, 1)
@@ -1086,10 +1347,15 @@ class HybridAttention(nn.Module):
             # A fully masked row cannot happen under causal masking (a query can
             # always see itself), so a plain softmax is safe here.
             weights = F.softmax(scores.float(), dim=-1).to(q.dtype)
-            self.last_sink_mass = torch.zeros(1, device=q.device)
+            self.last_sink_mass = self._zero_sink
 
         weights = self.dropout(weights)
-        out = torch.matmul(weights, value_repeat)
+        if self.n_rep > 1:
+            out = torch.matmul(
+                weights.reshape(bsz, self.n_kv_heads, self.n_rep * q_len, k_len), v
+            ).view(bsz, self.n_heads, q_len, self.head_dim)
+        else:
+            out = torch.matmul(weights, v)
         out = out.transpose(1, 2).reshape(bsz, q_len, self.n_heads * self.head_dim)
         if self.out_gate is not None:
             out = self.out_gate(out, hidden_states)
@@ -1200,6 +1466,7 @@ class DifferentialHybridAttention(nn.Module):
             self.register_parameter("sink2", None)
 
         self.register_buffer("last_sink_mass", torch.zeros(1), persistent=False)
+        self.register_buffer("_zero_sink", torch.zeros(1), persistent=False)
         self.register_buffer("last_lambda", torch.zeros(self.n_heads), persistent=False)
 
     def cache_span(self, slack: int = 0) -> Optional[int]:
@@ -1244,6 +1511,7 @@ class DifferentialHybridAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         cache_slack: int = 0,
+        contiguous_causal: bool = False,
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.shape
         q = self.q_proj(hidden_states).view(bsz, q_len, self.n_heads, self.head_dim).transpose(1, 2)
@@ -1257,12 +1525,11 @@ class DifferentialHybridAttention(nn.Module):
         q = apply_rotary(q, cos, sin)
         k = apply_rotary(k, cos, sin)
 
-        if past_kv is not None and past_kv[0].numel() > 0:
+        has_past = past_kv is not None and past_kv[0].numel() > 0
+        if has_past:
+            assert past_kv is not None
             k = torch.cat([past_kv[0], k], dim=2)
             v = torch.cat([past_kv[1], v], dim=2)
-            all_key_positions = torch.cat([key_positions, query_positions], dim=0)
-        else:
-            all_key_positions = query_positions
 
         present: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
         if use_cache:
@@ -1289,18 +1556,33 @@ class DifferentialHybridAttention(nn.Module):
         k2_repeat = self._match_kv_heads(k2, self.n_noise_heads)
         value_repeat = self._repeat_kv(v)
 
-        scores1 = torch.matmul(q1, k1_repeat.transpose(2, 3)) * self.scaling * self._attention_scaling
-        scores2 = torch.matmul(q2, k2_repeat.transpose(2, 3)) * self.scaling * self._attention_scaling
+        eff_scale = self.scaling * self._attention_scaling
+        scores1 = torch.matmul(q1, k1_repeat.transpose(2, 3)) * eff_scale
+        scores2 = torch.matmul(q2, k2_repeat.transpose(2, 3)) * eff_scale
 
-        causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
-        if self.window is not None:
-            causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
-        allowed = causal.view(1, 1, q_len, -1)
-        if attention_mask is not None:
-            allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
-        neg_inf = torch.finfo(scores1.dtype).min
-        scores1 = scores1.masked_fill(~allowed, neg_inf)
-        scores2 = scores2.masked_fill(~allowed, neg_inf)
+        k_len = int(k.shape[2])
+        all_keys_allowed = False
+        if q_len == 1 and attention_mask is None:
+            if k_len == 1:
+                all_keys_allowed = True
+            elif contiguous_causal and (self.window is None or k_len <= self.window):
+                all_keys_allowed = True
+
+        if not all_keys_allowed:
+            all_key_positions = (
+                torch.cat([key_positions, query_positions], dim=0)
+                if has_past
+                else query_positions
+            )
+            causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
+            if self.window is not None:
+                causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
+            allowed = causal.view(1, 1, q_len, -1)
+            if attention_mask is not None:
+                allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
+            neg_inf = torch.finfo(scores1.dtype).min
+            scores1 = scores1.masked_fill(~allowed, neg_inf)
+            scores2 = scores2.masked_fill(~allowed, neg_inf)
 
         if self.sink1 is not None and self.sink2 is not None:
             sink1 = self.sink1.view(1, self.n_heads, 1, 1).expand(bsz, self.n_heads, q_len, 1)
@@ -1318,7 +1600,7 @@ class DifferentialHybridAttention(nn.Module):
         else:
             map1 = F.softmax(scores1.float(), dim=-1).to(q.dtype)
             map2 = F.softmax(scores2.float(), dim=-1).to(q.dtype)
-            self.last_sink_mass = torch.zeros(1, device=q.device)
+            self.last_sink_mass = self._zero_sink
 
         if self.noise_ratio > 1:
             map2 = map2.repeat_interleave(self.noise_ratio, dim=1)
@@ -1426,6 +1708,7 @@ class MultiLatentAttention(nn.Module):
             self.register_parameter("sink", None)
 
         self.register_buffer("last_sink_mass", torch.zeros(1), persistent=False)
+        self.register_buffer("_zero_sink", torch.zeros(1), persistent=False)
 
     def cache_span(self, slack: int = 0) -> Optional[int]:
         if self.kind == "global":
@@ -1443,13 +1726,19 @@ class MultiLatentAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         cache_slack: int = 0,
+        contiguous_causal: bool = False,
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.shape
         q_content = self.q_content_proj(hidden_states).view(bsz, q_len, self.n_heads, self.head_dim).transpose(1, 2)
         q_pe = self.q_pe_proj(hidden_states).view(bsz, q_len, self.n_heads, self.pe_dim).transpose(1, 2)
 
         # Own table over pe_dim frequencies -- NOT a slice of the trunk's table.
-        pe_cos, pe_sin = self.pe_rotary(query_positions)
+        if contiguous_causal and q_len > 0:
+            pe_cos, pe_sin = self.pe_rotary.forward_range(
+                int(query_positions[0].item()), q_len, hidden_states.device
+            )
+        else:
+            pe_cos, pe_sin = self.pe_rotary(query_positions)
         if self.q_norm is not None:
             q_content = self.q_norm(q_content)
         q_pe = apply_rotary(q_pe, pe_cos, pe_sin)
@@ -1458,14 +1747,14 @@ class MultiLatentAttention(nn.Module):
         k_pe = self.k_pe_proj(hidden_states).view(bsz, q_len, 1, self.pe_dim).transpose(1, 2)  # (B, 1, q_len, pe_dim)
         k_pe = apply_rotary(k_pe, pe_cos, pe_sin)
 
-        if past_kv is not None and past_kv[0].numel() > 0:
+        has_past = past_kv is not None and past_kv[0].numel() > 0
+        if has_past:
+            assert past_kv is not None
             c_kv_all = torch.cat([past_kv[0], c_kv], dim=1)
             k_pe_all = torch.cat([past_kv[1], k_pe], dim=2)
-            all_key_positions = torch.cat([key_positions, query_positions], dim=0)
         else:
             c_kv_all = c_kv
             k_pe_all = k_pe
-            all_key_positions = query_positions
 
         present: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
         if use_cache:
@@ -1475,24 +1764,74 @@ class MultiLatentAttention(nn.Module):
             else:
                 present = (c_kv_all.detach(), k_pe_all.detach())
 
-        total_len = c_kv_all.shape[1]
+        total_len = int(c_kv_all.shape[1])
+        all_keys_allowed = False
+        if q_len == 1 and attention_mask is None:
+            if total_len == 1:
+                all_keys_allowed = True
+            elif contiguous_causal and (self.window is None or total_len <= self.window):
+                all_keys_allowed = True
+
+        # DeepSeek-V3 exact 2D-BLAS matrix absorption fast path (v106):
+        # For single-token eval decode (B=1, q_len=1, k_norm=None), absorb
+        # k_up_proj into q_content and v_up_proj after weights @ c_kv_all via
+        # pure 2D torch.mm + torch.bmm, eliminating O(total_len) up-projections.
+        if (
+            bsz == 1
+            and q_len == 1
+            and all_keys_allowed
+            and self.k_norm is None
+            and not self.training
+        ):
+            w_ku = self.k_up_proj.weight.view(self.n_heads, self.head_dim, self.latent_dim)
+            if w_ku.dtype != q_content.dtype:
+                w_ku = w_ku.to(dtype=q_content.dtype)
+            q_abs = torch.bmm(q_content.view(self.n_heads, 1, self.head_dim), w_ku).squeeze(1)
+            c2d = c_kv_all[0]  # (total_len, latent_dim)
+            scores_2d = (
+                torch.mm(q_abs, c2d.t()) + torch.mm(q_pe.view(self.n_heads, self.pe_dim), k_pe_all[0, 0].t())
+            ) * (self.scaling * self._attention_scaling)
+            if self.sink is not None:
+                sink_2d = self.sink.view(self.n_heads, 1).to(scores_2d.dtype)
+                scores_2d = torch.cat([sink_2d, scores_2d], dim=-1)
+                weights_2d = F.softmax(scores_2d.float(), dim=-1).to(q_content.dtype)
+                self.last_sink_mass = weights_2d[:, 0].detach().mean().reshape(1)
+                weights_2d = weights_2d[:, 1:]
+            else:
+                weights_2d = F.softmax(scores_2d.float(), dim=-1).to(q_content.dtype)
+                self.last_sink_mass = self._zero_sink
+            latent_2d = torch.mm(weights_2d, c2d).unsqueeze(1)  # (H, 1, L)
+            w_vu_t = self.v_up_proj.weight.view(self.n_heads, self.head_dim, self.latent_dim).transpose(1, 2)
+            if w_vu_t.dtype != latent_2d.dtype:
+                w_vu_t = w_vu_t.to(dtype=latent_2d.dtype)
+            out = torch.bmm(latent_2d, w_vu_t).reshape(1, 1, self.n_heads * self.head_dim)
+            if self.out_gate is not None:
+                out = self.out_gate(out, hidden_states)
+            return self.o_proj(out), present
+
         k_content = self.k_up_proj(c_kv_all).view(bsz, total_len, self.n_heads, self.head_dim).transpose(1, 2)
         if self.k_norm is not None:
             k_content = self.k_norm(k_content)
         v = self.v_up_proj(c_kv_all).view(bsz, total_len, self.n_heads, self.head_dim).transpose(1, 2)
 
         scores_content = torch.matmul(q_content, k_content.transpose(2, 3))
-        scores_pe = torch.matmul(q_pe, k_pe_all.expand(bsz, self.n_heads, total_len, self.pe_dim).transpose(2, 3))
-        scores = (scores_content + scores_pe) * self.scaling * self._attention_scaling
+        scores_pe = torch.matmul(q_pe, k_pe_all.transpose(2, 3))
+        scores = (scores_content + scores_pe) * (self.scaling * self._attention_scaling)
 
-        causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
-        if self.window is not None:
-            causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
-        allowed = causal.view(1, 1, q_len, -1)
-        if attention_mask is not None:
-            allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
-        neg_inf = torch.finfo(scores.dtype).min
-        scores = scores.masked_fill(~allowed, neg_inf)
+        if not all_keys_allowed:
+            all_key_positions = (
+                torch.cat([key_positions, query_positions], dim=0)
+                if has_past
+                else query_positions
+            )
+            causal = query_positions.view(-1, 1) >= all_key_positions.view(1, -1)
+            if self.window is not None:
+                causal = causal & (query_positions.view(-1, 1) - all_key_positions.view(1, -1) < self.window)
+            allowed = causal.view(1, 1, q_len, -1)
+            if attention_mask is not None:
+                allowed = allowed & attention_mask.view(bsz, 1, 1, -1)
+            neg_inf = torch.finfo(scores.dtype).min
+            scores = scores.masked_fill(~allowed, neg_inf)
 
         if self.sink is not None:
             sink = self.sink.view(1, self.n_heads, 1, 1).expand(bsz, self.n_heads, q_len, 1)
@@ -1503,7 +1842,7 @@ class MultiLatentAttention(nn.Module):
             self.last_sink_mass = sink_mass.detach().mean().reshape(1)
         else:
             weights = F.softmax(scores.float(), dim=-1).to(q_content.dtype)
-            self.last_sink_mass = torch.zeros(1, device=q_content.device)
+            self.last_sink_mass = self._zero_sink
 
         weights = self.dropout(weights)
         out = torch.matmul(weights, v)
@@ -1605,8 +1944,16 @@ class SparseMoEFeedForward(nn.Module):
                 config.moe_intermediate_size * self.n_shared,
                 config.dropout,
             )
+            if bool(getattr(config, "use_shared_expert_gate", False)):
+                self.shared_expert_gate: Optional[nn.Linear] = nn.Linear(
+                    config.hidden_size, 1, bias=False
+                )
+            else:
+                self.shared_expert_gate = None
         else:
             self.shared_expert = None
+            self.shared_expert_gate = None
+        self.register_buffer("last_shared_gate_mean", torch.ones(()), persistent=False)
 
         self.auto_update_bias = bool(config.router_bias_auto_update)
 
@@ -1629,6 +1976,13 @@ class SparseMoEFeedForward(nn.Module):
         self.collect_stats = False
         self.register_buffer("stat_load_sum", torch.zeros(self.n_routed), persistent=False)
         self.register_buffer("stat_batches", torch.zeros(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        """Zero-init shared_expert_gate so (1 + tanh(0)) == 1.0 exact birth identity."""
+        if self.shared_expert_gate is not None:
+            with torch.no_grad():
+                self.shared_expert_gate.weight.zero_()
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
         """Fill v93 buffers missing from an older checkpoint with their defaults.
@@ -1830,25 +2184,46 @@ class SparseMoEFeedForward(nn.Module):
         if self.norm_topk_prob and self.top_k > 1:
             gate_weights = gate_weights / gate_weights.sum(dim=-1, keepdim=True).clamp_min(1e-9)
 
-        output = torch.zeros_like(flat)
         one_hot = F.one_hot(expert_indices, num_classes=self.n_routed).sum(dim=1)  # (N, E)
-        for expert_id, expert in enumerate(self.experts):
-            token_ids = torch.nonzero(one_hot[:, expert_id], as_tuple=False).flatten()
-            if token_ids.numel() == 0:
-                continue
-            expert_out = expert(flat.index_select(0, token_ids))
-            weight = (gate_weights * (expert_indices == expert_id)).sum(dim=-1)
-            weight = weight.index_select(0, token_ids).unsqueeze(-1)
-            # `index_add_` requires the source to match the accumulator's dtype
-            # exactly. Under autocast the experts return bf16/fp16 while
-            # `output` was allocated from `flat` in fp32, so the cast is what
-            # lets mixed precision run at all -- without it the MoE path raises
-            # on the first step.
-            contribution = expert_out * weight.to(expert_out.dtype)
-            output.index_add_(0, token_ids, contribution.to(output.dtype))
+        if n_tokens == 1:
+            # Ultra-fast single-token decode path: dispatch directly to the
+            # top_k chosen experts without zeros_like/tolist/nonzero/index_add_.
+            chosen_w = gate_weights[0]
+            first_id = int(expert_indices[0, 0].item())
+            first_out = self.experts[first_id](flat)
+            output = first_out * chosen_w[0].to(first_out.dtype)
+            for k_i in range(1, self.top_k):
+                expert_id = int(expert_indices[0, k_i].item())
+                expert_out = self.experts[expert_id](flat)
+                output = output + expert_out * chosen_w[k_i].to(expert_out.dtype)
+        else:
+            output = torch.zeros_like(flat)
+            flat_experts = expert_indices.reshape(-1)
+            flat_weights = gate_weights.reshape(-1)
+            counts = torch.bincount(flat_experts, minlength=self.n_routed).tolist()
+            if any(counts):
+                order = torch.argsort(flat_experts, stable=True)
+                sorted_tok = order // self.top_k
+                sorted_w = flat_weights.index_select(0, order)
+                offset = 0
+                for expert_id, cnt in enumerate(counts):
+                    if cnt == 0:
+                        continue
+                    end = offset + cnt
+                    tok_slice = sorted_tok[offset:end]
+                    w_slice = sorted_w[offset:end].unsqueeze(-1)
+                    expert_out = self.experts[expert_id](flat.index_select(0, tok_slice))
+                    contribution = expert_out * w_slice.to(expert_out.dtype)
+                    output.index_add_(0, tok_slice, contribution.to(output.dtype))
+                    offset = end
 
         if self.shared_expert is not None:
-            output = output + self.shared_expert(flat)
+            shared_out = self.shared_expert(flat)
+            if self.shared_expert_gate is not None:
+                shared_gate = 1.0 + torch.tanh(self.shared_expert_gate(flat))
+                self.last_shared_gate_mean = shared_gate.detach().mean()
+                shared_out = shared_out * shared_gate.to(shared_out.dtype)
+            output = output + shared_out
 
         # --- routing telemetry and regularisers ---------------------------
         occupancy = one_hot.float()
@@ -2127,19 +2502,42 @@ class MiMoMixBlock(nn.Module):
         attention_mask=None,
         use_cache: bool = False,
         cache_slack: int = 0,
+        value_residual_v0: Optional[torch.Tensor] = None,
+        value_residual_gate: Optional[torch.Tensor] = None,
+        capture_v0: Optional[List[torch.Tensor]] = None,
+        contiguous_causal: bool = False,
     ):
         residual = hidden_states
-        attn_out, present = self.self_attn(
-            self.input_norm(hidden_states),
-            cos,
-            sin,
-            query_positions,
-            key_positions,
-            past_kv=past_kv,
-            attention_mask=attention_mask,
-            use_cache=use_cache,
-            cache_slack=cache_slack,
-        )
+        normed_in = self.input_norm(hidden_states)
+        if isinstance(self.self_attn, HybridAttention):
+            attn_out, present = self.self_attn(
+                normed_in,
+                cos,
+                sin,
+                query_positions,
+                key_positions,
+                past_kv=past_kv,
+                attention_mask=attention_mask,
+                use_cache=use_cache,
+                cache_slack=cache_slack,
+                value_residual_v0=value_residual_v0,
+                value_residual_gate=value_residual_gate,
+                capture_v0=capture_v0,
+                contiguous_causal=contiguous_causal,
+            )
+        else:
+            attn_out, present = self.self_attn(
+                normed_in,
+                cos,
+                sin,
+                query_positions,
+                key_positions,
+                past_kv=past_kv,
+                attention_mask=attention_mask,
+                use_cache=use_cache,
+                cache_slack=cache_slack,
+                contiguous_causal=contiguous_causal,
+            )
 
         if self.use_mod and self.mod_router is not None:
             # "Cannot see the whole sequence" == a cache is attached, or this is
@@ -2191,6 +2589,9 @@ class ManifoldHyperConnection(nn.Module):
         self.post_logits = nn.Parameter(torch.zeros(self.n_streams))
         self.register_buffer("last_ds_error", torch.zeros(()), persistent=False)
         self.register_buffer("last_stream_entropy", torch.zeros(()), persistent=False)
+        self._ds_eval_cache: Optional[Tuple[Tuple[int, torch.dtype, torch.device], torch.Tensor]] = None
+        self._pre_eval_cache: Optional[Tuple[Tuple[int, torch.dtype, torch.device], torch.Tensor]] = None
+        self._post_eval_cache: Optional[Tuple[Tuple[int, torch.dtype, torch.device], torch.Tensor]] = None
         self.reset_special_parameters()
 
     def reset_special_parameters(self) -> None:
@@ -2199,8 +2600,15 @@ class ManifoldHyperConnection(nn.Module):
             self.res_logits.diagonal().fill_(12.0)
             self.pre_logits.zero_()
             self.post_logits.zero_()
+        self._ds_eval_cache = None
+        self._pre_eval_cache = None
+        self._post_eval_cache = None
 
     def doubly_stochastic_matrix(self, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+        if not self.training and not torch.is_grad_enabled():
+            cache_key = (self.res_logits._version, dtype, self.res_logits.device)
+            if self._ds_eval_cache is not None and self._ds_eval_cache[0] == cache_key:
+                return self._ds_eval_cache[1]
         log_m = self.res_logits.float()
         for _ in range(self.sinkhorn_iters):
             log_m = log_m - torch.logsumexp(log_m, dim=-1, keepdim=True)
@@ -2213,21 +2621,46 @@ class ManifoldHyperConnection(nn.Module):
             ent = -(h_res * h_res.clamp_min(1e-12).log()).sum(dim=-1).mean()
             denom = math.log(max(2, self.n_streams))
             self.last_stream_entropy = (ent / denom) if self.n_streams > 1 else torch.zeros_like(ent)
-        return h_res.to(dtype=dtype)
+        out = h_res.to(dtype=dtype)
+        if not self.training and not torch.is_grad_enabled():
+            self._ds_eval_cache = ((self.res_logits._version, dtype, self.res_logits.device), out)
+        return out
 
     def collapse(self, streams: torch.Tensor) -> torch.Tensor:
         """Weighted convex read from ``(B, T, n_streams, D)`` -> ``(B, T, D)``."""
-        w_pre = F.softmax(self.pre_logits.float(), dim=0).to(dtype=streams.dtype)
-        return torch.einsum("s,btsd->btd", w_pre, streams)
+        if not self.training and not torch.is_grad_enabled():
+            cache_key = (self.pre_logits._version, streams.dtype, self.pre_logits.device)
+            if self._pre_eval_cache is not None and self._pre_eval_cache[0] == cache_key:
+                w_pre = self._pre_eval_cache[1]
+            else:
+                w_pre = F.softmax(self.pre_logits.float(), dim=0).to(dtype=streams.dtype).view(
+                    1, 1, self.n_streams, 1
+                )
+                self._pre_eval_cache = (cache_key, w_pre)
+            return (streams * w_pre).sum(dim=2)
+        w_pre = F.softmax(self.pre_logits.float(), dim=0).to(dtype=streams.dtype).view(
+            1, 1, self.n_streams, 1
+        )
+        return (streams * w_pre).sum(dim=2)
 
     def mix_and_inject(self, streams: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
         """Mix ``streams`` on the Birkhoff polytope and inject block ``delta``."""
         h_res = self.doubly_stochastic_matrix(dtype=streams.dtype)
-        mixed = torch.einsum("ij,btjd->btid", h_res, streams)
-        w_post = (float(self.n_streams) * F.softmax(self.post_logits.float(), dim=0)).to(
-            dtype=streams.dtype
-        )
-        return mixed + delta.unsqueeze(2) * w_post.view(1, 1, self.n_streams, 1)
+        mixed = torch.matmul(h_res, streams)
+        if not self.training and not torch.is_grad_enabled():
+            cache_key = (self.post_logits._version, streams.dtype, self.post_logits.device)
+            if self._post_eval_cache is not None and self._post_eval_cache[0] == cache_key:
+                w_post = self._post_eval_cache[1]
+            else:
+                w_post = (
+                    float(self.n_streams) * F.softmax(self.post_logits.float(), dim=0)
+                ).to(dtype=streams.dtype).view(1, 1, self.n_streams, 1)
+                self._post_eval_cache = (cache_key, w_post)
+        else:
+            w_post = (
+                float(self.n_streams) * F.softmax(self.post_logits.float(), dim=0)
+            ).to(dtype=streams.dtype).view(1, 1, self.n_streams, 1)
+        return mixed + delta.unsqueeze(2) * w_post
 
 
 class EngramConditionalMemory(nn.Module):
@@ -2303,12 +2736,13 @@ class EngramConditionalMemory(nn.Module):
 
         head_embs: List[torch.Tensor] = []
         unique_total = 0
+        single_token = (bsz * seq_len) == 1
         for h_idx, table in enumerate(self.tables):
             p1, p2, p3 = self._HEAD_PRIMES[h_idx % len(self._HEAD_PRIMES)]
             # Head 0 emphasizes bigram + trigram mix; additional heads use distinct primes.
             slot = ((t0 * p1) ^ (t1 * p2) ^ (t2 * p3) ^ ((h_idx + 1) * 2654435761)) % self.table_size
             head_embs.append(table(slot))
-            unique_total += int(torch.unique(slot).numel())
+            unique_total += 1 if single_token else int(torch.unique(slot).numel())
 
         e = torch.cat(head_embs, dim=-1).to(dtype=hidden_states.dtype)
         k_norm = self.key_norm(self.key_proj(e))
@@ -2401,28 +2835,56 @@ class GatedDeltaNetMemory(nn.Module):
         else:
             state = hidden_states.new_zeros((bsz, d, d))
 
-        outputs: List[torch.Tensor] = []
-        state_hist: List[torch.Tensor] = []
-        for t in range(seq_len):
-            k_t = k_all[:, t]  # (B, d)
-            v_t = v_all[:, t]
-            q_t = q_all[:, t]
-            gamma_t = decay_all[:, t].unsqueeze(-1)  # (B, d, 1)
-            beta_e = erase_all[:, t].unsqueeze(-1)
-            beta_w = write_all[:, t].unsqueeze(-1)
+        if seq_len == 1:
+            k_0 = k_all[:, 0]
+            v_0 = v_all[:, 0]
+            q_0 = q_all[:, 0]
+            gamma_0 = decay_all[:, 0].unsqueeze(-1)
+            recalled = torch.bmm(state, k_0.unsqueeze(-1)).squeeze(-1)
+            delta_vec = write_all[:, 0] * v_0 - erase_all[:, 0] * recalled
+            state = (gamma_0 * state + delta_vec.unsqueeze(-1) * k_0.unsqueeze(1)).clamp(-10.0, 10.0)
+            y_seq = torch.bmm(state, q_0.unsqueeze(-1)).squeeze(-1).unsqueeze(1)
+            hist = (
+                state.reshape(bsz, 1, d * d)
+                if (keep_states is None or int(keep_states) >= 1)
+                else hidden_states.new_zeros((bsz, 0, d * d))
+            )
+        else:
+            hist_start = (
+                max(0, seq_len - int(keep_states)) if keep_states is not None else 0
+            )
+            outputs: List[torch.Tensor] = []
+            state_hist: List[torch.Tensor] = []
+            k_steps = k_all.unbind(1)
+            v_steps = v_all.unbind(1)
+            q_steps = q_all.unbind(1)
+            decay_steps = decay_all.unsqueeze(-1).unbind(1)
+            erase_steps = erase_all.unbind(1)
+            write_steps = write_all.unbind(1)
+            for t in range(seq_len):
+                k_t = k_steps[t]  # (B, d)
+                v_t = v_steps[t]
+                q_t = q_steps[t]
+                gamma_t = decay_steps[t]  # (B, d, 1)
 
-            recalled = torch.bmm(state, k_t.unsqueeze(-1)).squeeze(-1)  # (B, d)
-            erase_term = beta_e * torch.bmm(recalled.unsqueeze(-1), k_t.unsqueeze(1))
-            write_term = beta_w * torch.bmm(v_t.unsqueeze(-1), k_t.unsqueeze(1))
-            state = (gamma_t * state - erase_term + write_term).clamp(-10.0, 10.0)
-            y_t = torch.bmm(state, q_t.unsqueeze(-1)).squeeze(-1)
-            outputs.append(y_t)
-            state_hist.append(state.reshape(bsz, d * d))
+                recalled = torch.bmm(state, k_t.unsqueeze(-1)).squeeze(-1)  # (B, d)
+                delta_vec = write_steps[t] * v_t - erase_steps[t] * recalled
+                state = (gamma_t * state + delta_vec.unsqueeze(-1) * k_t.unsqueeze(1)).clamp(-10.0, 10.0)
+                y_t = torch.bmm(state, q_t.unsqueeze(-1)).squeeze(-1)
+                outputs.append(y_t)
+                if t >= hist_start:
+                    state_hist.append(state.reshape(bsz, d * d))
 
-        y_seq = torch.stack(outputs, dim=1)
-        hist = torch.stack(state_hist, dim=1)  # (B, T, d*d)
-        if keep_states is not None and hist.shape[1] > int(keep_states):
-            hist = hist[:, -int(keep_states) :]
+            y_seq = torch.stack(outputs, dim=1)
+            hist = (
+                state_hist[0].unsqueeze(1)
+                if len(state_hist) == 1
+                else (
+                    torch.stack(state_hist, dim=1)
+                    if state_hist
+                    else hidden_states.new_zeros((bsz, 0, d * d))
+                )
+            )
 
         with torch.no_grad():
             self.last_decay_mean = decay_all.detach().mean()
@@ -2443,6 +2905,634 @@ class GatedDeltaNetMemory(nn.Module):
             "mean_write_gate": float(self.last_write_mean.detach()),
             "state_frobenius_norm": float(self.last_state_norm.detach()),
             "gate_mean_abs": float(self.gate.detach().abs().mean()),
+        }
+
+
+class TitansSurpriseMemory(nn.Module):
+    """Titans / MIRAS surprise-gated neural long-term memory with momentum (v104).
+
+    Maintains a causal associative matrix memory ``M_t`` and surprise-momentum
+    trace ``S_t``, both of shape ``(B, d, d)``:
+        ``e_t = M_{t-1} k_t - v_t``                     (associative prediction error)
+        ``sigma_t = ||e_t||_2 / sqrt(d)``               (scalar token surprise)
+        ``theta_t = sigmoid(lr_proj(x_t)) * tanh(1 + sigma_t)``
+        ``S_t = eta_t * S_{t-1} - theta_t * (e_t k_t^T)``
+        ``M_t = (1 - alpha_t) * M_{t-1} + S_t``
+        ``y_t = M_t q_t``
+
+    Zero-initialized output residual gate guarantees exact forward identity at
+    birth; flattened packed state history ``(B, T', 2*d*d)`` threads cleanly
+    through ``past_key_values`` for bit-exact incremental KV-cache and MTP
+    speculative rollback parity.
+    """
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        hidden = int(config.hidden_size)
+        d = int(getattr(config, "titans_dim", 32))
+        self.hidden_size = hidden
+        self.state_dim = d
+        self.after_layer = int(getattr(config, "titans_after_layer", 1))
+
+        self.norm = RMSNorm(hidden, config.rms_norm_eps)
+        self.k_proj = nn.Linear(hidden, d, bias=False)
+        self.v_proj = nn.Linear(hidden, d, bias=False)
+        self.q_proj = nn.Linear(hidden, d, bias=False)
+        self.forget_proj = nn.Linear(hidden, d, bias=True)
+        self.momentum_proj = nn.Linear(hidden, d, bias=True)
+        self.lr_proj = nn.Linear(hidden, d, bias=True)
+        self.out_proj = nn.Linear(d, hidden, bias=False)
+        self.gate = nn.Parameter(torch.zeros(hidden))
+
+        self.register_buffer("last_surprise_mean", torch.zeros(()), persistent=False)
+        self.register_buffer("last_forget_mean", torch.full((), 0.15), persistent=False)
+        self.register_buffer("last_momentum_mean", torch.full((), 0.7), persistent=False)
+        self.register_buffer("last_memory_norm", torch.zeros(()), persistent=False)
+        self.register_buffer("last_momentum_norm", torch.zeros(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.gate.zero_()
+            self.forget_proj.bias.fill_(-1.7)
+            self.momentum_proj.bias.fill_(0.85)
+            self.lr_proj.bias.fill_(-1.2)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        prev_state_flat: Optional[torch.Tensor] = None,
+        keep_states: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        bsz, seq_len, _ = hidden_states.shape
+        d = self.state_dim
+        dd = d * d
+        normed = self.norm(hidden_states)
+        k_all = F.normalize(self.k_proj(normed), p=2, dim=-1, eps=1e-6)
+        v_all = self.v_proj(normed)
+        q_all = F.normalize(self.q_proj(normed), p=2, dim=-1, eps=1e-6)
+        forget_all = torch.sigmoid(self.forget_proj(normed))
+        momentum_all = torch.sigmoid(self.momentum_proj(normed))
+        lr_all = torch.sigmoid(self.lr_proj(normed))
+
+        if prev_state_flat is not None and prev_state_flat.numel() > 0:
+            packed = prev_state_flat.to(dtype=hidden_states.dtype)
+            mem = packed[:, :dd].reshape(bsz, d, d)
+            mom = packed[:, dd : 2 * dd].reshape(bsz, d, d)
+        else:
+            mem = hidden_states.new_zeros((bsz, d, d))
+            mom = hidden_states.new_zeros((bsz, d, d))
+
+        inv_sqrt_d = float(d) ** -0.5
+        if seq_len == 1:
+            k_0 = k_all[:, 0]
+            v_0 = v_all[:, 0]
+            q_0 = q_all[:, 0]
+            pred_v = torch.bmm(mem, k_0.unsqueeze(-1)).squeeze(-1)
+            err_0 = pred_v - v_0
+            sigma_0 = err_0.pow(2).sum(dim=-1, keepdim=True).add(1e-8).sqrt() * inv_sqrt_d
+            surprise_acc = sigma_0.detach().mean()
+            scaled_err = (lr_all[:, 0] * torch.tanh(1.0 + sigma_0)) * err_0
+            mom = (momentum_all[:, 0].unsqueeze(-1) * mom - scaled_err.unsqueeze(-1) * k_0.unsqueeze(1)).clamp(-10.0, 10.0)
+            mem = ((1.0 - forget_all[:, 0]).unsqueeze(-1) * mem + mom).clamp(-10.0, 10.0)
+            y_seq = torch.bmm(mem, q_0.unsqueeze(-1)).squeeze(-1).unsqueeze(1)
+            hist = (
+                torch.cat([mem.reshape(bsz, 1, dd), mom.reshape(bsz, 1, dd)], dim=-1)
+                if (keep_states is None or int(keep_states) >= 1)
+                else hidden_states.new_zeros((bsz, 0, 2 * dd))
+            )
+        else:
+            hist_start = (
+                max(0, seq_len - int(keep_states)) if keep_states is not None else 0
+            )
+            outputs: List[torch.Tensor] = []
+            state_hist: List[torch.Tensor] = []
+            surprise_acc = hidden_states.new_zeros(())
+            k_steps = k_all.unbind(1)
+            v_steps = v_all.unbind(1)
+            q_steps = q_all.unbind(1)
+            keep_steps = (1.0 - forget_all).unsqueeze(-1).unbind(1)
+            eta_steps = momentum_all.unsqueeze(-1).unbind(1)
+            lr_steps = lr_all.unbind(1)
+            for t in range(seq_len):
+                k_t = k_steps[t]  # (B, d)
+                v_t = v_steps[t]
+                q_t = q_steps[t]
+
+                pred_v = torch.bmm(mem, k_t.unsqueeze(-1)).squeeze(-1)  # (B, d)
+                err_t = pred_v - v_t
+                sigma_t = err_t.pow(2).sum(dim=-1, keepdim=True).add(1e-8).sqrt() * inv_sqrt_d
+                surprise_acc = surprise_acc + sigma_t.detach().mean()
+                scaled_err = (lr_steps[t] * torch.tanh(1.0 + sigma_t)) * err_t
+
+                mom = (eta_steps[t] * mom - scaled_err.unsqueeze(-1) * k_t.unsqueeze(1)).clamp(-10.0, 10.0)
+                mem = (keep_steps[t] * mem + mom).clamp(-10.0, 10.0)
+                y_t = torch.bmm(mem, q_t.unsqueeze(-1)).squeeze(-1)
+                outputs.append(y_t)
+                if t >= hist_start:
+                    state_hist.append(torch.cat([mem.reshape(bsz, dd), mom.reshape(bsz, dd)], dim=-1))
+
+            y_seq = torch.stack(outputs, dim=1)
+            hist = (
+                state_hist[0].unsqueeze(1)
+                if len(state_hist) == 1
+                else (
+                    torch.stack(state_hist, dim=1)
+                    if state_hist
+                    else hidden_states.new_zeros((bsz, 0, 2 * dd))
+                )
+            )
+
+        with torch.no_grad():
+            self.last_surprise_mean = (
+                surprise_acc / float(seq_len) if seq_len > 0 else hidden_states.new_zeros(())
+            )
+            self.last_forget_mean = forget_all.detach().mean()
+            self.last_momentum_mean = momentum_all.detach().mean()
+            self.last_memory_norm = mem.detach().pow(2).sum(dim=(-1, -2)).sqrt().mean()
+            self.last_momentum_norm = mom.detach().pow(2).sum(dim=(-1, -2)).sqrt().mean()
+
+        out = hidden_states + self.gate.to(dtype=hidden_states.dtype) * self.out_proj(y_seq)
+        return out, hist
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "state_dim": int(self.state_dim),
+            "after_layer": int(self.after_layer),
+            "mean_surprise": float(self.last_surprise_mean.detach()),
+            "mean_forget_gate": float(self.last_forget_mean.detach()),
+            "mean_momentum_gate": float(self.last_momentum_mean.detach()),
+            "memory_frobenius_norm": float(self.last_memory_norm.detach()),
+            "momentum_frobenius_norm": float(self.last_momentum_norm.detach()),
+            "gate_mean_abs": float(self.gate.detach().abs().mean()),
+        }
+
+
+class DepthAttentionResidual(nn.Module):
+    """Cross-layer Depth Attention Residuals / AttnRes (v104).
+
+    At each transformer block ``l``, computes a token-local softmax attention
+    over the sequence of prior layer representations ``[h_0, ..., h_l]`` using a
+    learned per-layer depth query ``q_l``, then mixes the depth-attended summary
+    into the current residual stream through a zero-initialized per-layer gate:
+        ``out_l = h_l + gate_l * (sum_{j=0}^{l} w_{l,j} h_j - h_l)``
+    Because attention operates purely along the depth axis per token position,
+    causality, incremental KV-cache decode, and MTP speculative rollback parity
+    hold automatically with zero extra cache slots and exact birth identity.
+    """
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        self.n_layers = int(config.n_layers)
+        self.hidden_size = int(config.hidden_size)
+        self.norm = RMSNorm(self.hidden_size, config.rms_norm_eps)
+        self.depth_queries = nn.Parameter(torch.zeros(self.n_layers, self.hidden_size))
+        self.layer_gates = nn.Parameter(torch.zeros(self.n_layers, self.hidden_size))
+        self.register_buffer("last_depth_entropy", torch.zeros(()), persistent=False)
+        self.register_buffer("last_self_weight_mean", torch.ones(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.layer_gates.zero_()
+            nn.init.normal_(self.depth_queries, mean=0.0, std=0.02)
+
+    def mix_layer(
+        self,
+        layer_index: int,
+        current_hidden: torch.Tensor,
+        history: Sequence[torch.Tensor],
+        normed_history: Optional[Sequence[torch.Tensor]] = None,
+    ) -> torch.Tensor:
+        if not history:
+            return current_hidden
+        stack = torch.stack(list(history) + [current_hidden], dim=2)  # (B, T, D_depth, H)
+        if normed_history is not None and len(normed_history) == len(history):
+            normed_curr = self.norm(current_hidden)
+            normed = torch.stack(list(normed_history) + [normed_curr], dim=2)
+        else:
+            normed = self.norm(stack)
+        q = self.depth_queries[layer_index].to(dtype=normed.dtype)
+        scale = float(self.hidden_size) ** -0.5
+        scores = torch.matmul(normed, q) * scale
+        weights = F.softmax(scores, dim=-1)  # (B, T, D_depth)
+        mixed = torch.matmul(weights.unsqueeze(2), stack).squeeze(2)
+        gate = self.layer_gates[layer_index].to(dtype=current_hidden.dtype)
+
+        with torch.no_grad():
+            ent = -(weights * weights.clamp_min(1e-9).log()).sum(dim=-1).mean()
+            self.last_depth_entropy = ent.detach()
+            self.last_self_weight_mean = weights[..., -1].detach().mean()
+
+        return current_hidden + gate * (mixed - current_hidden)
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "n_layers": int(self.n_layers),
+            "last_depth_entropy": float(self.last_depth_entropy.detach()),
+            "last_self_weight_mean": float(self.last_self_weight_mean.detach()),
+            "gate_mean_abs": float(self.layer_gates.detach().abs().mean()),
+        }
+
+
+class ValueResidualMixer(nn.Module):
+    """Cross-layer Value Residual Learning / ResFormer mixer (v105).
+
+    Mixes layer-0's value tensor ``v_0`` into deeper attention layers before
+    KV-cache storage via a zero-initialized per-layer, per-KV-head gate:
+        ``v_l' = v_l + gate_l * (v_0 - v_l)``
+    Exact birth identity (`gate_l = 0`), zero extra KV-cache entries, and
+    automatic bit-exact incremental KV-cache and MTP speculative decode parity.
+    """
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        self.n_layers = int(config.n_layers)
+        self.n_kv_heads = int(config.n_kv_heads)
+        self.layer_gates = nn.Parameter(torch.zeros(self.n_layers, self.n_kv_heads))
+        self.register_buffer("last_mix_strength", torch.zeros(()), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.layer_gates.zero_()
+
+    def gate_for_layer(self, layer_index: int) -> torch.Tensor:
+        g = self.layer_gates[layer_index]
+        with torch.no_grad():
+            self.last_mix_strength = self.layer_gates[1:].detach().abs().mean() if self.n_layers > 1 else g.detach().abs().mean()
+        return g
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "n_layers": int(self.n_layers),
+            "n_kv_heads": int(self.n_kv_heads),
+            "gate_mean_abs": float(self.layer_gates.detach().abs().mean()),
+            "last_mix_strength": float(self.last_mix_strength.detach()),
+        }
+
+
+class CausalShortConvMemory(nn.Module):
+    """Mamba-2 / Qwen3-Next style causal depthwise Conv1d short-range memory (v106).
+
+    Captures local n-gram / syntactic continuity via depthwise causal 1D
+    convolution with input-conditioned sigmoid gating and a zero-initialized
+    per-channel residual gate:
+        ``y_t = h_t + gate * (sigmoid(W_g n_t) * SiLU(Conv1d_causal(n_{t-K+1:t})))``
+    where ``n_t = RMSNorm(h_t)``.
+
+    Exact birth identity (`gate == 0`), exact token causality, and exact
+    incremental KV-cache + MTP speculative rollback parity via a rank-3
+    ``(B, T', H)`` normalized-tail entry in ``past_key_values``.
+    """
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        hidden = int(config.hidden_size)
+        self.hidden_size = hidden
+        self.kernel_size = max(2, int(getattr(config, "short_conv_kernel", 4)))
+        self.after_layer = int(getattr(config, "short_conv_after_layer", 0))
+        self.norm = RMSNorm(hidden, config.rms_norm_eps)
+        self.conv = nn.Conv1d(
+            hidden,
+            hidden,
+            kernel_size=self.kernel_size,
+            groups=hidden,
+            bias=False,
+        )
+        self.ctx_gate = nn.Linear(hidden, hidden, bias=False)
+        self.gate = nn.Parameter(torch.zeros(hidden))
+        self.register_buffer("last_conv_rms", torch.zeros(()), persistent=False)
+        self.register_buffer("last_ctx_gate_mean", torch.full((), 0.5), persistent=False)
+        self.reset_special_parameters()
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.gate.zero_()
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        prev_normed_tail: Optional[torch.Tensor] = None,
+        keep_tail: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Apply causal depthwise short-conv; returns ``(updated_hidden, tail_history)``."""
+        bsz, seq_len, hidden = hidden_states.shape
+        normed = self.norm(hidden_states)  # (B, T, H); RMSNorm(0) == 0 so zero-pad is exact
+        pad_len = self.kernel_size - 1
+        if prev_normed_tail is not None and prev_normed_tail.numel() > 0:
+            prev = prev_normed_tail.to(device=normed.device, dtype=normed.dtype)
+            if prev.shape[1] >= pad_len:
+                prefix = prev[:, -pad_len:]
+            else:
+                pad_need = pad_len - prev.shape[1]
+                prefix = torch.cat(
+                    [normed.new_zeros((bsz, pad_need, hidden)), prev],
+                    dim=1,
+                )
+        else:
+            prefix = normed.new_zeros((bsz, pad_len, hidden))
+
+        window_seq = torch.cat([prefix, normed], dim=1)  # (B, pad_len + T, H)
+        conv_out = self.conv(window_seq.transpose(1, 2)).transpose(1, 2)  # (B, T, H)
+        act = F.silu(conv_out)
+        ctx = torch.sigmoid(self.ctx_gate(normed))
+        delta = ctx * act
+        with torch.no_grad():
+            self.last_conv_rms = delta.detach().float().pow(2).mean().sqrt()
+            self.last_ctx_gate_mean = ctx.detach().float().mean()
+
+        out = hidden_states + self.gate.to(dtype=hidden_states.dtype) * delta
+        tail_hist: Optional[torch.Tensor] = None
+        if keep_tail is not None:
+            if prev_normed_tail is not None and prev_normed_tail.numel() > 0:
+                full_tail = torch.cat(
+                    [prev_normed_tail.to(device=normed.device, dtype=normed.dtype), normed],
+                    dim=1,
+                )
+            else:
+                full_tail = normed
+            tail_hist = full_tail[:, -int(keep_tail) :].detach()
+        return out, tail_hist
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "kernel_size": int(self.kernel_size),
+            "after_layer": int(self.after_layer),
+            "gate_mean_abs": float(self.gate.detach().abs().mean()),
+            "last_conv_rms": float(self.last_conv_rms.detach()),
+            "last_ctx_gate_mean": float(self.last_ctx_gate_mean.detach()),
+        }
+
+
+class UniversalFastWeightMemory(nn.Module):
+    """Universal Fast-Weight Memory / uTTT dual-axis programmer (Supermix v107).
+
+    Grounded in Universal Test-Time Training (Cai et al., Oct 2026,
+    ``arXiv:2610.05484``) and Fast Weight Programmers / DeltaNet:
+    maintains a **single globally shared fast-weight programmer**
+    ``(W_k, W_v, W_q, W_erase, W_write, W_router, W_out, bank_init)`` that
+    recurs across **BOTH**:
+
+    1. **Cross-depth axis** (``layer_index = 0 .. n_layers - 1``):
+       Token-local fast-weight bank pool ``D_t^{(l)}`` in ``R^{E x d x d}``
+       conditioned on learned layer-role embeddings ``e_l``, updated via
+       ``uTTT-MoE`` Top-K sparse bank routing (or ``uTTT-Dense``) and injected
+       through zero-initialized ``layer_gates[l]``.
+    2. **Cross-time axis** (``t = 0 .. seq_len - 1``):
+       Persistent causal fast-weight bank pool ``S_t`` in ``R^{B x E x d x d}``
+       consolidating depth-aggregated associative writes via surprise-modulated
+       decoupled erase/write delta updates, injected through zero-initialized
+       ``temporal_gate`` and threaded as a rank-3 ``(B, T', E * d * d)`` tail
+       entry in ``past_key_values`` for bit-exact incremental KV-cache and MTP
+       speculative rollback parity.
+    """
+
+    def __init__(self, config: MiMoMixConfig):
+        super().__init__()
+        self.hidden_size = int(config.hidden_size)
+        self.n_layers = int(config.n_layers)
+        self.state_dim = max(2, int(getattr(config, "ufwm_dim", 24)))
+        self.n_banks = max(1, int(getattr(config, "ufwm_banks", 4)))
+        self.mode = str(getattr(config, "ufwm_mode", "moe"))
+        raw_top_k = int(getattr(config, "ufwm_top_k", 2))
+        self.top_k = (
+            max(1, min(raw_top_k, self.n_banks))
+            if self.mode == "moe"
+            else self.n_banks
+        )
+
+        self.norm = RMSNorm(self.hidden_size, config.rms_norm_eps)
+        self.bank_init = nn.Parameter(torch.zeros(self.n_banks, self.state_dim, self.state_dim))
+        self.layer_role_emb = nn.Parameter(torch.zeros(self.n_layers, self.hidden_size))
+        self.k_proj = nn.Linear(self.hidden_size, self.state_dim, bias=False)
+        self.v_proj = nn.Linear(self.hidden_size, self.state_dim, bias=False)
+        self.q_proj = nn.Linear(self.hidden_size, self.state_dim, bias=False)
+        self.erase_proj = nn.Linear(self.hidden_size, 1, bias=True)
+        self.write_proj = nn.Linear(self.hidden_size, 1, bias=True)
+        self.bank_router = nn.Linear(self.hidden_size, self.n_banks, bias=True)
+        self.out_proj = nn.Linear(self.state_dim, self.hidden_size, bias=False)
+        self.layer_gates = nn.Parameter(torch.zeros(self.n_layers, self.hidden_size))
+        self.temporal_gate = nn.Parameter(torch.zeros(self.hidden_size))
+
+        self.register_buffer("last_depth_surprise", torch.zeros(()), persistent=False)
+        self.register_buffer("last_temporal_surprise", torch.zeros(()), persistent=False)
+        self.register_buffer("last_bank_entropy", torch.zeros(()), persistent=False)
+        self.register_buffer("last_state_norm", torch.zeros(()), persistent=False)
+        self.register_buffer(
+            "last_bank_usage",
+            torch.full((self.n_banks,), 1.0 / float(self.n_banks)),
+            persistent=False,
+        )
+        self.reset_special_parameters()
+
+    @property
+    def flat_state_dim(self) -> int:
+        return int(self.n_banks * self.state_dim * self.state_dim)
+
+    def reset_special_parameters(self) -> None:
+        with torch.no_grad():
+            self.bank_init.zero_()
+            nn.init.normal_(self.layer_role_emb, mean=0.0, std=0.015)
+            self.layer_gates.zero_()
+            self.temporal_gate.zero_()
+            self.erase_proj.bias.fill_(-1.2)
+            self.write_proj.bias.fill_(-0.6)
+            self.bank_router.bias.zero_()
+
+    def init_depth_state(
+        self, bsz: int, seq_len: int, dtype: torch.dtype, device: torch.device
+    ) -> Dict[str, torch.Tensor]:
+        d = self.state_dim
+        prior = (
+            self.bank_init.to(dtype=dtype, device=device)
+            .view(1, 1, self.n_banks, d, d)
+            .expand(bsz, seq_len, -1, -1, -1)
+            .clone()
+        )
+        return {
+            "mem": prior,
+            "k_acc": torch.zeros((bsz, seq_len, d), dtype=dtype, device=device),
+            "v_acc": torch.zeros((bsz, seq_len, d), dtype=dtype, device=device),
+            "surprise_sum": torch.zeros((), dtype=torch.float32, device=device),
+        }
+
+    def _route_banks(self, flat: torch.Tensor) -> torch.Tensor:
+        logits = self.bank_router(flat)
+        if self.mode == "moe" and self.top_k < self.n_banks:
+            top_v, top_i = torch.topk(logits, self.top_k, dim=-1)
+            top_p = F.softmax(top_v.float(), dim=-1).to(flat.dtype)
+            weights = flat.new_zeros((flat.shape[0], self.n_banks))
+            weights.scatter_(1, top_i, top_p)
+            return weights
+        return F.softmax(logits.float(), dim=-1).to(flat.dtype)
+
+    def forward_layer(
+        self,
+        layer_index: int,
+        hidden_states: torch.Tensor,
+        depth_state: Dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Execute cross-depth uTTT fast-weight update + query at ``layer_index``."""
+        bsz, seq_len, _ = hidden_states.shape
+        nt = bsz * seq_len
+        d = self.state_dim
+        eb = self.n_banks
+
+        role = self.layer_role_emb[layer_index].to(dtype=hidden_states.dtype).view(1, 1, -1)
+        cond = self.norm(hidden_states + role)
+        flat = cond.reshape(nt, self.hidden_size)
+
+        k = F.normalize(self.k_proj(flat), p=2, dim=-1, eps=1e-6)
+        v = torch.tanh(self.v_proj(flat))
+        q = F.normalize(self.q_proj(flat), p=2, dim=-1, eps=1e-6)
+        erase_g = (0.35 * torch.sigmoid(self.erase_proj(flat))).view(nt, 1, 1, 1)
+        write_g = (0.65 * torch.sigmoid(self.write_proj(flat))).view(nt, 1, 1, 1)
+        bw = self._route_banks(flat)
+        bw4 = bw.view(nt, eb, 1, 1)
+
+        mem = depth_state["mem"].view(nt, eb, d, d)
+        pred_v = torch.matmul(mem, k.view(nt, 1, d, 1)).squeeze(-1)  # (nt, E, d)
+        err = v.unsqueeze(1) - pred_v
+        delta = torch.matmul(err.unsqueeze(-1), k.view(nt, 1, 1, d))
+        mem_next = ((1.0 - bw4 * erase_g) * mem + (bw4 * write_g) * delta).clamp(-8.0, 8.0)
+
+        read_banks = torch.matmul(mem_next, q.view(nt, 1, d, 1)).squeeze(-1)
+        read_vec = (read_banks * bw.unsqueeze(-1)).sum(dim=1)
+
+        depth_state["mem"] = mem_next.view(bsz, seq_len, eb, d, d)
+        depth_state["k_acc"] = depth_state["k_acc"] + k.view(bsz, seq_len, d)
+        depth_state["v_acc"] = depth_state["v_acc"] + v.view(bsz, seq_len, d)
+        depth_state["surprise_sum"] = depth_state["surprise_sum"] + err.detach().float().pow(2).mean().sqrt()
+
+        delta_h = self.out_proj(read_vec).view(bsz, seq_len, self.hidden_size)
+        return hidden_states + self.layer_gates[layer_index].to(dtype=hidden_states.dtype) * delta_h
+
+    def consolidate_temporal(
+        self,
+        hidden_states: torch.Tensor,
+        depth_state: Dict[str, torch.Tensor],
+        prev_state_flat: Optional[torch.Tensor] = None,
+        keep_states: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Consolidate depth-accumulated writes across causal time ``t = 0 .. T-1``."""
+        bsz, seq_len, _ = hidden_states.shape
+        d = self.state_dim
+        eb = self.n_banks
+        flat_width = eb * d * d
+        inv_layers = 1.0 / float(max(1, self.n_layers))
+
+        normed = self.norm(hidden_states)
+        flat = normed.reshape(bsz * seq_len, self.hidden_size)
+        k_all = F.normalize(depth_state["k_acc"] * inv_layers + self.k_proj(normed), p=2, dim=-1, eps=1e-6)
+        v_all = torch.tanh(depth_state["v_acc"] * inv_layers + self.v_proj(normed))
+        q_all = F.normalize(self.q_proj(normed), p=2, dim=-1, eps=1e-6)
+        erase_all = 0.30 * torch.sigmoid(self.erase_proj(normed))
+        write_all = 0.65 * torch.sigmoid(self.write_proj(normed))
+        bw_all = self._route_banks(flat).view(bsz, seq_len, eb)
+
+        if prev_state_flat is not None and prev_state_flat.numel() > 0:
+            t_mem = prev_state_flat.to(dtype=hidden_states.dtype, device=hidden_states.device).reshape(bsz, eb, d, d)
+        else:
+            t_mem = (
+                self.bank_init.to(dtype=hidden_states.dtype, device=hidden_states.device)
+                .unsqueeze(0)
+                .expand(bsz, -1, -1, -1)
+                .clone()
+            )
+
+        if seq_len == 1:
+            k_0 = k_all[:, 0]
+            v_0 = v_all[:, 0]
+            q_0 = q_all[:, 0]
+            bw_0 = bw_all[:, 0]
+            pred_0 = torch.matmul(t_mem, k_0.view(bsz, 1, d, 1)).squeeze(-1)
+            err_0 = v_0.unsqueeze(1) - pred_0
+            sigma_0 = err_0.pow(2).mean(dim=-1, keepdim=True).add(1e-8).sqrt().unsqueeze(-1)
+            temp_surprise = sigma_0.detach().float().mean()
+            bw4 = bw_0.view(bsz, eb, 1, 1)
+            e_0 = erase_all[:, 0].view(bsz, 1, 1, 1)
+            w_0 = write_all[:, 0].view(bsz, 1, 1, 1) * torch.tanh(1.0 + sigma_0)
+            delta_0 = torch.matmul(err_0.unsqueeze(-1), k_0.view(bsz, 1, 1, d))
+            t_mem = ((1.0 - bw4 * e_0) * t_mem + (bw4 * w_0) * delta_0).clamp(-8.0, 8.0)
+            read_b = torch.matmul(t_mem, q_0.view(bsz, 1, d, 1)).squeeze(-1)
+            y_seq = (read_b * bw_0.unsqueeze(-1)).sum(dim=1).unsqueeze(1)
+            hist = (
+                t_mem.reshape(bsz, 1, flat_width)
+                if (keep_states is None or int(keep_states) >= 1)
+                else hidden_states.new_zeros((bsz, 0, flat_width))
+            )
+        else:
+            hist_start = max(0, seq_len - int(keep_states)) if keep_states is not None else 0
+            k_steps = k_all.unbind(1)
+            v_steps = v_all.unbind(1)
+            q_steps = q_all.unbind(1)
+            e_steps = erase_all.unbind(1)
+            w_steps = write_all.unbind(1)
+            bw_steps = bw_all.unbind(1)
+            outs: List[torch.Tensor] = []
+            st_hist: List[torch.Tensor] = []
+            sup_acc = hidden_states.new_zeros((), dtype=torch.float32)
+            for t in range(seq_len):
+                k_t = k_steps[t]
+                v_t = v_steps[t]
+                q_t = q_steps[t]
+                bw_t = bw_steps[t]
+                pred_t = torch.matmul(t_mem, k_t.view(bsz, 1, d, 1)).squeeze(-1)
+                err_t = v_t.unsqueeze(1) - pred_t
+                sigma_t = err_t.pow(2).mean(dim=-1, keepdim=True).add(1e-8).sqrt().unsqueeze(-1)
+                sup_acc = sup_acc + sigma_t.detach().float().mean()
+                bw4 = bw_t.view(bsz, eb, 1, 1)
+                e_g = e_steps[t].view(bsz, 1, 1, 1)
+                w_g = w_steps[t].view(bsz, 1, 1, 1) * torch.tanh(1.0 + sigma_t)
+                delta_t = torch.matmul(err_t.unsqueeze(-1), k_t.view(bsz, 1, 1, d))
+                t_mem = ((1.0 - bw4 * e_g) * t_mem + (bw4 * w_g) * delta_t).clamp(-8.0, 8.0)
+                read_b = torch.matmul(t_mem, q_t.view(bsz, 1, d, 1)).squeeze(-1)
+                outs.append((read_b * bw_t.unsqueeze(-1)).sum(dim=1))
+                if t >= hist_start:
+                    st_hist.append(t_mem.reshape(bsz, flat_width))
+            y_seq = torch.stack(outs, dim=1)
+            hist = (
+                st_hist[0].unsqueeze(1)
+                if len(st_hist) == 1
+                else (
+                    torch.stack(st_hist, dim=1)
+                    if st_hist
+                    else hidden_states.new_zeros((bsz, 0, flat_width))
+                )
+            )
+            temp_surprise = sup_acc / float(max(1, seq_len))
+
+        with torch.no_grad():
+            self.last_depth_surprise = depth_state["surprise_sum"] * inv_layers
+            self.last_temporal_surprise = temp_surprise
+            bw_det = bw_all.detach().float()
+            self.last_bank_usage.copy_(bw_det.mean(dim=(0, 1)))
+            ent = -(bw_det * (bw_det + 1e-8).log()).sum(dim=-1).mean()
+            self.last_bank_entropy = ent
+            self.last_state_norm = t_mem.detach().float().pow(2).sum(dim=(-1, -2)).sqrt().mean()
+
+        out = hidden_states + self.temporal_gate.to(dtype=hidden_states.dtype) * self.out_proj(y_seq)
+        return out, hist
+
+    def telemetry(self) -> Dict[str, object]:
+        return {
+            "enabled": True,
+            "mode": self.mode,
+            "state_dim": int(self.state_dim),
+            "n_banks": int(self.n_banks),
+            "top_k": int(self.top_k),
+            "depth_surprise": float(self.last_depth_surprise.detach()),
+            "temporal_surprise": float(self.last_temporal_surprise.detach()),
+            "bank_entropy": float(self.last_bank_entropy.detach()),
+            "bank_usage": [round(float(x), 5) for x in self.last_bank_usage.detach().cpu().tolist()],
+            "state_frobenius_norm": float(self.last_state_norm.detach()),
+            "layer_gates_mean_abs": float(self.layer_gates.detach().abs().mean()),
+            "temporal_gate_mean_abs": float(self.temporal_gate.detach().abs().mean()),
         }
 
 
@@ -2952,6 +4042,47 @@ class ConnectomeCore(nn.Module):
         else:
             self.apical_gain = None
             self.apical_leak_logit = None
+        self.neuromod_gate = bool(getattr(config, "cns_neuromod_gate", False))
+        self.register_buffer("last_neuromod_gain_mean", torch.ones(()), persistent=False)
+        if self.neuromod_gate:
+            self.neuromod_strength = nn.Parameter(torch.zeros(n))
+        else:
+            self.neuromod_strength = None
+        self.stdp_trace = bool(getattr(config, "cns_stdp_trace", False))
+        self.register_buffer("last_stdp_gain_mean", torch.ones(()), persistent=False)
+        if self.stdp_trace:
+            self.stdp_strength = nn.Parameter(torch.zeros(n))
+        else:
+            self.stdp_strength = None
+        self.oscillatory_phase = bool(getattr(config, "cns_oscillatory_phase", False))
+        self.register_buffer("last_osc_gain_mean", torch.ones(()), persistent=False)
+        if self.oscillatory_phase:
+            self.osc_amp = nn.Parameter(torch.zeros(n))
+            self.osc_freq = nn.Parameter(torch.full((n,), math.pi / float(max(2, self.steps))))
+            self.osc_phase = nn.Parameter(torch.zeros(n))
+        else:
+            self.osc_amp = None
+            self.osc_freq = None
+            self.osc_phase = None
+        self.astrocyte_gate = bool(getattr(config, "cns_astrocyte_gate", False))
+        self.register_buffer("last_astro_gate_mean", torch.ones(()), persistent=False)
+        if self.astrocyte_gate:
+            self.astro_strength = nn.Parameter(torch.zeros(n))
+            self.astro_leak_logit = nn.Parameter(torch.full((n,), -2.2))
+        else:
+            self.astro_strength = None
+            self.astro_leak_logit = None
+        self.retrograde_ephaptic = bool(getattr(config, "cns_retrograde_ephaptic", False))
+        self.register_buffer("last_ephaptic_field_rms", torch.zeros(()), persistent=False)
+        self.register_buffer("last_retro_gain_mean", torch.ones(()), persistent=False)
+        if self.retrograde_ephaptic:
+            self.ephaptic_strength = nn.Parameter(torch.zeros(n))
+            self.retro_strength = nn.Parameter(torch.zeros(n))
+        else:
+            self.ephaptic_strength = None
+            self.retro_strength = None
+        self._weight_eval_cache: Optional[Tuple[Tuple[int, int, int, torch.dtype, torch.device], torch.Tensor, torch.Tensor]] = None
+        self._step_params_eval_cache: Optional[Tuple[Tuple[object, ...], Dict[str, Optional[torch.Tensor]]]] = None
         #: What the most recent growth primitive changed, for the event log.
         self.last_event: Dict[str, object] = {}
         self.graph_info: Dict[str, object] = {"loaded": False}
@@ -3028,6 +4159,26 @@ class ConnectomeCore(nn.Module):
                 self.apical_gain.zero_()
             if self.apical_leak_logit is not None:
                 self.apical_leak_logit.zero_()
+            if self.neuromod_strength is not None:
+                self.neuromod_strength.zero_()
+            if self.stdp_strength is not None:
+                self.stdp_strength.zero_()
+            if self.osc_amp is not None:
+                self.osc_amp.zero_()
+            if self.osc_freq is not None:
+                self.osc_freq.fill_(math.pi / float(max(2, self.steps)))
+            if self.osc_phase is not None:
+                self.osc_phase.zero_()
+            if self.astro_strength is not None:
+                self.astro_strength.zero_()
+            if self.astro_leak_logit is not None:
+                self.astro_leak_logit.fill_(-2.2)
+            if self.ephaptic_strength is not None:
+                self.ephaptic_strength.zero_()
+            if self.retro_strength is not None:
+                self.retro_strength.zero_()
+            self._weight_eval_cache = None
+            self._step_params_eval_cache = None
             target = (self.init_fraction * self.spectral_scale).clamp_min(1e-6)
             # softplus^-1(y) = log(expm1(y)); masked entries sit far below zero.
             inverse = torch.log(torch.expm1(target))
@@ -3286,6 +4437,141 @@ class ConnectomeCore(nn.Module):
         self.last_apical_mod_mean = mod.detach().mean()
         return rate * mod
 
+    def _neuromod_modulation(
+        self, rate: torch.Tensor, drive: torch.Tensor, rec: torch.Tensor
+    ) -> torch.Tensor:
+        if not self.neuromod_gate or self.neuromod_strength is None:
+            return rate
+        novelty = (drive - rec.detach()).abs().mean(dim=-1, keepdim=True)
+        strength = 0.5 * torch.tanh(self.neuromod_strength.to(rate.dtype))
+        mod = (1.0 + strength * torch.tanh(novelty)).clamp(0.5, 1.5)
+        self.last_neuromod_gain_mean = mod.detach().mean()
+        return rate * mod
+
+    def _stdp_modulation(self, rate: torch.Tensor, prev_rate: torch.Tensor) -> torch.Tensor:
+        if not self.stdp_trace or self.stdp_strength is None:
+            return rate
+        strength = 0.25 * torch.tanh(self.stdp_strength.to(rate.dtype))
+        coinc = (rate.detach() - prev_rate.detach()).clamp(-2.0, 2.0)
+        mod = (1.0 + strength * coinc).clamp(0.75, 1.25)
+        self.last_stdp_gain_mean = mod.detach().mean()
+        return rate * mod
+
+    def _prepare_step_params(self, dtype: torch.dtype) -> Dict[str, Optional[torch.Tensor]]:
+        """Precompute loop-invariant step tensors once per forward call (eval version-cached)."""
+        can_cache = not self.training and not torch.is_grad_enabled()
+        cache_key: Optional[Tuple[object, ...]] = None
+        if can_cache:
+            cache_key = (
+                dtype,
+                self.leak_logit.device,
+                self.sign._version,
+                self.pred_error_strength._version if self.pred_error_strength is not None else -1,
+                self.apical_gain._version if self.apical_gain is not None else -1,
+                self.hebbian_strength._version if self.hebbian_strength is not None else -1,
+                self.neuromod_strength._version if self.neuromod_strength is not None else -1,
+                self.stdp_strength._version if self.stdp_strength is not None else -1,
+                self.osc_amp._version if self.osc_amp is not None else -1,
+                self.osc_freq._version if self.osc_freq is not None else -1,
+                self.osc_phase._version if self.osc_phase is not None else -1,
+                self.div_norm_strength._version if self.div_norm_strength is not None else -1,
+                self.astro_strength._version if self.astro_strength is not None else -1,
+                self.astro_leak_logit._version if self.astro_leak_logit is not None else -1,
+                self.ephaptic_strength._version if self.ephaptic_strength is not None else -1,
+                self.retro_strength._version if self.retro_strength is not None else -1,
+            )
+            if self._step_params_eval_cache is not None and self._step_params_eval_cache[0] == cache_key:
+                return self._step_params_eval_cache[1]
+        pred_s = (
+            0.25 * torch.tanh(self.pred_error_strength.to(dtype))
+            if (self.predictive_error and self.pred_error_strength is not None)
+            else None
+        )
+        apical_g = (
+            0.5 * torch.tanh(self.apical_gain.to(dtype))
+            if (self.dendritic_apical and self.apical_gain is not None)
+            else None
+        )
+        heb_s = (
+            0.25 * torch.tanh(self.hebbian_strength.to(dtype))
+            if (self.hebbian_trace and self.hebbian_strength is not None)
+            else None
+        )
+        nm_s = (
+            0.5 * torch.tanh(self.neuromod_strength.to(dtype))
+            if (self.neuromod_gate and self.neuromod_strength is not None)
+            else None
+        )
+        stdp_s = (
+            0.25 * torch.tanh(self.stdp_strength.to(dtype))
+            if (self.stdp_trace and self.stdp_strength is not None)
+            else None
+        )
+        osc_mods: Optional[torch.Tensor] = None
+        if (
+            self.oscillatory_phase
+            and self.osc_amp is not None
+            and self.osc_freq is not None
+            and self.osc_phase is not None
+        ):
+            osc_a = 0.35 * torch.tanh(self.osc_amp.to(dtype)).unsqueeze(0)  # (1, n)
+            osc_f = self.osc_freq.to(dtype).unsqueeze(0)  # (1, n)
+            osc_p = self.osc_phase.to(dtype).unsqueeze(0)  # (1, n)
+            step_grid = torch.arange(
+                1, self.steps + 1, device=self.osc_amp.device, dtype=dtype
+            ).unsqueeze(1)  # (steps, 1)
+            osc_mods = (1.0 + osc_a * torch.cos(osc_f * step_grid + osc_p)).clamp(0.65, 1.35)
+        div_scale: Optional[torch.Tensor] = None
+        inhib_mask: Optional[torch.Tensor] = None
+        inhib_inv: Optional[float] = None
+        if self.divisive_norm and self.div_norm_strength is not None:
+            div_scale = (
+                F.softplus(self.div_norm_strength.to(dtype)) - math.log(2.0)
+            ).clamp(0.0, 2.0)
+            im = (self.sign < 0).to(dtype)
+            cnt = float(im.sum().item())
+            if cnt > 0.0:
+                inhib_mask = im
+                inhib_inv = 1.0 / cnt
+        astro_s = (
+            0.40 * torch.tanh(self.astro_strength.to(dtype))
+            if (self.astrocyte_gate and self.astro_strength is not None)
+            else None
+        )
+        astro_alpha = (
+            torch.sigmoid(self.astro_leak_logit.to(dtype))
+            if (self.astrocyte_gate and self.astro_leak_logit is not None)
+            else None
+        )
+        eph_s = (
+            0.25 * torch.tanh(self.ephaptic_strength.to(dtype))
+            if (self.retrograde_ephaptic and self.ephaptic_strength is not None)
+            else None
+        )
+        retro_s = (
+            0.35 * torch.tanh(self.retro_strength.to(dtype))
+            if (self.retrograde_ephaptic and self.retro_strength is not None)
+            else None
+        )
+        res: Dict[str, Optional[torch.Tensor]] = {
+            "pred_s": pred_s,
+            "apical_g": apical_g,
+            "heb_s": heb_s,
+            "nm_s": nm_s,
+            "stdp_s": stdp_s,
+            "osc_mods": osc_mods,
+            "div_scale": div_scale,
+            "inhib_mask": inhib_mask,
+            "inhib_inv": inhib_inv,  # type: ignore[dict-item]
+            "astro_s": astro_s,
+            "astro_alpha": astro_alpha,
+            "eph_s": eph_s,
+            "retro_s": retro_s,
+        }
+        if can_cache and cache_key is not None:
+            self._step_params_eval_cache = (cache_key, res)
+        return res
+
     def _per_token_rates(
         self,
         drive: torch.Tensor,
@@ -3293,8 +4579,10 @@ class ConnectomeCore(nn.Module):
         alpha: torch.Tensor,
         active: Optional[torch.Tensor],
         comm_gates: Optional[torch.Tensor] = None,
+        w_t_precomputed: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         rate = torch.zeros_like(drive)
+        one_minus_alpha = 1.0 - alpha
         slow = torch.zeros_like(drive) if self.dual_soma else None
         apical = torch.zeros_like(drive) if self.dendritic_apical else None
         apical_alpha = (
@@ -3302,41 +4590,117 @@ class ConnectomeCore(nn.Module):
             if self.dendritic_apical and self.apical_leak_logit is not None
             else None
         )
+        one_minus_apical = (1.0 - apical_alpha) if apical_alpha is not None else None
         slow_alpha = (
             torch.sigmoid(self.slow_leak_logit).to(drive.dtype)
             if self.dual_soma and self.slow_leak_logit is not None
             else None
         )
+        one_minus_slow = (1.0 - slow_alpha) if slow_alpha is not None else None
         slow_coup = (
             torch.tanh(self.slow_coupling).to(drive.dtype)
             if self.dual_soma and self.slow_coupling is not None
             else None
         )
         glial_gain = self._glial_gain(drive.dtype)
+        sp = self._prepare_step_params(drive.dtype)
+        pred_s = sp["pred_s"]
+        apical_g = sp["apical_g"]
+        heb_s = sp["heb_s"]
+        nm_s = sp["nm_s"]
+        stdp_s = sp["stdp_s"]
+        osc_mods = sp["osc_mods"]
+        div_scale = sp["div_scale"]
+        inhib_mask = sp["inhib_mask"]
+        inhib_inv = sp["inhib_inv"]
+        astro_s = sp["astro_s"]
+        astro_alpha = sp["astro_alpha"]
+        eph_s = sp["eph_s"]
+        retro_s = sp["retro_s"]
+        astro_ca = torch.zeros_like(drive) if astro_s is not None else None
         if comm_gates is not None:
             w_same_t, w_lr_t, w_rl_t = self._split_commissural_weights(w)
             g_lr, g_rl = comm_gates[:, 0:1], comm_gates[:, 1:2]
         else:
-            w_t = w.t()
-        for _ in range(self.steps):
+            w_t = w_t_precomputed if w_t_precomputed is not None else w.t()
+        last_step = self.steps - 1
+        for step_idx in range(self.steps):
+            is_last = step_idx == last_step
+            prev_rate = rate if stdp_s is not None else None
             if comm_gates is not None:
                 rec = rate @ w_same_t + g_lr * (rate @ w_lr_t) + g_rl * (rate @ w_rl_t)
             else:
                 rec = rate @ w_t
-            eff_drive = self._predictive_drive(drive, rec)
-            rate = (1.0 - alpha) * rate + alpha * F.relu(rec + eff_drive)
-            if apical is not None and apical_alpha is not None:
-                apical = (1.0 - apical_alpha) * apical + apical_alpha * rec
-                rate = self._apical_modulation(rate, apical)
-            if slow is not None and slow_alpha is not None and slow_coup is not None:
-                slow = (1.0 - slow_alpha) * slow + slow_alpha * rate
+            if pred_s is not None:
+                err_delta = pred_s * rec.detach()
+                eff_drive = drive - err_delta
+                if is_last:
+                    self.last_pred_error_norm = err_delta.detach().pow(2).mean().sqrt()
+            else:
+                eff_drive = drive
+            if eph_s is not None:
+                lfp = rec.mean(dim=-1, keepdim=True)
+                eph_cur = eph_s * (lfp - rate)
+                if is_last:
+                    self.last_ephaptic_field_rms = eph_cur.detach().pow(2).mean().sqrt()
+                eff_drive = eff_drive + eph_cur
+            rate = one_minus_alpha * rate + alpha * F.relu(rec + eff_drive)
+            if apical is not None and apical_alpha is not None and one_minus_apical is not None:
+                apical = one_minus_apical * apical + apical_alpha * rec
+                if apical_g is not None:
+                    mod = (1.0 + apical_g * (2.0 * torch.sigmoid(apical) - 1.0)).clamp(0.5, 1.5)
+                    if is_last:
+                        self.last_apical_mod_mean = mod.detach().mean()
+                    rate = rate * mod
+            if slow is not None and slow_alpha is not None and one_minus_slow is not None and slow_coup is not None:
+                slow = one_minus_slow * slow + slow_alpha * rate
                 rate = F.relu(rate + slow_coup * slow)
             if glial_gain is not None:
                 rate = rate * glial_gain
-            heb_gain = self._hebbian_modulation(rate)
-            if heb_gain is not None:
+            if heb_s is not None:
+                heb_gain = (1.0 + heb_s * (rate.detach().clamp(0.0, 2.0) - 0.25)).clamp(0.75, 1.25)
+                if is_last:
+                    self.last_hebbian_gain_mean = heb_gain.detach().mean()
                 rate = rate * heb_gain
-            rate = self._divisive_normalize(rate)
+            if nm_s is not None:
+                novelty = (drive - rec.detach()).abs().mean(dim=-1, keepdim=True)
+                nm_mod = (1.0 + nm_s * torch.tanh(novelty)).clamp(0.5, 1.5)
+                if is_last:
+                    self.last_neuromod_gain_mean = nm_mod.detach().mean()
+                rate = rate * nm_mod
+            if stdp_s is not None and prev_rate is not None:
+                coinc = (rate.detach() - prev_rate.detach()).clamp(-2.0, 2.0)
+                stdp_mod = (1.0 + stdp_s * coinc).clamp(0.75, 1.25)
+                if is_last:
+                    self.last_stdp_gain_mean = stdp_mod.detach().mean()
+                rate = rate * stdp_mod
+            if osc_mods is not None:
+                osc_step = osc_mods[step_idx]
+                if is_last:
+                    self.last_osc_gain_mean = osc_step.detach().mean()
+                rate = rate * osc_step
+            if astro_s is not None and astro_alpha is not None and astro_ca is not None:
+                astro_ca = (1.0 - astro_alpha) * astro_ca + astro_alpha * (
+                    0.5 * rate.detach().abs() + 0.5 * (drive - rec.detach()).abs().clamp(0.0, 4.0)
+                )
+                astro_mod = (1.0 + astro_s * torch.tanh(astro_ca - 0.25)).clamp(0.60, 1.40)
+                if is_last:
+                    self.last_astro_gate_mean = astro_mod.detach().mean()
+                rate = rate * astro_mod
+            if retro_s is not None:
+                retro_mod = (1.0 - retro_s * torch.tanh(rate.detach().pow(2) - 0.25)).clamp(0.65, 1.35)
+                if is_last:
+                    self.last_retro_gain_mean = retro_mod.detach().mean()
+                rate = rate * retro_mod
+            if div_scale is not None:
+                if inhib_mask is not None and inhib_inv is not None:
+                    inhib_pool = (rate * inhib_mask).sum(dim=-1, keepdim=True) * float(inhib_inv)
+                else:
+                    inhib_pool = rate.mean(dim=-1, keepdim=True)
+                denom = 1.0 + div_scale * inhib_pool.detach()
+                if is_last:
+                    self.last_div_norm_factor = denom.detach().mean()
+                rate = rate / denom
             if active is not None:
                 rate = rate * active
         return rate
@@ -3349,6 +4713,7 @@ class ConnectomeCore(nn.Module):
         alpha: torch.Tensor,
         active: Optional[torch.Tensor],
         comm_gates: Optional[torch.Tensor] = None,
+        w_t_precomputed: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Causal scan over ``drive`` ``(B, T, n)`` from ``state`` ``(B, n)``.
 
@@ -3362,64 +4727,169 @@ class ConnectomeCore(nn.Module):
             state = drive.new_zeros(bsz, n)
         else:
             state = state.to(dtype=drive.dtype)
+        one_minus_alpha = 1.0 - alpha
         slow = state.clone() if self.dual_soma else None
         apical_alpha = (
             torch.sigmoid(self.apical_leak_logit).to(drive.dtype)
             if self.dendritic_apical and self.apical_leak_logit is not None
             else None
         )
+        one_minus_apical = (1.0 - apical_alpha) if apical_alpha is not None else None
         slow_alpha = (
             torch.sigmoid(self.slow_leak_logit).to(drive.dtype)
             if self.dual_soma and self.slow_leak_logit is not None
             else None
         )
+        one_minus_slow = (1.0 - slow_alpha) if slow_alpha is not None else None
         slow_coup = (
             torch.tanh(self.slow_coupling).to(drive.dtype)
             if self.dual_soma and self.slow_coupling is not None
             else None
         )
         glial_gain = self._glial_gain(drive.dtype)
+        sp = self._prepare_step_params(drive.dtype)
+        pred_s = sp["pred_s"]
+        apical_g = sp["apical_g"]
+        heb_s = sp["heb_s"]
+        nm_s = sp["nm_s"]
+        stdp_s = sp["stdp_s"]
+        osc_mods = sp["osc_mods"]
+        div_scale = sp["div_scale"]
+        inhib_mask = sp["inhib_mask"]
+        inhib_inv = sp["inhib_inv"]
+        astro_s = sp["astro_s"]
+        astro_alpha = sp["astro_alpha"]
+        eph_s = sp["eph_s"]
+        retro_s = sp["retro_s"]
         if comm_gates is not None:
             w_same_t, w_lr_t, w_rl_t = self._split_commissural_weights(w)
             comm_seq = comm_gates.view(bsz, seq_len, 2)
+            comm_steps = comm_seq.unbind(1)
         else:
-            w_t = w.t()
+            w_t = w_t_precomputed if w_t_precomputed is not None else w.t()
+            comm_steps = None
+        drive_steps = drive.unbind(1)
         states: List[torch.Tensor] = []
+        last_t = seq_len - 1
+        last_step = self.steps - 1
         for t in range(seq_len):
-            u = drive[:, t]
+            u = drive_steps[t]
             apical = torch.zeros_like(u) if self.dendritic_apical else None
-            if comm_gates is not None:
-                g_lr = comm_seq[:, t, 0:1]
-                g_rl = comm_seq[:, t, 1:2]
-            for _ in range(self.steps):
-                if comm_gates is not None:
+            astro_ca = state.detach().abs() if astro_s is not None else None
+            if comm_steps is not None:
+                c_t = comm_steps[t]
+                g_lr = c_t[:, 0:1]
+                g_rl = c_t[:, 1:2]
+            is_last_t = t == last_t
+            for step_idx in range(self.steps):
+                is_last = is_last_t and (step_idx == last_step)
+                prev_state = state if stdp_s is not None else None
+                if comm_steps is not None:
                     rec = state @ w_same_t + g_lr * (state @ w_lr_t) + g_rl * (state @ w_rl_t)
                 else:
                     rec = state @ w_t
-                eff_u = self._predictive_drive(u, rec)
-                state = (1.0 - alpha) * state + alpha * F.relu(rec + eff_u)
-                if apical is not None and apical_alpha is not None:
-                    apical = (1.0 - apical_alpha) * apical + apical_alpha * rec
-                    state = self._apical_modulation(state, apical)
-                if slow is not None and slow_alpha is not None and slow_coup is not None:
-                    slow = (1.0 - slow_alpha) * slow + slow_alpha * state
+                if pred_s is not None:
+                    err_delta = pred_s * rec.detach()
+                    eff_u = u - err_delta
+                    if is_last:
+                        self.last_pred_error_norm = err_delta.detach().pow(2).mean().sqrt()
+                else:
+                    eff_u = u
+                if eph_s is not None:
+                    lfp = rec.mean(dim=-1, keepdim=True)
+                    eph_cur = eph_s * (lfp - state)
+                    if is_last:
+                        self.last_ephaptic_field_rms = eph_cur.detach().pow(2).mean().sqrt()
+                    eff_u = eff_u + eph_cur
+                state = one_minus_alpha * state + alpha * F.relu(rec + eff_u)
+                if apical is not None and apical_alpha is not None and one_minus_apical is not None:
+                    apical = one_minus_apical * apical + apical_alpha * rec
+                    if apical_g is not None:
+                        mod = (1.0 + apical_g * (2.0 * torch.sigmoid(apical) - 1.0)).clamp(0.5, 1.5)
+                        if is_last:
+                            self.last_apical_mod_mean = mod.detach().mean()
+                        state = state * mod
+                if slow is not None and slow_alpha is not None and one_minus_slow is not None and slow_coup is not None:
+                    slow = one_minus_slow * slow + slow_alpha * state
                     state = F.relu(state + slow_coup * slow)
                 if glial_gain is not None:
                     state = state * glial_gain
-                heb_gain = self._hebbian_modulation(state)
-                if heb_gain is not None:
+                if heb_s is not None:
+                    heb_gain = (1.0 + heb_s * (state.detach().clamp(0.0, 2.0) - 0.25)).clamp(0.75, 1.25)
+                    if is_last:
+                        self.last_hebbian_gain_mean = heb_gain.detach().mean()
                     state = state * heb_gain
-                state = self._divisive_normalize(state)
+                if nm_s is not None:
+                    novelty = (u - rec.detach()).abs().mean(dim=-1, keepdim=True)
+                    nm_mod = (1.0 + nm_s * torch.tanh(novelty)).clamp(0.5, 1.5)
+                    if is_last:
+                        self.last_neuromod_gain_mean = nm_mod.detach().mean()
+                    state = state * nm_mod
+                if stdp_s is not None and prev_state is not None:
+                    coinc = (state.detach() - prev_state.detach()).clamp(-2.0, 2.0)
+                    stdp_mod = (1.0 + stdp_s * coinc).clamp(0.75, 1.25)
+                    if is_last:
+                        self.last_stdp_gain_mean = stdp_mod.detach().mean()
+                    state = state * stdp_mod
+                if osc_mods is not None:
+                    osc_step = osc_mods[step_idx]
+                    if is_last:
+                        self.last_osc_gain_mean = osc_step.detach().mean()
+                    state = state * osc_step
+                if astro_s is not None and astro_alpha is not None and astro_ca is not None:
+                    astro_ca = (1.0 - astro_alpha) * astro_ca + astro_alpha * (
+                        0.5 * state.detach().abs() + 0.5 * (u - rec.detach()).abs().clamp(0.0, 4.0)
+                    )
+                    astro_mod = (1.0 + astro_s * torch.tanh(astro_ca - 0.25)).clamp(0.60, 1.40)
+                    if is_last:
+                        self.last_astro_gate_mean = astro_mod.detach().mean()
+                    state = state * astro_mod
+                if retro_s is not None:
+                    retro_mod = (1.0 - retro_s * torch.tanh(state.detach().pow(2) - 0.25)).clamp(0.65, 1.35)
+                    if is_last:
+                        self.last_retro_gain_mean = retro_mod.detach().mean()
+                    state = state * retro_mod
+                if div_scale is not None:
+                    if inhib_mask is not None and inhib_inv is not None:
+                        inhib_pool = (state * inhib_mask).sum(dim=-1, keepdim=True) * float(inhib_inv)
+                    else:
+                        inhib_pool = state.mean(dim=-1, keepdim=True)
+                    denom = 1.0 + div_scale * inhib_pool.detach()
+                    if is_last:
+                        self.last_div_norm_factor = denom.detach().mean()
+                    state = state / denom
                 if active is not None:
                     state = state * active
             states.append(state)
-        return torch.stack(states, dim=1)
+        return states[0].unsqueeze(1) if seq_len == 1 else torch.stack(states, dim=1)
 
     def rates(self, hiddens: Sequence[torch.Tensor], state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Raw module rates ``(B*T, n)`` (per-token) or ``(B, T, n)`` (temporal)."""
 
         drive = self.drive(hiddens)
-        w = self.weight().to(drive.dtype)
+        w_t_cached: Optional[torch.Tensor] = None
+        if (
+            not self.training
+            and not torch.is_grad_enabled()
+            and not self.ablate_grown
+            and not self.ablate_cross
+            and self._edge_grad_probe is None
+        ):
+            w_key = (
+                self.edge_logit._version,
+                self.mask._version,
+                self.sign._version,
+                drive.dtype,
+                drive.device,
+            )
+            if self._weight_eval_cache is not None and self._weight_eval_cache[0] == w_key:
+                w, w_t_cached = self._weight_eval_cache[1], self._weight_eval_cache[2]
+            else:
+                w = self.weight().to(drive.dtype)
+                w_t_cached = w.t().contiguous()
+                self._weight_eval_cache = (w_key, w, w_t_cached)
+        else:
+            w = self.weight().to(drive.dtype)
         alpha = torch.sigmoid(self.leak_logit).to(drive.dtype)
         _, _, active = self._tap_masks(drive.dtype)
         comm_gates: Optional[torch.Tensor] = None
@@ -3431,10 +4901,18 @@ class ConnectomeCore(nn.Module):
             primary = hiddens[-1]
             bsz, seq_len = int(primary.shape[0]), int(primary.shape[1])
             out = self._temporal_rates(
-                drive.view(bsz, seq_len, self.n_nodes), state, w, alpha, active, comm_gates
+                drive.view(bsz, seq_len, self.n_nodes),
+                state,
+                w,
+                alpha,
+                active,
+                comm_gates,
+                w_t_precomputed=w_t_cached,
             )
         else:
-            out = self._per_token_rates(drive, w, alpha, active, comm_gates)
+            out = self._per_token_rates(
+                drive, w, alpha, active, comm_gates, w_t_precomputed=w_t_cached
+            )
         if self.glial_homeostasis and self.training and self.glial_activity_ema is not None:
             with torch.no_grad():
                 batch_mean = out.detach().float().reshape(-1, self.n_nodes).mean(0)
@@ -3664,6 +5142,26 @@ class ConnectomeCore(nn.Module):
             self.apical_gain[child] = self.apical_gain[parent]
         if self.apical_leak_logit is not None:
             self.apical_leak_logit[child] = self.apical_leak_logit[parent]
+        if self.neuromod_strength is not None:
+            self.neuromod_strength[child] = self.neuromod_strength[parent]
+        if self.stdp_strength is not None:
+            self.stdp_strength[child] = self.stdp_strength[parent]
+        if self.osc_amp is not None:
+            self.osc_amp[child] = self.osc_amp[parent]
+        if self.osc_freq is not None:
+            self.osc_freq[child] = self.osc_freq[parent]
+        if self.osc_phase is not None:
+            self.osc_phase[child] = self.osc_phase[parent]
+        if self.astro_strength is not None:
+            self.astro_strength[child] = self.astro_strength[parent]
+        if self.astro_leak_logit is not None:
+            self.astro_leak_logit[child] = self.astro_leak_logit[parent]
+        if self.ephaptic_strength is not None:
+            self.ephaptic_strength[child] = self.ephaptic_strength[parent]
+        if self.retro_strength is not None:
+            self.retro_strength[child] = self.retro_strength[parent]
+        self._weight_eval_cache = None
+        self._step_params_eval_cache = None
         self.alive[child] = 1
         self.born_step[child] = int(step)
         # taps: afferent rows copied, efferent columns halved and shared
@@ -3818,6 +5316,30 @@ class ConnectomeCore(nn.Module):
             self.pred_error_strength[index] = 0.0
         if self.div_norm_strength is not None:
             self.div_norm_strength[index] = 0.0
+        if self.apical_gain is not None:
+            self.apical_gain[index] = 0.0
+        if self.apical_leak_logit is not None:
+            self.apical_leak_logit[index] = 0.0
+        if self.neuromod_strength is not None:
+            self.neuromod_strength[index] = 0.0
+        if self.stdp_strength is not None:
+            self.stdp_strength[index] = 0.0
+        if self.osc_amp is not None:
+            self.osc_amp[index] = 0.0
+        if self.osc_freq is not None:
+            self.osc_freq[index] = math.pi / float(max(2, self.steps))
+        if self.osc_phase is not None:
+            self.osc_phase[index] = 0.0
+        if self.astro_strength is not None:
+            self.astro_strength[index] = 0.0
+        if self.astro_leak_logit is not None:
+            self.astro_leak_logit[index] = -2.2
+        if self.ephaptic_strength is not None:
+            self.ephaptic_strength[index] = 0.0
+        if self.retro_strength is not None:
+            self.retro_strength[index] = 0.0
+        self._weight_eval_cache = None
+        self._step_params_eval_cache = None
         slot = torch.zeros(self.n_nodes, dtype=torch.bool, device=self.alive.device)
         slot[index] = True
         self._zero_slot_taps(slot)
@@ -4015,6 +5537,7 @@ class ConnectomeCore(nn.Module):
             target_radius=target_radius, max_scale_step=0.25, power_iters=power_iters
         )
         edges_after = int((self.mask > 0).sum())
+        self._weight_eval_cache = None
         return {
             "edges_before": float(edges_before),
             "edges_after": float(edges_after),
@@ -4023,6 +5546,145 @@ class ConnectomeCore(nn.Module):
             "rho_before": float(rho_before),
             "rho_after": float(proj["rho_after"]),
             "target_radius": float(target_radius),
+        }
+
+    @torch.no_grad()
+    def three_factor_btsp_update(
+        self,
+        pre_activity: torch.Tensor,
+        post_activity: torch.Tensor,
+        modulatory_signal: torch.Tensor | float,
+        *,
+        lr: float = 0.02,
+        spine_threshold: float = 0.35,
+        target_radius: Optional[float] = None,
+        power_iters: int = 8,
+    ) -> Dict[str, float]:
+        """Three-Factor BTSP + MICrONS Spine-Apparatus Dual-Regime Synaptic Update (v107).
+
+        Updates connected ``edge_logit`` magnitudes (strictly preserving Dale's law
+        signs ``self.sign`` and ``self.mask``):
+        - **Nascent spines** (``mag < spine_threshold``): exploratory Oja-normalized
+          coincidence ``post * pre - 0.15 * post^2 * mag``.
+        - **Mature spine-apparatus synapses** (``mag >= spine_threshold``): damped
+          consolidation credit ``0.35 * (post * pre - 0.30 * mag)``.
+        Multiplied by the third-factor plateau/neuromodulator ``modulatory_signal``.
+        """
+        n = self.n_nodes
+        step_lr = float(lr)
+        if step_lr <= 0.0:
+            raise ValueError(f"lr must be > 0, got {lr}")
+        pre_flat = pre_activity.detach().reshape(-1, n).to(device=self.edge_logit.device, dtype=torch.float32)
+        post_flat = post_activity.detach().reshape(-1, n).to(device=self.edge_logit.device, dtype=torch.float32)
+        if pre_flat.shape[0] != post_flat.shape[0] or pre_flat.shape[0] == 0:
+            raise ValueError("pre_activity and post_activity must share a non-empty batch/token count")
+
+        connected = self.mask > 0
+        n_conn = int(connected.sum())
+        if n_conn == 0:
+            return {
+                "updated_edges": 0.0,
+                "nascent_fraction": 0.0,
+                "mature_fraction": 0.0,
+                "mean_abs_delta_mag": 0.0,
+                "rho_after": 0.0,
+            }
+
+        samples = float(pre_flat.shape[0])
+        coinc = (post_flat.t() @ pre_flat) / samples  # (n, n)
+        post_sq = (post_flat.pow(2).mean(dim=0)).unsqueeze(1)  # (n, 1)
+        mag = F.softplus(self.edge_logit.to(torch.float32))
+
+        if isinstance(modulatory_signal, torch.Tensor):
+            mod = modulatory_signal.detach().to(device=mag.device, dtype=torch.float32)
+            if mod.numel() == 1:
+                mod_mat = mod.reshape(1, 1).clamp(-2.0, 2.0)
+            elif mod.numel() == n:
+                mod_mat = mod.reshape(n, 1).clamp(-2.0, 2.0)
+            else:
+                mod_mat = mod.mean().reshape(1, 1).clamp(-2.0, 2.0)
+        else:
+            mod_mat = torch.full((1, 1), max(-2.0, min(2.0, float(modulatory_signal))), device=mag.device)
+
+        thresh = max(1e-4, float(spine_threshold))
+        mature_mask = mag >= thresh
+        nascent_elig = coinc - 0.15 * post_sq * mag
+        mature_elig = 0.35 * (coinc - 0.30 * mag)
+        elig = torch.where(mature_mask, mature_elig, nascent_elig)
+
+        delta_mag = (step_lr * mod_mat * elig).clamp(-0.25, 0.25)
+        new_mag = (mag + delta_mag).clamp(1e-6, 12.0)
+        inv = torch.log(torch.expm1(new_mag)).to(self.edge_logit.dtype)
+        self.edge_logit.copy_(torch.where(connected, inv, self.edge_logit))
+        self._weight_eval_cache = None
+
+        if target_radius is not None and float(target_radius) > 0.0:
+            proj = self.project_spectral_radius(target_radius=float(target_radius), power_iters=power_iters)
+            rho_after = float(proj["rho_after"])
+        else:
+            rho_after = float(self.estimate_spectral_radius(power_iters=power_iters))
+
+        mature_conn = float((mature_mask & connected).sum()) / float(n_conn)
+        mean_delta = float((new_mag - mag).abs()[connected].mean())
+        return {
+            "updated_edges": float(n_conn),
+            "nascent_fraction": float(1.0 - mature_conn),
+            "mature_fraction": float(mature_conn),
+            "mean_abs_delta_mag": mean_delta,
+            "rho_after": rho_after,
+        }
+
+    @torch.no_grad()
+    def ewc_synaptic_consolidate(
+        self,
+        anchor_edge_logit: torch.Tensor,
+        fisher_diag: Optional[torch.Tensor] = None,
+        *,
+        pull_strength: float = 0.10,
+    ) -> Dict[str, float]:
+        """SONAPSE-SYMBIOSIS Continual Synaptic Consolidation (v107).
+
+        Applies closed-form Fisher-information-weighted proximal pull of active
+        synapse magnitudes toward ``anchor_edge_logit`` while preserving Dale
+        signs and ``self.mask`` topology.
+        """
+        lam = float(pull_strength)
+        if lam < 0.0:
+            raise ValueError(f"pull_strength must be >= 0, got {pull_strength}")
+        if tuple(anchor_edge_logit.shape) != tuple(self.edge_logit.shape):
+            raise ValueError(
+                f"anchor_edge_logit shape {tuple(anchor_edge_logit.shape)} != {tuple(self.edge_logit.shape)}"
+            )
+        connected = self.mask > 0
+        n_conn = int(connected.sum())
+        if n_conn == 0 or lam == 0.0:
+            return {"consolidated_edges": 0.0, "mean_mag_drift_before": 0.0, "mean_mag_drift_after": 0.0}
+
+        mag = F.softplus(self.edge_logit.to(torch.float32))
+        anchor_mag = F.softplus(
+            anchor_edge_logit.detach().to(device=mag.device, dtype=torch.float32)
+        )
+        if fisher_diag is not None:
+            f_raw = fisher_diag.detach().to(device=mag.device, dtype=torch.float32).abs()
+            if tuple(f_raw.shape) != tuple(mag.shape):
+                raise ValueError(f"fisher_diag shape {tuple(f_raw.shape)} != {tuple(mag.shape)}")
+            f_mean = float(f_raw[connected].mean())
+            f_norm = (f_raw / max(f_mean, 1e-8)).clamp(0.0, 10.0)
+        else:
+            f_norm = torch.ones_like(mag)
+
+        drift_before = float((mag - anchor_mag).abs()[connected].mean())
+        coeff = lam * f_norm
+        new_mag = ((mag + coeff * anchor_mag) / (1.0 + coeff)).clamp(1e-6, 12.0)
+        drift_after = float((new_mag - anchor_mag).abs()[connected].mean())
+
+        inv = torch.log(torch.expm1(new_mag)).to(self.edge_logit.dtype)
+        self.edge_logit.copy_(torch.where(connected, inv, self.edge_logit))
+        self._weight_eval_cache = None
+        return {
+            "consolidated_edges": float(n_conn),
+            "mean_mag_drift_before": drift_before,
+            "mean_mag_drift_after": drift_after,
         }
 
     # -- telemetry -------------------------------------------------------------
@@ -4133,6 +5795,28 @@ class ConnectomeCore(nn.Module):
             snapshot["dendritic_apical"] = True
             snapshot["apical_gain_mean_abs"] = float(self.apical_gain.detach().abs().mean())
             snapshot["apical_mod_mean"] = float(self.last_apical_mod_mean.detach())
+        if self.neuromod_gate and self.neuromod_strength is not None:
+            snapshot["neuromod_gate"] = True
+            snapshot["neuromod_strength_mean_abs"] = float(self.neuromod_strength.detach().abs().mean())
+            snapshot["neuromod_gain_mean"] = float(self.last_neuromod_gain_mean.detach())
+        if self.stdp_trace and self.stdp_strength is not None:
+            snapshot["stdp_trace"] = True
+            snapshot["stdp_strength_mean_abs"] = float(self.stdp_strength.detach().abs().mean())
+            snapshot["stdp_gain_mean"] = float(self.last_stdp_gain_mean.detach())
+        if self.oscillatory_phase and self.osc_amp is not None:
+            snapshot["oscillatory_phase"] = True
+            snapshot["osc_amp_mean_abs"] = float(self.osc_amp.detach().abs().mean())
+            snapshot["osc_gain_mean"] = float(self.last_osc_gain_mean.detach())
+        if self.astrocyte_gate and self.astro_strength is not None:
+            snapshot["astrocyte_gate"] = True
+            snapshot["astro_strength_mean_abs"] = float(self.astro_strength.detach().abs().mean())
+            snapshot["astro_gate_mean"] = float(self.last_astro_gate_mean.detach())
+        if self.retrograde_ephaptic and self.ephaptic_strength is not None and self.retro_strength is not None:
+            snapshot["retrograde_ephaptic"] = True
+            snapshot["ephaptic_strength_mean_abs"] = float(self.ephaptic_strength.detach().abs().mean())
+            snapshot["retro_strength_mean_abs"] = float(self.retro_strength.detach().abs().mean())
+            snapshot["ephaptic_field_rms"] = float(self.last_ephaptic_field_rms.detach())
+            snapshot["retro_gain_mean"] = float(self.last_retro_gain_mean.detach())
         return snapshot
 
 
@@ -4245,6 +5929,42 @@ class MiMoMixModel(nn.Module):
             if getattr(config, "use_deltanet_memory", False)
             else None
         )
+        self.titans_memory = (
+            TitansSurpriseMemory(config)
+            if getattr(config, "use_titans_memory", False)
+            else None
+        )
+        self.attn_res = (
+            DepthAttentionResidual(config)
+            if getattr(config, "use_attn_res", False)
+            else None
+        )
+        self.value_residual = (
+            ValueResidualMixer(config)
+            if getattr(config, "use_value_residual", False)
+            else None
+        )
+        self.short_conv = (
+            CausalShortConvMemory(config)
+            if getattr(config, "use_short_conv", False)
+            else None
+        )
+        self.neuron_foundry = (
+            SonapseNeuronFoundryLayer(
+                hidden_size=config.hidden_size,
+                foundry_dim=int(getattr(config, "neuron_foundry_dim", 32)),
+                after_layer=int(getattr(config, "neuron_foundry_after_layer", 2)),
+                rms_norm_eps=config.rms_norm_eps,
+            )
+            if getattr(config, "use_neuron_foundry", False)
+            else None
+        )
+        self.ufwm = (
+            UniversalFastWeightMemory(config)
+            if getattr(config, "use_ufwm", False)
+            else None
+        )
+        self._param_report_cache: Optional[Tuple[Tuple[object, ...], Dict[str, int]]] = None
 
         self.multimodal_projector = (
             MultimodalProjectionHead(
@@ -4318,7 +6038,16 @@ class MiMoMixModel(nn.Module):
         routed experts rather than all of them. It excludes the MTP depths,
         which are draft-only at inference.
         """
-
+        sig = (
+            len(self.layers),
+            len(self.mtp_modules),
+            tuple(self.embed_tokens.weight.shape),
+            tuple(self.lm_head.weight.shape),
+            id(self.embed_tokens.weight) == id(self.lm_head.weight),
+        )
+        cached = getattr(self, "_param_report_cache", None)
+        if cached is not None and cached[0] == sig:
+            return dict(cached[1])
         total = sum(p.numel() for p in self.parameters())
         inactive = 0
         for module in self.modules():
@@ -4326,12 +6055,14 @@ class MiMoMixModel(nn.Module):
                 per_expert = sum(p.numel() for p in module.experts[0].parameters())
                 inactive += per_expert * (module.n_routed - module.top_k)
         mtp = sum(p.numel() for p in self.mtp_modules.parameters())
-        return {
+        report = {
             "total": int(total),
             "active_per_token": int(total - inactive - mtp),
             "routed_but_idle": int(inactive),
             "mtp_draft": int(mtp),
         }
+        self._param_report_cache = (sig, report)
+        return dict(report)
 
     # -- v93 growth helpers -------------------------------------------------
 
@@ -4424,6 +6155,7 @@ class MiMoMixModel(nn.Module):
         sinks: List[float] = []
         loads: List[List[float]] = []
         router_entropy: List[float] = []
+        shared_gates: List[float] = []
         diff_lambdas: List[List[float]] = []
         mod_skips: List[float] = []
         mod_modes: List[str] = []
@@ -4452,6 +6184,8 @@ class MiMoMixModel(nn.Module):
             if isinstance(module, SparseMoEFeedForward):
                 loads.append([float(v) for v in module.last_expert_load])
                 router_entropy.append(float(module.last_router_entropy))
+                if module.shared_expert_gate is not None:
+                    shared_gates.append(float(module.last_shared_gate_mean))
         snapshot: Dict[str, object] = {
             "attention_layout": list(self.layout),
             "sliding_window": int(self.config.sliding_window),
@@ -4535,21 +6269,42 @@ class MiMoMixModel(nn.Module):
             snapshot["engram"] = self.engram_memory.telemetry()
         if self.deltanet_memory is not None:
             snapshot["deltanet"] = self.deltanet_memory.telemetry()
+        if self.titans_memory is not None:
+            snapshot["titans"] = self.titans_memory.telemetry()
+        if self.attn_res is not None:
+            snapshot["attn_res"] = self.attn_res.telemetry()
+        if self.value_residual is not None:
+            snapshot["value_residual"] = self.value_residual.telemetry()
+        if self.short_conv is not None:
+            snapshot["short_conv"] = self.short_conv.telemetry()
+        if self.neuron_foundry is not None:
+            snapshot["neuron_foundry"] = self.neuron_foundry.telemetry()
+        if self.ufwm is not None:
+            snapshot["ufwm"] = self.ufwm.telemetry()
+        if shared_gates:
+            snapshot["shared_expert_gate"] = {
+                "enabled": True,
+                "mean_gate": float(sum(shared_gates) / len(shared_gates)),
+                "per_layer_mean_gate": shared_gates,
+            }
         return snapshot
 
-    def forward(
+    def run_trunk(
         self,
         input_ids: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         past_key_values: Optional[Sequence[Optional[Tuple[torch.Tensor, torch.Tensor]]]] = None,
         use_cache: bool = False,
-        thinking_cycles: Optional[int] = None,
-        adaptive_thinking: bool = False,
-        return_mtp: Optional[bool] = None,
         cache_slack: int = 0,
         past_length: Optional[int] = None,
-    ) -> MiMoMixOutput:
+    ) -> Dict[str, object]:
+        """Execute embeddings + transformer/memory/connectome trunk once (v106).
+
+        Returns an opaque trunk state dict consumable by :meth:`finish_from_trunk`.
+        Allows multi-budget thinking controllers (e.g. ``mimomix_controller.decide``)
+        to sweep ``thinking_cycles`` over a shared trunk with **bit-identical**
+        logits while paying the transformer trunk cost only once.
+        """
         bsz, seq_len = input_ids.shape
         device = input_ids.device
         if past_length is not None:
@@ -4584,11 +6339,12 @@ class MiMoMixModel(nn.Module):
 
         # Absolute positions: with a trimmed SWA cache the *cached* positions
         # differ per layer, so each layer receives its own key_positions below.
-        query_positions = torch.arange(past_len, past_len + seq_len, device=device)
-        cos, sin = self.rotary(query_positions)
-        local_cos, local_sin = self.rotary_local(query_positions)
+        query_positions = self.rotary.position_range(past_len, seq_len, device)
+        cos, sin = self.rotary.forward_range(past_len, seq_len, device)
+        local_cos, local_sin = self.rotary_local.forward_range(past_len, seq_len, device)
 
-        hidden = self.embed_tokens(input_ids)
+        input_embeds = self.embed_tokens(input_ids)
+        hidden = input_embeds
         streams: Optional[torch.Tensor] = None
         if self.mhc_layers is not None:
             n_streams = int(getattr(self.config, "mhc_streams", 2))
@@ -4624,6 +6380,45 @@ class MiMoMixModel(nn.Module):
                 if d_entry is not None and d_entry[0].numel() > 0:
                     deltanet_prev_entry = d_entry
             tail_cursor += 1
+        titans_prev_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        titans_cache_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if self.titans_memory is not None:
+            if past_key_values is not None and tail_cursor < len(past_key_values):
+                t_entry = past_key_values[tail_cursor]
+                if t_entry is not None and t_entry[0].numel() > 0:
+                    titans_prev_entry = t_entry
+            tail_cursor += 1
+        short_conv_prev_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        short_conv_cache_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if self.short_conv is not None:
+            if past_key_values is not None and tail_cursor < len(past_key_values):
+                sc_entry = past_key_values[tail_cursor]
+                if sc_entry is not None and sc_entry[0].numel() > 0:
+                    short_conv_prev_entry = sc_entry
+            tail_cursor += 1
+        foundry_prev_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        foundry_cache_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        if self.neuron_foundry is not None:
+            if past_key_values is not None and tail_cursor < len(past_key_values):
+                nf_entry = past_key_values[tail_cursor]
+                if nf_entry is not None and nf_entry[0].numel() > 0:
+                    foundry_prev_entry = nf_entry
+            tail_cursor += 1
+        ufwm_prev_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        ufwm_cache_entry: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        ufwm_depth_state: Optional[Dict[str, torch.Tensor]] = None
+        if self.ufwm is not None:
+            if past_key_values is not None and tail_cursor < len(past_key_values):
+                uf_entry = past_key_values[tail_cursor]
+                if uf_entry is not None and uf_entry[0].numel() > 0:
+                    ufwm_prev_entry = uf_entry
+            tail_cursor += 1
+            ufwm_depth_state = self.ufwm.init_depth_state(bsz, seq_len, hidden.dtype, device)
+        depth_history: List[torch.Tensor] = [hidden] if self.attn_res is not None else []
+        depth_normed_history: List[torch.Tensor] = (
+            [self.attn_res.norm(hidden)] if self.attn_res is not None else []
+        )
+        v0_captured: List[torch.Tensor] = []
 
         for index, layer in enumerate(self.layers):
             past_kv = None
@@ -4633,8 +6428,19 @@ class MiMoMixModel(nn.Module):
                 cached = 0
             else:
                 cached = int(past_kv[0].shape[1] if past_kv[0].ndim == 3 else past_kv[0].shape[2])
-            key_positions = torch.arange(past_len - cached, past_len, device=device)
+            key_positions = self.rotary.position_range(past_len - cached, cached, device)
             layer_cos, layer_sin = (local_cos, local_sin) if layer.kind == "swa" else (cos, sin)
+            vr_capture = v0_captured if (self.value_residual is not None and index == 0) else None
+            vr_v0 = (
+                v0_captured[0]
+                if (self.value_residual is not None and index > 0 and v0_captured)
+                else None
+            )
+            vr_gate = (
+                self.value_residual.gate_for_layer(index)
+                if (self.value_residual is not None and vr_v0 is not None)
+                else None
+            )
             if streams is not None and self.mhc_layers is not None:
                 mhc_layer = self.mhc_layers[index]
                 block_in = mhc_layer.collapse(streams)
@@ -4648,6 +6454,10 @@ class MiMoMixModel(nn.Module):
                     attention_mask=attention_mask,
                     use_cache=use_cache,
                     cache_slack=cache_slack,
+                    value_residual_v0=vr_v0,
+                    value_residual_gate=vr_gate,
+                    capture_v0=vr_capture,
+                    contiguous_causal=True,
                 )
                 streams = mhc_layer.mix_and_inject(streams, block_out - block_in)
                 hidden = streams.mean(dim=2)
@@ -4662,6 +6472,10 @@ class MiMoMixModel(nn.Module):
                     attention_mask=attention_mask,
                     use_cache=use_cache,
                     cache_slack=cache_slack,
+                    value_residual_v0=vr_v0,
+                    value_residual_gate=vr_gate,
+                    capture_v0=vr_capture,
+                    contiguous_causal=True,
                 )
             presents.append(present)
 
@@ -4703,6 +6517,91 @@ class MiMoMixModel(nn.Module):
                         dn_hist.new_zeros((dn_hist.shape[0], dn_hist.shape[1], 0)),
                     )
 
+            if self.titans_memory is not None and index == self.titans_memory.after_layer:
+                pre_titans = hidden
+                prev_titans_state = (
+                    titans_prev_entry[0][:, -1]
+                    if (titans_prev_entry is not None and titans_prev_entry[0].numel() > 0)
+                    else None
+                )
+                keep_t = (1 + max(0, int(cache_slack))) if use_cache else None
+                hidden, titans_hist = self.titans_memory(
+                    hidden, prev_state_flat=prev_titans_state, keep_states=keep_t
+                )
+                if streams is not None:
+                    streams = streams + (hidden - pre_titans).unsqueeze(2)
+                if use_cache:
+                    if titans_prev_entry is not None and titans_prev_entry[0].numel() > 0:
+                        titans_hist = torch.cat([titans_prev_entry[0], titans_hist], dim=1)[
+                            :, -int(keep_t) :
+                        ]
+                    titans_cache_entry = (
+                        titans_hist,
+                        titans_hist.new_zeros((titans_hist.shape[0], titans_hist.shape[1], 0)),
+                    )
+
+            if self.short_conv is not None and index == self.short_conv.after_layer:
+                pre_sc = hidden
+                prev_sc_tail = (
+                    short_conv_prev_entry[0]
+                    if (short_conv_prev_entry is not None and short_conv_prev_entry[0].numel() > 0)
+                    else None
+                )
+                keep_sc = (
+                    ((self.short_conv.kernel_size - 1) + max(0, int(cache_slack)))
+                    if use_cache
+                    else None
+                )
+                hidden, sc_hist = self.short_conv(
+                    hidden, prev_normed_tail=prev_sc_tail, keep_tail=keep_sc
+                )
+                if streams is not None:
+                    streams = streams + (hidden - pre_sc).unsqueeze(2)
+                if use_cache and sc_hist is not None:
+                    short_conv_cache_entry = (
+                        sc_hist,
+                        sc_hist.new_zeros((sc_hist.shape[0], sc_hist.shape[1], 0)),
+                    )
+
+            if self.neuron_foundry is not None and index == self.neuron_foundry.after_layer:
+                pre_nf = hidden
+                prev_nf_state = (
+                    foundry_prev_entry[0][:, -1]
+                    if (foundry_prev_entry is not None and foundry_prev_entry[0].numel() > 0)
+                    else None
+                )
+                keep_nf = (1 + max(0, int(cache_slack))) if use_cache else None
+                hidden, nf_hist = self.neuron_foundry(
+                    hidden, prev_state_flat=prev_nf_state, keep_states=keep_nf
+                )
+                if streams is not None:
+                    streams = streams + (hidden - pre_nf).unsqueeze(2)
+                if use_cache:
+                    if foundry_prev_entry is not None and foundry_prev_entry[0].numel() > 0:
+                        nf_hist = torch.cat([foundry_prev_entry[0], nf_hist], dim=1)[
+                            :, -int(keep_nf) :
+                        ]
+                    foundry_cache_entry = (
+                        nf_hist.detach(),
+                        nf_hist.new_zeros((nf_hist.shape[0], nf_hist.shape[1], 0)),
+                    )
+
+            if self.ufwm is not None and ufwm_depth_state is not None:
+                pre_uf = hidden
+                hidden = self.ufwm.forward_layer(index, hidden, ufwm_depth_state)
+                if streams is not None:
+                    streams = streams + (hidden - pre_uf).unsqueeze(2)
+
+            if self.attn_res is not None:
+                pre_ar = hidden
+                hidden = self.attn_res.mix_layer(
+                    index, hidden, depth_history, normed_history=depth_normed_history
+                )
+                if streams is not None:
+                    streams = streams + (hidden - pre_ar).unsqueeze(2)
+                depth_history.append(hidden)
+                depth_normed_history.append(self.attn_res.norm(hidden))
+
             if core is not None:
                 if core_simple:
                     if index == int(self.config.cns_after_layer):
@@ -4730,34 +6629,105 @@ class MiMoMixModel(nn.Module):
                         if streams is not None:
                             streams = streams + (hidden - pre_cns).unsqueeze(2)
 
-        trunk_hidden = hidden
+        if self.ufwm is not None and ufwm_depth_state is not None:
+            prev_uf_state = (
+                ufwm_prev_entry[0][:, -1]
+                if (ufwm_prev_entry is not None and ufwm_prev_entry[0].numel() > 0)
+                else None
+            )
+            keep_uf = (1 + max(0, int(cache_slack))) if use_cache else None
+            hidden, uf_hist = self.ufwm.consolidate_temporal(
+                hidden,
+                ufwm_depth_state,
+                prev_state_flat=prev_uf_state,
+                keep_states=keep_uf,
+            )
+            if use_cache:
+                if ufwm_prev_entry is not None and ufwm_prev_entry[0].numel() > 0:
+                    uf_hist = torch.cat([ufwm_prev_entry[0], uf_hist], dim=1)[
+                        :, -int(keep_uf) :
+                    ]
+                ufwm_cache_entry = (
+                    uf_hist.detach(),
+                    uf_hist.new_zeros((uf_hist.shape[0], uf_hist.shape[1], 0)),
+                )
+
+        bond: Optional[torch.Tensor] = None
+        if self.thinking_core is not None and core is not None and not core_simple and core_read is not None:
+            bond = core.thinking_input(core_read)
+
+        if use_cache:
+            if core is not None and not core_simple and core.temporal and core_state_entry is not None:
+                # One extra rank-3 entry after the layer entries: (states (B, T', N),
+                # companion (B, T', 0)). trim_past narrows both on axis 1, the layer
+                # loop never reads index n_layers, and past_len inference skips it.
+                presents.append(core_state_entry)
+            if self.engram_memory is not None and engram_cache_entry is not None:
+                presents.append(engram_cache_entry)
+            if self.deltanet_memory is not None and deltanet_cache_entry is not None:
+                presents.append(deltanet_cache_entry)
+            if self.titans_memory is not None and titans_cache_entry is not None:
+                presents.append(titans_cache_entry)
+            if self.short_conv is not None and short_conv_cache_entry is not None:
+                presents.append(short_conv_cache_entry)
+            if self.neuron_foundry is not None and foundry_cache_entry is not None:
+                presents.append(foundry_cache_entry)
+            if self.ufwm is not None and ufwm_cache_entry is not None:
+                presents.append(ufwm_cache_entry)
+
+        return {
+            "trunk_hidden": hidden,
+            "input_embeds": input_embeds,
+            "cos": cos,
+            "sin": sin,
+            "query_positions": query_positions,
+            "attention_mask": attention_mask,
+            "bond": bond,
+            "presents": presents if use_cache else None,
+            "seq_len": int(seq_len),
+            "past_len": int(past_len),
+        }
+
+    def finish_from_trunk(
+        self,
+        trunk_state: Dict[str, object],
+        *,
+        labels: Optional[torch.Tensor] = None,
+        thinking_cycles: Optional[int] = None,
+        adaptive_thinking: bool = False,
+        return_mtp: Optional[bool] = None,
+        collect_telemetry: bool = True,
+    ) -> MiMoMixOutput:
+        """Complete thinking core, final norm, lm_head, optional MTP/loss from ``run_trunk``."""
+        trunk_hidden = trunk_state["trunk_hidden"]
+        assert isinstance(trunk_hidden, torch.Tensor)
+        hidden = trunk_hidden
+        bond = trunk_state.get("bond")
         thinking_info: Dict[str, torch.Tensor] = {}
         if self.thinking_core is not None:
-            bond = None
-            if core is not None and not core_simple and core_read is not None:
-                bond = core.thinking_input(core_read)
             hidden, thinking_info = self.thinking_core(
-                hidden, cycles=thinking_cycles, adaptive=adaptive_thinking, extra_input=bond
+                hidden,
+                cycles=thinking_cycles,
+                adaptive=adaptive_thinking,
+                extra_input=bond if isinstance(bond, torch.Tensor) else None,
             )
-        if use_cache and core is not None and not core_simple and core.temporal and core_state_entry is not None:
-            # One extra rank-3 entry after the layer entries: (states (B, T', N),
-            # companion (B, T', 0)). trim_past narrows both on axis 1, the layer
-            # loop never reads index n_layers, and past_len inference skips it.
-            presents.append(core_state_entry)
-        if use_cache and self.engram_memory is not None and engram_cache_entry is not None:
-            presents.append(engram_cache_entry)
-        if use_cache and self.deltanet_memory is not None and deltanet_cache_entry is not None:
-            presents.append(deltanet_cache_entry)
 
         hidden = self.norm(hidden)
         logits = self.lm_head(hidden)
 
+        seq_len = int(trunk_state["seq_len"])  # type: ignore[arg-type]
+        past_len = int(trunk_state["past_len"])  # type: ignore[arg-type]
         want_mtp = self.config.n_mtp_layers > 0 if return_mtp is None else bool(return_mtp)
         mtp_logits: List[torch.Tensor] = []
         mtp_loss: Optional[torch.Tensor] = None
         if want_mtp and len(self.mtp_modules) > 0:
             prev_hidden = trunk_hidden
-            embeddings = self.embed_tokens(input_ids)
+            embeddings = trunk_state["input_embeds"]
+            cos = trunk_state["cos"]
+            sin = trunk_state["sin"]
+            query_positions = trunk_state["query_positions"]
+            attention_mask = trunk_state["attention_mask"]
+            assert isinstance(embeddings, torch.Tensor)
             depth_losses: List[torch.Tensor] = []
             for depth, module in enumerate(self.mtp_modules, start=1):
                 # depth k consumes the embedding of the token k positions ahead
@@ -4798,17 +6768,21 @@ class MiMoMixModel(nn.Module):
                     + self.config.consistency_loss_weight * thinking_info["consistency_loss"]
                 )
 
-        telemetry = self.telemetry()
-        telemetry["sequence_length"] = int(seq_len)
-        telemetry["past_length"] = int(past_len)
-        if thinking_info:
-            telemetry["thinking"]["quality_probability"] = float(
-                thinking_info["quality_probability"].detach().mean()
-            )
-            telemetry["thinking"]["continue_probability"] = float(
-                thinking_info["continue_probability"].detach().mean()
-            )
+        if collect_telemetry:
+            telemetry = self.telemetry()
+            telemetry["sequence_length"] = seq_len
+            telemetry["past_length"] = past_len
+            if thinking_info:
+                telemetry["thinking"]["quality_probability"] = float(
+                    thinking_info["quality_probability"].detach().mean()
+                )
+                telemetry["thinking"]["continue_probability"] = float(
+                    thinking_info["continue_probability"].detach().mean()
+                )
+        else:
+            telemetry = {}
 
+        presents = trunk_state["presents"]
         return MiMoMixOutput(
             logits=logits,
             hidden_states=hidden,
@@ -4818,8 +6792,39 @@ class MiMoMixModel(nn.Module):
             mtp_loss=mtp_loss,
             aux_loss=aux_loss,
             mtp_logits=mtp_logits,
-            past_key_values=presents if use_cache else None,
+            past_key_values=presents,  # type: ignore[arg-type]
             telemetry=telemetry,
+        )
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        labels: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[Sequence[Optional[Tuple[torch.Tensor, torch.Tensor]]]] = None,
+        use_cache: bool = False,
+        thinking_cycles: Optional[int] = None,
+        adaptive_thinking: bool = False,
+        return_mtp: Optional[bool] = None,
+        cache_slack: int = 0,
+        past_length: Optional[int] = None,
+        collect_telemetry: bool = True,
+    ) -> MiMoMixOutput:
+        trunk_state = self.run_trunk(
+            input_ids,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            cache_slack=cache_slack,
+            past_length=past_length,
+        )
+        return self.finish_from_trunk(
+            trunk_state,
+            labels=labels,
+            thinking_cycles=thinking_cycles,
+            adaptive_thinking=adaptive_thinking,
+            return_mtp=return_mtp,
+            collect_telemetry=collect_telemetry,
         )
 
     @torch.no_grad()
@@ -4840,7 +6845,7 @@ class MiMoMixModel(nn.Module):
         if len(self.mtp_modules) == 0:
             return seed_token.new_zeros((seed_token.shape[0], 0))
         positions = torch.tensor([int(position)], device=seed_token.device)
-        cos, sin = self.rotary(positions)
+        cos, sin = self.rotary.forward_range(int(position), 1, seed_token.device)
         prev = trunk_hidden_last
         current = seed_token
         drafted: List[torch.Tensor] = []

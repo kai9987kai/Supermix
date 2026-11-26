@@ -13,14 +13,19 @@ if str(SOURCE_DIR) not in sys.path:
 
 __all__ = ["SCFLayeredMemory"]
 
+_MEM_TERM_RE = re.compile(r"[a-z0-9_+-]{3,}")
+
 
 class SCFLayeredMemory:
     """Combines working task state, conversation state, authority firewall, and MiMoMix slots."""
+
+    _LATENT_SUMMARY_CACHE: Optional[Dict[str, Any]] = None
 
     def __init__(self, *, latent_slot_count: int = 222) -> None:
         self.working_state: Dict[str, Any] = {}
         self.admitted_memories: List[Dict[str, Any]] = []
         self.latent_slot_count = int(latent_slot_count)
+        self._rrf_engine: Optional[Any] = None
 
     def admit_user_memory(
         self,
@@ -65,7 +70,7 @@ class SCFLayeredMemory:
 
         conv_state = cs.build_conversation_state(turns=list(recent_turns), current_user_text=prompt)
         brief = cs.render_state_brief(conv_state)
-        prompt_terms = set(re.findall(r"[a-z0-9_+-]{3,}", str(prompt or "").lower()))
+        prompt_terms = set(_MEM_TERM_RE.findall(str(prompt or "").lower()))
 
         active_commitments = [
             {
@@ -111,7 +116,7 @@ class SCFLayeredMemory:
         for idx, turn in enumerate(list(recent_turns)[-12:]):
             u_txt = str(turn.get("user", "") if isinstance(turn, dict) else (turn[0] if isinstance(turn, (list, tuple)) and turn else ""))
             a_txt = str(turn.get("assistant", "") if isinstance(turn, dict) else (turn[1] if isinstance(turn, (list, tuple)) and len(turn) > 1 else ""))
-            turn_terms = set(re.findall(r"[a-z0-9_+-]{3,}", u_txt.lower()))
+            turn_terms = set(_MEM_TERM_RE.findall(u_txt.lower()))
             overlap = len(prompt_terms & turn_terms) / max(1, len(prompt_terms | turn_terms)) if prompt_terms else 0.0
             recency = (idx + 1) / max(1, min(12, len(recent_turns)))
             has_pref = 1.0 if any(k in u_txt.lower() for k in ("prefer", "always", "never", "use ", "remember", "constraint", "project")) else 0.0
@@ -158,8 +163,6 @@ class SCFLayeredMemory:
             "answer_authority": False,
         }
         try:
-            import nexus_v102_frontier as v102
-
             rrf_docs: List[Dict[str, Any]] = []
             for idx, turn in enumerate(list(recent_turns)[-16:]):
                 u_txt = str(turn.get("user", "") if isinstance(turn, dict) else (turn[0] if isinstance(turn, (list, tuple)) and turn else "")).strip()
@@ -175,7 +178,11 @@ class SCFLayeredMemory:
                         }
                     )
             if rrf_docs:
-                rrf_res = v102.NexusSearchHybridRRF().rank_documents(prompt, rrf_docs, top_k=4)
+                if self._rrf_engine is None:
+                    import nexus_v102_frontier as v102
+
+                    self._rrf_engine = v102.NexusSearchHybridRRF()
+                rrf_res = self._rrf_engine.rank_documents(prompt, rrf_docs, top_k=4)
         except Exception:
             pass
         self.working_state["rrf_memory_hits"] = list(rrf_res.get("hits") or [])
@@ -184,21 +191,25 @@ class SCFLayeredMemory:
 
         latent_summary: Optional[Dict[str, Any]] = None
         if enable_latent_memory:
-            try:
-                import mimomix_reasoner as mr
+            if SCFLayeredMemory._LATENT_SUMMARY_CACHE is not None:
+                latent_summary = dict(SCFLayeredMemory._LATENT_SUMMARY_CACHE)
+            else:
+                try:
+                    import mimomix_reasoner as mr
 
-                cfg = mr.ReasonerConfig()
-                tokenizer = mr.SlotTokenizer(cfg)
-                latent_summary = {
-                    "enabled": True,
-                    "slot_sequence_length": int(tokenizer.sequence_length),
-                    "d_model": int(cfg.hidden_size),
-                    "n_layers": int(cfg.n_layers),
-                    "n_states": int(cfg.n_states),
-                    "state_authority": "advisory_slot_context_only",
-                }
-            except Exception as exc:
-                latent_summary = {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+                    cfg = mr.ReasonerConfig()
+                    tokenizer = mr.SlotTokenizer(cfg)
+                    latent_summary = {
+                        "enabled": True,
+                        "slot_sequence_length": int(tokenizer.sequence_length),
+                        "d_model": int(cfg.hidden_size),
+                        "n_layers": int(cfg.n_layers),
+                        "n_states": int(cfg.n_states),
+                        "state_authority": "advisory_slot_context_only",
+                    }
+                    SCFLayeredMemory._LATENT_SUMMARY_CACHE = dict(latent_summary)
+                except Exception as exc:
+                    latent_summary = {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
 
         return {
             "working_state": dict(self.working_state),

@@ -67,6 +67,7 @@ SUPPORTED_MODEL_SIZES: Tuple[str, ...] = (
     "frontier_verifier_expert",
     "test_time_diff_expert",
     "titan_dreamer_expert",
+    "universal_fast_weight_expert",
 )
 EXPANSION_DIM_MODEL_SIZES = frozenset({"large", "xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
 EXTRA_EXPANSION_DIM_MODEL_SIZES = frozenset({"xlarge", "xxlarge", "xxxlarge", "ultralarge", "megalarge"})
@@ -5216,6 +5217,231 @@ class ChampionNetTestTimeDiffExpert(nn.Module):
         return x
 
 
+class UniversalFastWeightFoundryExpertHead(nn.Module):
+    """Universal Fast-Weight Memory (uTTT-MoE) + 6-family Synthetic Neuron Foundry head (v107).
+
+    Combines:
+    - Shared multi-bank fast-weight associative memory recurring across depth steps
+      via a decoupled delta erase/write rule with Top-K bank routing.
+    - Six synthetic neuron organelle branches (Soliton axon, MICrONS Ca2+ spine
+      apparatus, Astrocytic tripartite gliotransmitter, Ephaptic LFP coupling,
+      Retrograde DSI/DSE messenger, Intracellular fast-weight engram).
+    - Retains ``weight`` and ``bias`` parameters with zero-initialized ``alpha``
+      and ``beta`` gates so warm-starting from base ChampionNet checkpoints is exact.
+    """
+
+    def __init__(
+        self,
+        in_dim: int = 256,
+        out_dim: int = 10,
+        fast_dim: int = 24,
+        n_banks: int = 4,
+        top_k_banks: int = 2,
+        recursion_steps: int = 3,
+        foundry_dim: int = 64,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.in_dim = int(in_dim)
+        self.out_dim = int(out_dim)
+        self.fast_dim = int(max(4, fast_dim))
+        self.n_banks = int(max(1, n_banks))
+        self.top_k_banks = int(max(1, min(top_k_banks, self.n_banks)))
+        self.recursion_steps = int(max(1, recursion_steps))
+        self.foundry_dim = int(max(8, foundry_dim))
+
+        self.weight = nn.Parameter(torch.empty(self.out_dim, self.in_dim))
+        self.bias = nn.Parameter(torch.zeros(self.out_dim))
+
+        # Universal Fast-Weight Memory (uTTT-MoE) shared across recursion depth
+        self.ufwm_norm = nn.LayerNorm(self.in_dim)
+        self.ufwm_banks = nn.Parameter(torch.zeros(self.n_banks, self.fast_dim, self.fast_dim))
+        self.ufwm_depth_emb = nn.Parameter(torch.randn(self.recursion_steps, self.in_dim) * 0.015)
+        self.ufwm_k = nn.Linear(self.in_dim, self.fast_dim, bias=False)
+        self.ufwm_v = nn.Linear(self.in_dim, self.fast_dim, bias=False)
+        self.ufwm_q = nn.Linear(self.in_dim, self.fast_dim, bias=False)
+        self.ufwm_write_gate = nn.Linear(self.in_dim, 2, bias=True)
+        self.ufwm_bank_router = nn.Linear(self.in_dim, self.n_banks, bias=True)
+        self.ufwm_out = nn.Linear(self.fast_dim, self.in_dim, bias=False)
+
+        # Six synthetic neuron organelle branches
+        self.foundry_norm = nn.LayerNorm(self.in_dim)
+        self.foundry_in = nn.Linear(self.in_dim, self.foundry_dim, bias=False)
+        self.soliton_proj = nn.Linear(self.foundry_dim, self.foundry_dim, bias=True)
+        self.spine_heb = nn.Linear(self.foundry_dim, self.foundry_dim, bias=False)
+        self.spine_err = nn.Linear(self.foundry_dim, self.foundry_dim, bias=True)
+        self.astro_proj = nn.Linear(self.foundry_dim, self.foundry_dim, bias=True)
+        self.ephaptic_proj = nn.Linear(self.foundry_dim, self.foundry_dim, bias=False)
+        self.retro_proj = nn.Linear(self.foundry_dim, self.foundry_dim, bias=False)
+        self.engram_kv = nn.Linear(self.foundry_dim, self.foundry_dim * 2, bias=False)
+        self.foundry_router = nn.Linear(self.foundry_dim, 6, bias=True)
+        self.foundry_down = nn.Linear(self.foundry_dim, self.in_dim, bias=False)
+
+        self.delta_out = nn.Linear(self.in_dim, self.out_dim, bias=False)
+        self.foundry_out = nn.Linear(self.in_dim, self.out_dim, bias=False)
+        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.beta = nn.Parameter(torch.tensor(0.0))
+        self.dropout = nn.Dropout(dropout)
+
+        self.last_ufwm_surprise: float = 0.0
+        self.last_active_banks: int = self.top_k_banks
+        self.last_foundry_entropy: float = 0.0
+        self.last_metabolic_cost: float = 0.0
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.kaiming_uniform_(self.weight, a=5**0.5)
+        nn.init.zeros_(self.bias)
+        for mod in (
+            self.ufwm_k,
+            self.ufwm_v,
+            self.ufwm_q,
+            self.ufwm_out,
+            self.foundry_in,
+            self.foundry_down,
+        ):
+            nn.init.normal_(mod.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.delta_out.weight, mean=0.0, std=0.015)
+        nn.init.normal_(self.foundry_out.weight, mean=0.0, std=0.015)
+        nn.init.zeros_(self.ufwm_bank_router.bias)
+        nn.init.zeros_(self.foundry_router.bias)
+
+    def _ensure_sequence(self, x: torch.Tensor) -> Tuple[torch.Tensor, bool]:
+        if x.ndim == 2:
+            return x.unsqueeze(1), True
+        if x.ndim == 3:
+            return x, False
+        raise ValueError(f"Expected rank-2 or rank-3 tensor, got shape={tuple(x.shape)}")
+
+    def _run_foundry_branches(self, state: torch.Tensor) -> torch.Tensor:
+        z = self.foundry_in(self.foundry_norm(state))
+        # 1. Soliton dispersion-steepened pulse
+        lap = torch.roll(z, 1, dims=-1) - 2.0 * z + torch.roll(z, -1, dims=-1)
+        b_soliton = torch.tanh(1.35 * self.soliton_proj(z) + 0.15 * lap)
+        # 2. MICrONS Ca2+ spine-apparatus dual-regime switch
+        h_raw = self.spine_heb(z)
+        ca_proxy = torch.sigmoid(4.0 * (z.pow(2) - 0.30))
+        b_spine = (1.0 - ca_proxy) * torch.tanh(h_raw) + ca_proxy * torch.tanh(self.spine_err(z - h_raw))
+        # 3. Astrocytic tripartite gliotransmitter gate
+        glio = torch.sigmoid(self.astro_proj(z.abs() - 0.25))
+        b_astro = torch.tanh(z * (0.75 + 0.5 * glio))
+        # 4. Ephaptic zero-lag LFP coupling
+        lfp = 0.5 * z.mean(dim=-1, keepdim=True) + 0.5 * torch.tanh(self.ephaptic_proj(z))
+        b_ephaptic = F.silu(z + 0.25 * (lfp - z)).clamp(-6.0, 6.0)
+        # 5. Retrograde DSI/DSE release modulation
+        retro_rel = (1.0 - 0.35 * torch.tanh(z.pow(2))).clamp(0.35, 1.45)
+        b_retro = torch.tanh(retro_rel * self.retro_proj(z))
+        # 6. Intracellular fast-weight cytoskeletal engram
+        ek, ev = self.engram_kv(z).chunk(2, dim=-1)
+        ek = F.normalize(ek, p=2, dim=-1, eps=1e-6)
+        b_engram = torch.tanh(z + (ek * F.normalize(z, p=2, dim=-1, eps=1e-6)).sum(dim=-1, keepdim=True) * torch.tanh(ev))
+
+        probs = F.softmax(self.foundry_router(z).float(), dim=-1).to(z.dtype)
+        stacked = torch.stack([b_soliton, b_spine, b_astro, b_ephaptic, b_retro, b_engram], dim=-2)
+        fused = (stacked * probs.unsqueeze(-1)).sum(dim=-2)
+
+        with torch.no_grad():
+            p_det = probs.detach().float()
+            ent = -(p_det * (p_det + 1e-8).log()).sum(dim=-1).mean()
+            met_weights = p_det.new_tensor([1.15, 1.25, 1.10, 0.85, 1.05, 1.35])
+            self.last_foundry_entropy = float(ent.cpu())
+            self.last_metabolic_cost = float((p_det.mean(dim=(0, 1)) * met_weights).sum().cpu()) * float(self.foundry_dim)
+
+        return self.foundry_down(self.dropout(fused))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        seq_x, squeezed = self._ensure_sequence(x)
+        bsz, steps, _ = seq_x.shape
+        base_logits = F.linear(seq_x, self.weight, self.bias)
+
+        # Initialize fast-weight bank pool M: (B * T, E, d, d)
+        nt = bsz * steps
+        mem = self.ufwm_banks.unsqueeze(0).expand(nt, -1, -1, -1).clone()
+        state = seq_x
+        surprise_acc = 0.0
+
+        for step_idx in range(self.recursion_steps):
+            cond = self.ufwm_norm(state + self.ufwm_depth_emb[step_idx].view(1, 1, -1))
+            flat = cond.reshape(nt, self.in_dim)
+            k = F.normalize(self.ufwm_k(flat), p=2, dim=-1, eps=1e-6)
+            v = torch.tanh(self.ufwm_v(flat))
+            q = F.normalize(self.ufwm_q(flat), p=2, dim=-1, eps=1e-6)
+
+            gates = torch.sigmoid(self.ufwm_write_gate(flat))
+            erase_g = (0.35 * gates[:, 0]).view(nt, 1, 1, 1)
+            write_g = (0.65 * gates[:, 1]).view(nt, 1, 1, 1)
+
+            router_logits = self.ufwm_bank_router(flat)
+            if self.top_k_banks < self.n_banks:
+                top_vals, top_idx = torch.topk(router_logits, self.top_k_banks, dim=-1)
+                top_probs = F.softmax(top_vals.float(), dim=-1).to(flat.dtype)
+                bank_weights = flat.new_zeros((nt, self.n_banks))
+                bank_weights.scatter_(1, top_idx, top_probs)
+            else:
+                bank_weights = F.softmax(router_logits.float(), dim=-1).to(flat.dtype)
+
+            bw = bank_weights.view(nt, self.n_banks, 1, 1)
+            pred_v = torch.matmul(mem, k.view(nt, 1, self.fast_dim, 1)).squeeze(-1)  # (nt, E, d)
+            err = v.unsqueeze(1) - pred_v
+            surprise_acc += float(err.detach().float().pow(2).mean().sqrt().cpu())
+
+            delta = torch.matmul(err.unsqueeze(-1), k.view(nt, 1, 1, self.fast_dim))
+            mem = ((1.0 - bw * erase_g) * mem + (bw * write_g) * delta).clamp(-8.0, 8.0)
+
+            read_banks = torch.matmul(mem, q.view(nt, 1, self.fast_dim, 1)).squeeze(-1)
+            read_vec = (read_banks * bank_weights.unsqueeze(-1)).sum(dim=1)
+            ufwm_ctx = self.ufwm_out(self.dropout(read_vec)).view(bsz, steps, self.in_dim)
+            state = state + 0.5 * ufwm_ctx
+
+        self.last_ufwm_surprise = surprise_acc / float(self.recursion_steps)
+        self.last_active_banks = self.top_k_banks
+
+        foundry_ctx = self._run_foundry_branches(state)
+        out_logits = (
+            base_logits
+            + self.alpha * self.delta_out(state)
+            + torch.tanh(self.beta) * self.foundry_out(foundry_ctx)
+        )
+        return out_logits.squeeze(1) if squeezed else out_logits
+
+
+class ChampionNetUniversalFastWeightExpert(nn.Module):
+    """Backbone-compatible ChampionNet wrapper for UniversalFastWeightFoundryExpertHead (v107)."""
+
+    def __init__(
+        self,
+        fast_dim: int = 24,
+        n_banks: int = 4,
+        top_k_banks: int = 2,
+        recursion_steps: int = 3,
+        foundry_dim: int = 64,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        base = ChampionNet()
+        layers = [base.layers[i] for i in range(10)]
+        layers.append(
+            UniversalFastWeightFoundryExpertHead(
+                256,
+                10,
+                fast_dim=fast_dim,
+                n_banks=n_banks,
+                top_k_banks=top_k_banks,
+                recursion_steps=recursion_steps,
+                foundry_dim=foundry_dim,
+                dropout=dropout,
+            )
+        )
+        layers.append(base.layers[11])
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 class StateSpaceExpert(nn.Module):
     """
     Continuous-Time State Space Model (inspired by S4/Mamba).
@@ -7645,6 +7871,8 @@ def build_model(
         from model_frontier_v43 import ChampionNetTitanDreamerExpert
 
         return ChampionNetTitanDreamerExpert(dropout=dropout)
+    if model_size == "universal_fast_weight_expert":
+        return ChampionNetUniversalFastWeightExpert(dropout=dropout)
 
     raise ValueError(
         f"Unknown model_size={model_size!r}. Use one of {SUPPORTED_MODEL_SIZES}."
@@ -9058,7 +9286,7 @@ def load_weights_for_model(model: nn.Module, state_dict: dict, model_size: str) 
         unexpected_filtered = [k for k in incompatible.unexpected_keys if k]
         return missing_filtered, unexpected_filtered
 
-    if model_size in ("test_time_diff_expert", "titan_dreamer_expert"):
+    if model_size in ("test_time_diff_expert", "titan_dreamer_expert", "universal_fast_weight_expert"):
         head_pref = "layers.10."
         target_state = model.state_dict()
         keep_head_keys = {
@@ -9124,6 +9352,8 @@ def detect_model_size_from_state_dict(state_dict: dict) -> str:
         return "test_time_diff_expert"
     if "layers.10.titan_w1" in state_dict and "layers.10.recursion_router.weight" in state_dict:
         return "titan_dreamer_expert"
+    if "layers.10.ufwm_banks" in state_dict and "layers.10.foundry_router.weight" in state_dict:
+        return "universal_fast_weight_expert"
     if "layers.10.domain_gate.weight" in state_dict or "layers.10.expert_gates.0.weight" in state_dict:
         return "hierarchical_expert"
     if "layers.10.shared_up.weight" in state_dict and "layers.10.gate.weight" in state_dict:

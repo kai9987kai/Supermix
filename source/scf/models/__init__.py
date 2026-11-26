@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE_DIR = ROOT / "source"
@@ -82,6 +84,7 @@ class ChampionNetAdapter(BaseModelAdapter):
         "LiquidSpikingTensorExpertHead",
         "OmniversalQuantumExpertHead",
         "FractalGenesisExpertHead",
+        "UniversalFastWeightFoundryExpertHead",
     )
 
     def status(self) -> ModelFamilyStatus:
@@ -128,12 +131,14 @@ class ChampionNetAdapter(BaseModelAdapter):
             "liquid_spiking": "liquid_spiking_expert",
             "omniversal_quantum": "omniversal_expert",
             "fractal_genesis": "fractal_expert",
+            "universal_fast_weight": "universal_fast_weight_expert",
         }
         resolved_size = size_alias.get(model_size, model_size)
         is_experimental = resolved_size in {
             "liquid_spiking_expert",
             "omniversal_expert",
             "fractal_expert",
+            "universal_fast_weight_expert",
         }
         if is_experimental and not allow_experimental:
             return {
@@ -250,6 +255,44 @@ class QwenAdapter(BaseModelAdapter):
             return {"valid": False, "promoted": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
+_SKIP_SCAN_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        ".venv-dml",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".playwright-cli",
+        "datasets",
+        "build",
+        "dist",
+        "runtime_python",
+        "external",
+    }
+)
+
+
+def _walk_matching_weights(root: Path, prefix: str, suffix: str) -> List[str]:
+    """Fast pruned directory walk that avoids crawling venv/.git/dataset trees."""
+    found: List[str] = []
+    if not root.exists():
+        return found
+    root_str = str(root)
+    for dirpath, dirnames, filenames in os.walk(root_str):
+        dirnames[:] = [
+            d for d in dirnames if d not in _SKIP_SCAN_DIRS and not d.startswith(".venv")
+        ]
+        for fname in filenames:
+            if fname.startswith(prefix) and fname.endswith(suffix):
+                rel = Path(dirpath, fname).relative_to(root).as_posix()
+                found.append(rel)
+    found.sort()
+    return found
+
+
 class OmniCollectiveAdapter(BaseModelAdapter):
     """Compatibility wrapper for Omni Collective v1-v8, v41, v42 and catalog."""
 
@@ -264,11 +307,7 @@ class OmniCollectiveAdapter(BaseModelAdapter):
         except Exception:
             specs = []
             available = False
-        weights = [
-            p.relative_to(ROOT).as_posix()
-            for p in sorted(ROOT.rglob("omni_collective*.pth"))
-            if ".git" not in p.parts
-        ]
+        weights = _walk_matching_weights(ROOT, "omni_collective", ".pth")
         return ModelFamilyStatus(
             family=self.family_name,
             available_in_source=available,
@@ -500,7 +539,9 @@ class NexusMindAdapter(BaseModelAdapter):
 class SCFModelRegistry:
     """Unified discovery and health registry across all six Supermix model families."""
 
-    def __init__(self) -> None:
+    _SHARED_SUMMARY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    def __init__(self, *, summary_ttl_seconds: float = 15.0) -> None:
         self._adapters: Dict[str, BaseModelAdapter] = {
             "ChampionNet": ChampionNetAdapter(),
             "CognitiveLeap": CognitiveLeapAdapter(),
@@ -509,6 +550,7 @@ class SCFModelRegistry:
             "MiMoMix": MiMoMixAdapter(),
             "NexusMind": NexusMindAdapter(),
         }
+        self._summary_ttl_seconds = max(0.0, float(summary_ttl_seconds))
 
     def list_families(self) -> List[str]:
         return list(self._adapters.keys())
@@ -518,8 +560,47 @@ class SCFModelRegistry:
             raise KeyError(f"Unknown SCF model family: {family!r}")
         return self._adapters[family]
 
-    def summary(self) -> Dict[str, Any]:
-        return {
+    _FAMILY_SOURCE_FILES: Dict[str, Tuple[str, ...]] = {
+        "ChampionNet": ("model_variants.py",),
+        "CognitiveLeap": ("chat_app.py",),
+        "QwenLoRA": ("qwen_adapter_promotion.py",),
+        "OmniCollective": ("multimodel_catalog.py",),
+        "MiMoMix": ("mimomix_core.py", "mimomix_decoding.py", "mimomix_reasoner.py"),
+        "NexusMind": ("nexus_engine.py", "nexus_solver.py"),
+    }
+
+    def available_source_families(self) -> List[str]:
+        """Fast source-presence check avoiding cold-import & disk-walk overhead on routing."""
+        cache_key = str(ROOT)
+        now = time.monotonic()
+        cached = self._SHARED_SUMMARY_CACHE.get(cache_key)
+        if cached is not None and (now - cached[0]) < self._summary_ttl_seconds:
+            return [k for k, v in cached[1].items() if v.get("available_in_source")]
+        available: List[str] = []
+        for family in self._adapters:
+            req_files = self._FAMILY_SOURCE_FILES.get(family)
+            if req_files is not None:
+                if all((SOURCE_DIR / rel).is_file() for rel in req_files):
+                    available.append(family)
+            else:
+                if self._adapters[family].status().available_in_source:
+                    available.append(family)
+        return available
+
+    def invalidate_cache(self) -> None:
+        self._SHARED_SUMMARY_CACHE.pop(str(ROOT), None)
+
+    def summary(self, *, refresh: bool = False) -> Dict[str, Any]:
+        cache_key = str(ROOT)
+        now = time.monotonic()
+        if not refresh and self._summary_ttl_seconds > 0.0:
+            cached = self._SHARED_SUMMARY_CACHE.get(cache_key)
+            if cached is not None and (now - cached[0]) < self._summary_ttl_seconds:
+                return {k: dict(v) for k, v in cached[1].items()}
+        data = {
             family: adapter.status().to_dict()
             for family, adapter in self._adapters.items()
         }
+        if self._summary_ttl_seconds > 0.0:
+            self._SHARED_SUMMARY_CACHE[cache_key] = (now, data)
+        return {k: dict(v) for k, v in data.items()}

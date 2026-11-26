@@ -104,6 +104,7 @@ RUNTIME_MODULES = (
     "source/route_policy_shadow_cli.py",
     "source/run.py",
     "source/score_fusion.py",
+    "source/sonapse_neuron_foundry.py",
     "source/supermix_multimodel_web_app.py",
     "source/supermix_multimodel_desktop_app.py",
     "source/three_d_generation_model.py",

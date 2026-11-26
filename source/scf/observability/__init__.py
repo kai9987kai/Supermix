@@ -117,3 +117,20 @@ class SCFObservabilityHub:
         payload = receipt.finalize().to_dict()
         self.history.append(payload)
         return payload
+
+    def latency_summary(self) -> Dict[str, Any]:
+        """Aggregate latency percentiles across recorded SCF execution receipts."""
+        vals = sorted(float(item.get("total_latency_ms", 0.0)) for item in self.history)
+        if not vals:
+            return {"count": 0, "min_ms": 0.0, "mean_ms": 0.0, "p50_ms": 0.0, "p95_ms": 0.0, "max_ms": 0.0}
+        n = len(vals)
+        p50 = vals[int(0.50 * (n - 1))]
+        p95 = vals[int(0.95 * (n - 1))]
+        return {
+            "count": n,
+            "min_ms": round(vals[0], 3),
+            "mean_ms": round(sum(vals) / float(n), 3),
+            "p50_ms": round(p50, 3),
+            "p95_ms": round(p95, 3),
+            "max_ms": round(vals[-1], 3),
+        }
